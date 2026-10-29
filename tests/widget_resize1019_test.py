@@ -22,10 +22,14 @@ def ok(c, m):
 sys.path.insert(0, str(ROOT / "ui"))
 import app  # noqa: E402
 
-ok(app.set_card_base(None, None) == app.CARD_DEFAULT and app.set_card_base(2000, 10) == (640, 360) and app.set_card_base(360, 560) == (360, 560),
+default_size = app.set_card_base(None, None)
+bounded_size = app.set_card_base(2000, 10)
+custom_size = app.set_card_base(360, 560)
+ok(default_size == app.CARD_DEFAULT and bounded_size == (app.CARD_MAX[0], app.CARD_MIN[1]) and custom_size == (360, 560),
    "свой размер карточки — в пределах, пусто — по умолчанию")
 app.set_zoom_sizes(0.8)
-ok(app.SIZES["card"] == (288, 448), f"свой размер и масштаб вместе: {app.SIZES['card']}")
+expected_zoom = tuple(round(v * 0.8) for v in custom_size)
+ok(app.SIZES["card"] == expected_zoom, f"свой размер и масштаб вместе: {app.SIZES['card']} (ожидалось {expected_zoom})")
 app.set_zoom_sizes(1.0)
 app.TRANSPARENT[0] = False
 solid = app._shape_rects("card", 300, 420, 28)

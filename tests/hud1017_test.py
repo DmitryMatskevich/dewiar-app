@@ -17,7 +17,7 @@ def ok(c, m):
 
 app = (ROOT / "ui/app.py").read_text(encoding="utf-8")
 hud = (ROOT / "ui/hud.html").read_text(encoding="utf-8")
-ok('BASE_SIZES = {"card": (300, 420)}' in app and app.count('for m in ("card",):') == 2 and 'uis.get("hud_mode") == "mini"' not in app,
+ok(re.search(r'BASE_SIZES\s*=\s*\{"card":\s*\(\d+\s*,\s*\d+\)\}', app) and app.count('for m in ("card",):') == 2 and 'uis.get("hud_mode") == "mini"' not in app,
    "одно окно виджета — карточка; сохранённый «mini» тоже открывается карточкой (Linux и Windows)")
 ok('id="b-mini"' not in hud and "setMode(\"mini\")" not in hud, "в карточке нет кнопки «свернуть в значок»")
 

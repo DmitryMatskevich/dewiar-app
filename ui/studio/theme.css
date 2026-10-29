@@ -184,6 +184,15 @@ html.st-neu :is(#wlc-chip) { background: var(--sk-glass); box-shadow: var(--rais
 html.st-neu :is(.btn:hover, .chip:hover, .ritem .ract button:hover, .hbtn:hover, .me-links span:hover) { background: var(--sk-glass); color: var(--accent); }
 html.st-neu :is(.btn:active, .chip:active, .tabs button:active) { box-shadow: var(--press); }
 html.st-neu :is(.btn.primary, .chip.on, .tabs button.on) { background: var(--brand); color: #fff; box-shadow: var(--raise-s); }
+/* В светлом неоморфизме голубой фирменный градиент слишком светлый для белой подписи.
+   Оставляем синий акцент, но используем тёмный вариант с контрастом WCAG ≥ 4.5. */
+html.st-light.st-neu :is(.btn.primary, .chip.on, .tabs button.on) {
+  background: linear-gradient(135deg, #354bc2 0%, #25378f 100%);
+  color: #fff;
+}
+/* Отключённые основные действия остаются читаемыми: общая opacity:.5 делала белый текст
+   на светлом фоне практически невидимым (например, пока не выдан доступ к контактам). */
+html.st-light .btn.primary:disabled { opacity: 1; }
 html.st-neu :is(nav button.cur, .stabs button.on, .fbtns .seg button.on, .me-tools .seg button.cur, .mpanes button.on, .mn-tabs button.cur, .oi.on) {
   background: var(--sk-glass); color: var(--accent); box-shadow: var(--press);
 }
