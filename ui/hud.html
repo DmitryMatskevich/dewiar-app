@@ -104,6 +104,7 @@
   #bubble { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
             background: var(--glass); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
             color: #fff; border: 0; border-radius: 999px; padding: 6px 18px 8px 14px; min-width: 150px; max-width: min(72%, 300px); font: inherit; font-size: 13.5px; letter-spacing: .01em; cursor: pointer; transition: background .3s, transform .18s; }
+  #bubble[hidden] { display: none !important; }
   #bubble:hover, #bubble:focus-visible { transform: translateX(-50%) scale(1.025); outline: none; background: rgba(255,255,255,.12); }
   #bubble::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.28); transition: background .3s, box-shadow .3s; }
   #bubble.live { background: rgb(255 255 255 / 7%); }
@@ -128,7 +129,7 @@
 
   /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
   #mid { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; }
-  #card.no-orb #mid { padding-top: 50px; }
+  #card.no-orb #mid { padding-top: 10px; }
   /* Ввод всегда находится над нижней панелью. До появления ответа свободное место — это область
      переписки; при открытом ответе карточка ответа занимает её целиком. */
   #mid::before { content: ""; flex: 0 0 0; min-height: 0; margin: -4px 0; }
@@ -504,7 +505,7 @@
 <body>
 <div id="reader"><div class="rh"><b id="rd-title">Ответ целиком</b><button class="btn" id="rd-x" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div><div id="rd-body"></div></div>
 <div id="card">
-  <button id="bubble" title="Только состояние режима ввода. Модель выбирается отдельной кнопкой в строке сообщения." aria-label="Состояние режима ввода; модель выбирается отдельной кнопкой">
+  <button id="bubble" hidden aria-hidden="true" title="Состояние режима ввода. Модель выбирается отдельной кнопкой в строке сообщения." aria-label="Состояние режима ввода; модель выбирается отдельной кнопкой">
     <span id="say">Подключаюсь…</span>
   </button>
   <div id="orb" tabindex="0" role="button" title="Нажмите — выбрать помощника. Удерживайте — диктовка любой длины, отпустите — отправлю" aria-label="Выбрать помощника"><canvas id="cv"></canvas>

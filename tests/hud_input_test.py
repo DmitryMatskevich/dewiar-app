@@ -29,12 +29,12 @@ for ident in ("dict-tools", "dict-cancel", "dict-done"):
 for command in ("dictation_start", 'core.call("devices")'):
     ok(command in src, f"подключена команда {command}")
 ok('$("ask-model").onclick' in src and 'open_settings("brain")' in src, "кнопка модели открывает вкладку «Модели»")
-ok('id="b-model"' not in src and 'id="bubble"' in src and '$("bubble").onclick' in src,
-   "верхняя отдельная иконка мозга убрана, состояние остаётся отдельным индикатором")
+ok('id="b-model"' not in src and 'id="bubble" hidden' in src,
+   "верхняя кнопка состояния и текстовые статусы скрыты")
 ok('say.textContent = "Текст"' in src and 'Текстовый режим' not in src,
-   "индикатор текстового режима называется «Текст»")
-ok('$("bubble").onclick = () => { $("bubble").title' in src and '$("bubble").onclick = () => { const a = api(); if (a) a.open_settings("brain")' not in src,
-   "индикатор «Текст» не выбирает модель")
+   "внутреннее состояние текстового режима не выводится отдельной надписью")
+ok('$("bubble").onclick' in src and '$("bubble").onclick = () => { const a = api(); if (a) a.open_settings("brain")' not in src,
+   "скрытый индикатор не используется для выбора модели")
 ok('role="dialog" aria-modal="true" aria-label="Выбор помощника"' in src and 'id="team-list"' in src and 'id="team-close"' in src,
    "выбор помощника открывается модальным плавающим окном")
 ok('$("team-close").onclick' in src and 'e.key === "Escape" && $("team").classList.contains("show")' in src,
