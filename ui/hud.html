@@ -312,13 +312,11 @@
   #a-mic.recording { color: #ff6e91; background: rgba(255,104,144,.13); }
   #a-mic-pick { width: 25px; min-width: 25px; margin-left: -8px; }
   #a-mic-pick svg { width: 13px; height: 13px; }
-  #dict-tools { display: none; align-items: center; gap: 3px; flex: 1; min-width: 52px; }
-  #dict-tools.on { display: flex; }
-  #dict-level { height: 5px; flex: 1; min-width: 42px; max-width: 130px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
+  /* Уровень диктовки находится слева от микрофона и появляется только во время записи. */
+  #dict-level { display: none; width: 72px; min-width: 42px; max-width: 96px; height: 5px; margin: 0 1px 0 2px;
+                flex: 0 1 96px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
+  #dict-level.on { display: block; }
   #dict-level i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#65d6a4,#ffc95b,#ff6b8b); transition: width .08s linear; }
-  #dict-cancel, #dict-done { display: none; border-radius: 10px; }
-  #dict-tools.on #dict-cancel, #dict-tools.on #dict-done { display: grid; }
-  #dict-cancel { color: #ff829e; } #dict-done { color: #64d7a4; }
   #askn { display: none; }
   #mic-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 25; display: none; padding: 6px; border-radius: 15px;
               background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
@@ -532,9 +530,9 @@
           <button class="ab" id="a-shot" title="Приложить снимок экрана"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
+          <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
           <button class="ab" id="a-mic" title="Диктовка в поле: говорите, пауза завершит фразу" aria-label="Начать диктовку"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
-          <div id="dict-tools" aria-live="polite"><div id="dict-level" title="Уровень микрофона"><i></i></div><button class="ab" id="dict-cancel" title="Отменить диктовку" aria-label="Отменить диктовку"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><button class="ab" id="dict-done" title="Завершить ввод после текущей фразы" aria-label="Завершить ввод"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button></div>
           <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <button class="ab send" id="a-send" title="Отправить сообщение (Ctrl+Enter)" aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
         </div>
@@ -983,7 +981,7 @@ core.on("hello", d => {
 .on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); featuresSet((e.settings || {}).features); setModelSettings((e.settings || {}).llm); setAskModel(null, (e.settings || {}).audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
-.on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") $("dict-level").firstElementChild.style.width = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100) + "%"; })
+.on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") { const pct = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100); $("dict-level").firstElementChild.style.width = pct + "%"; $("dict-level").setAttribute("aria-valuenow", String(pct)); } })
 .on("wake", () => { /* имя услышано — об этом говорит надпись «Я вас слушаю»; карточку не открываем:
                        если имя почудилось (шум, телевизор), не останется висящих точек */ })
 .on("heard", e => { if (e.text) showCap(e.text, WAIT); else showCap("", "Слушаю…"); })
@@ -1264,8 +1262,9 @@ function dictationUi(on) {
   $("a-mic").classList.toggle("recording", dictating);
   $("a-mic").title = dictating ? "Диктовка идёт — пауза завершит фразу" : "Диктовка в поле: говорите, пауза завершит фразу";
   $("a-mic").setAttribute("aria-label", $("a-mic").title);
-  $("dict-tools").classList.toggle("on", dictating);
-  if (!dictating) $("dict-level").firstElementChild.style.width = "0%";
+  $("dict-level").classList.toggle("on", dictating);
+  $("dict-level").setAttribute("aria-hidden", dictating ? "false" : "true");
+  if (!dictating) { $("dict-level").firstElementChild.style.width = "0%"; $("dict-level").setAttribute("aria-valuenow", "0"); }
 }
 core.on("dictation", e => {
   if (e.state === "recording") { openAsk(); dictationUi(true); return; }
@@ -1282,8 +1281,6 @@ async function startDictation() {
   dictationUi(true); openAsk(); $("askin").focus();
 }
 $("a-mic").onclick = guard($("a-mic"), () => startDictation().catch(showErr), () => "Включаю диктовку в поле сообщения…");
-$("dict-cancel").onclick = () => core.call("dictation_cancel").catch(showErr);
-$("dict-done").onclick = () => core.call("dictation_finish").catch(showErr);
 async function showMicMenu() {
   const menu = $("mic-menu"), list = $("mic-list");
   if (menu.classList.contains("on")) { menu.classList.remove("on"); return; }

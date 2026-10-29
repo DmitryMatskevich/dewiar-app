@@ -18,12 +18,15 @@ ok('e.key === "Enter" && (e.ctrlKey || e.metaKey)' in src, "Ctrl/⌘+Enter от�
 ok('#ask { display: block;' in src, "окно чата агента открыто постоянно")
 ok('M12 19V5M6 11l6-6 6 6' in src, "стрелка отправки направлена вверх")
 ok(src.index('id="b-voice-inline"') < src.index('id="a-mic"'), "динамик находится слева от микрофона")
+ok(src.index('id="dict-level"') < src.index('id="a-mic"'), "индикатор уровня находится слева от микрофона")
 for ident in ("b-mic", "b-type", "b-team"):
     ok(f'id="{ident}" hidden' in src, f"старая кнопка {ident} убрана из панели опций")
 ok('e.key === "Enter" && !e.shiftKey' not in src, "старое поведение Shift+Enter не осталось")
-for ident in ("a-mic", "a-mic-pick", "dict-level", "dict-cancel", "dict-done", "b-voice-inline"):
+for ident in ("a-mic", "a-mic-pick", "dict-level", "b-voice-inline"):
     ok(f'id="{ident}"' in src, f"элемент {ident} присутствует")
-for command in ("dictation_start", "dictation_cancel", "dictation_finish", 'core.call("devices")'):
+for ident in ("dict-tools", "dict-cancel", "dict-done"):
+    ok(f'id="{ident}"' not in src, f"лишний элемент {ident} не показывается")
+for command in ("dictation_start", 'core.call("devices")'):
     ok(command in src, f"подключена команда {command}")
 ok('$("ask-model").onclick' in src and 'open_settings("brain")' in src, "кнопка модели открывает вкладку «Модели»")
 ok('id="b-model"' not in src and 'id="bubble"' in src and '$("bubble").onclick' in src,
@@ -57,8 +60,9 @@ ok('#ask { margin-top: auto; }' in src and '#mid::after { content: ""; display: 
 ok('id="b-orb"' in src and 'setOrbVisible(!orbShown, true)' in src, "верхняя кнопка скрывает и возвращает большой образ")
 ok('chat-open' in src and '#card.chat-open #cap' in src, "ответ и чат растягиваются при расширении окна")
 ok('box.classList.toggle("show")' in src and 'function tapOrb()' in src, "круг помощника открывает выбор персонажа")
-ok("Ctrl+Enter (или ⌘+Enter)" in help_src and "выбрать устройство macOS" in help_src,
-   "справка объясняет новую клавиатуру, микрофон и уровень записи")
+ok("Ctrl+Enter (или ⌘+Enter)" in help_src and "выбрать устройство macOS" in help_src
+   and "автоматически добавляется" in help_src and "слева от микрофона" in help_src,
+   "справка объясняет новую клавиатуру, автоматическую диктовку и уровень записи")
 
 if fails:
     raise SystemExit(f"Ошибок: {len(fails)}")
