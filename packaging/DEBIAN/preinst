@@ -1,0 +1,9 @@
+#!/bin/bash
+# Прежние версии (patrik-assistant, cortex-assistant) держали свои службы у пользователей — гасим их.
+for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    user=$(id -nu "$uid" 2>/dev/null) || continue
+    systemctl --machine="$user@.host" --user disable --now patrik-wakeword.service >/dev/null 2>&1 || true
+    systemctl --machine="$user@.host" --user disable --now cortex-core.service >/dev/null 2>&1 || true
+    systemctl --machine="$user@.host" --user stop dewiar-core.service >/dev/null 2>&1 || true
+done
+exit 0

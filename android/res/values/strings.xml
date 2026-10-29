@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Dewiar</string>
+    <string name="sc_listen">Говорить</string>
+    <string name="sc_listen_long">Сказать Dewiar</string>
+    <string name="sc_type">Написать</string>
+    <string name="hands_summary">Ассистент выполняет просьбы в других приложениях</string>
+    <string name="hands_desc">Dewiar читает, что на экране, и нажимает кнопки, вводит текст и листает в других приложениях — только когда вы попросили (например: «напиши маме в Telegram, что я задержусь», «найди в YouTube новости»). Пароли не читаются и не вводятся. Перед отправкой, оплатой или удалением ассистент спрашивает подтверждение. Выключить можно здесь в любой момент.</string>
+    <string name="w_capture">Записать</string>
+    <string name="w_capture_desc">Одно нажатие — Dewiar слушает и записывает мысль в «Идеи» или ставит напоминание</string>
+</resources>

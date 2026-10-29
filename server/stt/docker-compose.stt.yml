@@ -1,0 +1,38 @@
+# =============================================================================
+#  DEWIAR STT — распознавание речи GigaAM на видеокарте для приложений Dewiar.
+#  Положить в /var/www/dwr рядом с остальными compose-файлами, папку server/stt — в /var/www/dwr/src/dewiar-stt.
+#  В .env дописать файл в COMPOSE_FILE:  ...:docker-compose.stt.yml
+#  Запуск:  docker compose up -d --build dewiar-stt
+# =============================================================================
+services:
+  dewiar-stt:
+    build: ./src/dewiar-stt
+    image: dwr/dewiar-stt:latest
+    container_name: dewiar-stt
+    restart: always
+    environment:
+      STT_MODEL: gigaam-v3-e2e-rnnt
+      # вход по api_token пользователя сайта — проверка через login.php внутри сети docker (сервис app)
+      STT_LOGIN_URL: http://app/dwrapp/login.php
+      # STT_KEY: общий ключ для своих сервисов (необязательно)
+      # Голос с сервера: адрес вашего TTS (vLLM-Omni Qwen3-TTS, см. server/tts) — тогда /stt/v1/audio/speech
+      # пускает пользователей сайта по их токену. В login.php тогда: DWR_TTS_URL = '/stt/v1'
+      # TTS_UPSTREAM: http://host.docker.internal:8091/v1
+      # TTS_UPSTREAM_KEY: ключ TTS-сервера, если он есть
+      # TTS_MODEL: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice     # какую модель просить у TTS-сервера
+    volumes:
+      - ./storage/dewiar-stt:/models          # модель скачивается один раз (~250 МБ)
+    expose:
+      - "8020"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 3g
+    logging:
+      driver: "json-file"
+      options: { max-size: "10m", max-file: "3" }

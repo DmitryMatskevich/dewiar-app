@@ -1,0 +1,147 @@
+/* Текст для русского синтеза речи — то же, что core/speechnorm.py (числа словами, даты и время, суммы, проценты, латиница
+   русскими буквами), чтобы телефон отдавал серверу голоса уже «читаемый» текст и не зависел от того, обновлена ли служба
+   голосов (отзыв 16.10: «спросил время — написала 14:10, а произнесла „ствисе“»). Меняешь здесь — меняй и там:
+   tests/speechnorm_js_test.py сверяет оба на одних фразах. window.DewiarSpeech.norm(text, latin = true). */
+(function () {
+  const ONES = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять", "одиннадцать",
+    "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"];
+  const ONES_F = { 1: "одна", 2: "две" };
+  const TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"];
+  const HUND = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"];
+  const SCALES = [[1e12, ["триллион", "триллиона", "триллионов"], false], [1e9, ["миллиард", "миллиарда", "миллиардов"], false],
+    [1e6, ["миллион", "миллиона", "миллионов"], false], [1000, ["тысяча", "тысячи", "тысяч"], true]];
+  const W = "0-9A-Za-z_А-Яа-яЁё";                       // \w Python (с кириллицей): в JS \w — только латиница
+
+  function plural(n, f) { n = Math.abs(n) % 100; if (n >= 11 && n <= 14) return f[2]; return n % 10 === 1 ? f[0] : n % 10 >= 2 && n % 10 <= 4 ? f[1] : f[2]; }
+  function under1000(n, fem) {
+    const out = [];
+    if (n >= 100) { out.push(HUND[Math.floor(n / 100)]); n %= 100; }
+    if (n >= 20) { out.push(TENS[Math.floor(n / 10)]); n %= 10; }
+    if (n || !out.length) out.push(fem && ONES_F[n] ? ONES_F[n] : ONES[n]);
+    return out.filter(w => w && !(w === "ноль" && out.length > 1));
+  }
+  function numberWords(n, fem) {
+    n = Math.trunc(+n);
+    if (n < 0) return "минус " + numberWords(-n, fem);
+    if (n === 0) return "ноль";
+    let words = [];
+    for (const [value, forms, female] of SCALES) {
+      if (n >= value) {
+        const k = Math.floor(n / value);
+        if (k > 1) words = words.concat(k < 1000 ? under1000(k, female) : numberWords(k).split(" "));
+        words.push(plural(k, forms));
+        n %= value;
+      }
+    }
+    if (n) words = words.concat(under1000(n, fem));
+    return words.join(" ");
+  }
+  const LETTER = { a: "эй", b: "би", c: "си", d: "ди", e: "и", f: "эф", g: "джи", h: "эйч", i: "ай", j: "джей", k: "кей", l: "эл", m: "эм",
+    n: "эн", o: "оу", p: "пи", q: "кью", r: "ар", s: "эс", t: "ти", u: "ю", v: "ви", w: "дабл-ю", x: "экс", y: "уай", z: "зед" };
+  const TR2 = [["sch", "ш"], ["sh", "ш"], ["ch", "ч"], ["th", "т"], ["ph", "ф"], ["ck", "к"], ["oo", "у"], ["ee", "и"], ["ea", "и"],
+    ["ou", "ау"], ["qu", "кв"], ["kh", "х"], ["zh", "ж"], ["ya", "я"], ["yu", "ю"], ["yo", "ё"], ["ts", "ц"]];
+  const TR1 = { a: "а", b: "б", c: "к", d: "д", e: "е", f: "ф", g: "г", h: "х", i: "и", j: "дж", k: "к", l: "л", m: "м", n: "н", o: "о",
+    p: "п", q: "к", r: "р", s: "с", t: "т", u: "у", v: "в", w: "в", x: "кс", y: "и", z: "з" };
+  const KNOWN = { linux: "линукс", ubuntu: "убунту", windows: "виндоус", telegram: "телеграм", max: "макс", dewiar: "дэвиаар",
+    youtube: "ютуб", google: "гугл", yandex: "яндекс", wifi: "вай-фай", "wi-fi": "вай-фай", ok: "окей", email: "имейл", sudo: "судо",
+    python: "пайтон", chrome: "хром", obsidian: "обсидиан", android: "андроид", iphone: "айфон", bluetooth: "блютус", hdmi: "эйч-ди-эм-ай",
+    jazz: "джаз", relax: "релакс", fm: "эф-эм" };
+  function latinWord(w) {
+    const low = w.toLowerCase();
+    if (KNOWN[low]) return KNOWN[low];
+    if ((w === w.toUpperCase() && w.length <= 6) || w.length === 1) return [...low].map(c => LETTER[c] || c).join("-");
+    let out = "", i = 0;
+    while (i < low.length) {
+      const t2 = TR2.find(([a]) => low.startsWith(a, i));
+      if (t2) { out += t2[1]; i += t2[0].length; } else { out += TR1[low[i]] || low[i]; i++; }
+    }
+    return out;
+  }
+  function num(s) {
+    if (s.includes(":")) {
+      const [h, mi] = s.split(":");
+      return numberWords(+h) + (mi.startsWith("0") && mi !== "00" ? " ноль " + numberWords(+mi) : mi === "00" ? "" : " " + numberWords(+mi));
+    }
+    const parts = s.split(/[.,]/);
+    if (parts.length === 1) return s.length <= 15 ? numberWords(+s) : [...s].map(c => numberWords(+c)).join(" ");
+    return parts.map(p => p ? numberWords(+p) : "").join(" точка ");
+  }
+  const FRAC = { 1: ["десятая", "десятых", "десятых"], 2: ["сотая", "сотых", "сотых"] };
+  const MONEY = { rub: [["рубль", "рубля", "рублей"], ["копейка", "копейки", "копеек"]], usd: [["доллар", "доллара", "долларов"], ["цент", "цента", "центов"]],
+    eur: [["евро", "евро", "евро"], ["цент", "цента", "центов"]] };
+  function money(n, k, cur) {
+    n = +n; const [rub, kop] = MONEY[cur];
+    let out = `${numberWords(n)} ${plural(n, rub)}`;
+    if (k && +k.padEnd(2, "0")) { const kk = +k.padEnd(2, "0"); out += ` ${numberWords(kk, cur === "rub")} ${plural(kk, kop)}`; }
+    return out;
+  }
+  const MONTHS = "января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря", MONTH_LIST = MONTHS.split("|");
+  const ORD = { 1: "перв", 2: "втор", 3: "трет", 4: "четвёрт", 5: "пят", 6: "шест", 7: "седьм", 8: "восьм", 9: "девят", 10: "десят",
+    11: "одиннадцат", 12: "двенадцат", 13: "тринадцат", 14: "четырнадцат", 15: "пятнадцат", 16: "шестнадцат", 17: "семнадцат",
+    18: "восемнадцат", 19: "девятнадцат", 20: "двадцат", 30: "тридцат", 40: "сороков", 50: "пятидесят", 60: "шестидесят",
+    70: "семидесят", 80: "восьмидесят", 90: "девяност", 100: "сот" };
+  const ORD_END = { m_nom: ["ый", "ой", "ий"], n_nom: ["ое", "ое", "ье"], gen: ["ого", "ого", "ьего"], dat: ["ому", "ому", "ьему"],
+    prep: ["ом", "ом", "ьем"], ins: ["ым", "ым", "ьим"] };
+  function ordinalWords(n, form = "n_nom") {
+    n = Math.trunc(+n);
+    let last = n % 100 < 20 ? n % 100 : (n % 10 || n % 100);
+    if (n % 100 >= 20 && n % 10) last = n % 10;
+    if (!last || !ORD[last]) { if (n % 100 === 0 && n % 1000) last = 100; else return null; }
+    let head = n - last ? numberWords(n - last) : "";
+    const stem = ORD[last], i = stem === "трет" ? 2 : ["втор", "шест", "седьм", "восьм", "сороков"].includes(stem) ? 1 : 0;
+    const word = stem + ORD_END[form][i];
+    if (head.endsWith("сто") && last === 100) head = head.slice(0, -3).trim();
+    return (head + " " + word).trim();
+  }
+  const NOT_FEM = new Set(["часа", "дня", "года", "раза", "рубля", "доллара", "человека", "шага", "градуса", "процента", "километра", "метра",
+    "литра", "килограмма", "грамма", "пункта", "этажа", "балла", "урока", "вопроса", "ответа", "файла", "месяца", "мужчина", "папа"]);
+  const NOT_NEUT = new Set(["кофе", "евро", "кино", "метро", "пальто", "радио", "фото"]);
+  function agree(n, word) {
+    const w = word.toLowerCase(), k = n % 10, k2 = n % 100;
+    if ((k2 >= 11 && k2 <= 14) || (k !== 1 && k !== 2)) return numberWords(n);
+    if (k === 1 && /[ая]$/.test(w) && !NOT_FEM.has(w)) return numberWords(n, true);
+    if (k === 2 && /[ыи]$/.test(w) && !NOT_FEM.has(w)) return numberWords(n, true);
+    if (k === 1 && /[ую]$/.test(w)) return numberWords(n).replace(/один$/, "одну");
+    if (k === 1 && /[ое]$/.test(w) && !NOT_NEUT.has(w)) return numberWords(n).replace(/один$/, "одно");
+    return numberWords(n);
+  }
+  const caseOf = (pre) => { const p = (pre || "").trim().toLowerCase();
+    return ["до", "с", "со", "от", "после", "около", "начиная с", "кроме"].includes(p) ? "gen" : ["к", "ко", "по"].includes(p) ? "dat" : "n_nom"; };
+  const PRE = "((?:(?<=\\s)|^)(?:до|с|со|от|после|около|к|ко|по|на|в)\\s+)?";
+
+  function norm(text, latin = true) {
+    let t = String(text == null ? "" : text);
+    for (let i = 0; i < 3; i++) t = t.replace(/(?<![\d.,])(\d{1,3})[   ](?=\d{3}(?!\d))/g, "$1");
+    t = t.replace(/(\d+)(?:[.,](\d{1,2}))?\s*(?:руб(?:л[а-яё]*)?\.?|₽|р\.|BYN|RUB)(?![а-яёА-ЯЁA-Za-z])/g, (m, n, k) => money(n, k, "rub"));
+    t = t.replace(/\$\s*(\d+)(?:[.,](\d{1,2}))?|(\d+)(?:[.,](\d{1,2}))?\s*(?:\$|долл\.|USD)/g, (m, n, k, n2, k2) => money(n || n2, k || k2, "usd"));
+    t = t.replace(/(\d+)(?:[.,](\d{1,2}))?\s*(?:€|EUR)/g, (m, n, k) => money(n, k, "eur"));
+    t = t.replace(/(?<![\d.,:])(\d{1,9}),(\d{1,2})(?!\d|[.,]\d)/g, (m, a, b) => `${numberWords(+a, true)} и ${numberWords(+b, true)} ${plural(+b, FRAC[b.length])}`);
+    t = t.replace(/(?<=\d)\s*=\s*(?=[-−]?\d)/g, " равно ").replace(/(?<=\d)\s+[-−–]\s+(?=\d)/g, " минус ").replace(/(?<=\d)\s*\+\s*(?=\d)/g, " плюс ")
+      .replace(/(?<=\d)\s*[×*]\s*(?=\d)/g, " умножить на ").replace(/(?<=\d)\s*÷\s*(?=\d)/g, " разделить на ");   // «12 - 10 = 2» — словами
+    t = t.replace(/https?:\/\/\S+/g, "ссылка");
+    if (latin) t = t.replace(new RegExp(`(?<![${W}])(?=[${W}]*\\d)(?=[${W}]*[A-Za-z])[A-Za-z0-9_]{4,}(?![${W}])`, "g"), " ");
+    t = t.replace(/(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])/g, " ");
+    t = t.replace(new RegExp(`(?<![${W}-])\\+(?=\\d)`, "g"), "плюс ");
+    t = t.replace(new RegExp(`(?<![${W}-])[-−](?=\\d)`, "g"), "минус ");
+    t = t.replace(/(\d+)\s*%/g, (m, n) => `${numberWords(+n)} ${plural(+n, ["процент", "процента", "процентов"])}`);
+    t = t.replace(/(\d+)\s*°\s*[CС]?(?![A-Za-zА-Яа-яЁё])/g, (m, n) => `${numberWords(+n)} ${plural(+n, ["градус", "градуса", "градусов"])}`);
+    t = t.replace(new RegExp("((?:(?<=\\s)|^)(?:до|с|со|от|после|около|к|ко|по)\\s+)?(?<![\\d.,:])(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?![\\d.,]\\d)", "gi"),
+      (m, pre, d, mo, y) => { d = +d; mo = +mo; if (!(d >= 1 && d <= 31 && mo >= 1 && mo <= 12)) return m; const f = caseOf(pre);
+        return `${pre || ""}${ordinalWords(d, f) || numberWords(d)} ${MONTH_LIST[mo - 1]} ${ordinalWords(+y, "gen") || numberWords(+y)} года`; });
+    t = t.replace(/(?<![\d.,:])(\d{3,4})\s+(год|года|году|годом|годе)(?![а-яё])/g, (m, n, g) => {
+      const form = { "год": "m_nom", "года": "gen", "году": "prep", "годом": "ins", "годе": "prep" }[g.toLowerCase()] || "m_nom";
+      return `${ordinalWords(+n, form) || numberWords(+n)} ${g}`; });
+    t = t.replace(new RegExp(PRE + "(?<![\\d.,:])(\\d{1,2})\\s+(" + MONTHS + ")(?![а-яё])", "gi"), (m, pre, n, mon) => {
+      n = +n; const w = n >= 1 && n <= 31 ? ordinalWords(n, caseOf(pre)) : null; return `${pre || ""}${w || numberWords(n)} ${mon}`; });
+    t = t.replace(/(?<![\d.,:])(\d{1,15})(?![\d.,:])(\s+)([А-Яа-яЁё]+)/g, (m, n, sp, w) => agree(+n, w) + sp + w);
+    t = t.replace(new RegExp(`(?<![${W}])([01]?\\d|2[0-3]):[0-5]\\d(?![${W}])|\\d+(?:[.,]\\d+)*`, "g"), (m) => num(m));
+    if (!latin) return end(t.replace(/№/g, "номер ").replace(/[ \t]+/g, " ").trim());
+    t = t.replace(/[A-Za-z]+(?:-[A-Za-z]+)?/g, (m) => latinWord(m));
+    t = t.replace(/&/g, " и ").replace(/\+/g, " плюс ").replace(/=/g, " равно ").replace(/№/g, "номер ");
+    t = t.replace(/[^А-Яа-яЁё ,.!?:;—\-«»"()']+/g, " ");
+    return end(t.replace(/\s+/g, " ").trim());
+  }
+  // фраза без точки в конце — с точкой: иначе голос сервера глотал последнее слово («…равно два» — без «два»)
+  const end = (t) => t && /[0-9A-Za-zА-Яа-яЁё»)"']$/.test(t) ? t + "." : t;
+  window.DewiarSpeech = { norm, numberWords, ordinalWords };
+})();

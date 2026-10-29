@@ -1,0 +1,64 @@
+#!/bin/bash
+set -e
+APP=/opt/dewiar
+[ "$1" = "configure" ] || exit 0
+
+# Окружение Python и библиотеки: без python3-venv/python3-pip из apt (см. /opt/dewiar/dewiar-env)
+# с низким приоритетом: пока ставятся библиотеки, рабочий Dewiar и остальная система не должны тормозить
+if command -v ionice >/dev/null 2>&1; then LOW="nice -n 15 ionice -c3"; else LOW="nice -n 15"; fi
+$LOW /usr/bin/python3 "$APP/dewiar-env" || true
+PYV="$APP/venv/bin/python3"; [ -x "$PYV" ] || PYV=/usr/bin/python3
+# Модель распознавания имён (45 МБ) — не внутри пакета, чтобы он был маленьким. Если сейчас нет сети,
+# ядро само докачает её при первом запуске.
+if [ ! -f "$APP/data/vosk-model-small-ru-0.22.zip" ]; then
+    echo "Dewiar: скачиваю модель распознавания имён (45 МБ)..."
+    "$PYV" - <<'PY' || echo "!! Модель не скачалась сейчас — ассистент докачает её сам при первом запуске."
+import hashlib, os, sys, urllib.request
+urls = ["https://dewiar.pro/dwrapp/models/vosk-model-small-ru-0.22.zip",        # свой сайт — первым
+        "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"]
+sha = "961d5ff98a17f4aa6de69864d0aa71fa5bac682301d2b5d17a3f24c5c99a46d4"
+dst = "/opt/dewiar/data/vosk-model-small-ru-0.22.zip"
+err = ""
+for url in urls:
+    h = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(dst + ".part", "wb") as f:
+            while True:
+                b = r.read(1 << 16)
+                if not b:
+                    break
+                f.write(b); h.update(b)
+    except Exception as e:
+        err = str(e); continue
+    if h.hexdigest() == sha:
+        os.replace(dst + ".part", dst)
+        print("Dewiar: модель скачана и проверена.")
+        break
+    err = "контрольная сумма не совпала"
+else:
+    sys.exit(f"   ({err})")
+PY
+    rm -f "$APP/data/vosk-model-small-ru-0.22.zip.part"
+fi
+
+
+# Остатки прежнего Cortex (пустые папки, __pycache__) — если его пакет уже удалён
+if ! dpkg-query -W -f='${Status}' cortex-assistant 2>/dev/null | grep -q "ok installed"; then
+    rm -rf /opt/cortex
+fi
+
+# Файлы .dewiar и ссылки dewiar:// открываются в Dewiar
+command -v update-mime-database >/dev/null && update-mime-database /usr/share/mime >/dev/null 2>&1 || true
+command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications >/dev/null 2>&1 || true
+
+# Перезапускаем ядро у тех, кто уже вошёл в систему (обновление подхватится сразу)
+for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    user=$(id -nu "$uid" 2>/dev/null) || continue
+    systemctl --machine="$user@.host" --user daemon-reload >/dev/null 2>&1 || true
+    systemctl --machine="$user@.host" --user try-restart dewiar-core.service >/dev/null 2>&1 || true
+done
+# Dewiar на сервере (sudo dewiar-server setup) — подхватывает обновление сразу
+systemctl try-restart dewiar-server.service >/dev/null 2>&1 || true
+echo
+echo "Dewiar установлен. Откройте «Dewiar» в меню приложений (или просто войдите в систему заново)."
+exit 0

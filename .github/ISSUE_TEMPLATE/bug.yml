@@ -1,0 +1,34 @@
+name: Ошибка
+description: Что-то работает не так, как ожидалось
+labels: [ошибка]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что делали, что ожидали и что получилось вместо этого. Фраза, которую сказали ассистенту, — дословно.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как повторить
+      placeholder: "1. Открыть студию → …\n2. Сказать «…»\n3. …"
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      description: Студия → «О программе» или телефон → «Ещё».
+      placeholder: "0.36.9 · Windows 11 / телефон 0.4.32 · Android 14"
+    validations:
+      required: true
+  - type: dropdown
+    id: brain
+    attributes:
+      label: Где думает ассистент
+      options: [Модели Dewiar, Своя модель (Ollama, LM Studio, vLLM…), Облако по ключу (OpenAI, Claude, OpenRouter…), Не знаю]
+  - type: textarea
+    id: log
+    attributes:
+      label: Журнал или снимок экрана
+      description: Если есть. Ключи, пароли и личное перед отправкой уберите. Проще всего — «Сообщить о проблеме» прямо в программе.

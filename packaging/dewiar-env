@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Python-окружение Dewiar: /opt/dewiar/venv + библиотеки из requirements.txt.
+
+Запускается из postinst (root) и вручную: sudo /opt/dewiar/dewiar-env
+Не требует из apt ни python3-venv, ни python3-pip: окружение создаётся без pip, а библиотеки
+ставит uv — установщик, который скачивается с PyPI (как и сами библиотеки) и проверяется по
+контрольной сумме. Если uv скачать не удалось, а pip в системе есть — используется pip.
+Только стандартная библиотека Python.
+"""
+import hashlib
+import io
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import urllib.request
+import zipfile
+from pathlib import Path
+
+APP = Path(os.environ.get("DEWIAR_APP", "/opt/dewiar"))
+VENV = APP / "venv"
+UV = APP / "bin" / "uv"
+CACHE = Path(os.environ.get("DEWIAR_UV_CACHE", "/var/cache/dewiar/uv"))
+REQ = APP / "requirements.txt"
+EXTRA = APP / "requirements-extra.txt"
+PYPI = os.environ.get("DEWIAR_PYPI_JSON", "https://pypi.org/pypi/uv/json")
+
+
+def say(msg):
+    print("Dewiar: " + msg, flush=True)
+
+
+def has_gi(py):
+    return subprocess.run([str(py), "-c", "import gi"], capture_output=True).returncode == 0
+
+
+def system_python():
+    """Python, для которого в системе есть GTK (python3-gi) — иначе окна не откроются."""
+    for c in ("/usr/bin/python3", "/usr/bin/python3.13", "/usr/bin/python3.12", "/usr/bin/python3.11", "/usr/bin/python3.10"):
+        if os.access(c, os.X_OK) and has_gi(c):
+            return c
+    return "/usr/bin/python3"
+
+
+def uv_ok():
+    return UV.exists() and subprocess.run([str(UV), "--version"], capture_output=True).returncode == 0
+
+
+def fetch_uv():
+    """Скачать uv с PyPI: колесо под эту архитектуру, проверка sha256, из архива берём один файл."""
+    if uv_ok():
+        return True
+    arch = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64",
+            "armv7l": "armv7l", "i686": "i686"}.get(platform.machine().lower())
+    if not arch:
+        return False
+    try:
+        with urllib.request.urlopen(PYPI, timeout=30) as r:
+            meta = json.load(r)
+        files = [u for u in meta["urls"] if u["filename"].endswith(".whl") and f"manylinux_2_17_{arch}" in u["filename"]]
+        if not files:
+            return False
+        f = files[0]
+        say(f"скачиваю установщик библиотек uv {meta['info']['version']} ({f['size'] // 1_000_000} МБ)...")
+        with urllib.request.urlopen(f["url"], timeout=120) as r:
+            data = r.read()
+        if hashlib.sha256(data).hexdigest() != f["digests"]["sha256"]:
+            say("контрольная сумма uv не совпала — не использую его")
+            return False
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            name = next(n for n in z.namelist() if n.endswith("/scripts/uv"))
+            UV.parent.mkdir(parents=True, exist_ok=True)
+            tmp = UV.with_suffix(".part")
+            tmp.write_bytes(z.read(name))
+            tmp.chmod(0o755)
+            tmp.replace(UV)
+        return uv_ok()
+    except Exception as e:  # noqa: BLE001
+        say(f"uv не скачался ({e})")
+        return False
+
+
+def uv_env():
+    env = dict(os.environ, UV_CACHE_DIR=str(CACHE), UV_LINK_MODE="copy", UV_NATIVE_TLS="1", UV_SYSTEM_CERTS="1",
+               UV_NO_PROGRESS="1", UV_PYTHON_DOWNLOADS="never")
+    if os.environ.get("PIP_INDEX_URL") and not os.environ.get("UV_DEFAULT_INDEX"):
+        env["UV_DEFAULT_INDEX"] = os.environ["PIP_INDEX_URL"]      # зеркало PyPI пользователя
+    return env
+
+
+def make_venv(have_uv):
+    py = VENV / "bin" / "python3"
+    if py.exists() and has_gi(py):
+        return True
+    shutil.rmtree(VENV, ignore_errors=True)
+    base = system_python()
+    # --system-site-packages обязателен: GTK/WebKit для окон стоят в системе, не в pip.
+    # --without-pip: модулю venv тогда не нужен пакет python3-venv (ensurepip).
+    r = subprocess.run([base, "-m", "venv", "--system-site-packages", "--without-pip", str(VENV)],
+                       capture_output=True, text=True)
+    if r.returncode != 0 and have_uv:
+        shutil.rmtree(VENV, ignore_errors=True)
+        r = subprocess.run([str(UV), "venv", "--python", base, "--system-site-packages", str(VENV)],
+                           capture_output=True, text=True, env=uv_env())
+    if r.returncode != 0 or not py.exists():
+        say("не получилось создать окружение Python: " + (r.stderr or r.stdout).strip()[-300:])
+        return False
+    return True
+
+
+def install(have_uv):
+    py = VENV / "bin" / "python3"
+    if have_uv:
+        r = subprocess.run([str(UV), "pip", "install", "--python", str(py), "-q", "-r", str(REQ)], env=uv_env())
+        if r.returncode == 0:
+            return True
+        say("uv не справился, пробую pip...")
+    # pip: свой в окружении (если оно создано с pip), иначе системный — через --python (pip ≥ 22.3)
+    if subprocess.run([str(py), "-m", "pip", "--version"], capture_output=True).returncode == 0:
+        cmd = [str(py), "-m", "pip"]
+    elif shutil.which("pip3") or subprocess.run([system_python(), "-m", "pip", "--version"], capture_output=True).returncode == 0:
+        cmd = [system_python(), "-m", "pip", "--python", str(py)]
+    else:
+        return False
+    return subprocess.run(cmd + ["install", "-q", "--disable-pip-version-check", "-r", str(REQ)]).returncode == 0
+
+
+def install_extras(have_uv):
+    """Необязательные библиотеки (голоса Vosk TTS, телевизор): по одной, неудача одной ничего не ломает."""
+    if not EXTRA.exists():
+        return
+    py = VENV / "bin" / "python3"
+    for line in EXTRA.read_text(encoding="utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        pk = line.split()
+        if have_uv:
+            r = subprocess.run([str(UV), "pip", "install", "--python", str(py), "-q", "-c", str(REQ)] + pk, env=uv_env())
+        else:
+            r = subprocess.run([str(py), "-m", "pip", "install", "-q", "--disable-pip-version-check", "-c", str(REQ)] + pk)
+        say(f"{pk[0]}: {'установлен' if r.returncode == 0 else 'не установился — эта возможность будет недоступна'}")
+
+
+def check():
+    """Главное для запуска на месте?"""
+    py = VENV / "bin" / "python3"
+    r = subprocess.run([str(py), "-c", "import numpy, onnxruntime, vosk, httpx, websockets, webview"], capture_output=True, text=True)
+    if r.returncode:
+        say("внимание: не хватает библиотек: " + (r.stderr.strip().splitlines() or ["?"])[-1])
+    return r.returncode == 0
+
+
+def main():
+    if os.geteuid() != 0 and not os.environ.get("DEWIAR_APP"):
+        sys.exit("Запустите с sudo: sudo /opt/dewiar/dewiar-env")
+    say("готовлю Python-окружение (нужен интернет, 1–3 минуты)...")
+    have_uv = fetch_uv()
+    if not make_venv(have_uv):
+        return 1
+    if install(have_uv):
+        install_extras(have_uv)
+        check()
+        say("библиотеки установлены.")
+        subprocess.run([str(VENV / "bin" / "python3"), "-m", "compileall", "-q", str(APP / "core"), str(APP / "ui")],
+                       capture_output=True)
+        return 0
+    say("не удалось поставить библиотеки Python (нет интернета?). Когда сеть появится, выполните:")
+    print("   sudo /opt/dewiar/dewiar-env", flush=True)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

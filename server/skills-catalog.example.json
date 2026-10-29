@@ -1,0 +1,10 @@
+{
+  "skills": [
+    {"name": "math-tutor", "title": "Репетитор по математике",
+     "description": "Объясняет по шагам, задаёт наводящие вопросы, проверяет решение.",
+     "url": "math-tutor.zip"},
+    {"name": "email-writer", "title": "Деловые письма",
+     "description": "Составляет письмо по короткому описанию и зачитывает для проверки.",
+     "url": "https://dewiar.ru/skills/email-writer.zip"}
+  ]
+}

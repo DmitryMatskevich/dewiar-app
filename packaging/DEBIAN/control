@@ -1,0 +1,16 @@
+Package: dewiar-assistant
+Version: 0.45.3
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1 | gir1.2-webkit2-4.0, libpulse0
+Recommends: pipewire-pulse | pulseaudio, libnotify-bin, playerctl, openssh-client, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1
+Suggests: ffmpeg, espeak-ng, pulseaudio-utils
+Conflicts: cortex-assistant, patrik-assistant
+Replaces: cortex-assistant, patrik-assistant
+Maintainer: Dewiar Project <dewiar@localhost>
+Description: Dewiar — голосовой ИИ-ассистент с персонажами (Девиар, Патрик, Агент, Джарвис, Лира, Эва)
+ Слушает имя персонажа, распознаёт речь (GigaAM), отвечает голосом через
+ любую языковую модель: свой vLLM, Ollama, llama.cpp, LM Studio, OpenRouter,
+ OpenAI или Anthropic Claude. Эхоподавление, перебивание голосом, живой
+ виджет на рабочем столе и студия настройки персонажей.

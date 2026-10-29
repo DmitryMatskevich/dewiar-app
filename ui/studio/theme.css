@@ -1,0 +1,253 @@
+/* Студия в стиле виджета (ui/studio/theme.js ставит классы на <html> и переменные --scene, --sk-*):
+   html.st-skin  — любая тема, кроме «Фирменной»: фон-сцена темы, акцент — светлое стекло вместо фиолетового;
+   html.st-light — светлые темы: тёмный текст, светлые поля и кнопки, чернильный акцент (как в виджете);
+   html.st-neu   — неоморфизм: панели из того же материала, форма — от двух теней, поля вдавлены, кнопки выпуклые.
+   Рамок нет нигде — состояние показывают фон, тень и прозрачность. */
+
+/* ---------- тёмные темы: акцент — стекло ---------- */
+html.st-skin:not(.st-light):not([data-skin="neon"]) {
+  --brand: linear-gradient(135deg, rgba(255,255,255,.24) 0%, rgba(255,255,255,.12) 100%);
+  --accent: #A9C8FF;
+}
+html.st-skin:not(.st-light):not([data-skin="neon"]) :is(nav button.cur, .stabs button.on, .btn.primary, .card.new b) {
+  box-shadow: 0 10px 26px -14px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.16);
+}
+html.st-skin:not(.st-light):not([data-skin="neon"]) :is(#help .tplay, #wlc .tplay) {
+  box-shadow: 0 10px 26px -14px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.16);
+}
+html.st-skin:not(.st-light) .tg input:checked + i { background: rgba(255,255,255,.34); }
+html.st-skin :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b) { background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(255,255,255,.85)); box-shadow: none; }
+html.st-skin :is(#upd-bar b) { background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(255,255,255,.85)); box-shadow: none; }
+html.st-skin .cc-use .ub i.on { background: rgba(255,255,255,.6); }
+
+/* ---------- светлые темы ---------- */
+html.st-light {
+  color-scheme: light;
+  --ink: var(--sk-ink, #1d2230); --muted: var(--sk-muted, rgba(29,34,48,.6));
+  --dim: color-mix(in srgb, var(--ink) 48%, transparent);
+  --line: color-mix(in srgb, var(--ink) 9%, transparent);
+  --field: rgba(255,255,255,.62);
+  --panel: rgba(255,255,255,.5); --panel2: rgba(255,255,255,.75); --glass2: rgba(255,255,255,.45);
+  --accent: #4b5bd6;
+  --brand: linear-gradient(135deg, #2b2540 0%, #3b3560 100%);
+  --glass: linear-gradient(var(--sk-glass), var(--sk-glass)), var(--scene);
+  --frost: linear-gradient(var(--sk-glass), var(--sk-glass)), var(--scene);
+  --frost-hi: linear-gradient(rgba(255,255,255,.3), rgba(255,255,255,.3)), linear-gradient(var(--sk-glass), var(--sk-glass)), var(--scene);
+  --frost-on: var(--frost-hi);
+  --soft: color-mix(in srgb, var(--ink) 6%, transparent);          /* лёгкая подложка: чипы, наведение */
+  --soft2: color-mix(in srgb, var(--ink) 10%, transparent);
+  --bad: #b8284c; --good: #1d7f55;                                 /* красный и зелёный тёмной темы на светлом не читались */
+}
+/* роль персонажа (отзыв 18.10: «Главная помощница», «Здоровье» в «Небесном» почти не видно) — цвет персонажа темнее, к тексту */
+html.st-light .card .role { color: color-mix(in srgb, var(--c) 42%, var(--ink)); background: color-mix(in srgb, var(--c) 22%, transparent); }
+html.st-light body { background-color: transparent; }
+html.st-light nav { box-shadow: 10px 0 34px -12px rgba(20,30,60,.16); }
+html.st-light :is(.dwc, .card, .jcard, .tidea, .wtile, .cloudc, .prof, .opt, .ritem, .lk, .mstat, .ftree, .fview, .ddays, .calgrid, .calside, .mocard, .mopanel, .wpanel, .ph-q, .rempty, .pr-it, .dpage, .wst) {
+  box-shadow: var(--sk-shadow);
+}
+html.st-light :is(#m-notes, #m-side, #cal-feed .cit, #wlc .box, #upd .box) {
+  box-shadow: var(--sk-shadow);
+}
+html.st-light :is(.card:hover, .jcard:hover, .tidea:hover, .wtile:hover, .lk:hover, .ritem:hover, .pr-it:hover) { background: var(--frost-hi); }
+html.st-light :is(.lk.on, .wtile.cur, .jcard.on, .card.cur, .opt.on, .prof.on) { background: var(--frost-hi); box-shadow: 0 18px 36px -18px rgba(20,30,60,.42), inset 0 1px 0 rgba(255,255,255,.8); }
+
+/* текст и значки, которые на тёмном были белыми */
+html.st-light :is(.card h3, .mstat b, .md h1, .mn-item.cur, .ritem .vval.shown, .pi.now, .cit.link:hover .t, .pr-demo b, .tg-code span) { color: var(--ink); }
+
+html.st-light :is(#help .try b, #upd li.now) { color: var(--ink); }
+html.st-light :is(h1 svg.hi, .jcard svg, .tidea svg, .wtile svg) { stroke: var(--ink); }
+html.st-light :is(.ritem .ico, .ritem .rbadge, .wst > i, .hbtn) { color: var(--ink); background: var(--soft2); }
+html.st-light :is(#wlc-chip) { color: var(--ink); background: var(--soft2); }
+html.st-light #wlc .tq { background: var(--soft2); } html.st-light #wlc .tq:hover { background: var(--frost-hi); }
+html.st-light #wlc .tq.sent { background: rgba(17,114,75,.14); }
+html.st-light .hbtn:hover { color: #fff; }
+html.st-light :is(.dentry, .dins li, .dw-weak p, .dw-weak ol, .dw-steps, .sv-key, .sv-say span, .jcard .jstate, .pr-demo span, .pr-demo em, .md blockquote) { color: var(--ink); }
+html.st-light :is(.soulpage > h2, .dins h3, .dentry.night .dt, .dentry .tom b, .dpage .dhead .orn) { color: #6a4fc4; }
+html.st-light .dentry.night { background: radial-gradient(110% 90% at 100% 0%, rgba(140,110,230,.12), transparent 55%), rgba(255,255,255,.5); box-shadow: var(--sk-shadow); }
+html.st-light .dentry.night h3 + p::first-letter { color: #6a4fc4; }
+html.st-light .dpage { background: linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55)), var(--scene); }
+html.st-light .brand b { background: linear-gradient(90deg, #4b5bd6, #8a4fc4); -webkit-background-clip: text; background-clip: text; }
+
+/* подложки: белая дымка на светлом не видна — берём тон текста */
+html.st-light :is(nav button:hover, .stabs, .stabs button:hover, .btn, .chip, .tabs button, .fbtns .seg, .me-tools .seg, .mpanes, .mlegend button, .calf button, .kn-row, .kn-hit, .dws, .badge, kbd, .sv-say span, .oi, .scit, .tg-shared, .dk-acc, .mhit, .me-links span, .dentry .dt, .ritem .ract button, .obar, .shsteps li::before, .bugc .chip, .calgrid .day, .cc-pay, .pr-demo) { background-color: var(--soft); }
+
+html.st-light :is(#help .try, #help .say li, #wlc .try, #e-kb .kbsel span, #upd li::before) { background-color: var(--soft); }
+html.st-light :is(.btn:hover, .chip:hover, .ritem .ract button:hover, .mhit:hover, .me-links span:hover, .calgrid .day:hover, .ftree .node:hover, .titem:hover, .dday:hover, .mn-item:hover, .mn-dir:hover) { background-color: var(--soft2); }
+html.st-light :is(.fbtns .seg button.on, .me-tools .seg button.cur, .mpanes button.on, .mn-tabs button.cur, .calgrid .day.sel, .dday.cur, .ftree .node.cur, .titem.cur, .styles button.on, .fxgrid button.on, .oi.on) {
+  background: rgba(255,255,255,.85); color: var(--ink); box-shadow: 0 4px 14px -6px rgba(20,30,60,.3);
+}
+html.st-light :is(.btn.primary, .chip.on, .tabs button.on, nav button.cur, .stabs button.on) { color: #fff; box-shadow: 0 8px 22px -10px rgba(30,30,60,.55); }
+html.st-light .btn.primary { background: var(--brand); }
+html.st-light :is(.dw-bar, .cc-bar, .tbar, .tprog .bar, .mocat .bar, .cchip i, .cc-use .ub i) { background-color: var(--soft2); }
+html.st-light :is(#upd-bar) { background-color: var(--soft2); }
+html.st-light :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b) { background: linear-gradient(90deg, #4b5bd6, #8a7bf0); }
+html.st-light :is(#upd-bar b) { background: linear-gradient(90deg, #4b5bd6, #8a7bf0); }
+html.st-light .cc-use .ub i.on { background: #4b5bd6; }
+
+/* поля, галочки, переключатели */
+html.st-light :is(input[type=text], input[type=password], input[type=number], input[type=url], input[type=email], input[type=search], input[type=time], input[type=date], input[type=datetime-local], select, textarea, .soulpage textarea, .constpage textarea) {
+  background-color: var(--field); box-shadow: inset 0 1px 2px rgba(20,30,60,.08);
+}
+
+html.st-light :is(#me-mem) {
+  background-color: var(--field); box-shadow: inset 0 1px 2px rgba(20,30,60,.08);
+}
+html.st-light :is(input, select, textarea):focus { background-color: #fff; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+html.st-light select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%235a6072' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+html.st-light select option { background: #fff; color: #1d2230; }
+html.st-light ::placeholder { color: color-mix(in srgb, var(--ink) 38%, transparent); }
+html.st-light input::-webkit-calendar-picker-indicator { filter: none; }
+html.st-light :is(input[type=checkbox]:not(.tg input), input[type=radio]) { background: var(--soft2); }
+html.st-light input[type=radio]:checked::after { background: var(--ink); }
+html.st-light .tg i { background: var(--soft2); }
+html.st-light .tg i::after { background: #fff; box-shadow: 0 1px 3px rgba(20,30,60,.3); }
+html.st-light .tg input:checked + i { background: var(--brand); }
+html.st-light :is(.dw-path, .tg-code span, .diff, .md pre, pre.code, .opane, .cp-shot, .bugshot, .bugc) { background: rgba(255,255,255,.55); color: var(--ink); }
+html.st-light :is(#me-view, #f-body .ftable, #e-kb .kblist) { background: rgba(255,255,255,.55); color: var(--ink); }
+html.st-light .swatches button.on { border-color: var(--ink); }
+
+/* разметка заметок (.md) — те же роли цвета, но тёмные оттенки */
+html.st-light .md { color: color-mix(in srgb, var(--ink) 92%, transparent); }
+html.st-light .md h2, html.st-light .md h3 strong, html.st-light .md h4 strong { color: #c2386f; }
+html.st-light .md h3, html.st-light .md h4 { color: #0f8a7e; }
+html.st-light .md strong, html.st-light .md b { color: #a2650a; }
+html.st-light .md ul li strong, html.st-light .md ul li b { color: #13875a; }
+html.st-light .md ol li strong, html.st-light .md ol li b, html.st-light .md ol li::marker { color: #1d72b8; }
+html.st-light .md li::marker { color: var(--dim); }
+html.st-light .md em { color: #6a4fc4; }
+html.st-light .md a, html.st-light .md a.wl { color: #2563c9; border-bottom-color: rgba(37,99,201,.35); }
+html.st-light .md code { background: var(--soft); color: #0f7a5c; }
+html.st-light .md blockquote { background: rgba(15,138,126,.07); }
+html.st-light .md table { background: rgba(255,255,255,.5); }
+html.st-light .md td { border-top-color: var(--line); }
+html.st-light .md .tag { color: #6a4fc4; background: rgba(106,79,196,.1); }
+html.st-light .md .when { color: var(--dim); }
+
+/* цветные метки: пастель на светлом не читается — насыщенные тона */
+html.st-light .dws.ok, html.st-light .badge.done, html.st-light .bugc .chip.fixed { color: #11724b; }
+html.st-light .dws.warn, html.st-light .bugc .chip.work, html.st-light .pnow, html.st-light .me-tools .st.dirty { color: #9a5a00; }
+html.st-light .dws.bad, html.st-light .badge.failed { color: #b4234a; }
+html.st-light .dws.run, html.st-light .badge.sleeping { color: #3a46b8; }
+html.st-light :is(.ritem .rtime, .rparse b, .ritem .rbadge.k) { color: #a2650a; }
+html.st-light :is(.ritem .ico.k, .wst.ok span, .tool .risk) { color: #11724b; }
+html.st-light .tool .risk { color: #9a5a00; }
+html.st-light :is(.amt.exp, .mocard.exp b) { color: #c0304f; }
+html.st-light :is(#upd.bad #upd-line) { color: #c0304f; }
+html.st-light :is(.amt.inc, .mocard.inc b, .res.ok, .mstat.up b) { color: #11885a; }
+html.st-light .diff .add { color: #11724b; } html.st-light .diff .del { color: #b4234a; } html.st-light .diff .hunk { color: #3a46b8; } html.st-light .diff .file { color: var(--ink); }
+html.st-light .cchip { background: var(--soft); }
+
+/* выдвижные панели, подсказки, рамка окна */
+html.st-light :is(.drawer) { background: linear-gradient(rgba(255,255,255,.72), rgba(255,255,255,.72)), var(--scene); }
+
+html.st-light :is(#help) { background: linear-gradient(rgba(255,255,255,.72), rgba(255,255,255,.72)), var(--scene); }
+html.st-light .drawer.open { box-shadow: -30px 0 80px rgba(20,30,60,.18); }
+html.st-light #f-body th { background: #eef0f6; }
+html.st-light .card .disc { background: radial-gradient(circle at 50% 35%, #ffffff, #e3e7ef 70%); box-shadow: 0 10px 26px -12px rgba(20,30,60,.35); }
+html.st-light .lk-prev .pt { background-color: #e3e7ef; }
+html.st-light.framed #tbar { background: linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55)), var(--scene); border-bottom: 0; box-shadow: 0 1px 0 var(--line); }
+html.st-light #tbar .tt { color: var(--muted); } html.st-light #tbar .tt b { color: var(--ink); }
+html.st-light #tbar .lg { filter: invert(.85); }
+html.st-light #tbar .wb button { color: var(--muted); } html.st-light #tbar .wb button:hover { background: var(--soft2); color: var(--ink); }
+html.st-light #tbar .wb button.x:hover { background: #E5484D; color: #fff; }
+html.st-light #upd .logo img { filter: invert(.85); }
+html.st-light #fedge { box-shadow: inset 0 0 0 1px rgba(20,30,60,.08); }
+html.st-light :is(#upd, #wlc) { background: rgba(230,234,242,.55); }
+html.st-light #m-graph { background: radial-gradient(ellipse at 50% 40%, rgba(60,60,120,.35), rgba(8,8,16,.82) 70%); }   /* граф памяти остаётся ночным: светящиеся узлы */
+html.st-light .msplit::after { background: var(--soft2); }
+
+/* ---------- неоморфизм: один материал, форма от двух теней ---------- */
+html.st-neu {
+  --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #4560ea;      /* акцент-текст (вкладки, ссылки) — читаемый на материале */
+  --nd: var(--sk-nd, #c2c9d4); --nl: var(--sk-nl, #fff);
+  --raise: 6px 6px 14px var(--nd), -6px -6px 14px var(--nl);
+  --raise-s: 3px 3px 7px var(--nd), -3px -3px 7px var(--nl);
+  --press: inset 3px 3px 7px var(--nd), inset -3px -3px 7px var(--nl);
+  --glass: var(--sk-glass); --frost: var(--sk-glass); --frost-hi: var(--sk-glass); --frost-on: var(--sk-glass);
+  --field: var(--sk-glass); --glass2: var(--sk-glass);
+}
+html.st-neu body { background: var(--sk-glass); }
+html.st-neu nav { background: var(--sk-glass); box-shadow: 8px 0 18px -6px var(--nd); }
+html.st-neu :is(.dwc, .card, .jcard, .tidea, .wtile, .cloudc, .prof, .opt, .ritem, .lk, .mstat, .ftree, .fview, .ddays, .calgrid, .calside, .mocard, .mopanel, .wpanel, .ph-q, .rempty, .pr-it, .dpage, .wst, .fxgrid button, .styles button) {
+  background: var(--sk-glass); box-shadow: var(--raise);
+}
+html.st-neu :is(#m-notes, #m-side, #cal-feed .cit, #wlc .box, #upd .box) {
+  background: var(--sk-glass); box-shadow: var(--raise);
+}
+html.st-neu :is(.card:hover, .jcard:hover, .tidea:hover, .wtile:hover, .lk:hover, .ritem:hover, .pr-it:hover, .fxgrid button:hover) { background: var(--sk-glass); box-shadow: 9px 9px 20px var(--nd), -9px -9px 20px var(--nl); }
+html.st-neu :is(.lk.on, .wtile.cur, .jcard.on, .card.cur, .opt.on, .prof.on, .fxgrid button.on, .styles button.on) { background: var(--sk-glass); box-shadow: var(--press); }
+html.st-neu .lk.on .lk-prev { box-shadow: var(--raise-s); }
+/* кнопки — выпуклые, нажатое и выбранное — вдавлено, цвет акцента — у текста */
+html.st-neu :is(.btn, .chip, .tabs button, .mlegend button, .calf button, .ritem .ract button, .oi, .hbtn, .me-links span) { background: var(--sk-glass); box-shadow: var(--raise-s); }
+
+html.st-neu :is(#wlc-chip) { background: var(--sk-glass); box-shadow: var(--raise-s); }
+html.st-neu :is(.btn:hover, .chip:hover, .ritem .ract button:hover, .hbtn:hover, .me-links span:hover) { background: var(--sk-glass); color: var(--accent); }
+html.st-neu :is(.btn:active, .chip:active, .tabs button:active) { box-shadow: var(--press); }
+html.st-neu :is(.btn.primary, .chip.on, .tabs button.on) { background: var(--brand); color: #fff; box-shadow: var(--raise-s); }
+html.st-neu :is(nav button.cur, .stabs button.on, .fbtns .seg button.on, .me-tools .seg button.cur, .mpanes button.on, .mn-tabs button.cur, .oi.on) {
+  background: var(--sk-glass); color: var(--accent); box-shadow: var(--press);
+}
+html.st-neu nav button:hover { background: transparent; color: var(--accent); }
+html.st-neu :is(.stabs, .fbtns .seg, .me-tools .seg, .mpanes) { background: var(--sk-glass); box-shadow: var(--press); }
+/* поля — вдавлены в материал */
+html.st-neu :is(input[type=text], input[type=password], input[type=number], input[type=url], input[type=email], input[type=search], input[type=time], input[type=date], input[type=datetime-local], select, textarea, .soulpage textarea, .constpage textarea, .dw-path, .diff, .md pre, pre.code, .opane, .cp-shot, .bugshot, .bugc, .tg-code span) {
+  background-color: var(--sk-glass); box-shadow: var(--press);
+}
+
+html.st-neu :is(#me-mem, #me-view, #f-body .ftable, #e-kb .kblist) {
+  background-color: var(--sk-glass); box-shadow: var(--press);
+}
+html.st-neu :is(input, select, textarea):focus { background-color: var(--sk-glass); box-shadow: var(--press), 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+html.st-neu :is(input[type=checkbox]:not(.tg input), input[type=radio]) { background: var(--sk-glass); box-shadow: inset 2px 2px 4px var(--nd), inset -2px -2px 4px var(--nl); }
+html.st-neu input[type=checkbox]:not(.tg input):checked { background: var(--brand); box-shadow: var(--raise-s); }
+html.st-neu .tg i { background: var(--sk-glass); box-shadow: inset 2px 2px 5px var(--nd), inset -2px -2px 5px var(--nl); }
+html.st-neu .tg i::after { box-shadow: 2px 2px 4px var(--nd), -1px -1px 3px var(--nl); }
+html.st-neu .tg input:checked + i { background: var(--brand); box-shadow: inset 2px 2px 5px rgba(0,0,0,.18); }
+html.st-neu :is(.dw-bar, .cc-bar, .tbar, .tprog .bar, .mocat .bar) { background: var(--sk-glass); box-shadow: inset 2px 2px 4px var(--nd), inset -2px -2px 4px var(--nl); }
+html.st-neu :is(#upd-bar) { background: var(--sk-glass); box-shadow: inset 2px 2px 4px var(--nd), inset -2px -2px 4px var(--nl); }
+html.st-neu :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b) { background: var(--brand); }
+html.st-neu :is(#upd-bar b) { background: var(--brand); }
+html.st-neu :is(.drawer) { background: var(--sk-glass); }
+html.st-neu :is(#help) { background: var(--sk-glass); }
+html.st-neu .drawer.open { box-shadow: -14px 0 30px var(--nd); }
+html.st-neu .card .disc { background: var(--sk-glass); box-shadow: var(--press); }
+html.st-neu.framed #tbar { background: var(--sk-glass); box-shadow: 0 4px 10px -6px var(--nd); }
+html.st-neu .dpage { background: var(--sk-glass); }
+html.st-neu .dentry.night { background: var(--sk-glass); box-shadow: var(--press); }
+/* тёмный неоморфизм: текст остаётся светлым, подложки чуть светлее материала */
+html.st-neu:not(.st-light) .switch { border-bottom-color: rgba(255,255,255,.04); }
+
+/* закрытая выдвижная панель стоит за правым краем — её тень не должна заходить в окно */
+.drawer:not(.open) { box-shadow: none; }
+
+/* «Близкие» в светлых и неоморфных стилях */
+html.st-light :is(.cl-p:hover, .cl-files span) { background: var(--soft); }
+html.st-light .cl-p.cur { background: rgba(255,255,255,.85); box-shadow: 0 6px 16px -10px rgba(20,30,60,.35); }
+html.st-light .cl-m { background: rgba(255,255,255,.75); box-shadow: 0 4px 12px -8px rgba(20,30,60,.3); }
+html.st-light .cl-m.out { background: linear-gradient(135deg, #3b3560, #2b2540); color: #fff; }
+html.st-light .cl-m.out time { color: rgba(255,255,255,.6); }
+html.st-light .cl-f { background: var(--soft); }
+html.st-light :is(.cl-side, .cl-chat, .cl-invite) { box-shadow: var(--sk-shadow); }
+html.st-neu :is(.cl-side, .cl-chat, .cl-invite) { background: var(--sk-glass); box-shadow: var(--raise); }
+html.st-neu .cl-p.cur { background: var(--sk-glass); box-shadow: var(--press); color: var(--accent); }
+html.st-neu .cl-m { background: var(--sk-glass); box-shadow: var(--raise-s); }
+html.st-neu .cl-m.out { background: var(--brand); color: #fff; }
+html.st-neu .cl-head { box-shadow: 0 8px 14px -12px var(--nd); }
+html.st-light .ritem .rbadge.ratt { color: #3b46a6; background: rgba(90,105,230,.14); }
+
+/* «Небесный вечер» — тёмная пара «Небесного»: тот же голубой акцент (кнопки, вкладки, переключатели), а не стекло */
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) { --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #93a9ff; }
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) .tg input:checked + i { background: var(--brand); }
+html.st-neu.st-skin[data-skin="neudusk"]:not(.st-light) :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b, #upd-bar b) { background: var(--brand); }
+
+/* «Плагины» в светлых темах и в неоморфизме */
+html.st-light .plg-md pre { background: rgba(20,30,60,.06); }
+html.st-neu .plg { background: var(--sk-glass); box-shadow: var(--raise); }
+html.st-neu .plg:hover { background: var(--sk-glass); box-shadow: var(--raise-s); transform: none; }
+html.st-neu .plg-ic { box-shadow: var(--press); background: color-mix(in srgb, var(--pc) 14%, var(--sk-glass)); }
+html.st-neu .plg.on::after { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pc) 70%, transparent); }
+
+/* «Рядом» в светлых темах и неоморфизме — как на телефоне: светлый прибор, в неоморфизме — вдавлен в материал */
+html.st-light .cl-tabs { background: rgba(20,30,60,.06); }
+html.st-neu .cl-tabs { background: var(--sk-glass); box-shadow: var(--press); }
+html.st-neu .nr-card, html.st-neu .nr-empty { background: var(--sk-glass); box-shadow: var(--raise); }

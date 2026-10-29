@@ -1,0 +1,147 @@
+name: Метка версии
+
+# Новая версия в core/version.py попала в main — ставим метку vX.Y.Z и выпуск на GitHub с текстом из CHANGELOG.md,
+# затем (задание files) собираем и прикладываем к выпуску всё: .deb, установщик Windows (компактный, -online),
+# «что нового» и — если в секретах репозитория есть ключ подписи (DEWIAR_KEYSTORE_B64, DEWIAR_KEYPASS) —
+# телефон (.apk). Каждый файл — ещё и под постоянным именем без версии: …/releases/latest/download/<имя> — всегда свежее.
+
+on:
+  push:
+    branches: [main]
+    paths: [core/version.py, CHANGELOG.md, .github/workflows/release.yml, tools/release_refresh.py]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Метка и выпуск
+    # закрытый репозиторий: Actions выключены (19.10 — без оплаты GitHub задачи не запускаются, решено не платить);
+    # в открытой копии (dwr-git/dewiar-app) этот же файл работает как обычно
+    if: github.repository != 'dwr-git/dewiar'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Метка и выпуск
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "Dewiar"
+          git config user.email "dev@dewiar.pro"
+
+          notes() {   # раздел версии из CHANGELOG.md (заголовок «## 0.28.6 …» или «### 0.28.2 …») + где скачать
+            python3 tools/release_refresh.py --section "$1"
+            # прямые ссылки (папка dwrapp сайта не открывается списком — 403): последние версии; старые — в кабинете → «Обновления»
+            printf '\n**Скачать:** файлы для компьютера (Linux — .deb, Windows — Setup-…-online.exe) — ниже, в «Assets». Телефон — [Dewiar.apk](https://dewiar.pro/dwrapp/Dewiar.apk) (с управлением приложениями — [Dewiar-hands.apk](https://dewiar.pro/dwrapp/Dewiar-hands.apk)); компьютер обновляется сам («Доступна версия…»).\n'
+          }
+
+          release() {   # release <версия> <запись> — пропускает, если метка уже есть
+            local v=$1 sha=$2 title
+            if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then   # метка есть — текст освежит release_refresh.py
+              echo "v$v уже есть"                                          # (таблицу «Скачать» не трогаем)
+              return
+            fi
+            title=$(grep -m1 -E "^##+ $v([ ·/]|$)" CHANGELOG.md | sed -E 's/^#+ //; s/ — [0-9]{4}-[0-9]{2}-[0-9]{2}$//')
+            git tag -a "v$v" "$sha" -m "Dewiar ${title:-$v}"
+            git push origin "v$v"
+            notes "$v" > notes.md
+            # текущая версия — черновиком: люди увидят выпуск, когда задание files приложит все файлы и таблицу «Скачать»
+            gh release create "v$v" --title "Dewiar ${title:-$v}" --notes-file notes.md --verify-tag \
+              $( [ "$v" = "$CURRENT" ] && echo --draft || echo --latest=false )
+            echo "v$v → $sha"
+          }
+
+          CURRENT=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' core/version.py)
+          release "$CURRENT" "$GITHUB_SHA"
+          # поправили текст прошлых версий в CHANGELOG.md — освежить и их выпуски (таблица «Скачать» остаётся)
+          python3 tools/release_refresh.py 6 || true
+
+  files:
+    name: Файлы к выпуску
+    needs: tag
+    runs-on: ubuntu-24.04
+    env:
+      HAS_KEY: ${{ secrets.DEWIAR_KEYSTORE_B64 != '' && '1' || '' }}     # ключ подписи телефона — в секретах (если положили)
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Инструменты (NSIS — установщик Windows, Android SDK — телефон)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nsis >/dev/null
+          if [ "$HAS_KEY" = 1 ]; then sudo apt-get install -y -qq android-sdk android-sdk-platform-23 android-framework-res >/dev/null; fi
+
+      - name: Сборки для компьютера
+        run: |
+          mkdir -p dist
+          bash tools/build_deb.sh dist
+          DEWIAR_WIN_CACHE="$RUNNER_TEMP/wincache" bash tools/build_win.sh --online
+          # полный установщик: ничего не качает при установке — для тех, у кого PyPI или сайт не открываются (19.10, Украина)
+          command -v uv >/dev/null || pipx install uv >/dev/null         # колёса win_amd64 для полного — через uv
+          DEWIAR_WIN_CACHE="$RUNNER_TEMP/wincache" bash tools/build_win.sh
+
+      - name: Телефон (подпись — ключом из секретов, на диске только на время сборки)
+        if: env.HAS_KEY == '1'
+        env:
+          KS_B64: ${{ secrets.DEWIAR_KEYSTORE_B64 }}
+          DEWIAR_KEYPASS: ${{ secrets.DEWIAR_KEYPASS }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/k.jks"
+          DEWIAR_KEYSTORE="$RUNNER_TEMP/k.jks" bash android/tools/build_apk.sh dist
+          rm -f "$RUNNER_TEMP/k.jks" dist/*.idsig
+
+      # Постоянные имена (без номера версии): ссылка …/releases/latest/download/<имя> всегда ведёт на самое свежее.
+      - name: Постоянные имена
+        run: |
+          cd dist
+          shopt -s nullglob                               # телефона может не быть (нет ключа) — пустые маски не ошибка
+          cp dewiar-assistant_*_all.deb dewiar-assistant_all.deb
+          cp Dewiar-Setup-*-online.exe Dewiar-Setup-online.exe
+          for f in Dewiar-Setup-[0-9]*.exe; do case "$f" in *-online.exe) ;; *) cp "$f" Dewiar-Setup.exe;; esac; done
+          cp dewiar-notes-*.txt dewiar-notes.txt
+          for f in Dewiar-[0-9]*-hands.apk; do [ -f "$f" ] && cp "$f" Dewiar-hands.apk; done
+          for f in Dewiar-[0-9]*.apk; do case "$f" in *-hands.apk) ;; *) cp "$f" Dewiar.apk;; esac; done
+          ls -la
+
+      - name: Приложить к выпуску и написать, где что скачать
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' core/version.py)
+          PH=$(sed -n 's/.*static final String VERSION = "\([0-9.]*\)".*/\1/p' android/src/pro/dewiar/app/BuildInfo.java)
+          say() { out=$("$@" 2>&1) || { echo "::error::$* → $out"; echo "$out"; return 1; }; echo "$out"; }   # ошибка — в замечания запуска
+          say gh release upload "v$V" dist/*.deb dist/*.exe dist/*.txt $(ls dist/*.apk 2>/dev/null) --clobber
+          R="https://github.com/$GITHUB_REPOSITORY/releases/download/v$V"
+          L="https://github.com/$GITHUB_REPOSITORY/releases/latest/download"
+          {
+            echo "<img src=\"https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/docs/img/banner.webp\" width=\"880\" alt=\"Dewiar\">"
+            echo
+            echo "## Скачать — Dewiar $V · телефон $PH"
+            echo
+            echo "Проще всего — страница **[dewiar.pro/dwrapp/download.php](https://dewiar.pro/dwrapp/download.php)**: сама узнаёт устройство и даёт свежую версию."
+            echo
+            echo "| Где | Файл этой версии | Всегда самая свежая |"
+            echo "|---|---|---|"
+            echo "| **Windows 10 / 11** | [Dewiar-Setup-$V-online.exe]($R/Dewiar-Setup-$V-online.exe) | [Dewiar-Setup-online.exe]($L/Dewiar-Setup-online.exe) |"
+            echo "| **Windows, полный** (ничего не скачивает при установке) | [Dewiar-Setup-$V.exe]($R/Dewiar-Setup-$V.exe) | [Dewiar-Setup.exe]($L/Dewiar-Setup.exe) |"
+            echo "| **Ubuntu 22.04 / 24.04** | [dewiar-assistant_${V}_all.deb]($R/dewiar-assistant_${V}_all.deb) | [dewiar-assistant_all.deb]($L/dewiar-assistant_all.deb) |"
+            if ls dist/Dewiar-[0-9]*.apk >/dev/null 2>&1; then
+              echo "| **Android** | [Dewiar-$PH.apk]($R/Dewiar-$PH.apk) | [Dewiar.apk]($L/Dewiar.apk) |"
+              echo "| **Android, с управлением приложениями** | [Dewiar-$PH-hands.apk]($R/Dewiar-$PH-hands.apk) | [Dewiar-hands.apk]($L/Dewiar-hands.apk) |"
+            else
+              echo "| **Android** | [Dewiar.apk](https://dewiar.pro/dwrapp/Dewiar.apk) — с сайта | |"
+            fi
+            echo
+            echo "Все последние версии одним списком: https://github.com/$GITHUB_REPOSITORY/releases/latest"
+            echo
+            echo "## Что нового"
+            echo
+            python3 tools/release_refresh.py --section "$V"
+          } > notes.md
+          say gh release edit "v$V" --notes-file notes.md
+          say gh release edit "v$V" --draft=false --latest || say gh release edit "v$V" --draft=false   # теперь выпуск виден всем — целиком
+          gh release view "v$V" --json assets --jq '.assets[] | "\(.name)  \(.size / 1048576 | floor) МБ"'

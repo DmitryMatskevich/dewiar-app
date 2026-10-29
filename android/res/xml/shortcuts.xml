@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="listen" android:enabled="true" android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_listen" android:shortcutLongLabel="@string/sc_listen_long">
+        <intent android:action="pro.dewiar.LISTEN" android:targetPackage="pro.dewiar.app" android:targetClass="pro.dewiar.app.MainActivity"/>
+    </shortcut>
+    <shortcut android:shortcutId="type" android:enabled="true" android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_type" android:shortcutLongLabel="@string/sc_type">
+        <intent android:action="pro.dewiar.TYPE" android:targetPackage="pro.dewiar.app" android:targetClass="pro.dewiar.app.MainActivity"/>
+    </shortcut>
+</shortcuts>

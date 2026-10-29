@@ -1,0 +1,4 @@
+{"dewiar": 1, "name": "Dewiar Cloud", "url": "https://dewiar.example/.well-known/dewiar.json",
+ "llm": {"active": "cloud", "profiles": {"cloud": {"name": "Dewiar Cloud", "kind": "openai", "base_url": "https://dewiar.example/v1", "model": "qwen3"}}},
+ "stt": {"engine": "remote", "remote": {"base_url": "https://dewiar.example/stt/v1"}},
+ "persona": "lira"}

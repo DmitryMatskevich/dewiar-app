@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Dewiar
+GenericName=Голосовой ассистент
+Comment=Голосовой ИИ-ассистент с персонажами
+Exec=/usr/bin/dewiar %U
+MimeType=application/x-dewiar;x-scheme-handler/dewiar;
+Icon=dewiar
+Terminal=false
+Categories=Utility;AudioVideo;
+Keywords=assistant;voice;ai;ассистент;голос;
+StartupNotify=false
+StartupWMClass=Dewiar

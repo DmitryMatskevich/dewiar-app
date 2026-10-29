@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""Dewiar на своём сервере — круглосуточно, без экрана, микрофона и звука (ядро core/main.py --server).
+
+Зачем: телефон отдаёт большие задачи «компьютеру» (start_task через синхронизацию), Telegram-бот отвечает, напоминания
+и календари идут — даже когда домашний компьютер выключен. Сервер — такой же «компьютер» в вашем аккаунте dewiar.pro.
+
+    sudo dewiar-server setup      — пользователь dewiar-assistant, вход в аккаунт, модель, служба (спросит всё сам)
+    sudo dewiar-server status     — работает ли, чем занят
+    sudo dewiar-server log        — журнал (Ctrl+C — выйти)
+    sudo dewiar-server restart | stop | remove
+    dewiar-server exam --key dw-… [--long]  — экзамен способностей: итог — в кабинете, вкладка «Экзамен» (sudo не нужен)
+
+Без вопросов: DEWIAR_LOGIN, DEWIAR_PASSWORD, DEWIAR_LLM_URL (пусто — модели Dewiar по аккаунту), DEWIAR_LLM_MODEL,
+DEWIAR_LLM_KEY, DEWIAR_SITE (по умолчанию https://dewiar.pro). Пароль никуда не записывается — только токен входа."""
+import getpass
+import json
+import os
+import pwd
+import subprocess
+import sys
+from pathlib import Path
+
+APP = Path(os.environ.get("DEWIAR_APP") or "/opt/dewiar")
+USER = "dewiar-assistant"
+HOME = Path("/var/lib/dewiar-assistant")
+UNIT = Path("/etc/systemd/system/dewiar-server.service")
+PY = APP / "venv/bin/python3" if (APP / "venv/bin/python3").exists() else Path(sys.executable)
+
+
+def say(t):
+    print(f"Dewiar-сервер: {t}", flush=True)
+
+
+def ask(prompt, env, default="", secret=False):
+    if os.environ.get(env) is not None:
+        return os.environ[env]
+    if not sys.stdin.isatty():
+        return default
+    v = (getpass.getpass if secret else input)(f"{prompt}{f' [{default}]' if default and not secret else ''}: ").strip()
+    return v or default
+
+
+def ensure_user():
+    try:
+        pwd.getpwnam(USER)
+    except KeyError:
+        subprocess.run(["useradd", "--system", "--create-home", "--home-dir", str(HOME), "--shell", "/usr/sbin/nologin", USER], check=True)
+        say(f"создан пользователь {USER} (данные — в {HOME})")
+    HOME.mkdir(parents=True, exist_ok=True)
+
+
+def configure():
+    """Вход в аккаунт и модель — модулями ядра, от имени пользователя службы (его ~/.config/dewiar)."""
+    login = ask("Логин на dewiar.pro", "DEWIAR_LOGIN")
+    password = ask("Пароль", "DEWIAR_PASSWORD", secret=True) if login else ""
+    print("Модель: адрес OpenAI-совместимого сервера (Ollama — http://127.0.0.1:11434/v1, vLLM — http://127.0.0.1:8000/v1).")
+    print("Пусто — модели Dewiar по аккаунту (облако).")
+    url = ask("Адрес модели", "DEWIAR_LLM_URL")
+    model = ask("Имя модели", "DEWIAR_LLM_MODEL") if url else ""
+    key = ask("Ключ модели (если нужен)", "DEWIAR_LLM_KEY", secret=True) if url else ""
+    job = {"site": os.environ.get("DEWIAR_SITE") or "https://dewiar.pro", "login": login, "password": password,
+           "url": url, "model": model, "key": key}
+    code = r'''
+import json, sys
+sys.path.insert(0, sys.argv[1] + "/core")
+job = json.loads(sys.stdin.read())
+from settings import Settings
+s = Settings()
+patch = {"sync": {"enabled": True}, "audio": {"sounds": False}, "tts": {"engine": "vosk"}}
+if job["url"]:
+    patch["llm"] = {"active": "server", "profiles": {"server": {"name": "Сервер — " + (job["model"] or "модель"), "kind": "openai",
+                    "base_url": job["url"].rstrip("/"), "api_key": job["key"], "model": job["model"], "disable_thinking": True}}}
+s.update(patch)
+if job["login"]:
+    from account import Account, AccountError
+    try:
+        st = Account().login(job["site"], job["login"], job["password"])
+        print("вход: " + st["login"] + " на " + st["server"])
+    except AccountError as e:
+        print("ВХОД НЕ УДАЛСЯ: " + str(e)); sys.exit(2)
+'''
+    r = subprocess.run(["runuser", "-u", USER, "--", "env", f"HOME={HOME}", str(PY), "-c", code, str(APP)],
+                       input=json.dumps(job), text=True, capture_output=True)
+    for line in (r.stdout + r.stderr).strip().splitlines()[-6:]:
+        say(line)
+    if r.returncode:
+        sys.exit("Настройка не удалась — проверьте логин и пароль и повторите: sudo dewiar-server setup")
+
+
+def write_unit():
+    UNIT.write_text(f"""[Unit]
+Description=Dewiar — ассистент на сервере (задачи с телефона, Telegram, напоминания; без звука)
+After=network-online.target
+Wants=network-online.target
+[Service]
+User={USER}
+Environment=HOME={HOME}
+Environment=DEWIAR_SERVER=1
+Environment=DEWIAR_PORT=8775
+ExecStart={PY} {APP}/core/main.py --server
+Restart=on-failure
+RestartSec=10
+Nice=5
+[Install]
+WantedBy=multi-user.target
+""", encoding="utf-8")
+    subprocess.run(["systemctl", "daemon-reload"], check=False)
+    subprocess.run(["systemctl", "enable", "--now", "dewiar-server.service"], check=False)
+    subprocess.run(["systemctl", "restart", "dewiar-server.service"], check=False)
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
+    if cmd in ("help", "-h", "--help"):
+        print(__doc__)
+        return 0
+    if cmd == "exam":                                  # экзамен способностей (core/exam.py): отчёт — в кабинет и в ~/dewiar-exam
+        out = Path.home() / "dewiar-exam"
+        args = sys.argv[2:]
+        if "--upload" not in args and "--key" in args:
+            args.append("--upload")
+        if "--out" not in args:
+            args += ["--out", str(out)]
+        return subprocess.run([str(PY), str(APP / "core/exam.py")] + args).returncode
+    if os.geteuid() != 0:
+        sys.exit("Запустите через sudo: sudo dewiar-server " + cmd)
+    if cmd == "setup":
+        if not (APP / "core/main.py").exists():
+            sys.exit(f"Dewiar не найден в {APP} — сначала: sudo apt install ./dewiar-assistant_*.deb")
+        ensure_user()
+        configure()
+        write_unit()
+        say("служба запущена. Телефон увидит сервер как компьютер в «Синхронизации» (через минуту-две) и будет отдавать ему задачи.")
+        say("Журнал: sudo dewiar-server log")
+        return 0
+    if cmd == "status":
+        return subprocess.run(["systemctl", "status", "--no-pager", "-n", "15", "dewiar-server.service"]).returncode
+    if cmd == "log":
+        return subprocess.run(["journalctl", "-u", "dewiar-server.service", "-f", "-n", "50"]).returncode
+    if cmd in ("restart", "stop"):
+        return subprocess.run(["systemctl", cmd, "dewiar-server.service"]).returncode
+    if cmd == "remove":
+        subprocess.run(["systemctl", "disable", "--now", "dewiar-server.service"], check=False)
+        UNIT.unlink(missing_ok=True)
+        subprocess.run(["systemctl", "daemon-reload"], check=False)
+        say(f"служба удалена. Данные остались в {HOME} (удалить: sudo userdel -r {USER}).")
+        return 0
+    sys.exit(f"неизвестная команда: {cmd}\n{__doc__}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Уязвимость — не в общий список
+    url: https://github.com/dwr-git/dewiar-app/blob/main/SECURITY.md
+    about: Как сообщить о проблеме безопасности лично.
+  - name: Сайт и аккаунт dewiar.pro
+    url: https://dewiar.pro
+    about: Вопросы об аккаунте, оплате и моделях Dewiar.

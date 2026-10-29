@@ -1,0 +1,1807 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="assets/skins.css">
+<style>
+  /* Виджет — матово-чёрная карточка; в ней живёт персонаж. Окно непрозрачное, скругление даёт форма окна,
+     тень рисует система. Режим «значок» — отдельное круглое окно с той же страницей (?mode=mini).
+     С ядром страница говорит сама (core из assets/dewiar.js), окнами управляет ui/app.py (api() — класс Api:
+     положение, режим, трей, студия, окно напоминания). Сторож загрузки в app.py (page_guard) ищет #card, #orb
+     и window.core — без них виджет сочтут незагрузившимся и спрячут. */
+  :root { --persona: #8A9BFF; --ink: #F4F4F6; --muted: rgba(255,255,255,.62);
+          /* сдержанная палитра (фирменные цвета владельца): стекло вместо фиолетовых заливок, акцент — холодный белый */
+          --brand: linear-gradient(135deg, rgba(255,255,255,.22) 0%, rgba(193,235,255,.13) 100%);
+          --glass: rgb(255 255 255 / 4%); --glass-shadow: 0 0 20px rgba(0,0,0,.5); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #0b0b0e; overflow: hidden; height: 100%; user-select: none; -webkit-user-select: none; }
+  body { font: 14px/1.45 "Manrope", "Ubuntu", "Noto Sans", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+  #card { position: absolute; inset: 0; overflow: hidden;
+          display: flex; flex-direction: column; align-items: center; padding: 10px 14px 12px; cursor: grab;
+          background: #0a0a0f; background: var(--skin-bg, #0a0a0f); }   /* тема — assets/skins.css (класс skin-… у body) */
+  #card.dragging { cursor: grabbing; }
+  /* Linux с композитором (ui/app.py composited_x11, &tw=1): окно прозрачное, углы скругляет сама страница — сглаженно,
+     без ступенек формы окна (отзыв 19.10: «грубовато края стали» на светлой теме) */
+  html.tw, html.tw body { background: transparent; }
+  html.tw #card { border-radius: 28px; }
+  /* Светлые темы: карточка сливалась со светлым окном под ней (студия в «Небесном», 20.10). Тени внутри (материал,
+     портрет, панель) не трогаем — только сама карточка: тонкая линия по краю и светлый блик сверху, во всё окно.
+     Было (0.38.94): в прозрачном окне тень снаружи и 6 px пустого края под неё — пока виджет тянули, Ubuntu закрашивал
+     этот край тёмным фоном окна («тёмная кромка»). Пустого края больше нет — нечего закрашивать; отрисовку окна (GTK)
+     не трогаем (0.38.95: правка фона окна заморозила виджет). */
+  body.light:not(.mini) #card { box-shadow: inset 0 0 0 1px rgba(20,32,60,.075), inset 0 1px 0 rgba(255,255,255,.6); }   /* 20.10: «чуть менее заметную» — .13 → .075 */
+  /* растянуть карточку за угол (отзыв 19.10); размер запоминается (ui.hud_w, ui.hud_h) */
+  #grip { position: absolute; right: 3px; bottom: 3px; width: 18px; height: 18px; z-index: 6; cursor: nwse-resize;
+          display: grid; place-items: center; opacity: 0; transition: opacity .2s; color: var(--muted); touch-action: none; }
+  html.tw #grip { right: 7px; bottom: 7px; }
+  #card:hover #grip, #grip.on { opacity: .75; }
+  #grip svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; }
+  body.mini #grip { display: none; }
+  /* Темы (ui.skin, студия → «Оформление»): фон и стекло — в assets/skins.css; здесь только то, что меняет «Неон»
+     сверх фона: фиолетовые кнопки и заливка строки состояния, как раньше */
+  body.skin-neon { --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --glass: rgba(255,255,255,.065); --glass-shadow: 0 0 0 transparent; }
+  body.skin-neon #bubble.live { background: var(--brand); }
+  /* Светлые темы (body.light — skins.js light): тёмный текст, кнопки-акценты — глубокий чернильный, как в дизайн-студиях */
+  body.light { --brand: linear-gradient(135deg, #2b2540 0%, #3b3560 100%); }
+  body.light #bubble { color: var(--ink); }
+  body.light #bubble::before { background: rgba(30,30,50,.25); }
+  body.light #bubble.live::before { background: var(--ink); box-shadow: none; }
+  body.light #bubble::after { background: linear-gradient(90deg, transparent, rgba(30,30,60,.55) 25%, rgba(30,30,60,.75) 50%, rgba(30,30,60,.55) 75%, transparent); }
+  body.light #cap .bot.wait::before, body.light #cap .bot.wait::after, body.light #cap .bot.wait i { background: var(--ink); }
+  body.light #cap .bot::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); }
+  body.light #bot .rep, body.light #yn button:not(.yes), body.light #team-list button.cur { background: rgba(20,20,40,.07); color: var(--ink); }
+  body.light #act, body.light #task, body.light #upd:not(.on), body.light #health, body.light #cloudlow { color: var(--ink); }
+  body.light .btn:hover, body.light .btn:focus-visible, body.light #corner .btn:hover, body.light .ab:hover { color: var(--ink); background: rgba(20,20,40,.07); }
+  body.light #corner .btn, body.light #corner-l .btn { color: var(--muted); }
+  body.light #team { background: #fff; color: var(--ink); box-shadow: 0 14px 40px rgba(20,30,60,.18), 0 0 0 100vmax rgba(20,30,60,.12); }
+  body.light #team-list button:hover, body.light #team-list button:focus-visible { background: rgba(20,20,40,.05); }
+  body.light .team-close { background: rgba(20,20,40,.07); color: var(--muted); }
+  body.light .sep { background: rgba(20,20,40,.12); }
+  body.light #ask textarea { color: var(--ink); }
+  body.light #ask textarea::placeholder { color: var(--muted); }
+  /* карточки напоминания, заметки, расхода и таймера (отзыв 18.10: в «Небесном» белые цифры и янтарная строка на светлом
+     почти не читались) — на светлом: свой тон фона, тёмный текст, акценты темнее, кнопки — как остальные светлые */
+  body.light #rem { background: linear-gradient(135deg, rgba(255,181,71,.2), rgba(255,106,136,.12)); box-shadow: 0 8px 22px rgba(20,30,60,.10); color: var(--ink); }
+  body.light #rem.note { background: linear-gradient(135deg, rgba(138,155,255,.2), rgba(75,227,161,.12)); }
+  body.light #rem .rt b { color: #9a5a00; }
+  body.light #rem.note .rt b { color: #3d4bb8; }
+  body.light #rem.money .rt b { color: #1f7a55; }
+  body.light #rem button, body.light #tmr button { background: rgba(20,20,40,.08); color: var(--ink); }
+  body.light #rem button:hover, body.light #tmr button:hover { background: rgba(20,20,40,.14); }
+  body.light #tmr .tr { background: linear-gradient(135deg, rgba(126,232,250,.22), rgba(138,155,255,.16)); box-shadow: 0 8px 22px rgba(20,30,60,.10); }
+  body.light #tmr .tr.end { background: linear-gradient(135deg, rgba(255,181,71,.28), rgba(255,106,136,.18)); }
+  body.light #tmr .tt b { color: var(--ink); }
+  body.light #tmr .tt span { color: var(--muted); }
+  body.light #tmr svg.pg .bg { stroke: rgba(20,20,40,.10); }
+  body.light #tmr svg.pg .fg { stroke: #2aa7c9; }
+  body.light #tmr .tr.end svg.pg .fg { stroke: #e08a00; }
+  /* неоморфизм: портрет — выпуклая «таблетка» из того же материала (две тени вокруг круга под обликом) */
+  body.neu #orb::before { content: ""; position: absolute; left: 50%; top: 50%; width: 63%; height: 63%; transform: translate(-50%, -50%);
+                         border-radius: 50%; background: var(--glass); box-shadow: 9px 9px 18px var(--neu-dark), -9px -9px 18px var(--neu-light); }
+  body.neu.light #orb::before { width: 72%; height: 72%; }      /* светлый неоморфизм: поле материала вокруг портрета, без рамки */
+  body.neu #orb canvas { position: relative; }
+  body.neu .btn:hover, body.neu .ab:hover { background: transparent; box-shadow: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light); }
+  body.neu #bar { opacity: .9; }
+  /* как в наборах неоморфизма: поле ввода — вогнутое, акцент — чистый синий (точка «слушаю», черта «ваша очередь», кнопки) */
+  body.neu { --brand: linear-gradient(135deg, #6a8dff 0%, #4f6cf0 100%); --accent: #5b7cff; }
+  body.neu .askbox, body.neu .askbox:focus-within { background: var(--glass); box-shadow: inset 4px 4px 9px var(--neu-dark), inset -4px -4px 9px var(--neu-light); }
+  body.neu #bubble.live::before { background: var(--accent); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+  body.neu #bubble::after { background: linear-gradient(90deg, transparent, var(--accent) 25%, #7fd6ff 50%, var(--accent) 75%, transparent); }
+  body.neu #yn button:not(.yes) { background: var(--glass); box-shadow: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light); }
+  body.neu #team { background: var(--glass); box-shadow: 8px 8px 20px var(--neu-dark), -8px -8px 20px var(--neu-light); }
+
+  #orb { position: relative; width: calc(228px * var(--ok, 1)); height: calc(228px * var(--ok, 1)); flex: none; margin-top: 38px; cursor: pointer; transition: width .35s ease, height .35s ease, opacity .2s; }
+  #card.busy #orb { width: calc(150px * var(--ok, 1)); height: calc(150px * var(--ok, 1)); }        /* есть текст — сфера уступает место */
+  #card.no-orb #orb { display: none; }
+  #orb canvas { width: 100%; height: 100%; display: block; }
+
+  /* Строка состояния под портретом — не кнопка: стекло, слева точка. Слушает, думает, говорит — точка светится и
+     дышит. «Ваша очередь» (ответ закончен, можно говорить без имени) — под надписью тонкая светлая черта тает к центру:
+     столько осталось ждать; кончилась — снова покой и сигнал «не слушаю». */
+  #bubble { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 4; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            background: var(--glass); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+            color: #fff; border: 0; border-radius: 999px; padding: 6px 18px 8px 14px; min-width: 150px; max-width: min(72%, 300px); font: inherit; font-size: 13.5px; letter-spacing: .01em; cursor: pointer; transition: background .3s, transform .18s; }
+  #bubble:hover, #bubble:focus-visible { transform: translateX(-50%) scale(1.025); outline: none; background: rgba(255,255,255,.12); }
+  #bubble::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.28); transition: background .3s, box-shadow .3s; }
+  #bubble.live { background: rgb(255 255 255 / 7%); }
+  #bubble.live::before { background: #fff; box-shadow: 0 0 10px rgba(255,255,255,.75); animation: breathe 1.8s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
+  #bubble > span { position: relative; z-index: 1; }
+  #bubble::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: 3px; height: 2px; border-radius: 2px;
+                   background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.75) 20%, rgba(193,235,255,.9) 50%, rgba(255,255,255,.75) 80%, rgba(255,255,255,0));
+                   transform: scaleX(0); pointer-events: none; }
+  #bubble.turn::after { animation: turn-left var(--turn, 8s) linear forwards; }
+  @keyframes turn-left { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+  @media (prefers-reduced-motion: reduce) { #bubble.turn::after { animation: none; transform: scaleX(.6); } #bubble.live::before { animation: none; } }
+  /* диктовка удержанием: красная точка записи и время; увели палец в сторону — «отпустите — отменить» */
+  #bubble.hold { background: rgb(255 92 122 / 16%); }
+  #bubble.hold::before { background: #ff5c7a; box-shadow: 0 0 10px rgba(255,92,122,.8); animation: breathe 1s ease-in-out infinite; }
+  #bubble.hold.holdx { background: rgb(255 255 255 / 7%); }
+  #bubble.hold.holdx::before { background: rgba(255,255,255,.5); box-shadow: none; animation: none; }
+  #bubble.hold span { font-variant-numeric: tabular-nums; }
+  #orb.holding { transform: scale(1.04); transition: transform .2s ease, width .35s ease, height .35s ease; }
+  @media (prefers-reduced-motion: reduce) { #bubble.hold::before { animation: none; } #orb.holding { transform: none; } }
+  #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
+
+  /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
+  #mid { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; }
+  #card.no-orb #mid { padding-top: 50px; }
+  /* Ввод всегда находится над нижней панелью. До появления ответа свободное место — это область
+     переписки; при открытом ответе карточка ответа занимает её целиком. */
+  #mid::before { content: ""; flex: 0 0 0; min-height: 0; margin: -4px 0; }
+  #mid::after { content: ""; display: none; }
+  #ask { margin-top: auto; }
+  #cap { display: none; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; padding: 10px 13px; border-radius: 18px; background: var(--glass); font-size: calc(13.5px * var(--dw-text, 1)); line-height: 1.42; cursor: default;
+         box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  #cap.show { display: flex; flex-direction: column; }
+  #card.chat-open #cap { flex: 1 1 auto; min-height: 0; }
+  #card.chat-open #cap .bot { flex: 1 1 auto; min-height: 0; }
+  #cap > * { flex: none; }
+  #cap.err { background: rgba(255,90,120,.14); }
+  #cap .bot:empty:not(.wait) { display: none; }
+  /* ответ ещё готовится — три мягко мигающие точки цвета персонажа, а не «…» навсегда */
+  #cap .bot.wait { height: 18px; display: flex; gap: 5px; align-items: center; }
+  #cap .bot.wait::before, #cap .bot.wait::after, #cap .bot.wait i { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; opacity: .25; animation: wdot 1.2s infinite ease-in-out; }
+  #cap .bot.wait i { animation-delay: .2s; }
+  #cap .bot.wait::after { animation-delay: .4s; }
+  @keyframes wdot { 0%, 80%, 100% { opacity: .25; transform: scale(.85); } 40% { opacity: 1; transform: scale(1); } }
+  #cap .you { color: var(--muted); font-size: 12.5px; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #cap .you::before { content: "Вы: "; opacity: .75; }
+  /* длинный ответ прокручивается колесом или пальцем; край, за которым есть ещё текст, плавно тает */
+  #cap .bot { color: var(--ink); user-select: text; -webkit-user-select: text; white-space: pre-wrap; flex: 0 1 auto; min-height: 0;
+              overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; margin-right: -8px; padding-right: 8px;
+              scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.25) transparent; }
+  #cap .bot::-webkit-scrollbar { width: 4px; } #cap .bot::-webkit-scrollbar-thumb { background: rgba(255,255,255,.22); border-radius: 4px; }
+  #cap .bot.ft { -webkit-mask-image: linear-gradient(transparent, #000 18px); mask-image: linear-gradient(transparent, #000 18px); }
+  #cap .bot.fb { -webkit-mask-image: linear-gradient(#000 calc(100% - 22px), transparent); mask-image: linear-gradient(#000 calc(100% - 22px), transparent); }
+  #cap .bot.ft.fb { -webkit-mask-image: linear-gradient(transparent, #000 18px, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(transparent, #000 18px, #000 calc(100% - 22px), transparent); }
+  button.busy, .b.busy { opacity: .55; transform: scale(.94); transition: opacity .15s, transform .15s; }   /* нажатая кнопка ждёт ядро (не вся карточка!) */
+  #bot .rep { display: block; margin-top: 8px; border: 0; border-radius: 10px; padding: 5px 10px; font: inherit; font-size: 12px;
+             color: #fff; background: rgba(255,255,255,.12); cursor: pointer; }
+  #bot .rep:hover { background: rgba(255,255,255,.2); }
+  #bot .repask { display: flex; gap: 6px; flex-wrap: wrap; } #bot .repask .rep { display: inline-block; }
+  #act { font-size: 12px; color: #D6E4F0; margin-bottom: 4px; display: none; }
+  #act.on { display: block; }
+  #act.bad { color: #ff8aa2; }
+  #act::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 7px; vertical-align: 1px; }
+  #act.run::before { animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  #yn { display: none; flex: none; width: 100%; gap: 8px; }
+  #yn.on { display: flex; }
+  #yn button { flex: 1; padding: 7px 0; border-radius: 12px; border: 0; background: rgba(255,255,255,.1); color: var(--ink); font: inherit; cursor: pointer; }
+  #yn button.yes { background: var(--brand); color: #fff; font-weight: 600; }
+  #note { text-align: center; font-size: 12.5px; line-height: 1.4; color: var(--muted); padding: 0 6px; cursor: default; }
+  #note:empty, #cap.show ~ #note { display: none; }
+  #note { white-space: pre-line; }
+  /* первая загрузка: что готовится (status.loading) — полоска под строкой; доля неизвестна — бегущий отрезок */
+  #ldbar { display: none; width: 56%; height: 3px; margin: 7px auto 0; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+  #ldbar.on { display: block; } #cap.show ~ #ldbar { display: none; }
+  #ldbar i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(193,235,255,.95)); transition: width .5s; }
+  #ldbar.run i { width: 30%; animation: ldrun 1.4s ease-in-out infinite; }
+  @keyframes ldrun { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+  #health { display: none; align-self: center; max-width: 100%; text-align: center; font-size: 12px; line-height: 1.35; padding: 5px 11px; border-radius: 12px;
+            background: rgba(255,190,90,.14); color: #FFD9A0; cursor: default; }
+  #health.on { display: block; } #health.bad { background: rgba(255,107,138,.16); color: #FFC2CF; }
+  #health.calm { background: rgba(193,235,255,.08); color: #D6E4F0; }
+  #health .dots::after { content: ""; animation: hdots 1.4s steps(4) infinite; }
+  @keyframes hdots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  #health button { display: block; margin: 6px auto 0; border: 0; border-radius: 9px; padding: 4px 11px; font: inherit; font-size: 12px; cursor: pointer;
+                   background: rgba(255,255,255,.14); color: var(--ink); } #health button:hover { background: rgba(255,255,255,.22); }
+  #task, #upd { display: none; text-align: center; font-size: 12px; line-height: 1.35; color: #D6E4F0; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.05); cursor: pointer; }
+  #task.on, #upd.on { display: block; }
+  #task { text-align: left; padding: 8px 12px; }
+  #rem { display: none; align-items: center; gap: 10px; padding: 9px 10px 9px 12px; border-radius: 16px;
+         background: linear-gradient(135deg, rgba(255,181,71,.16), rgba(255,106,136,.12)); box-shadow: 0 10px 30px rgb(0 0 0 / 20%); }
+  #rem.show { display: flex; animation: remin .35s ease-out; }
+  @keyframes remin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  #rem.note { background: linear-gradient(135deg, rgba(138,155,255,.16), rgba(75,227,161,.10)); }
+  #rem.note .rt b { color: #C9D0FF; }
+  #rem .ri { font-size: 18px; }
+  #rem .rt { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 12.5px; line-height: 1.3; }
+  #rem .rt b { color: #FFC978; font-weight: 600; }
+  #rem .rt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #rem button { border: 0; border-radius: 10px; padding: 6px 10px; cursor: pointer; background: rgba(255,255,255,.1); color: #fff; font: 600 12px/1 inherit; }
+  #rem button:hover { background: rgba(255,255,255,.18); }
+  /* Таймер с обратным отсчётом (как у Алисы: «поставь таймер на 5 минут» — цифры на экране, потом звонок): строка на
+     каждый таймер (до трёх) — круг-прогресс, крупные цифры, название, ✕; вокруг облика — дуга ближайшего таймера,
+     у значка — цифры поверх круга. Данные — напоминания вида timer (снимок hello и событие reminders), тик раз в секунду. */
+  #tmr { display: none; flex-direction: column; gap: 6px; }
+  #tmr.on { display: flex; }
+  #tmr .tr { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border-radius: 16px;
+             background: linear-gradient(135deg, rgba(126,232,250,.13), rgba(138,155,255,.12)); box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+             animation: remin .35s ease-out; }
+  #tmr .tr.end { background: linear-gradient(135deg, rgba(255,181,71,.22), rgba(255,106,136,.18)); }
+  #tmr svg.pg { width: 34px; height: 34px; flex: none; transform: rotate(-90deg); }
+  #tmr svg.pg circle { fill: none; stroke-width: 3.2; }
+  #tmr svg.pg .bg { stroke: rgba(255,255,255,.12); }
+  #tmr svg.pg .fg { stroke: #7EE8FA; stroke-linecap: round; transition: stroke-dashoffset .9s linear; }
+  #tmr .tr.end svg.pg .fg { stroke: #FFC978; }
+  #tmr .tt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.1; }
+  #tmr .tt b { font: 600 25px/1.05 "Unbounded", "Manrope", sans-serif; font-variant-numeric: tabular-nums; letter-spacing: .01em; color: #fff; }
+  #tmr .tt span { font-size: 11.5px; color: rgba(255,255,255,.62); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tmr button { flex: none; width: 30px; height: 30px; border: 0; border-radius: 50%; cursor: pointer; background: rgba(255,255,255,.09); color: #fff;
+                display: grid; place-items: center; }
+  #tmr button:hover { background: rgba(255,255,255,.18); }
+  #tmr button svg { width: 13px; height: 13px; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; fill: none; }
+  #tarc { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); pointer-events: none; transform: rotate(-90deg); display: none; }
+  #tarc.on { display: block; }
+  #tarc circle { fill: none; stroke: #7EE8FA; stroke-width: 2.2; stroke-linecap: round; opacity: .85; transition: stroke-dashoffset .9s linear;
+                 filter: drop-shadow(0 0 5px rgba(126,232,250,.55)); }
+  #tmini { display: none; position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%); padding: 1px 7px; border-radius: 999px;
+           background: rgba(10,12,20,.78); color: #fff; font: 700 12px/1.35 "Manrope", sans-serif; font-variant-numeric: tabular-nums; pointer-events: none; }
+  body.mini #tmini.on { display: block; }
+  body.mini #tarc { inset: 1px; width: calc(100% - 2px); height: calc(100% - 2px); }
+  #task .tl { display: flex; align-items: center; gap: 7px; } #task .tl b { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #task .tl em { font-style: normal; opacity: .75; font-variant-numeric: tabular-nums; }
+  #task .tsub { opacity: .75; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #task .tp { display: block; height: 3px; margin-top: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
+  #task .tp b { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(193,235,255,.95)); transition: width .6s; }
+  #task.done { background: rgba(75,227,161,.08); cursor: default; }
+  #task .tx { margin-left: auto; border: 0; background: none; color: inherit; opacity: .6; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
+  #task .tbtn { display: flex; gap: 6px; margin-top: 7px; }
+  #task .tbtn button { flex: 1; border: 0; border-radius: 9px; padding: 5px 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+                       background: rgba(255,255,255,.12); color: var(--ink); }
+  #task .tbtn button:first-child { background: var(--brand); }
+  #task .tbtn button:hover { filter: brightness(1.15); } #task .tbtn button:disabled { opacity: .6; }
+  #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(214,228,240,.3); border-top-color: #D6E4F0; animation: tspin .9s linear infinite; flex: none; }
+  @keyframes tspin { to { transform: rotate(360deg); } }
+  #upd { color: #fff; background: var(--brand); }
+  #cloudlow { display: none; text-align: center; font-size: 12px; line-height: 1.35; padding: 7px 10px; border-radius: 12px; cursor: pointer;
+              color: #FFE2B8; background: linear-gradient(135deg, rgba(255,138,101,.18), rgba(255,201,120,.12)); }
+  #cloudlow.on { display: block; } #cloudlow.empty { color: #FFD0DA; background: rgba(255,107,138,.16); }
+  /* объявление для всех (событие ann): строка над полем — нажать, откроется в студии */
+  #annb { display: none; align-items: center; gap: 6px; font-size: 12.5px; line-height: 1.35; padding: 7px 8px 7px 11px; border-radius: 12px; cursor: pointer;
+          color: #fff; background: linear-gradient(135deg, rgba(110,140,255,.32), rgba(190,120,255,.24)); }
+  #annb.on { display: flex; } #annb.warn { background: linear-gradient(135deg, rgba(255,170,80,.34), rgba(255,120,120,.22)); }
+  #annb span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #annb button { border: 0; background: none; color: inherit; opacity: .6; cursor: pointer; font-size: 12px; padding: 0 2px; } #annb button:hover { opacity: 1; }
+  body.light #annb { color: var(--ink); }
+  /* письмо от близкого (24.10, владелец: «на компе тоже бы видеть, если придёт сообщение от близкого»): строка «💌 Анна: …»
+     держится, пока не прочитали; нажать — студия, «Близкие», эта переписка */
+  #clb { display: none; align-items: center; gap: 6px; font-size: 12.5px; line-height: 1.35; padding: 7px 8px 7px 11px; border-radius: 12px; cursor: pointer;
+         color: #fff; background: linear-gradient(135deg, rgba(255,122,182,.34), rgba(183,140,255,.26)); animation: clbIn .35s ease-out; }
+  #clb.on { display: flex; } #clb span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #clb em { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.28); }
+  #clb button { border: 0; background: none; color: inherit; opacity: .6; cursor: pointer; font-size: 12px; padding: 0 2px; } #clb button:hover { opacity: 1; }
+  body.light #clb { color: var(--ink); } body.light #clb em { background: rgba(255,255,255,.7); }
+  @keyframes clbIn { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) { #clb { animation: none; } }
+  .srcs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .srcs button { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; border: 0; border-radius: 999px; padding: 4px 10px 4px 8px;
+                 cursor: pointer; background: rgba(138,155,255,.16); color: #DDE2FF; font: 600 11.5px/1.3 inherit; }
+  .srcs button:hover { background: rgba(138,155,255,.28); }
+  .srcs svg { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.9; }
+  .srcs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #media { display: flex; gap: 6px; justify-content: center; margin-top: 8px; }
+  #media:empty { display: none; }
+  #media img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; cursor: zoom-in; background: rgba(255,255,255,.06); }
+  #lightbox { position: absolute; inset: 0; z-index: 50; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    padding: 14px; background: rgba(8,8,12,.94); cursor: zoom-out; }
+  #lightbox.on { display: flex; }
+  #lightbox img { max-width: 100%; max-height: calc(100% - 40px); border-radius: 12px; object-fit: contain; }
+  #lightbox span { font-size: 12px; color: var(--muted); text-align: center; }
+  #lb-x { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border: 0; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(255,255,255,.12); color: #fff; cursor: pointer; }
+  #lb-x:hover, #lb-x:focus-visible { background: rgba(255,255,255,.24); outline: none; }
+  #lb-x svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  #ask { display: block; width: 100%; }
+  /* поле ввода — одна карточка: текст сверху, под ним вложения и «отправить» */
+  .askbox { border-radius: 18px; background: var(--glass); box-shadow: var(--glass-shadow); padding: 9px 6px 4px 13px; transition: background .2s; }
+  .askbox:focus-within { background: rgba(255,255,255,.115); }
+  #ask textarea { width: 100%; padding: 2px 6px 4px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13.5px;
+    line-height: 1.45; outline: none; resize: none; display: block; height: 24px; min-height: 24px; max-height: min(260px, 36vh); overflow-y: hidden;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+  #ask textarea::placeholder { color: rgba(255,255,255,.4); }
+  #ask textarea.scroll { overflow-y: auto; }
+  .askrow { display: flex; align-items: center; gap: 2px; margin-left: -7px; }
+  .askrow .ab { width: 34px; height: 34px; min-width: 34px; }
+  #ask-model { min-width: 0; max-width: 118px; margin-left: 2px; margin-right: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+               border: 0; padding: 0; background: transparent; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 1.2; text-align: left; cursor: pointer; }
+  #ask-model:hover, #ask-model:focus-visible { color: var(--ink); outline: none; }
+  #ask-model::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%; background: #63d5a2; }
+  #ask-model.off::before { background: #f2b35d; }
+  #ask-model.off { color: var(--muted); }
+  #a-stop { display: none; margin-left: 2px; color: #ff7895; background: rgba(255,104,144,.12); }
+  #a-stop:hover, #a-stop:focus-visible { color: #fff; background: rgba(255,104,144,.28); }
+  #ask.running #a-stop { display: grid; }
+  #ask.running #a-send { display: none; }
+  #a-mic, #a-mic-pick { border-radius: 10px; }
+  #a-mic.recording { color: #ff6e91; background: rgba(255,104,144,.13); }
+  #a-mic-pick { width: 25px; min-width: 25px; margin-left: -8px; }
+  #a-mic-pick svg { width: 13px; height: 13px; }
+  #dict-tools { display: none; align-items: center; gap: 3px; flex: 1; min-width: 52px; }
+  #dict-tools.on { display: flex; }
+  #dict-level { height: 5px; flex: 1; min-width: 42px; max-width: 130px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
+  #dict-level i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#65d6a4,#ffc95b,#ff6b8b); transition: width .08s linear; }
+  #dict-cancel, #dict-done { display: none; border-radius: 10px; }
+  #dict-tools.on #dict-cancel, #dict-tools.on #dict-done { display: grid; }
+  #dict-cancel { color: #ff829e; } #dict-done { color: #64d7a4; }
+  #askn { display: none; }
+  #mic-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 25; display: none; padding: 6px; border-radius: 15px;
+              background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
+  #mic-menu.on { display: block; animation: tpop .14s ease-out; }
+  #mic-menu h4 { margin: 3px 8px 6px; color: var(--muted); font-size: 10.5px; font-weight: 600; }
+  #mic-menu button { width: 100%; min-height: 34px; border: 0; border-radius: 10px; padding: 6px 9px; display: flex; gap: 8px; align-items: center;
+                     background: none; color: inherit; cursor: pointer; text-align: left; font: inherit; font-size: 11.5px; }
+  #mic-menu button:hover, #mic-menu button.cur { background: rgba(255,255,255,.1); }
+  #mic-menu button::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: transparent; flex: none; }
+  #mic-menu button.cur::before { background: #5b7cff; }
+  body.light #mic-menu { background: #fff; box-shadow: 0 15px 35px rgba(20,30,60,.2); }
+  .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
+  .askbox.has .ab.send { background: var(--brand); color: #fff; }
+  .ab.send svg { width: 15px; height: 15px; }
+  #card.crowd #orb { width: calc(104px * var(--ok, 1)); height: calc(104px * var(--ok, 1)); }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
+  #card.long #orb { width: calc(84px * var(--ok, 1)); height: calc(84px * var(--ok, 1)); }          /* длинный текст — сфера уступает место полю */
+  #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
+  .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+  .ab:hover { background: rgba(255,255,255,.09); color: var(--ink); }
+  .ab svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .ab.send { color: #D6E4F0; }
+  #atts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  #atts:empty { display: none; }
+  .att { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 3px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 11.5px; color: var(--ink); }
+  .att img, .att .ic { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
+  .att .ic { display: grid; place-items: center; background: rgba(139,140,247,.25); font-size: 9.5px; font-weight: 600; letter-spacing: .02em; }
+  .att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+  .att button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 3px; }
+  body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
+
+  #bar { flex: none; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; }
+  #card:hover #bar, #bar.pinned { opacity: 1; }
+  .btn { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+  .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
+  .btn.on { color: #ff7a93; }
+  .btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #b-voice-inline .x { display: none; } #b-voice-inline.on .x { display: inline; } #b-voice-inline.on .w1 { display: none; }
+  .sep { width: 1px; height: 16px; background: rgba(255,255,255,.1); margin: 0 3px; }
+  #b-team { width: auto; padding: 0 4px 0 6px; gap: 1px; display: inline-flex; align-items: center; }
+  /* кто отвечает — контурный силуэт героини или героя в стиле остальных значков: цветной кружок читался как
+     «в сети / не в сети» (тестировщик 14.10), а лицо в 20 px — как пятно рядом с большим портретом (14.10) */
+  .gi { display: grid; place-items: center; flex: none; }
+  .gi svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  #b-team svg.chev { width: 13px; height: 13px; opacity: .7; }
+  /* Выбор помощника — отдельное плавающее модальное окно. Оно не отодвигает чат и не зависит от
+     количества персонажей: список прокручивается внутри панели, фокус остаётся в окне. */
+  #team { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(88%, 360px); max-height: min(72%, 430px);
+          overflow: hidden; z-index: 20; display: none; flex-direction: column; padding: 0; border: 1px solid rgba(255,255,255,.13); border-radius: 20px;
+          background: #16161c; box-shadow: 0 18px 40px -12px rgba(0,0,0,.8), 0 0 0 100vmax rgba(4,6,14,.32); }
+  #team.show { display: flex; animation: tpop .16s ease-out; }
+  @keyframes tpop { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+  .team-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 14px 10px; flex: none; }
+  .team-head b { font-size: 14px; font-weight: 700; letter-spacing: .01em; }
+  .team-close { width: 28px; height: 28px; display: grid; place-items: center; flex: none; border: 0; border-radius: 50%; background: rgba(255,255,255,.08); color: var(--muted); cursor: pointer; font: inherit; font-size: 20px; line-height: 1; }
+  .team-close:hover, .team-close:focus-visible { color: var(--ink); background: rgba(255,255,255,.16); outline: none; }
+  #team-list { min-height: 0; overflow-y: auto; padding: 0 8px 10px; }
+  #team-list button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 12px;
+                 background: none; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
+  #team-list button:hover, #team-list button:focus-visible { background: rgba(255,255,255,.07); outline: none; }
+  #team-list button.cur { background: rgba(255,255,255,.1); }
+  #team-list .gi { width: 22px; color: var(--muted); } #team-list button.cur .gi { color: var(--ink); }
+  #team-list b { font-weight: 600; font-size: 13px; }
+  #team-list span { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+  #team-list::-webkit-scrollbar { width: 6px; } #team-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+  .dot { width: 11px; height: 11px; flex: none; border-radius: 50%; border: 0; cursor: pointer; margin: 0 2px; opacity: .45; transition: opacity .2s, transform .2s; }
+  .dot:hover { opacity: .9; transform: scale(1.2); }
+  .dot.cur { opacity: 1; transform: scale(1.25); }
+
+  /* «свернуть» и «спрятать» — в правом верхнем углу, как у окна; видны, когда мышь над виджетом */
+  /* знакомство: подсветка кнопки, о которой сейчас рассказывают; фразы «попробуйте»; «Пропустить» */
+  .btn.hl { color: #fff; background: var(--persona); box-shadow: 0 0 0 0 var(--persona); animation: hlp 1.1s ease-out infinite; }
+  @keyframes hlp { 0% { box-shadow: 0 0 0 0 var(--persona); } 100% { box-shadow: 0 0 0 9px transparent; } }
+  #bot .itry { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
+  #bot .itry button { text-align: left; border: 0; border-radius: 10px; padding: 6px 10px; font: inherit; font-size: 12.5px; cursor: pointer;
+                      color: var(--ink); background: rgba(255,255,255,.08); }
+  #bot .itry button::before { content: "▶ "; color: var(--persona); font-size: 10px; }
+  #bot .itry button:hover { background: rgba(255,255,255,.15); }
+  #intro-skip { position: absolute; top: 10px; left: 12px; z-index: 6; display: none; border: 0; border-radius: 999px; padding: 3px 10px;
+                font: inherit; font-size: 11px; color: var(--muted); background: rgba(255,255,255,.07); cursor: pointer; }
+  #intro-skip:hover { color: var(--ink); background: rgba(255,255,255,.14); }
+  body.intro #intro-skip { display: block; }
+  body.mini #intro-skip { display: none !important; }
+  #corner, #corner-l { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity .2s; z-index: 5; }
+  #corner-l { right: auto; left: 10px; opacity: 1; }
+  #card:hover #corner, #corner:focus-within, #card:hover #corner-l, #corner-l:focus-within { opacity: 1; }
+  #corner .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
+  #corner .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
+  #corner .btn svg, #corner-l .btn svg { width: 15px; height: 15px; }
+  #corner.pinned { opacity: 1; }
+  #corner-l.lo { opacity: 1; }
+  #corner-l.lo #b-lo, body.light #corner-l.lo #b-lo { color: #2fbf83; }
+  #corner-l.lo:not(:hover):not(:focus-within) #b-bug { opacity: 0; }
+  /* есть обновление — значок виден всегда, с точкой; без него — как жучок, по наведению */
+  #corner-l.upd { opacity: 1; } #corner-l.upd:not(:hover):not(:focus-within) #b-bug { opacity: 0; }
+  #b-upd { position: relative; } #b-upd.has, body.light #b-upd.has { color: var(--accent, #8B8CF7); }
+  #b-upd.has::after { content: ""; position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: #ff6f9c; box-shadow: 0 0 0 2px rgba(0,0,0,.15); }
+  #b-upd.busy svg { animation: updSpin 1.1s linear infinite; } @keyframes updSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #b-upd.busy svg { animation: none; } }                                  /* блокнот открыт — кнопка видна и подсвечена */
+  #b-pad.on, #b-play.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
+  body.light #b-pad.on, body.light #b-play.on { color: var(--accent, #4f6cf0); background: rgba(79,108,240,.12); }
+  #b-play[hidden] { display: none; }
+  #b-orb.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
+  /* Legacy input/persona controls stay in the DOM for command compatibility,
+     but must never reserve space in the redesigned bottom bar. */
+  #bar > [hidden] { display: none !important; }
+  body.mini #corner, body.mini #corner-l { display: none; }
+
+  /* ---------- значок ---------- */
+  body.mini #card { padding: 0; justify-content: center; }     /* значок — в той же теме, что и карточка */
+  body.mini #orb { width: 92px; height: 92px; }
+  body.mini #bubble, body.mini #mid, body.mini #bar { display: none; }
+  #grow { display: none; position: absolute; left: 62px; top: 62px; width: 24px; height: 24px; border-radius: 50%; border: 0;
+          background: rgba(40,40,52,.92); color: #E6E7F2; place-items: center; cursor: pointer; opacity: 0; transition: opacity .2s; }
+  #grow svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  body.mini #grow { display: grid; }
+  body.mini:hover #grow { opacity: 1; }
+  /* «Открыть целиком»: ответ полностью (код — с кнопкой «Копировать») и ход работы — что ассистент делал */
+  /* «Ход работы (3) и ответ» — строкой внутри карточки ответа, справа, а не отдельной плашкой между карточками (отзыв
+     11.10: на тесном виджете карточка, плашка и задача наезжали друг на друга) */
+  #more { display: none; flex: none; align-self: flex-end; margin: 4px -2px -2px 0; border: 0; background: none; color: var(--muted, rgba(255,255,255,.62));
+          font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 8px; cursor: pointer; }
+  #more::after { content: " ›"; }
+  #more.on { display: inline-block; }
+  #more:hover { color: var(--ink, #fff); background: rgba(255,255,255,.08); }
+  /* тесно (fitCap): вопрос — одной строкой, «…— готово» прячется (о задаче и так говорит карточка задачи), ещё теснее —
+     без вопроса; ответ не сжимается в ноль — хотя бы две строки и прокрутка */
+  #cap .bot:not(:empty):not(.wait) { min-height: 2.84em; }
+  #cap.tight { padding: 8px 12px; }
+  #cap.tight .you { -webkit-line-clamp: 1; margin-bottom: 2px; }
+  #cap.tight #act.fin { display: none; }
+  #cap.tight2 .you { display: none; }
+  #act { cursor: pointer; }
+  #reader { position: absolute; inset: 0; z-index: 30; display: none; flex-direction: column; padding: 12px 10px 10px 14px;
+            background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--persona) 12%, transparent) 0%, transparent 55%), var(--skin-bg, #0d0d12); }
+  #reader.on { display: flex; }
+  #reader .rh { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding-right: 2px; }
+  #reader .rh b { flex: 1; font: 600 14px "Unbounded", "Ubuntu", sans-serif; letter-spacing: .02em; }
+  #rd-body { flex: 1; overflow-y: auto; padding-right: 6px; user-select: text; -webkit-user-select: text; cursor: auto;
+             scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.18) transparent; font-size: calc(13.5px * var(--dw-text, 1)); line-height: 1.55; }
+  #rd-body .q { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  #rd-body .q::before { content: "Вы: "; opacity: .75; }
+  #rd-body h4 { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.45); margin: 4px 0 8px; font-weight: 600; }
+  .steps { list-style: none; margin: 0 0 14px; }
+  .steps li { position: relative; padding: 0 0 10px 20px; }
+  .steps li::before { content: ""; position: absolute; left: 3px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: #4BE3A1; }
+  .steps li.run::before { background: #D6E4F0; animation: blink 1s infinite; }
+  .steps li.error::before { background: #ff8aa2; } .steps li.declined::before { background: rgba(255,255,255,.35); }
+  .steps li::after { content: ""; position: absolute; left: 6.5px; top: 18px; bottom: 2px; width: 1px; background: rgba(255,255,255,.1); }
+  .steps li:last-child::after { display: none; }
+  .steps .st { font-weight: 600; font-size: 13px; }
+  .steps .sd { font: 12px/1.45 ui-monospace, "Ubuntu Mono", monospace; color: #D6E4F0; word-break: break-word; margin-top: 2px; }
+  .steps .se { color: #ff8aa2; font-size: 12px; margin-top: 2px; }
+  .steps details { margin-top: 3px; } .steps summary { font-size: 11.5px; color: var(--muted); cursor: pointer; }
+  .steps pre, .md pre { margin: 6px 0; }
+  .md p { margin: 0 0 8px; } .md ul, .md ol { margin: 0 0 8px 18px; } .md li { margin-bottom: 3px; }
+  .md .h { display: block; font-weight: 700; margin: 10px 0 6px; color: #fff; }
+  .md code { font: 12.5px ui-monospace, "Ubuntu Mono", monospace; background: rgba(255,255,255,.08); padding: 1px 5px; border-radius: 5px; }
+  pre { position: relative; background: rgba(255,255,255,.06); border-radius: 12px; padding: 10px 12px; overflow-x: auto;
+        font: 12px/1.5 ui-monospace, "Ubuntu Mono", monospace; white-space: pre; scrollbar-width: thin; }
+  pre code { background: none !important; padding: 0 !important; }
+  pre .cp { position: sticky; float: right; left: 100%; top: 0; margin: -4px -6px 0 8px; border: 0; border-radius: 8px; padding: 3px 8px;
+            background: rgba(255,255,255,.1); color: var(--ink); font: 11px "Manrope", sans-serif; cursor: pointer; }
+  pre .cp:hover { background: rgba(255,255,255,.18); }
+  /* «Ответ целиком» и ход работы в светлых темах (№233, 24.10: «при нажатии „ответ целиком“ текст плохо различим» —
+     тёмный лист #0d0d12 и тёмные чернила «Небесного»): лист — цвет темы, чернила, приглушённые линии и код */
+  body.light #reader .rh b, body.light #rd-body { color: var(--ink); }
+  body.light #rd-body { scrollbar-color: rgba(20,30,60,.22) transparent; }
+  body.light #rd-body h4 { color: var(--muted); }
+  body.light .md .h { color: var(--ink); }
+  body.light .md code { background: rgba(20,30,60,.07); }
+  body.light pre { background: rgba(20,30,60,.06); }
+  body.light pre .cp { background: rgba(20,30,60,.08); } body.light pre .cp:hover { background: rgba(20,30,60,.14); }
+  body.light .steps .sd { color: #3c4a64; } body.light .steps li.run::before { background: #6f8bb3; }
+  body.light .steps li::after { background: rgba(20,30,60,.12); } body.light .steps li.declined::before { background: rgba(20,30,60,.3); }
+  body.light .steps li.error::before { background: #d2486a; } body.light .steps .se { color: #b8304f; }
+  body.light .steps li::before { background: #1f9d6a; }
+  /* Подсказки кнопок — свои, внутри карточки (отзыв 17.10: системная подсказка у портрета вылезала за края виджета и
+     обрезалась). title переезжает в data-tip при наведении; подсказка переносится по словам и не выходит за окно. */
+  #htip { position: fixed; z-index: 99; max-width: calc(100vw - 20px); padding: 7px 11px; border-radius: 12px; pointer-events: none;
+          background: rgba(14,14,18,.96); color: #ECEAF5; font: 500 12px/1.4 "Manrope", sans-serif; box-shadow: 0 10px 26px -10px rgba(0,0,0,.7);
+          opacity: 0; transition: opacity .12s; }
+  #htip.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="reader"><div class="rh"><b id="rd-title">Ответ целиком</b><button class="btn" id="rd-x" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div><div id="rd-body"></div></div>
+<div id="card">
+  <button id="bubble" title="Только состояние режима ввода. Модель выбирается отдельной кнопкой в строке сообщения." aria-label="Состояние режима ввода; модель выбирается отдельной кнопкой">
+    <span id="say">Подключаюсь…</span>
+  </button>
+  <div id="orb" tabindex="0" role="button" title="Нажмите — выбрать помощника. Удерживайте — диктовка любой длины, отпустите — отправлю" aria-label="Выбрать помощника"><canvas id="cv"></canvas>
+    <svg id="tarc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span id="tmini"></span></div>
+  <div id="mid">
+    <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div class="bot" id="bot"></div><div id="media"></div><button id="more">Открыть целиком</button></div>
+    <div id="yn"><button class="yes" id="y">Да</button><button id="n">Нет</button></div>
+    <div id="note"></div><div id="ldbar"><i></i></div>
+    <div id="health" title="Что сейчас с ассистентом"></div>
+    <div id="tmr" aria-live="off"></div>
+    <div id="rem"><span class="ri" id="rem-ico">⏰</span><span class="rt"><b id="rem-when"></b><span id="rem-text"></span></span><button id="rem-undo" title="Отменить напоминание">Отменить</button></div>
+    <div id="task"></div>
+    <div id="upd"></div>
+    <div id="cloudlow"></div>
+    <div id="annb" role="button" tabindex="0"><span id="annb-t"></span><button id="annb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
+    <div id="clb" role="button" tabindex="0" title="Открыть переписку"><span id="clb-t"></span><em id="clb-n" hidden></em><button id="clb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
+    <div id="ask">
+      <div class="askbox" id="askbox">
+        <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка · Ctrl+Enter — отправить" autocomplete="off" spellcheck="true"></textarea>
+        <div class="askrow">
+          <button class="ab" id="a-att" title="Приложить файл или картинку"><svg viewBox="0 0 24 24"><path d="M21 11.5 12.6 19.9a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg></button>
+          <button class="ab" id="a-clip" title="Вставить картинку из буфера обмена (Ctrl+V)"><svg viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2.2"/><path d="M9.5 4.5V3.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v.9M9.5 11h5M9.5 14.5h5"/></svg></button>
+          <button class="ab" id="a-shot" title="Приложить снимок экрана"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
+          <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
+          <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
+          <button class="ab" id="a-mic" title="Диктовка в поле: говорите, пауза завершит фразу" aria-label="Начать диктовку"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+          <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+          <div id="dict-tools" aria-live="polite"><div id="dict-level" title="Уровень микрофона"><i></i></div><button class="ab" id="dict-cancel" title="Отменить диктовку" aria-label="Отменить диктовку"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><button class="ab" id="dict-done" title="Завершить ввод после текущей фразы" aria-label="Завершить ввод"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button></div>
+          <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+          <button class="ab send" id="a-send" title="Отправить сообщение (Ctrl+Enter)" aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+        </div>
+      </div>
+      <div id="mic-menu" role="menu" aria-label="Микрофоны"><h4>Микрофон</h4><div id="mic-list"></div></div>
+      <input type="file" id="a-file" multiple hidden>
+      <div id="atts"></div>
+      <span id="askn" aria-hidden="true"></span>
+    </div>
+  </div>
+  <div id="team" role="dialog" aria-modal="true" aria-label="Выбор помощника">
+    <div class="team-head"><b>Выберите помощника</b><button class="team-close" id="team-close" type="button" title="Закрыть выбор помощника (Esc)" aria-label="Закрыть">×</button></div>
+    <div id="team-list"></div>
+  </div>
+  <div id="lightbox" title="Закрыть — щелчок или Esc"><button id="lb-x" title="Закрыть (Esc)" aria-label="Закрыть картинку"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><img alt=""><span></span></div>
+  <button id="intro-skip" title="Закончить знакомство">Пропустить</button>
+  <!-- слева сверху (появляется при наведении, как «свернуть» справа): сообщить о проблеме — нужна редко, а место на
+       панели отдано заметкам (отзыв 11.10) -->
+  <div id="corner-l">
+    <!-- Безопасность доступна всегда, независимо от разрешения внешних подключений. -->
+    <button class="btn" id="b-lo" title="Безопасность" aria-label="Безопасность"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 5 6v5.6c0 4.2 2.9 7.7 7 9.2 4.1-1.5 7-5 7-9.2V6z"/><path d="m9 12 2.2 2.2L15.3 10"/></svg></button>
+    <button class="btn" id="b-bug" title="Сообщить о проблеме — сниму экран и открою форму жалобы"><svg viewBox="0 0 24 24"><rect x="6.5" y="7" width="11" height="14.5" rx="5.5"/><path d="M8.8 7.6a3.2 3.2 0 0 1 6.4 0M12 11.5v10M6.5 12.5H2.5M21.5 12.5h-4M6.8 17.5 3 19.8M17.2 17.5l3.8 2.3M7.5 9.2 4 6.5M16.5 9.2 20 6.5"/></svg></button>
+    <!-- обновление одним нажатием (24.10, владелец: «возле жучка не хватает значка обновления») -->
+    <button class="btn" id="b-upd" title="Обновления — проверить и обновить одним нажатием" aria-label="Обновления"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+  </div>
+  <div id="corner">
+    <!-- блокнот у виджета (20.10): вкладки, ссылки, картинки, таблицы, задачи — выезжает рядом, синхронизируется (ui/pad.html) -->
+    <!-- «Досуг» (24.10): милые игры в том же листе, что блокнот (ui/pad.html, assets/arcade); выключается в «Возможностях» -->
+    <button class="btn" id="b-play" hidden title="Досуг — милые игры на пару минут. Или скажите: «Лира, давай поиграем»"><svg viewBox="0 0 24 24"><path d="M7.5 7.5h9a4.5 4.5 0 0 1 4.3 5.8l-1.1 3.7a2.3 2.3 0 0 1-3.9.9L14 15.5h-4l-1.8 2.4a2.3 2.3 0 0 1-3.9-.9l-1.1-3.7a4.5 4.5 0 0 1 4.3-5.8z"/><path d="M8 10.5v3M6.5 12h3"/><path d="M15.5 11h.01M17.5 13h.01"/></svg></button>
+    <button class="btn" id="b-pad" title="Блокнот — вкладки под рукой: ссылки, задачи, таблицы, картинки. Синхронизируется между устройствами"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M8 8h6M8 11.5h6M8 15h3.5"/><path d="M17.5 7h2M17.5 11h2"/></svg></button>
+    <button class="btn" id="b-orb" title="Скрыть большой образ Лиры и освободить место для ответа" aria-label="Скрыть большой образ Лиры" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+    <button class="btn" id="b-tray" title="Спрятать — появлюсь сам, когда позовёте по имени или придёт напоминание"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+  </div>
+  <div id="bar">
+    <!-- Старые быстрые кнопки сохранены в DOM для совместимости с клавиатурными сценариями, но убраны из панели:
+         микрофон — в строке ввода, текст — всегда открыт, помощник — на круглой кнопке портрета. -->
+    <button class="btn" id="b-mic" hidden title="Выключить микрофон"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+    <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
+    <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+    <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
+    <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg></button>
+    <!-- чат — сразу справа от «Заметок» в нижней панели; из строки ввода убран, чтобы не дублировать навигацию -->
+    <button class="btn" id="b-chat" title="Сообщения (Чат) — вся переписка: голосом и текстом" aria-label="Открыть сообщения"><svg viewBox="0 0 24 24"><path d="M6.5 4h8a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5H10l-3.5 3v-3A2.5 2.5 0 0 1 4 11.5v-5A2.5 2.5 0 0 1 6.5 4z"/><path d="M17 9.5h.5A2.5 2.5 0 0 1 20 12v4.5a2.5 2.5 0 0 1-2 2.45V21l-3-2.5h-2.5a2.5 2.5 0 0 1-2.4-1.8"/></svg></button>
+    <button class="btn" id="b-set" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+  </div>
+  <div id="grip" title="Потяните, чтобы изменить размер. Двойной щелчок — как было" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M11 4 4 11M11 8 8 11"/></svg></div>
+</div>
+<button id="grow" aria-label="Развернуть"><svg viewBox="0 0 24 24"><path d="M4 10V4h6M20 14v6h-6M4 4l6 6M20 20l-6-6"/></svg></button>
+
+<script src="assets/entities.js"></script>
+<script src="assets/skins.js"></script>
+<script src="assets/dewiar.js"></script>
+<script src="assets/rich.js"></script>
+<script src="assets/zoom.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+// карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
+// voiceLevels: ядро шлёт уровень своего голоса, пока звук играет, — рот и лучи «говорят» только под звук, а не всё время
+// «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
+const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars", voiceLevels: true, lookGain: 0.5 });
+const VOICE_FX = ["bars", "pulse", "wave"];
+let orbShown = true;
+function setOrbVisible(on, persist = false) {
+  orbShown = !!on;
+  $("card").classList.toggle("no-orb", !orbShown);
+  const b = $("b-orb");
+  if (b) {
+    b.classList.toggle("on", !orbShown);
+    b.title = orbShown ? "Скрыть большой образ Лиры и освободить место для ответа" : "Показать большой образ Лиры";
+    b.setAttribute("aria-label", b.title);
+    b.setAttribute("aria-pressed", String(!orbShown));
+  }
+  if (persist && typeof core !== "undefined") core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
+  requestAnimationFrame(() => { fitCap(); fitAsk(); });
+}
+function applyLook(ui) {                      // тема карточки и облика (assets/skins.*) + чем голос отзывается вокруг портрета
+  ui = ui || {};
+  const sk = window.dewiarSkin ? dewiarSkin(ui.skin) : { id: "brand" };
+  (window.DEWIAR_SKIN_IDS || ["brand"]).forEach(k => document.body.classList.toggle("skin-" + k, k === sk.id));
+  document.body.classList.toggle("light", !!sk.light);
+  document.body.classList.toggle("neu", !!sk.neu);
+  entity.tone = sk.tone || "mono";
+  entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
+  applyZoom(ui);
+  setOrbVisible(ui.hud_show_orb !== false);
+  lookOn = ui.cursor_look === true;
+  if (!lookOn) { clearTimeout(lookT); entity.look(null); }   // выключено — сразу прямо
+}
+/* Курсор над виджетом — персонаж смотрит на него: взгляд и лёгкий сдвиг лица (DewiarEntity.look, вдвое слабее, чем на
+   телефоне). Только если включено в студии: «Оформление» → «Портрет смотрит на курсор» (ui.cursor_look; прежний ui.tilt был включён по умолчанию — не используем); по умолчанию — нет
+   (отзыв 14.10: «на компьютере не нравится — оставить под флагом, по умолчанию выключено»). Круг не поворачивается. */
+let lookOn = false, lookT = 0;
+const lookCv = () => document.getElementById("cv");
+function lookAt(ev) {
+  if (!lookOn || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const cv = lookCv(), r = cv && cv.getBoundingClientRect(); if (!r || !r.width) return;
+  const s = Math.max(innerWidth, innerHeight) * 0.55, cl = (v) => Math.max(-1, Math.min(1, v));
+  entity.look(cl((ev.clientX - (r.left + r.width / 2)) / s), cl((ev.clientY - (r.top + r.height / 2)) / s));
+  clearTimeout(lookT);
+}
+function lookAway() {
+  clearTimeout(lookT);
+  lookT = setTimeout(() => { entity.look(0, 0); lookT = setTimeout(() => entity.look(null), 1500); }, 500);
+}
+document.addEventListener("pointermove", lookAt, { passive: true });
+document.documentElement.addEventListener("mouseleave", lookAway);
+window.addEventListener("blur", lookAway);
+/* Масштаб интерфейса (ui.zoom) и текста (ui.text): страница — сразу (CSS zoom), окно виджета — под неё (Api.set_zoom;
+   правый нижний угол на месте, новое положение — в настройки). Ctrl + / Ctrl − / Ctrl 0 и Ctrl + колесо — прямо в виджете. */
+let zoomNow = null, zoomSaveT = 0;
+function applyZoom(ui) {
+  if (!window.DewiarZoom) return;
+  const z = DewiarZoom.apply(ui).zoom;
+  if (zoomNow === null) { zoomNow = z; return; }          // первый раз — окно уже создано под этот масштаб
+  if (z === zoomNow) return;
+  zoomNow = z;
+  const a = api(); if (a && a.set_zoom) a.set_zoom(z).then(p => { if (p) core.call("settings_save", { patch: { ui: { hud_x: p[0], hud_y: p[1] } } }).catch(() => {}); }).catch(() => {});
+}
+if (window.DewiarZoom) DewiarZoom.keys(() => zoomNow || 1, z => {
+  applyZoom({ zoom: z, text: DewiarZoom.get().text });
+  showCap("", "Масштаб " + DewiarZoom.pct(z) + " · Ctrl 0 — как было"); hideCapLater(1800);
+  clearTimeout(zoomSaveT); zoomSaveT = setTimeout(() => core.call("settings_save", { patch: { ui: { zoom: z } } }).catch(() => {}), 500);
+});
+applyLook({});
+const LABEL = { listening: "Я вас слушаю", thinking: "Думаю…", muted: "Микрофон выключен", offline: "Нет связи с ядром" };
+let personas = [], current = null, state = "offline", capTimer = null, muted = false;
+entity.set({ state: "offline" });
+function setAskPlaceholder() {
+  const input = $("askin");
+  if (!input) return;
+  const name = current && current.name ? current.name : "Лира";
+  input.placeholder = audioMode === "text" || !["listening"].includes(state)
+    ? `Я ${name}, жду ваше задание…`
+    : `Я ${name}, говорите, я слушаю…`;
+}
+function setRunControls(s) {
+  const running = s === "thinking" || s === "speaking";
+  $("ask").classList.toggle("running", running);
+  const stop = $("a-stop");
+  if (stop) {
+    stop.disabled = false;
+    stop.setAttribute("aria-busy", String(running));
+  }
+}
+
+function applyPersona(pid) {
+  const p = personas.find(x => x.id === pid) || personas[0]; if (!p) return;
+  current = p;
+  document.documentElement.style.setProperty("--persona", p.color);
+    entity.configure({ style: p.avatar_url && p.style !== "aura" ? "photo" : p.style, color: p.color, image: p.avatar_url || null, live: p.live || "" });
+  renderDots(); setState(state);
+}
+// силуэт по плечи: у героини — длинные волосы до плеч, у героя (и если пол не указан) — простой силуэт
+const GENDER_SVG = {
+  female: '<circle cx="12" cy="9" r="2.7"/><path d="M12 4.3c-3.3 0-5.4 2.7-5.4 6 0 2-.4 3.6-1.3 4.9M12 4.3c3.3 0 5.4 2.7 5.4 6 0 2 .4 3.6 1.3 4.9"/><path d="M5.8 20.6c1-2.8 3.4-4.4 6.2-4.4s5.2 1.6 6.2 4.4"/>',
+  male: '<circle cx="12" cy="8.6" r="3.3"/><path d="M5.6 20.6c1-2.9 3.5-4.6 6.4-4.6s5.4 1.7 6.4 4.6"/>',
+};
+GENDER_SVG[""] = GENDER_SVG.male;
+function paintAv(el, p) {
+  const g = p && (p.gender === "female" || p.gender === "male") ? p.gender : "";
+  el.className = "gi"; el.style.backgroundImage = ""; el.dataset.g = g || "none";
+  el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${GENDER_SVG[g]}</svg>`;
+}
+function renderDots() {                       // список команды — в отдельном плавающем окне
+  const panel = $("team"), box = $("team-list"); if (!box) return; box.innerHTML = "";
+  personas.forEach(p => {
+    const b = document.createElement("button");
+    b.className = current && p.id === current.id ? "cur" : "";
+    b.innerHTML = "<i></i><b></b><span></span>";
+    paintAv(b.querySelector("i"), p); b.querySelector("b").textContent = p.name;
+    b.querySelector("span").textContent = (p.role || "").toLowerCase();
+    b.onclick = guard(b, () => { panel?.classList.remove("show"); return core.call("persona_set", { id: p.id }).catch(showErr); });
+    box.appendChild(b);
+  });
+  if (current) paintAv($("team-dot"), current);
+  $("b-team").title = current ? `Сейчас: ${current.name}${current.role ? " — " + current.role.toLowerCase() : ""}. Нажмите, чтобы выбрать другого` : "Выбрать персонажа";
+  $("orb").title = current ? `Помощник: ${current.name}. Нажмите на круг, чтобы выбрать другого; удерживайте — диктовка` : "Нажмите на круг, чтобы выбрать помощника; удерживайте — диктовка";
+}
+let radioNow = "";                           // играет радио — в покое вместо персонажа крутится пластинка
+let stateSince = Date.now();
+let hold = null;              // диктовка удержанием (ниже, у перетаскивания): {on, t0, far, timer, by: "mouse"|"key"}
+let audioMode = "voice";       // Ядро --server не захватывает звук: не показываем ложную запись.
+let dictating = false, selectedMic = "";
+let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
+// обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
+// портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
+let updating = 0;
+function setState(s) {
+  if (s === "offline" && updating && Date.now() - updating < 180000) {
+    state = "offline"; entity.set({ state: "idle" });
+    $("bubble").classList.remove("live", "turn"); $("say").textContent = "Обновляюсь — скоро вернусь"; $("say").title = "";
+    return;
+  }
+  if (s !== "offline") updating = 0;
+  if (s !== state) stateSince = Date.now();
+  if (s !== "listening") turnUntil = 0;
+  state = s; entity.set({ state: s });
+  setAskPlaceholder();
+  setRunControls(s);
+  if (hold && hold.on) return holdShow();
+  const say = $("say"), bub = $("bubble");
+  bub.classList.toggle("live", s === "listening" || s === "speaking" || s === "thinking");
+  const left = turnUntil - Date.now();
+  if (s === "listening" && left > 300) {
+    say.textContent = "Ваша очередь — говорите";
+    say.title = "Ответ закончен: можно говорить сразу, без имени";
+    if (!bub.classList.contains("turn")) { bub.style.setProperty("--turn", (left / 1000).toFixed(1) + "s"); bub.classList.add("turn"); }
+    setAskPlaceholder(); return;
+  }
+  bub.classList.remove("turn");
+  if (audioMode === "text" && ["idle", "muted", "listening"].includes(s)) {
+    say.textContent = "Текст"; say.title = "Текстовый ввод. Модель выбирается отдельной кнопкой в строке сообщения"; return;
+  }
+  if (LABEL[s]) { say.textContent = LABEL[s]; say.title = ""; }
+  else if (radioNow && (s === "idle" || s === "muted")) { say.innerHTML = ""; const b = document.createElement("b"); b.textContent = "♪ " + radioNow; say.appendChild(b); say.title = "Играет радио. «Пауза», «дальше», «выключи музыку»"; }
+  else { say.innerHTML = ""; say.title = ""; const b = document.createElement("b"); b.textContent = current ? current.name : "Dewiar"; say.appendChild(b); }
+}
+function setRadio(r) {
+  radioNow = r && r.playing ? (r.station || "Радио") : "";
+  entity.vinyl = radioNow || null;
+  setState(state);
+}
+core.on("radio", setRadio);
+const WAIT = {};   // метка для showCap: ответ готовится — вместо текста мигающие точки
+document.getElementById("rem-undo").onclick = async () => {
+  const el = document.getElementById("rem"); const id = el.dataset.id;
+  if (el.classList.contains("note")) { core.call("ws_open", { path: el.dataset.path }).catch(() => {}); return; }
+  if (el.classList.contains("power")) {                 // выключение через минуту — отменить
+    clearInterval(el._cd); try { await core.call("power_cancel", {}); document.getElementById("rem-when").textContent = "Отменено"; } catch (e) {}
+    setTimeout(() => el.classList.remove("show", "power"), 1500); return;
+  }
+  if (el.classList.contains("money")) {                 // запись о деньгах — отменить
+    try { await core.call("money_delete", { id: el.dataset.mid }); document.getElementById("rem-when").textContent = "Запись удалена"; } catch (e) {}
+    setTimeout(() => el.classList.remove("show"), 1500); return;
+  }
+  if (!id) return;
+  try { await core.call("reminder_cancel", { id }); document.getElementById("rem-when").textContent = "Напоминание отменено"; }
+  catch (e) {} setTimeout(() => el.classList.remove("show"), 1500);
+};
+/* в подписи — без разметки: код коротко «⟨код⟩» (целиком — «Открыть целиком») */
+function capText(t) {
+  return String(t || "").replace(/```\s*mermaid[\s\S]*?(```|$)/g, " ⟨схема — «Открыть целиком»⟩ ").replace(/```[\s\S]*?(```|$)/g, (m) => window.DewiarRich && DewiarRich.isDiagram(m.replace(/^```\w*\n?/, "")) ? " ⟨схема — «Открыть целиком»⟩ " : " ⟨код⟩ ").replace(/`([^`\n]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/^\s*#{1,6}\s+/gm, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+function showCap(you, bot, err) {
+  if (you !== null) { $("you").textContent = you; $("media").innerHTML = ""; $("bot").scrollTop = 0; capScrolled = false; }
+  $("you").style.display = $("you").textContent ? "" : "none";
+  if (bot === WAIT) { $("bot").innerHTML = "<i></i>"; $("bot").classList.add("wait"); }
+  else if (bot !== null) { $("bot").classList.remove("wait"); $("bot").textContent = bot; }
+  requestAnimationFrame(capFade);
+  $("cap").classList.toggle("err", !!err);
+  $("cap").classList.add("show");
+  $("card").classList.add("chat-open");
+  requestAnimationFrame(fitCap);
+  clearTimeout(capTimer);
+}
+/* Пока ответ читают (мышь над ним или его прокрутили) — не прячем; ушли — спрячем чуть позже. */
+let capHover = false, capHideMs = 0, capScrolled = false;
+function hideCapLater(ms) {
+  clearTimeout(capTimer); capHideMs = ms;
+  capTimer = setTimeout(() => { if (capHover && ms > 1000) return; $("cap").classList.remove("show"); capScrolled = false; $("card").classList.toggle("chat-open", $("ask").style.display === "block"); requestAnimationFrame(fitCap); }, ms);
+}
+$("cap").addEventListener("mouseenter", () => { capHover = true; });
+$("cap").addEventListener("mouseleave", () => { capHover = false; if (capHideMs > 1000 && $("cap").classList.contains("show")) hideCapLater(Math.max(capHideMs, 8000)); });
+/* Карточка ответа на тесном виджете: не обрезать строку посередине и не сжимать ответ в ноль — сначала вопрос в одну
+   строку и без «…— готово», потом без вопроса. Пересчёт — при каждом показе и изменении размеров (fitCap). */
+function fitCap() {
+  const cap = $("cap"), card = $("card"), mid = $("mid"), orb = $("orb"), bot = $("bot");
+  orb.style.transition = "none";                     // меряем сразу итоговый размер облика, без анимации
+  card.classList.remove("crowd"); cap.classList.remove("tight", "tight2");
+  const shown = cap.classList.contains("show"), has = shown && bot.textContent.trim() && !bot.classList.contains("wait");
+  const over = () => mid.scrollHeight > mid.clientHeight + 1 || (shown && (cap.scrollHeight > cap.clientHeight + 1 || (has && bot.clientHeight < 34)));
+  // тесно: сначала облик меньше (карточка задачи с кнопками, «Да/Нет» не уезжают на панель), потом карточка ответа короче
+  if (over()) card.classList.add("crowd");
+  if (over() && shown) cap.classList.add("tight");
+  if (over() && has) cap.classList.add("tight2");
+  requestAnimationFrame(() => { orb.style.transition = ""; });
+}
+{ const ro = new ResizeObserver(() => requestAnimationFrame(fitCap));
+  ["mid", "task", "yn", "rem", "upd", "note"].forEach(id => { const el = document.getElementById(id); if (el) ro.observe(el); }); }
+function capFade() { const c = $("bot"); c.classList.toggle("ft", c.scrollTop > 2); c.classList.toggle("fb", c.scrollTop + c.clientHeight < c.scrollHeight - 2); }
+$("bot").addEventListener("scroll", () => { capScrolled = true; capFade(); }, { passive: true });
+new ResizeObserver(capFade).observe($("bot"));
+/* Нажатие не повторяется, пока ядро не ответило на предыдущее: иначе на занятом компьютере клики копятся и
+   потом «перещёлкиваются» сами. Кнопка сразу показывает, что нажата; ядро молчит дольше 4 с — подсказка. */
+let slowHint = 0;
+function guard(el, fn, waitingText = "Ядро занято (загружает модели) — нажатие выполнится, как только освободится") {
+  return (...args) => {
+    if (el.dataset.busy) return;
+    el.dataset.busy = "1"; el.classList.add("busy");
+    let waitingNotice='';
+    const t = setTimeout(() => { if (Date.now() - slowHint > 20000) { slowHint = Date.now(); waitingNotice=typeof waitingText === 'function' ? waitingText() : waitingText; note({ note: waitingNotice }); } }, 4000);
+    return Promise.resolve().then(() => fn(...args)).finally(() => { clearTimeout(t); delete el.dataset.busy; el.classList.remove("busy"); if(typeof waitingText==='function' && waitingNotice && $("note").textContent===waitingNotice)note({note:""}); });
+  };
+}
+let orbBusy = false;
+let teamKeepUntil = 0;
+function tapOrb() {
+  const box = $("team");
+  if (!box) return;
+  box.classList.toggle("show");
+  teamKeepUntil = Date.now() + 350;
+  if (box.classList.contains("show")) box.querySelector("#team-list button")?.focus();
+}
+/* Текст ошибки для человека: событие (не прочитался файл, не загрузилась картинка) — словами, а не «[object ProgressEvent]»
+   (пакет 22.10, жалоба №181) */
+function errText(e) {
+  if (e && e.message) return String(e.message);
+  if (e && typeof Event !== "undefined" && e instanceof Event) {
+    const t = e.target || {}, err = t.error && t.error.name;
+    return t instanceof FileReader ? "файл не прочитался" + (err ? ` (${err})` : "") + " — возможно, это папка, файл в облаке или занят другой программой"
+      : "не загрузилось" + (t.src || t.currentSrc ? ": " + String(t.src || t.currentSrc).slice(0, 80) : "");
+  }
+  return String(e);
+}
+function showErr(e) {
+  const msg = errText(e);
+  showCap(null, msg, true); hideCapLater(12000);
+  // сразу после ошибки — отчёт разработчику одним нажатием (журнал + настройки без ключей); нет связи — файлом на рабочий стол
+  const b = document.createElement("button"); b.className = "rep"; b.textContent = "Отправить отчёт разработчику";
+  b.onclick = (ev) => { ev.stopPropagation(); b.disabled = true; b.textContent = "Отправляю…"; hideCapLater(60000);
+    core.call("report_send", { note: "Ошибка в виджете: " + msg.slice(0, 300) })
+      .then(r => { b.textContent = `Отчёт №${r.id} отправлен — спасибо!`; hideCapLater(6000); })
+      .catch(err => core.call("report").then(p => { const d = p.split(/[\\/]/).slice(-2, -1)[0] || "";
+        b.textContent = `Не отправился (${err.message.slice(0, 80)}) — сохранил в папку «${d}»`; b.title = p; }))
+      .catch(err => { b.textContent = err.message; }); };
+  $("bot").appendChild(b);
+}
+// первый сбой за запуск, а про отчёты ещё не спрашивали: предложить отправлять их самому (с согласия)
+function reportOffer(e) {
+  showCap(null, "Что-то пошло не так" + (e.summary ? `: ${e.summary.slice(0, 120)}` : "") + ". Можно отправлять разработчику отчёт о таких сбоях "
+    + "самому — журнал работы и настройки без ключей и паролей. Так ошибки исправят быстрее.", false);
+  const row = document.createElement("div"); row.className = "repask";
+  const yes = document.createElement("button"); yes.className = "rep"; yes.textContent = "Отправлять отчёты сами";
+  const no = document.createElement("button"); no.className = "rep"; no.textContent = "Не надо";
+  yes.onclick = (ev) => { ev.stopPropagation(); core.call("report_auto", { on: true }).then(() => { $("bot").textContent = "Хорошо — при сбое отчёт уйдёт сам. Выключить — в студии, «О программе»."; hideCapLater(6000); }); };
+  no.onclick = (ev) => { ev.stopPropagation(); core.call("report_auto", { on: false }).then(() => hideCapLater(300)); };
+  row.append(yes, no); $("bot").appendChild(row); hideCapLater(45000);
+}
+
+// созвон начался (core/engine_audio._meeting_watch) — предложить суфлёр: молча слушает и подсказывает на экране
+function prompterOffer(e) {
+  if (mode !== "card") return;
+  showCap(null, "Идёт созвон" + (e.apps && e.apps.length ? ` (${e.apps.join(", ")})` : "") + ". Включить суфлёр? Я буду молча слушать и подсказывать на экране.", false);
+  const row = document.createElement("div"); row.className = "repask";
+  const yes = document.createElement("button"); yes.className = "rep"; yes.textContent = "Открыть суфлёр";
+  const no = document.createElement("button"); no.className = "rep"; no.textContent = "Не сейчас";
+  yes.onclick = (ev) => { ev.stopPropagation(); const a = api(); if (a && a.open_prompter) a.open_prompter(); hideCapLater(300); };
+  no.onclick = (ev) => { ev.stopPropagation(); hideCapLater(300); };
+  row.append(yes, no); $("bot").appendChild(row); hideCapLater(40000);
+}
+
+/* Знакомство голосом (core/engine_intro.py): пока идёт — «Пропустить»; рассказ о кнопках — подсвечиваем их по очереди;
+   в конце — фразы «попробуйте» кнопками под ответом; нет мозга — открываем студию на нужном разделе. */
+let introTry = null, introHl = [];
+function introClear() { introHl.forEach(clearTimeout); introHl = []; document.querySelectorAll(".btn.hl").forEach(b => b.classList.remove("hl")); $("bar").classList.remove("pinned"); }
+function introStep(e) {
+  if (e.step === "done") { document.body.classList.remove("intro"); introClear(); return; }
+  document.body.classList.add("intro");
+  if (e.step === "buttons" || (e.buttons && e.buttons.length)) {
+    introClear(); $("bar").classList.add("pinned");
+    (e.buttons || []).forEach((id, i) => {
+      introHl.push(setTimeout(() => { document.querySelectorAll(".btn.hl").forEach(b => b.classList.remove("hl")); const b = $(id); if (b) b.classList.add("hl"); }, 1600 + i * 1900));
+    });
+    introHl.push(setTimeout(introClear, 1600 + (e.buttons || []).length * 1900 + 1200));
+  }
+  if (e.step === "try") { introClear(); introTry = e.phrases || null; }
+  if (e.step === "brain") { const a = api(); if (a) a.open_settings(e.page || "brain"); }
+}
+$("intro-skip").onclick = (ev) => { ev.stopPropagation(); core.call("intro_stop").catch(() => {}); document.body.classList.remove("intro"); introClear(); hideCapLater(300); };
+
+/* «Отвечать текстом»: голос молчит, ответы — только в виджете (как значок динамика в телефоне) */
+let textOnly = false;
+function setTextOnly(on) { textOnly = !!on; $("b-voice-inline").classList.toggle("on", textOnly); $("b-voice-inline").title = textOnly ? "Отвечать голосом" : "Отвечать только текстом"; }
+$("b-voice-inline").onclick = guard($("b-voice-inline"), () => core.call("settings_save", { patch: { tts: { text_only: !textOnly } } })
+  .then(s => { setTextOnly(s.tts.text_only); showCap("", textOnly ? "Отвечаю только текстом — голос молчит." : "Снова отвечаю голосом."); hideCapLater(2500); }).catch(showErr));
+/* ---------- таймеры: обратный отсчёт ---------- */
+let TMR = [], tmrTick = 0;
+const tmrAt = (x) => new Date(x.at).getTime(), tmrFrom = (x) => new Date(x.created || x.at).getTime();
+function tmrFmt(ms) { const s = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), c = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(c).padStart(2, "0")}` : `${m}:${String(c).padStart(2, "0")}`; }
+const tmrWords = (m) => m >= 60 && m % 60 === 0 ? (m / 60 === 1 ? "час" : `${m / 60} ч`) : `${m} мин`;
+function tmrSet(items) {
+  TMR = (items || []).filter(x => x.kind === "timer" && !x.paused && tmrAt(x) > Date.now() - 1500 && tmrAt(x) - Date.now() < 24 * 3600e3)
+    .sort((a, b) => tmrAt(a) - tmrAt(b)).slice(0, 3);
+  const box = $("tmr");
+  box.innerHTML = TMR.map(x => `<div class="tr" data-id="${x.id}"><svg class="pg" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.5"/><circle class="fg" cx="18" cy="18" r="15.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg>`
+    + `<div class="tt"><b></b><span></span></div><button title="Отменить таймер" aria-label="Отменить таймер"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("");
+  TMR.forEach((x, i) => { const r = box.children[i];
+    const mins = Math.round((tmrAt(x) - tmrFrom(x)) / 60000);
+    r.querySelector(".tt span").textContent = !x.text || /^Таймер$/i.test(x.text) ? (mins >= 1 ? `таймер на ${tmrWords(mins)}` : "таймер") : x.text;
+    r.querySelector("button").onclick = (ev) => { ev.stopPropagation(); core.call("reminder_cancel", { id: x.id }).catch(() => {}); }; });
+  clearInterval(tmrTick); if (TMR.length) tmrTick = setInterval(tmrDraw, 250);
+  tmrDraw();
+}
+function tmrDraw() {
+  const now = Date.now(), box = $("tmr");
+  TMR = TMR.filter(x => tmrAt(x) > now - 1500);
+  box.classList.toggle("on", TMR.length > 0); $("tarc").classList.toggle("on", TMR.length > 0); $("tmini").classList.toggle("on", TMR.length > 0);
+  if (!TMR.length) { clearInterval(tmrTick); box.innerHTML = ""; return; }
+  TMR.forEach(x => { const r = box.querySelector(`.tr[data-id="${x.id}"]`); if (!r) return;
+    const left = tmrAt(x) - now, all = Math.max(1000, tmrAt(x) - tmrFrom(x)), done = Math.min(100, Math.max(0, 100 - left / all * 100));
+    r.querySelector(".tt b").textContent = tmrFmt(left); r.classList.toggle("end", left <= 10000);
+    r.querySelector(".fg").style.strokeDashoffset = String(done); });
+  const n = TMR[0], left = tmrAt(n) - now, all = Math.max(1000, tmrAt(n) - tmrFrom(n));
+  $("tarc").querySelector("circle").style.strokeDashoffset = String(Math.min(100, Math.max(0, 100 - left / all * 100)));
+  $("tmini").textContent = tmrFmt(left);
+}
+
+function voiceSwitchAvailable() { return !!window.pywebview?.api?.request_microphone_access; }
+function updateAudioMode(mode) {
+  audioMode = mode;
+  $("b-mic").disabled = mode === "text" && !voiceSwitchAvailable();
+  $("b-mic").title = mode === "text" ? (voiceSwitchAvailable() ? "Включить голосовой режим" : "Голосовой ввод недоступен в текстовом режиме") : muted ? "Включить микрофон" : "Выключить микрофон";
+  $("b-mic").setAttribute("aria-label", $("b-mic").title);
+  setState(state);
+}
+window.addEventListener("pywebviewready", () => updateAudioMode(audioMode));
+core.on("audio_mode", e => updateAudioMode(e.mode));
+core.on("hello", d => {
+  updateAudioMode(d.audio_mode || "voice");
+  tmrSet(d.reminders);
+  applyLook(d.settings.ui);
+  featuresSet(d.settings.features);
+  setLocal(d.settings.privacy && d.settings.privacy.local_only);
+  setModelSettings(d.settings.llm); refreshModelHint();
+  personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
+  applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status); selectedMic = (d.settings.audio && d.settings.audio.input) || ""; setAskModel(d.status && d.status.llm);
+  if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Модели» → «Подключить бесплатно».", true); }
+})
+.on("offline", () => { setState("offline"); $("bubble").title = "Нет связи с ядром. Это индикатор режима ввода; модель выбирается отдельной кнопкой в строке сообщения."; $("bubble").setAttribute("aria-label", $("bubble").title); })
+.on("reminders", e => tmrSet(e.items))
+.on("state", e => {
+  setState(e.state); if (e.persona && (!current || e.persona !== current.id)) applyPersona(e.persona);
+  // ответа так и не будет (фразу отбросили, имя почудилось, перебили) — убираем ожидание
+  if ((e.state === "idle" || e.state === "listening") && ($("bot").classList.contains("wait") || $("bot").textContent === "Слушаю…"))
+    hideCapLater(e.state === "idle" ? 400 : 7000);
+})
+.on("turn", e => {                         // ответ закончен — ход у человека: «Ваша очередь» с тающей полосой
+  turnUntil = Date.now() + (e.seconds || 0) * 1000;
+  const bub = $("bubble"); bub.classList.remove("turn"); void bub.offsetWidth;    // новая очередь — полоса заново
+  setState("listening");
+  clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
+  window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
+})
+.on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); featuresSet((e.settings || {}).features); setModelSettings((e.settings || {}).llm); setAskModel(null, (e.settings || {}).audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
+.on("persona", e => applyPersona(e.persona))
+.on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
+.on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") $("dict-level").firstElementChild.style.width = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100) + "%"; })
+.on("wake", () => { /* имя услышано — об этом говорит надпись «Я вас слушаю»; карточку не открываем:
+                       если имя почудилось (шум, телевизор), не останется висящих точек */ })
+.on("heard", e => { if (e.text) showCap(e.text, WAIT); else showCap("", "Слушаю…"); })
+.on("media", e => {                       // картинки из базы знаний персонажа (гравюры, схемы) и к рассказу (show_images)
+  const pics = e.source === "pics";                     // show_images: поисковик картинок (или Commons)
+  const box = $("media"); if (!pics || !TL.media) box.innerHTML = "";
+  if (pics) { TL.media = (TL.media || []).concat(e.items || []).slice(0, 12); moreBtn(); }
+  (e.items || []).slice(0, pics ? 4 : 3).forEach(m => { const im = document.createElement("img"); im.src = m.src; im.title = (m.title || "") + (m.author ? " — " + m.author : m.site ? " — " + m.site : "");
+    im.referrerPolicy = "no-referrer"; im.onerror = () => im.remove();
+    im.onclick = (ev) => { ev.stopPropagation(); const lb = $("lightbox"), big = lb.querySelector("img");
+      big.referrerPolicy = "no-referrer"; big.onerror = () => { if (big.src !== m.src) big.src = m.src; };   // оригинал с сайта не дался — миниатюра
+      big.src = m.full || m.src;
+      lb.querySelector("span").textContent = (m.title || "") + (m.author ? " · " + m.author : "") + (m.license ? " · " + m.license : "") + (m.site && !m.author ? " · " + m.site : ""); lb.classList.add("on"); }; box.appendChild(im); });
+  if (box.children.length) { $("cap").classList.add("show"); hideCapLater(30000); }
+})
+.on("answer", e => {
+  showCap(null, capText(e.text)); if (e.done) hideCapLater(Math.min(20000, 5000 + e.text.length * 60));
+  if (e.done && e.sources && e.sources.length) {   // ответ по документам — источники кнопками: нажать — открыть файл
+    const box = document.createElement("div"); box.className = "srcs";
+    e.sources.forEach(x => { const b = document.createElement("button"); b.title = "Открыть: " + (x.label || x.name);
+      b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span></span>';
+      b.querySelector("span").textContent = x.name;
+      b.onclick = (ev) => { ev.stopPropagation(); core.call("knowledge_open_file", { key: x.key }).catch(showErr); }; box.appendChild(b); });
+    $("bot").appendChild(box); hideCapLater(45000);
+  }
+  if (introTry && e.done) {                       // знакомство: фразы «попробуйте» — нажмите, и вопрос уйдёт ассистенту
+    const box = document.createElement("div"); box.className = "itry";
+    introTry.forEach(t => { const b = document.createElement("button"); b.textContent = t;
+      b.onclick = (ev) => { ev.stopPropagation(); core.call("say", { text: t }).catch(showErr); }; box.appendChild(b); });
+    $("bot").appendChild(box); introTry = null; hideCapLater(90000);
+  }
+})
+.on("intro", introStep)
+.on("error", e => showErr(e.text))
+.on("report_offer", reportOffer)
+.on("prompter", e => { if (e.kind === "open" && mode === "card") { const a = api(); if (a && a.open_prompter) a.open_prompter(); } })
+.on("prompter_offer", prompterOffer)
+.on("push", e => { showCap(null, `${e.title}${e.text ? " — " + e.text : ""}`, !!e.critical && e.title.startsWith("⚠")); hideCapLater(9000); })
+.on("sleep", () => { showCap(null, "Сплю. Позовите по имени — или нажмите на облик.", false); hideCapLater(2500); })
+.on("interrupted", () => hideCapLater(1500))
+.on("status", e => { note(e.status); if (e.status && typeof e.status === "object") setAskModel(e.status.llm || e.status.model); })
+.on("muted", e => { muted = !!e.on; $("b-mic").classList.toggle("on", muted); updateAudioMode(audioMode); })
+.on("calib", e => {
+  if (e.step === "listen") showCap("", `Скажите «${e.name}» — 1 из ${e.need}`);
+  if (e.step === "sample") showCap("", e.n < e.need ? `Ещё раз «${e.name}» — ${e.n + 1} из ${e.need}` : "Запоминаю…");
+  if (e.step === "done") { showCap("", `Готово! Теперь зовите: «${e.name}, …»`); hideCapLater(6000); }
+  if (e.step === "error") showErr(e.error);
+})
+.on("tool", e => {
+  const a = $("act"); a.className = "on " + (e.status === "run" ? "run" : e.status === "error" ? "bad" : "");
+  a.textContent = e.status === "run" ? `${e.title}…` : e.status === "done" ? `${e.title} — готово` :
+                  e.status === "declined" ? `${e.title} — отменено` : `${e.title}: ${e.error || "не получилось"}`;
+  a.classList.toggle("fin", e.status === "done" || e.status === "declined");
+  showCap(null, null);
+})
+.on("confirm", e => { showCap(null, e.text); $("yn").classList.add("on"); $("y").focus(); requestAnimationFrame(fitCap); })
+.on("confirm_done", () => { $("yn").classList.remove("on"); requestAnimationFrame(fitCap); })
+.on("handoff", e => { $("act").className = "on"; $("act").textContent = `Отвечает ${e.name}${e.role ? " · " + e.role.toLowerCase() : ""}`; })
+.on("note_saved", e => {
+  $("rem-ico").textContent = { list: "🛒", fact: "🧠" }[e.kind] || "📝";
+  $("rem-when").textContent = { list: "В список · " + e.title, fact: "Запомнил о вас" }[e.kind] || "Записал в заметки";
+  $("rem-text").textContent = e.kind === "note" ? e.title : e.text; $("rem").dataset.id = ""; $("rem").dataset.path = e.path || "";
+  $("rem-undo").textContent = "Открыть"; $("rem").classList.remove("money", "power"); $("rem").classList.add("note", "show");
+  clearTimeout($("rem")._t); $("rem")._t = setTimeout(() => $("rem").classList.remove("show"), 12000);
+})
+.on("money_saved", e => {
+  if (!e.id || !e.amount || e.deleted) return;
+  const sign = e.kind === "income" ? "+" : "−", cur = { BYN: "руб.", RUB: "₽", USD: "$", EUR: "€" }[e.currency] || e.currency;
+  $("rem-ico").textContent = e.kind === "income" ? "💰" : "💸";
+  $("rem-when").textContent = `${sign}${Number(e.amount).toLocaleString("ru-RU")} ${cur} · ${e.category}`;
+  $("rem-text").textContent = e.note || (e.kind === "income" ? "доход" : "расход"); $("rem").dataset.id = ""; $("rem").dataset.mid = e.id;
+  $("rem-undo").textContent = "Отменить"; $("rem").classList.remove("note", "power"); $("rem").classList.add("money", "show");
+  clearTimeout($("rem")._t); $("rem")._t = setTimeout(() => $("rem").classList.remove("show"), 12000);
+})
+.on("power", e => {
+  const el = $("rem"); clearInterval(el._cd); clearTimeout(el._t);
+  if (e.cancelled) { if (el.classList.contains("power")) { $("rem-when").textContent = "Отменено"; el._t = setTimeout(() => el.classList.remove("show", "power"), 2000); } return; }
+  if (!e.seconds || e.seconds < 10) return;
+  const what = { shutdown: "Выключение", reboot: "Перезагрузка", logout: "Выход из системы" }[e.action] || "Выключение";
+  let left = e.seconds; $("rem-ico").textContent = "⏻"; $("rem-text").textContent = "Скажите «отмени выключение» или нажмите";
+  const tick = () => { $("rem-when").textContent = `${what} через ${left} с`; if (left-- <= 0) { clearInterval(el._cd); el.classList.remove("show", "power"); } };
+  tick(); el._cd = setInterval(tick, 1000);
+  $("rem-undo").textContent = "Отменить"; el.dataset.id = ""; el.classList.remove("note", "money"); el.classList.add("power", "show");
+})
+.on("reminder_set", e => {
+  const it = e.item || {};
+  if (it.kind === "timer") return;                 // таймер — живым отсчётом (#tmr), а не карточкой $("rem-when").textContent = it.when + (it.repeat_text ? " · " + it.repeat_text : "") + (it.att ? ` · 📎 ${it.att}` : "");
+  $("rem-ico").textContent = it.kind === "timer" ? "⏱" : it.kind === "job" ? "🗓" : "⏰"; $("rem-undo").textContent = "Отменить"; $("rem").classList.remove("note", "money", "power"); clearInterval($("rem")._cd);
+  $("rem-text").textContent = it.text || ""; $("rem").dataset.id = it.id || ""; $("rem").classList.add("show");
+  clearTimeout($("rem")._t); $("rem")._t = setTimeout(() => $("rem").classList.remove("show"), 14000);
+})
+// окно напоминания открывает только окно карточки — иначе их было бы два
+.on("alarm", e => { const a = api(); if (e.window !== false && a && a.show_alarm && mode === "card") a.show_alarm(e); })
+.on("reminder", e => { $("act").className = "on"; $("act").textContent = "Напоминание"; showCap("", e.text); hideCapLater(15000); })
+.on("heard", () => { $("act").className = ""; });
+
+/* Чем занят ассистент, если «задумался»: ядро не отвечает, команда выполняется долго, модель думает долго —
+   чтобы было понятно, завис он, обновляется или что-то докачивает. Раз в 5 с — ping; ответ говорит, какая
+   команда (cmd) и сколько секунд (oldest) уже выполняется. */
+const CMD_RU = { tts_test: "пробует голос", llm_test: "проверяет модель", check_all: "проверяет всё", update_check: "проверяет обновления",
+                 cloud_models: "спрашивает модели облака", radio: "включает радио", say: "отвечает" };
+let pingAt = 0, offlineSince = 0, connectedAt = 0;
+let restarting = 0;
+const pageAt = Date.now();
+core.on("hello", () => { connectedAt = Date.now(); });
+/* Долгое молчание ядра — почти всегда запуск (грузятся слух, голос, модели) или долгая работа, а не сбой; тревожное
+   «не отвечает» пугает зря. Поэтому сначала — спокойное «запускаюсь / занят», и только если долго — мягкий совет и
+   кнопка перезапуска (api().restart_core). */
+function health(text, bad, restart, calm) {
+  const el = $("health"); el.textContent = text || ""; el.classList.toggle("on", !!text); el.classList.toggle("bad", !!bad);
+  el.classList.toggle("calm", !!calm && !bad);
+  if (text && calm) { const d = document.createElement("span"); d.className = "dots"; el.appendChild(d); }
+  if (text && restart && api() && api().restart_core) {                      // ядро молчит давно — предложить перезапуск
+    const b = document.createElement("button"); b.textContent = Date.now() - restarting < 30000 ? "Перезапускаю…" : "Перезапустить";
+    b.disabled = Date.now() - restarting < 30000;
+    b.onclick = (ev) => { ev.stopPropagation(); restarting = Date.now(); b.disabled = true; b.textContent = "Перезапускаю…"; api().restart_core(); };
+    el.appendChild(b);
+  }
+}
+setInterval(() => {
+  if (!core.connected) {                                   // связи нет (ядро упало или перезапускается) — тоже предложить перезапуск
+    pingAt = 0; offlineSince = offlineSince || Date.now();
+    const sec = Math.round((Date.now() - offlineSince) / 1000);
+    const starting = Date.now() - pageAt < 150000 || Date.now() - restarting < 120000;
+    if (sec <= 6) return health("");
+    if (starting || sec < 90) return health("Dewiar запускается — секунду", false, false, true);
+    return health("Dewiar долго не запускается. Можно перезапустить — настройки и разговор сохранятся.", false, true);
+  }
+  offlineSince = 0;
+  const now = Date.now();
+  if (pingAt) {                                         // прошлый «ping» ещё без ответа — ядро занято
+    const sec = Math.round((now - pingAt) / 1000);
+    const warmup = now - connectedAt < 150000 || now - restarting < 150000;       // только что запустилось / обновилось
+    if (sec < 8) return;
+    if (warmup && sec < 150) health("Готовлюсь к работе: загружаю слух и голос", false, false, true);
+    else if (sec < 60) health("Секунду — заканчиваю предыдущее", false, false, true);
+    else if (sec < 150) health("Работаю над тяжёлым делом — подождите немного", false, false, true);
+    else health("Долго не отвечаю. Если так и не пройдёт — перезапустите: настройки и разговор сохранятся.", false, true);
+    return;
+  }
+  pingAt = now;
+  core.call("ping").then(r => {
+    pingAt = 0;
+    const think = (state === "thinking") ? Math.round((Date.now() - stateSince) / 1000) : 0;
+    if (think > 40) health(`Модель отвечает долго — ${think} с. «Стоп» — прервать`);
+    else if (r && r.oldest > 25) health(`Занят: ${CMD_RU[r.cmd] || r.cmd} — ${Math.round(r.oldest)} с`);
+    else health("");
+  }).catch(() => { pingAt = 0; });
+}, 5000);
+function note(st) {
+  if (!st) return;
+  // первая загрузка (status.loading: {этап: {t, f}}): «Готовлюсь: голоса персонажей · 40%» и полоска; ещё этапы — «и ещё N»
+  const lds = Object.values(st.loading || {}), ld = lds.find(x => x.f != null && x.f < 1) || lds[0];
+  const ldText = ld ? "Готовлюсь: " + ld.t.charAt(0).toLowerCase() + ld.t.slice(1) + (ld.f != null && ld.f < 1 ? ` · ${Math.round(ld.f * 100)}%` : "…")
+    + (lds.length > 1 ? ` (и ещё ${lds.length - 1})` : "") : "";
+  const bar = $("ldbar"); bar.classList.toggle("on", !!ld); bar.classList.toggle("run", !!ld && (ld.f == null || ld.f >= 1));
+  bar.firstChild.style.width = ld && ld.f != null && ld.f < 1 ? Math.round(ld.f * 100) + "%" : "";
+  const dl = Object.values(st.downloads || {}).find(v => v < 1);
+  const base = st.note ? st.note + (dl !== undefined && !ld ? ` ${Math.round(dl * 100)}%` : "") :
+    st.meeting ? `🎧 Созвон${(st.meeting.apps || []).length ? " (" + st.meeting.apps.join(", ") + ")" : ""} — ` + (st.meeting.mode === "pause" ? "слушаю только по кнопке" : "откликаюсь только на главное имя") : "";   // какая программа — видно сразу (отзыв 17.10, OBS)
+  $("note").textContent = [ld && st.note && /^(Загружаю|Скачиваю)/.test(st.note) ? "" : base, ldText].filter(Boolean).join("\n");
+  // созвон или компьютеру не хватает памяти (status.tight) — облик почти неподвижен, кадры редкие
+  if (typeof entity !== "undefined") entity.calm = !!(st.meeting && st.meeting.mode === "pause") || !!st.tight;
+}
+
+/* когда в карточке есть текст, поле ввода или вопрос «Да/Нет» — сфера становится меньше */
+new MutationObserver(() => {
+  const b = $("cap").classList.contains("show") || $("yn").classList.contains("on") || $("ask").style.display === "block";
+  // строка задачи/обновления не требует уменьшать облик
+  $("card").classList.toggle("busy", b);
+}).observe($("mid"), { subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+
+/* перетаскивание — за любое место карточки; нажатие на сферу — говорить. Окно двигает программа (move_to,
+   логические px экрана); после перетаскивания положение сохраняется в настройки (hud_x, hud_y) */
+let drag = null;
+const card = $("card");
+/* Диктовка удержанием (как голосовое в Telegram): нажали на облик и держите (или пробел) — говорите сколько нужно,
+   паузы не обрывают; отпустили — уходит одним вопросом. Увели палец в сторону или Esc — отмена. Короткое нажатие —
+   как раньше («слушай» / «замолчи»). Ядро берёт звук с самого нажатия (hold_start back_ms), так что начало не теряется. */
+function holdShow() {
+  const say = $("say"), bub = $("bubble");
+  if (!hold || !hold.on) { bub.classList.remove("hold", "holdx"); $("orb").classList.remove("holding"); return setState(state); }
+  const sec = Math.floor((Date.now() - hold.t0) / 1000);
+  bub.classList.add("live", "hold"); bub.classList.remove("turn"); bub.classList.toggle("holdx", !!hold.far); $("orb").classList.add("holding");
+  say.textContent = hold.far ? "Отпустите — отменить" : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")} · отпустите — отправлю`;
+  say.title = "Держите и говорите сколько нужно — паузы не обрывают. Увести в сторону или Esc — отмена";
+}
+function holdBegin(by) {
+  if (audioMode === "text") { openAsk(); return; }
+  if (hold || state === "offline") return;
+  hold = { on: false, t0: Date.now(), far: false, by, timer: null };
+  hold.wait = setTimeout(() => {                       // держат дольше 0,3 с — это удержание, а не нажатие
+    if (!hold) return;
+    hold.on = true; hold.t0 = Date.now() - 300;
+    core.call("hold_start", { back_ms: 450 }).catch(e => { hold = null; holdShow(); showErr(e); });
+    hold.timer = setInterval(holdShow, 250); holdShow();
+  }, 300);
+}
+function holdFinish(cancel) {
+  const h = hold; if (!h) return false;
+  hold = null; clearTimeout(h.wait); clearInterval(h.timer);
+  if (!h.on) return false;                             // это было короткое нажатие
+  holdShow();
+  core.call("hold_end", { cancel: !!(cancel || h.far) }).catch(showErr);
+  return true;
+}
+core.on("hold", e => { if (!e.on && hold && hold.on) { clearInterval(hold.timer); hold = null; holdShow(); } });   // ядро само закончило (предел 10 минут)
+card.addEventListener("pointerdown", async (ev) => {
+  // строки задачи и обновления — кнопки: не перехватываем указатель, иначе щелчок до них не дойдёт
+  // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
+  // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
+  // строки «ИИ-баланс…» и объявления — тоже кнопки (24.10: щелчок по #cloudlow уходил в перетаскивание и студия не открывалась)
+  if (ev.button !== 0 || ev.target.closest("button, input, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
+  card.setPointerCapture(ev.pointerId);
+  drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
+  if (drag.orb) holdBegin("mouse");
+  const a = api(); if (a) drag.pos = await a.get_pos(mode);
+  if (a && a.drag_begin && /^Win/.test(navigator.platform)) drag.win = await a.drag_begin(mode).catch(() => false);   // Windows: окно идёт за курсором (№169)
+});
+document.addEventListener("keydown", (e) => {          // пробел в виджете — то же удержание (не в поле ввода)
+  if (e.code === "Escape" && hold) { e.preventDefault(); if (!holdFinish(true)) hold = null; return; }
+  if (e.code !== "Space" || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (/^(INPUT|TEXTAREA|BUTTON|SELECT)$/.test((document.activeElement || {}).tagName || "") || $("reader").classList.contains("on")) return;
+  e.preventDefault(); holdBegin("key");
+});
+document.addEventListener("keyup", (e) => {
+  if (e.code !== "Space" || !hold || hold.by !== "key") return;
+  e.preventDefault();
+  if (!holdFinish(false)) tapOrb();                    // короткий пробел — как нажатие на облик
+});
+window.addEventListener("blur", () => { if (hold && hold.by === "key") holdFinish(false); });   // ушли из окна с зажатым пробелом
+let raf = 0;
+card.addEventListener("pointermove", (ev) => {
+  if (!drag) return;
+  const dx = ev.screenX - drag.sx, dy = ev.screenY - drag.sy;
+  if (hold && hold.on) {                               // удержание: окно не двигаем; далеко увели — «отпустите — отменить»
+    const far = Math.hypot(dx, dy) > 90;
+    if (far !== hold.far) { hold.far = far; holdShow(); }
+    return;
+  }
+  if (hold && !hold.on && Math.hypot(dx, dy) > 5) { clearTimeout(hold.wait); hold = null; }   // потащили — это перетаскивание
+  if (!drag.moved && Math.hypot(dx, dy) > 5) { drag.moved = true; card.classList.add("dragging"); }
+  if (drag.moved && drag.pos && !raf) {
+    raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (!a || !drag) return;
+      if (drag.win) a.drag_step(mode); else a.move_to(mode, drag.pos[0] + dx, drag.pos[1] + dy); });
+  }
+});
+card.addEventListener("pointerup", () => {
+  if (!drag) return;
+  const d = drag; drag = null; card.classList.remove("dragging");
+  if (hold && hold.by === "mouse" && holdFinish(false)) return;   // отпустили после удержания — отправили (или отмена)
+  if (d.moved) { const a = api(); if (a) a.save_pos(mode).then(p => core.call("settings_save", { patch: { ui: { hud_x: p[0], hud_y: p[1] } } })).catch(() => {}); return; }
+  if (!d.orb || state === "offline") return;
+  tapOrb();
+});
+card.addEventListener("pointercancel", () => { if (hold && hold.by === "mouse") holdFinish(true); drag = null; card.classList.remove("dragging"); });
+
+$("y").onclick = () => core.call("confirm_answer", { ok: true }).catch(showErr);
+$("n").onclick = () => core.call("confirm_answer", { ok: false }).catch(showErr);
+async function enableMacVoice() {
+  if (!voiceSwitchAvailable()) throw Error("Откройте приложение Dewiar для включения микрофона");
+  let status = await window.pywebview.api.microphone_permission();
+  if (status.state === 'not_determined' && !status.requested)status = await window.pywebview.api.request_microphone_access();
+  const deadline = Date.now() + 60000;
+  while (status.pending && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    status = await window.pywebview.api.microphone_permission();
+  }
+  if (!status.granted) {
+    if (["denied", "restricted"].includes(status.state)) await window.pywebview.api.open_microphone_settings();
+    throw Error(status.retry_blocked ? "Системный запрос уже отправлен. Проверьте Dewiar: настройки macOS → Конфиденциальность и безопасность → Микрофон. Повторный запрос не открываю." : "Разрешите микрофон для Dewiar в настройках macOS и нажмите кнопку ещё раз.");
+  }
+  await core.call("audio_enable");
+  updateAudioMode("voice");
+}
+function dictationUi(on) {
+  dictating = !!on;
+  $("a-mic").classList.toggle("recording", dictating);
+  $("a-mic").title = dictating ? "Диктовка идёт — пауза завершит фразу" : "Диктовка в поле: говорите, пауза завершит фразу";
+  $("a-mic").setAttribute("aria-label", $("a-mic").title);
+  $("dict-tools").classList.toggle("on", dictating);
+  if (!dictating) $("dict-level").firstElementChild.style.width = "0%";
+}
+core.on("dictation", e => {
+  if (e.state === "recording") { openAsk(); dictationUi(true); return; }
+  if (e.state === "cancelled") { dictationUi(false); return; }
+  if (e.state === "done") {
+    dictationUi(false);
+    if (e.text) { const t = $("askin"); t.value = (t.value ? t.value.replace(/\s*$/, "") + " " : "") + e.text.trim(); fitAsk(); t.focus(); }
+  }
+});
+async function startDictation() {
+  if (dictating) return;
+  if (audioMode === "text") await enableMacVoice();
+  await core.call("dictation_start");
+  dictationUi(true); openAsk(); $("askin").focus();
+}
+$("a-mic").onclick = guard($("a-mic"), () => startDictation().catch(showErr), () => "Включаю диктовку в поле сообщения…");
+$("dict-cancel").onclick = () => core.call("dictation_cancel").catch(showErr);
+$("dict-done").onclick = () => core.call("dictation_finish").catch(showErr);
+async function showMicMenu() {
+  const menu = $("mic-menu"), list = $("mic-list");
+  if (menu.classList.contains("on")) { menu.classList.remove("on"); return; }
+  list.innerHTML = "<div style=\"padding:8px;color:var(--muted);font-size:11px\">Загружаю список…</div>";
+  menu.classList.add("on");
+  try {
+    const ds = await core.call("devices");
+    const src = (ds || []).filter(d => d.kind === "source");
+    list.innerHTML = "";
+    const add = (name, value) => { const b = document.createElement("button"); b.type = "button"; b.className = value === selectedMic ? "cur" : ""; b.textContent = name; b.title = name === "Системный по умолчанию" ? "Использовать микрофон, выбранный в macOS" : "Выбрать «" + name + "»"; b.onclick = async () => { try { await core.call("settings_save", { patch: { audio: { input: value } } }); selectedMic = value; menu.classList.remove("on"); } catch (e) { showErr(e); } }; list.appendChild(b); };
+    add("Системный по умолчанию", "");
+    src.forEach(d => add(d.description || d.name, d.name));
+    if (!src.length) list.innerHTML = "<div style=\"padding:8px;color:var(--muted);font-size:11px\">Микрофоны не найдены. Проверьте доступ macOS.</div>";
+  } catch (e) { list.innerHTML = "<div style=\"padding:8px;color:var(--muted);font-size:11px\">Не удалось получить список микрофонов</div>"; }
+}
+$("a-mic-pick").onclick = showMicMenu;
+document.addEventListener("mousedown", e => { if (!e.target.closest("#mic-menu, #a-mic-pick")) $("mic-menu").classList.remove("on"); });
+$("b-mic").onclick = guard($("b-mic"), () => audioMode === "text" ? enableMacVoice().catch(showErr) : core.call("mute", { on: !muted }).then(m => { muted = m; $("b-mic").classList.toggle("on", m); $("b-mic").title = m ? "Включить микрофон" : "Выключить микрофон"; }).catch(showErr), () => audioMode === 'text' ? 'Ожидаю разрешение macOS на микрофон или подключение голосового ввода…' : 'Переключаю микрофон…');
+$("b-set").onclick = () => { const a = api(); if (a) a.open_settings(); };
+/* Dewiar Облако: заряд на исходе — мягкая строка в виджете (нажать — студия, «Модели») */
+core.on("cloud", c => {
+  const el = $("cloudlow"), show = c && c.connected && c.active && (c.low || c.empty || c.frozen);
+  el.className = show ? "on" + (c.empty || c.frozen ? " empty" : "") : "";
+  el.textContent = !show ? "" : c.frozen ? (c.site ? "Доступ к ИИ на сайте приостановлен" : "Ключ Dewiar приостановлен")
+    : c.empty ? (c.site ? "ИИ-баланс на dewiar.pro закончился — пополните" : "ИИ-баланс закончился — пополните")
+    : `ИИ-баланс: ${c.site ? (c.balance_text || c.balance + " тал.") : c.percent + "%"} — скоро пополнить`;
+});
+$("cloudlow").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
+/* объявления для всех (core: _ann_fetch, событие ann): строка «📣 заголовок»; нажали — студия покажет окно с фото и ссылкой */
+let annHidden = 0;
+function annSet(it) {
+  const el = $("annb"); if (!it || it.id <= annHidden) { el.className = ""; return; }
+  el.dataset.id = it.id; el.className = "on" + (it.level === "warn" ? " warn" : "");
+  $("annb-t").textContent = (it.level === "warn" ? "⚠️ " : "📣 ") + (it.title || it.text || "Новость Dewiar");
+}
+core.on("ann", e => annSet(e.item));
+core.on("hello", () => setTimeout(() => core.call("ann").then(r => annSet((r.items || []).find(i => i.id > (r.seen || 0)))).catch(() => {}), 1500));
+$("annb").onclick = () => { const a = api(); if (a) a.open_settings(); };        // студия при появлении сама покажет непрочитанное
+$("annb-x").onclick = (e) => { e.stopPropagation(); annHidden = +($("annb").dataset.id || 0); $("annb").className = ""; };
+/* письма близких (core/close.py: события close_msg — новое, close — непрочитанное): строка держится, пока есть непрочитанное */
+const CLB = { pid: "", hid: 0 };
+function clbSet(st, last) {
+  const people = (st && st.people) || [], n = people.reduce((a, p) => a + (p.unread || 0), 0), el = $("clb");
+  if (!n || n <= CLB.hid) { el.className = ""; if (!n) CLB.hid = 0; return; }
+  const p = (last && people.find(x => x.pid === last.pid)) || people.find(x => x.pid === CLB.pid && x.unread) || people.find(x => x.unread);
+  if (!p) { el.className = ""; return; }
+  const l = last && last.pid === p.pid ? { t: last.text, f: last.files } : (p.last && !p.last.out ? { t: p.last.t, f: (p.last.f || []).map(x => x.name) } : {});
+  CLB.pid = p.pid; el.className = "on";
+  $("clb-t").textContent = `💌 ${p.name}: ${l.t || ((l.f || []).length ? "📎 " + l.f[0] : "новое сообщение")}`;
+  $("clb-n").hidden = n < 2; $("clb-n").textContent = n;
+}
+core.on("close_msg", e => { CLB.hid = 0; core.call("close_state").then(st => clbSet(st, e)).catch(() => clbSet({ people: [{ pid: e.pid, name: e.name, unread: 1 }] }, e)); })
+  .on("close", e => { if ($("clb").classList.contains("on") || CLB.hid) clbSet(e.state); })
+  .on("hello", () => setTimeout(() => core.call("close_state").then(st => clbSet(st)).catch(() => {}), 2000));
+$("clb").onclick = () => { const a = api(); if (a) a.open_settings("close"); };
+$("clb-x").onclick = (e) => { e.stopPropagation(); CLB.hid = +($("clb-n").textContent || 1) || 1; $("clb").className = ""; };
+$("b-cal").onclick = () => { const a = api(); if (a) a.open_settings("calendar"); };
+function setLocal(on) {
+  const button = $("b-lo"); button.hidden = false;
+  $("corner-l").classList.toggle("lo", !!on);
+  button.title = on ? "Безопасность: только локально. Внешние подключения запрещены" : "Безопасность: внешние подключения разрешены";
+  button.setAttribute("aria-label", button.title + ". Открыть настройки безопасности");
+}
+$("b-lo").onclick = () => { const a = api(); if (a) a.open_settings("safety"); };
+let hudModels = {}, hudModelRequest = 0;
+function setAskModel(name, audio) {
+  const el = $("ask-model"); if (!el) return;
+  const text = String(name || "").trim();
+  el.textContent = text || "Модель не подключена";
+  el.title = text ? "Активная модель: " + text : "Модель не подключена — откройте настройки «Модели»";
+  el.classList.toggle("off", !text);
+}
+function setModelSettings(llm) {
+  hudModels = llm || {};
+  $("bubble").title = "Только состояние режима ввода. Модель выбирается отдельной кнопкой в строке сообщения.";
+  $("bubble").setAttribute("aria-label", "Состояние режима ввода; модель выбирается отдельной кнопкой");
+}
+async function refreshModelHint() {
+  const version = ++hudModelRequest;
+  try {
+    // Local metadata only: never refresh subscription limits or send an inference request.
+    const status = await core.call("models_routing_status");
+    if (version !== hudModelRequest) return;
+    const id = status.automatic ? status.next : hudModels.active;
+    const p = (hudModels.profiles || {})[id];
+    const chosen = p?.model || (id ? id : "нет доступной модели");
+    $("bubble").title = "Режим ввода: " + ($("say").textContent || "готов").trim() + ". Модель выбирается отдельной кнопкой в строке сообщения.";
+    $("bubble").setAttribute("aria-label", $("bubble").title);
+    setAskModel(status.selected?.model || chosen);
+  } catch (_) { /* Keep the settings-derived model if the core is unavailable. */ }
+}
+// Индикатор режима не открывает настройки и не запускает выбор модели. Обновление активной модели
+// выполняется общей проверкой состояния и отдельной кнопкой с названием модели в строке ввода.
+$("bubble").onclick = () => { $("bubble").title = "Это индикатор режима ввода. Для выбора модели нажмите на название модели в строке сообщения или откройте раздел «Модели»."; };
+$("ask-model").onclick = (e) => { e.stopPropagation(); const a = api(); if (a) a.open_settings("brain"); };
+$("ask-model").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("ask-model").click(); } };
+setInterval(() => { if (core.connected && !document.hidden) refreshModelHint(); }, 15000);
+// жалоба: сначала снимок экрана (каким его видит человек в момент проблемы), потом форма в студии («О программе»)
+$("b-bug").onclick = guard($("b-bug"), async () => {
+  note({ note: "Снимаю экран для жалобы…" });
+  try { await core.call("bug_shot"); } catch (e) { /* без снимка — форма всё равно откроется */ }
+  note({ note: "" });
+  const a = api(); if (a) a.open_settings("about");
+});
+$("a-stop").onclick = () => {
+  const b = $("a-stop");
+  if (b.dataset.busy) return;
+  b.dataset.busy = "1"; b.disabled = true; b.title = "Останавливаю текущий ответ…";
+  setRunControls("idle");
+  core.call("stop").catch(showErr).finally(() => { delete b.dataset.busy; b.disabled = false; b.title = "Остановить ответ и текущую работу модели"; });
+};
+$("b-chat").onclick = () => { const a = api(); if (a) a.open_settings("chat"); };   // совместимость со старыми сценариями
+$("b-notes").onclick = () => { const a = api(); if (a) a.open_settings("notes"); };
+/* фоновые задачи и обновления — строкой в карточке */
+const tasks = {}, doneAt = {}, dismissed = new Set();
+/* задача готова — прямо в виджете: что получилось и кнопки «Посмотреть», «HTML» / «Скачать», «PDF»; висит 30 минут
+   или пока не скроют */
+function renderDone(el, t) {
+  const esc = (s) => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const o = (t.outputs || [])[(t.outputs || []).length - 1], ext = o ? o.path.split(".").pop().toLowerCase() : "", page = ["html", "htm"].includes(ext);
+  el.innerHTML = `<div class="tl">✅ <b>${esc(t.title)}</b><button class="tx" title="Скрыть">×</button></div>` +
+    (o ? `<div class="tsub">${esc(o.title || o.path)}</div><div class="tbtn"><button data-a="view">Посмотреть</button>` +
+         `<button data-a="${page ? "html" : "file"}">${page ? "HTML" : "Скачать"}</button>${page || ext === "md" ? `<button data-a="pdf">PDF</button>` : ""}</div>`
+       : `<div class="tsub">Итог — в студии, «Задачи»</div>`);
+  el.querySelector(".tx").onclick = (ev) => { ev.stopPropagation(); dismissed.add(t.id); renderTask(); };
+  el.querySelectorAll(".tbtn button").forEach(b => b.onclick = async (ev) => {
+    ev.stopPropagation();
+    const a = b.dataset.a, was = b.textContent; b.disabled = true;
+    try {
+      if (a === "view") await core.call("task_open_result", { id: t.id, path: o.path });
+      else { b.textContent = a === "pdf" ? "PDF…" : "…"; const r = await core.call("task_export", { id: t.id, path: o.path, fmt: a });
+             showCap("", `Сохранено в «${r.dir.split(/[\\/]/).pop()}»: ${r.name}`); hideCapLater(6000); }
+    } catch (e) { showCap("", e.message); hideCapLater(8000); }
+    finally { b.disabled = false; b.textContent = was; }
+  });
+}
+function renderTask() { renderTask_(); requestAnimationFrame(fitCap); }
+function renderTask_() {
+  const act = Object.values(tasks).filter(t => ["running", "waiting"].includes(t.status));
+  let t = act.find(x => x.status === "waiting") || act[0];
+  const el = $("task");
+  const fresh = Object.values(tasks).filter(x => x.status === "done" && doneAt[x.id] && Date.now() - doneAt[x.id] < 30 * 60e3 && !dismissed.has(x.id))
+    .sort((a, b) => doneAt[b.id] - doneAt[a.id])[0];
+  el.classList.toggle("on", !!(t || fresh));
+  el.classList.toggle("done", !t && !!fresh);
+  if (!t && fresh) return renderDone(el, fresh);
+  if (!t) return;
+  const pr = t.progress && t.progress[1] ? t.progress[0] / t.progress[1] : 0;
+  const esc = (s) => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  el.innerHTML = t.status === "waiting"
+    ? `<div class="tl">❓ <b>${esc(t.title)}</b></div><div class="tsub">${esc(t.question)}</div>`
+    : `<div class="tl"><span class="spin"></span><b>${esc(t.title)}</b><em>${t.progress && t.progress[1] ? `${t.progress[0]}/${t.progress[1]}` : `шаг ${t.steps}`}</em></div>` +
+      (t.activity ? `<div class="tsub">${esc(t.activity)}</div>` : "") + `<i class="tp"><b style="width:${Math.max(4, pr * 100)}%"></b></i>`;
+}
+core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); if (d.update && (d.update.available || d.update.failed)) showUpd(d.update); })
+    .on("task", e => {
+      const prev = tasks[e.task.id];
+      if (e.task.status === "done" && (!prev || prev.status !== "done")) doneAt[e.task.id] = Date.now();
+      tasks[e.task.id] = e.task; renderTask();
+    })
+    .on("update", e => showUpd(e.update));
+$("task").onclick = () => { const a = api(); if (a) a.open_settings("tasks"); };
+/* значок обновления у жучка: есть обновление — ставит сразу (как строка «Доступна версия…»); нет — проверяет (и скачивает
+   найденное) и тоже ставит; новее нет — так и говорит строкой на 5 секунд */
+const UPD = { avail: null };
+function updMsg(t, ms) {
+  const u = $("upd"); u.classList.add("on"); u.textContent = t; u.onclick = null; clearTimeout(window._updMsgT);
+  if (ms) window._updMsgT = setTimeout(() => { if (!UPD.avail) u.classList.remove("on"); }, ms);
+}
+$("b-upd").onclick = async () => {
+  const b = $("b-upd"); if (b.classList.contains("busy") || updating) return;
+  if (UPD.avail) { $("upd").classList.add("on"); if ($("upd").onclick) $("upd").onclick(); return; }
+  b.classList.add("busy"); updMsg("Проверяю обновления…");
+  let u = null;
+  try { u = await core.call("update_check"); } catch (e) { b.classList.remove("busy"); updMsg("Не получилось проверить: " + (e.message || e), 6000); return; }
+  b.classList.remove("busy");
+  if (u && u.available) { showUpd(u); if ($("upd").onclick) $("upd").onclick(); return; }
+  updMsg(u && u.error ? `Не получилось проверить: ${String(u.error).slice(0, 120)}` : `У вас последняя версия${u && u.current ? " — " + u.current : ""}`, 5000);
+};
+function showUpd(u) {
+  const f = u && u.failed && u.failed.path ? u.failed : null;
+  if (f) {           // нажимали «обновить», а запустилась прежняя версия — открыть установщик обычным окном: в нём видно, что мешает
+    $("upd").classList.add("on");
+    $("upd").textContent = `Обновление до ${f.version} не установилось — нажмите, чтобы открыть установщик`;
+    $("upd").onclick = async () => {
+      const x = api(); if (!x) return;
+      if (typeof x.run_installer !== "function") { $("upd").textContent = `Скачайте Dewiar ${f.version} с dewiar.pro и запустите установщик`; return; }
+      const r = await x.run_installer(f.path).catch(e => ({ ok: false, error: e.message }));
+      $("upd").textContent = r.ok ? "Установщик открыт — следуйте его шагам" : `Не получилось: ${r.error}. Скачайте Dewiar ${f.version} с dewiar.pro`;
+    };
+    return;
+  }
+  const a = u && u.available; $("upd").classList.toggle("on", !!a);
+  UPD.avail = a || null; $("b-upd").classList.toggle("has", !!a); $("corner-l").classList.toggle("upd", !!a);
+  $("b-upd").title = a ? `Доступна версия ${a.version} — нажмите, чтобы обновить` : "Обновления — проверить и обновить одним нажатием";
+  if (a) $("upd").textContent = `Доступна версия ${a.version} — нажмите, чтобы обновить`;
+  $("upd").onclick = async () => {
+    const x = api(); if (!x || !a) return;
+    // страница новее запущенной программы (обновились, а интерфейс не перезапускали) — кнопки установки в ней нет
+    if (typeof x.install_update !== "function") { $("upd").textContent = "Закройте Dewiar и откройте снова — затем обновите"; return; }
+    $("upd").textContent = navigator.platform.startsWith("Win") ? "Устанавливаю… Dewiar перезапустится сам" : "Устанавливаю… система спросит пароль";
+    updating = Date.now();
+    const r = await x.install_update(a.path).catch(e => ({ ok: false, error: e.message }));
+    if (!r.ok) { $("upd").textContent = `Не получилось: ${r.error} — нажмите, чтобы попробовать снова`; updating = 0; return; }
+    updating = Date.now();
+    if (!r.started || typeof x.update_progress !== "function") { $("upd").textContent = "Готово — перезапускаюсь…"; return; }
+    // Linux: установка только началась — показываем ход, а не «готово» сразу (пакет 22.10, №173: «выглядит, как будто
+    // зависло»): ждём пароль → ставлю N % → перезапускаюсь; отменили пароль или ошибка — так и пишем, можно повторить
+    clearInterval(window._updT);
+    window._updT = setInterval(async () => {
+      let u = null; try { u = await x.update_progress(); } catch (e) { return; }
+      if (!u || !u.stage) return;
+      updating = Date.now();
+      if (u.stage === "auth") $("upd").textContent = "Введите пароль в окне системы — без него обновление не встанет";
+      else if (u.stage === "install") $("upd").textContent = `Ставлю обновление… ${u.pct ? u.pct + " %" : ""}`.trim();
+      else if (u.stage === "restart" || u.stage === "done") { $("upd").textContent = "Готово — перезапускаюсь…"; clearInterval(window._updT); }
+      else if (u.stage === "error") { clearInterval(window._updT); updating = 0;
+        $("upd").textContent = `Не встало: ${String(u.error || "ошибка установки").slice(0, 140)} — нажмите, чтобы попробовать снова`; }
+    }, 700);
+  };
+}
+
+/* карточка ↔ значок: это два окна; эта страница живёт в одном из них */
+const mode = new URLSearchParams(location.search).get("mode") === "mini" ? "mini" : "card";
+if (new URLSearchParams(location.search).get("tw") === "1") document.documentElement.classList.add("tw");
+// растянутая карточка — и портрет крупнее (--ok: во сколько раз карточка больше обычной 300×420, 1…1,6)
+function orbScale() {
+  const z = (window.DewiarZoom && DewiarZoom.get().zoom) || 1;
+  const k = Math.max(1, Math.min(1.6, Math.min(innerWidth / z / 300, innerHeight / z / 420)));
+  document.documentElement.style.setProperty("--ok", k.toFixed(3));
+}
+addEventListener("resize", () => { orbScale(); requestAnimationFrame(fitAsk); });
+orbScale();
+/* Растянуть карточку за правый нижний угол: окно меняет размер на лету (Api.resize_card), отпустили — размер в
+   настройки (ui.hud_w, ui.hud_h — при масштабе 100 %, так он переживает смену масштаба). Двойной щелчок — по умолчанию. */
+(() => {
+  const g = $("grip"); if (!g) return;
+  let rs = null, raf = 0, last = null;
+  g.addEventListener("pointerdown", async (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    const a = api(); if (!a || !a.resize_card) return;
+    g.setPointerCapture(ev.pointerId); g.classList.add("on");
+    rs = { sx: ev.screenX, sy: ev.screenY, size: await a.card_size() };
+  });
+  g.addEventListener("pointermove", (ev) => {
+    if (!rs || !rs.size) return;
+    last = [Math.round(rs.size[0] + ev.screenX - rs.sx), Math.round(rs.size[1] + ev.screenY - rs.sy)];
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; const a = api(); if (a && last) a.resize_card(last[0], last[1], false); });
+  });
+  const done = (ev) => {
+    if (!rs) return;
+    const r = rs; rs = null; g.classList.remove("on");
+    const a = api(); if (!a || !last || !r.size) { last = null; return; }
+    a.resize_card(last[0], last[1], true).then(b => { if (b) core.call("settings_save", { patch: { ui: { hud_w: b[0], hud_h: b[1] } } }).catch(() => {}); }).catch(() => {});
+    last = null;
+  };
+  g.addEventListener("pointerup", done);
+  g.addEventListener("pointercancel", done);
+  g.addEventListener("dblclick", (ev) => {
+    ev.stopPropagation(); const a = api(); if (!a || !a.resize_card) return;
+    a.resize_card(0, 0, true).then(b => { if (b) core.call("settings_save", { patch: { ui: { hud_w: null, hud_h: null } } }).catch(() => {}); }).catch(() => {});
+  });
+})();
+document.body.classList.toggle("mini", mode === "mini");
+window.hudActive = (on) => { entity.paused = !on; if (on && entity._wake) entity._wake(); };     // зовёт app.py (_activate): спрятанное окно не анимирует облик
+function setMode(m, auto = false) {
+  const a = api(); if (!a || m === mode) return;
+  a.set_mode(m, auto).then(p => { if (p && !auto) core.call("settings_save", { patch: { ui: { hud_mode: m, hud_x: p[0], hud_y: p[1] } } }).catch(() => {}); }).catch(() => {});
+}
+$("b-team").onclick = (e) => { e.stopPropagation(); tapOrb(); };
+$("team-close").onclick = (e) => { e.stopPropagation(); $("team").classList.remove("show"); $("orb")?.focus?.(); };
+document.addEventListener("click", (e) => { if (Date.now() < teamKeepUntil) return; if (!e.target.closest("#team, #orb")) $("team").classList.remove("show"); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("team").classList.contains("show")) { e.preventDefault(); $("team").classList.remove("show"); $("orb")?.focus?.(); } });
+$("orb").addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && !hold) { e.preventDefault(); tapOrb(); } });
+$("grow").onclick = () => setMode("card");
+core.on("confirm", () => { const a = api(); if (mode === "mini") setMode("card", true); else if (a && a.cancel_back) a.cancel_back(); })   // «Да/Нет» нужно видеть
+    .on("confirm_done", () => { const a = api(); if (a && mode === "card") a.auto_back(); })
+    .on("wake", () => popUp());                                                                      // спрятанный виджет возвращается на имя
+
+/* трей: виджет спрятан, ассистент слушает. Появляется сам — на имя, «слушаю», напоминание, уведомление, вопрос «Да/Нет»;
+   поговорили и стало тихо — прячется обратно. Слушает только окно карточки, чтобы не звать дважды. */
+let backT = null;
+function popUp() { const a = api(); if (a && mode === "card") { clearTimeout(backT); a.show(); } }
+function backLater(ms) { const a = api(); if (!a || mode !== "card") return; clearTimeout(backT); backT = setTimeout(() => a.tray_back && a.tray_back(), ms); }
+$("b-pad").onclick = () => { const a = api(); if (a && a.pad_toggle) a.pad_toggle("notes"); };
+$("b-play").onclick = () => { const a = api(); if (a && a.pad_toggle) a.pad_toggle("play"); };
+$("b-orb").onclick = () => setOrbVisible(!orbShown, true);
+let gamesFeature = true;                                  // «Возможности» → «Досуг» (features.games); нет ключа — включено
+const padCheck = () => { const a = api(); $("b-pad").hidden = !(a && a.pad_toggle); $("b-play").hidden = !(a && a.play_open) || !gamesFeature; };   // окно без блокнота (старая оболочка) — кнопки нет
+window.addEventListener("pywebviewready", padCheck); setTimeout(padCheck, 1500);
+const featuresSet = (f) => { gamesFeature = !(f && f.games === false); padCheck(); };
+window.padMark = (on, m) => { const play = !!on && m === "play"; $("b-pad").classList.toggle("on", !!on && !play); $("b-play").classList.toggle("on", play);
+  $("corner").classList.toggle("pinned", !!on); };
+$("b-tray").onclick = () => { const a = api(); if (!a || !a.to_tray) return; a.to_tray();
+  core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); };
+/* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */
+core.on("window", e => { const a = api(); if (!a || mode !== "card") return;
+  if (e.do === "tray" && a.to_tray) { a.to_tray(); core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); }
+  else if (e.do === "show" && a.from_tray) a.from_tray();
+  else if (e.do === "quit" && a.quit_all) a.quit_all();
+  else if (e.do === "play" && a.play_open) a.play_open(e.game || ""); });                // «Лира, давай поиграем» — «Досуг» в листе у виджета
+window.trayLeft = () => { if (mode === "card") core.call("settings_save", { patch: { ui: { hud_tray: false } } }).catch(() => {}); };
+core.on("state", e => { if (e.state === "listening") popUp(); if (e.state === "idle") backLater(9000); else clearTimeout(backT); })
+    .on("push", () => { popUp(); backLater(12000); })
+    .on("reminder", () => { popUp(); backLater(20000); })
+    .on("confirm", () => popUp());
+$("b-type").onclick = () => {
+  const box = $("ask");
+  box.style.display = "block"; $("bar").classList.add("pinned");
+  $("askin").focus();
+  setTimeout(fitAsk, 0);
+};
+/* вложения: скрепка, перетащить на виджет, Ctrl+V (картинка или файл), снимок экрана одной кнопкой */
+let atts = [];                                   // {kind: "image"|"file", name, url | b64, size}
+const IMG = /^image\//, MAXF = 11e6;
+function shrink(file) {
+  return new Promise((ok, bad) => {
+    const img = new Image(); img.onerror = () => bad(new Error("это не картинка"));
+    img.onload = () => { const k = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src); ok(c.toDataURL("image/jpeg", 0.88)); };
+    img.src = URL.createObjectURL(file);
+  });
+}
+const b64of = (file) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result);
+  r.onerror = () => bad(new Error(`«${file.name}» не прочитался${r.error && r.error.name ? " (" + r.error.name + ")" : ""} — возможно, это папка, файл в облаке или занят другой программой`));
+  r.readAsDataURL(file); });
+function renderAtts() {
+  const box = $("atts"); box.innerHTML = "";
+  atts.forEach((a, i) => {
+    const d = document.createElement("div"); d.className = "att";
+    const ext = (a.name.split(".").pop() || "").slice(0, 4).toUpperCase();
+    d.innerHTML = a.kind === "image" ? `<img alt=""><span></span><button title="Убрать">×</button>` : `<i class="ic"></i><span></span><button title="Убрать">×</button>`;
+    if (a.kind === "image") d.querySelector("img").src = a.url; else d.querySelector(".ic").textContent = ext || "ФАЙЛ";
+    d.querySelector("span").textContent = a.name;
+    d.querySelector("button").onclick = (ev) => { ev.stopPropagation(); atts.splice(i, 1); renderAtts(); };
+    box.appendChild(d);
+  });
+  $("askbox").classList.toggle("has", !!$("askin").value.trim() || atts.length > 0);
+}
+async function addFiles(list) {
+  for (const f of list) {
+    try {
+      if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f) });
+      else if (f.size > MAXF) showErr(`«${f.name}» больше 11 МБ — положите его в папку ассистента`);
+      else atts.push({ kind: "file", name: f.name, b64: await b64of(f), size: f.size });
+    } catch (err) { showErr(err); }
+  }
+  renderAtts(); openAsk();
+}
+function openAsk() { $("ask").style.display = "block"; $("bar").classList.add("pinned"); $("card").classList.add("chat-open"); requestAnimationFrame(fitAsk); }
+$("a-att").onclick = () => $("a-file").click();
+$("a-file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
+$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(url => { atts.push({ kind: "image", name: "Снимок экрана", url }); renderAtts(); }).catch(showErr));
+document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
+document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
+document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
+/* Картинка из буфера: страница получает её не везде (WebKitGTK часто отдаёт при вставке только текст) — тогда спрашиваем
+   окно (Api.clipboard_image: буфер GTK / Pillow на Windows). Ctrl+V работает и когда поле вопроса закрыто. */
+async function pasteImage(quiet) {
+  const a = window.api && window.api();
+  const url = a && a.clipboard_image ? await a.clipboard_image() : "";
+  if (url) { atts.push({ kind: "image", name: "Из буфера обмена", url }); renderAtts(); openAsk(); return true; }
+  if (!quiet) { showCap(null, "В буфере обмена нет картинки — скопируйте снимок или фото и нажмите ещё раз."); hideCapLater(5000); }
+  return false;
+}
+$("a-clip").onclick = (e) => { e.stopPropagation(); pasteImage(false); };
+$("askin").addEventListener("paste", (e) => {
+  const items = [...(e.clipboardData.items || [])];
+  const files = items.filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); addFiles(files); return; }
+  if (!e.clipboardData.getData("text")) { e.preventDefault(); pasteImage(true); }      // текста нет — значит, картинка
+});
+document.addEventListener("keydown", (e) => {          // Ctrl+V мимо поля вопроса — открыть поле с картинкой из буфера
+  if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "м") && document.activeElement !== $("askin")
+      && !/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || "")) { e.preventDefault(); pasteImage(true); }
+});
+function sendAsk() {
+  const q = $("askin").value.trim();
+  if (!q && !atts.length) return;
+  const images = atts.filter(a => a.kind === "image").map(a => a.url);
+  const files = atts.filter(a => a.kind === "file").map(a => ({ name: a.name, b64: a.b64 }));
+  const label = q || atts.map(a => a.name).join(", ");
+  tlReset(label);
+  const kept = atts;
+  core.sendLater("say", { text: q, images, files }).catch(e => {   // не дошло — вопрос обратно в поле (№200)
+    if (!$("askin").value.trim()) { $("askin").value = q; atts = kept; renderAtts(); fitAsk(); }
+    showErr(new Error(errText(e) + " — вопрос вернул в поле, отправьте ещё раз"));
+  });
+  showCap(label + (q && atts.length ? `  📎${atts.length}` : ""), core.connected ? WAIT : "нет связи с ядром — отправлю, как только вернётся");
+  $("askin").value = ""; atts = []; renderAtts(); fitAsk(); openAsk();
+}
+/* Поле растёт под текст и при изменении ширины окна (до доступной высоты, дальше прокрутка). Важно
+   сначала сбросить старую высоту: при сужении окна scrollHeight должен пересчитаться по новым переносам. */
+function fitAsk() {
+  const t = $("askin"); if (!t) return;
+  t.style.height = "24px";
+  const available = Math.max(120, Math.min(260, Math.floor(innerHeight * .36)));
+  const longText = $("card").classList.contains("long") || t.value.length > 60 || t.value.includes("\n");
+  const lim = Math.min(available, longText ? 260 : 120);
+  const h = Math.min(t.scrollHeight, lim); t.style.height = Math.max(24, h) + "px";
+  $("askbox").classList.toggle("has", !!t.value.trim() || atts.length > 0);
+  t.classList.toggle("scroll", t.scrollHeight > lim);
+  const long = t.value.length > 60 || t.value.includes("\n");
+  $("card").classList.toggle("long", long && $("ask").style.display === "block");
+  const n = t.value.length, lines = t.value.split("\n").length;
+  const pl = (k, a, b, c) => k % 10 === 1 && k % 100 !== 11 ? a : k % 10 >= 2 && k % 10 <= 4 && (k % 100 < 10 || k % 100 >= 20) ? b : c;
+  $("askn").textContent = "";
+}
+/* Перетаскивание уголка меняет размер webview не во всех сборках с событием window.resize.
+   Поэтому дополнительно следим только за изменением ширины поля (изменение высоты не вызывает
+   повторный пересчёт) и не создаём цикл ResizeObserver. */
+let askWidth = 0;
+new ResizeObserver(entries => {
+  const w = entries[0]?.contentRect?.width || 0;
+  if (w && Math.abs(w - askWidth) > .5) { askWidth = w; fitAsk(); }
+}).observe($("askbox"));
+$("a-send").onclick = sendAsk;
+
+/* ---------- ход работы и ответ целиком ---------- */
+const TL = { you: "", steps: [], answer: "" };
+const escR = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function mdLite(t) {
+  const parts = String(t || "").split(/```/);
+  return parts.map((p, i) => {
+    if (i % 2) { const code = p.replace(/^[\w+-]*\n/, ""); return `<pre><button class="cp">Копировать</button><code>${escR(code.replace(/\n$/, ""))}</code></pre>`; }
+    let h = escR(p).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    const out = []; let list = null, num = 0;          // num — номер первого пункта нумерованного списка (0 — точки)
+    const close = () => { if (list) out.push(num ? `<ol start="${num}">${list.join("")}</ol>` : `<ul>${list.join("")}</ul>`); list = null; };
+    for (const line of h.split("\n")) {
+      const li = line.match(/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/), hd = line.match(/^\s*#{1,6}\s+(.*)$/);
+      if (li) { const n = li[1] ? +li[1] : 0; if (list && !n !== !num) close(); if (!list) { list = []; num = n; } list.push(`<li>${li[2]}</li>`); continue; }
+      close();
+      if (hd) out.push(`<span class="h">${hd[1]}</span>`);
+      else if (line.trim()) out.push(`<p>${line}</p>`);
+    }
+    close();
+    return out.join("");
+  }).join("");
+}
+function tlReset(you) { TL.you = you || ""; TL.steps = []; TL.answer = ""; TL.media = null; moreBtn(); }
+function moreBtn() {
+  const a = TL.answer || "", long = a.length > 260 || a.includes("```") || a.split("\n").length > 5 || !!(TL.media && TL.media.length);
+  const n = TL.steps.length;
+  $("more").textContent = n ? `Ход работы (${n}) и ответ` : "Открыть целиком";
+  $("more").classList.toggle("on", long || n > 0);
+  requestAnimationFrame(fitCap);
+  if ($("reader").classList.contains("on")) renderReader();
+}
+function renderReader() {
+  const box = $("rd-body"), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+  const st = TL.steps.map(x => `<li class="${x.status}"><div class="st">${escR(x.title)}${x.status === "run" ? "…" : x.status === "declined" ? " — отменено" : ""}</div>`
+    + (x.detail ? `<div class="sd">${escR(x.detail)}</div>` : "") + (x.error ? `<div class="se">${escR(x.error)}</div>` : "")
+    + (x.result ? `<details><summary>что получил</summary><pre><button class="cp">Копировать</button><code>${escR(x.result)}</code></pre></details>` : "") + `</li>`).join("");
+  box.innerHTML = (TL.you ? `<div class="q">${escR(TL.you)}</div>` : "") + (st ? `<h4>Ход работы</h4><ul class="steps">${st}</ul>` : "")
+    + (TL.answer ? `${st ? "<h4>Ответ</h4>" : ""}<div class="md">${mdLite(TL.answer)}</div>` : "")
+    + (TL.media && window.DewiarRich ? DewiarRich.gallery(TL.media) : "");
+  $("rd-title").textContent = TL.steps.length && !TL.answer ? "Ход работы" : "Ответ целиком";
+  if (window.DewiarRich) DewiarRich.diagrams(box).then(n => { if (n && atEnd) box.scrollTop = box.scrollHeight; });   // ```mermaid — схемой
+  if (atEnd) box.scrollTop = box.scrollHeight;
+}
+function copyText(t, btn) {
+  const done = () => { btn.textContent = "Скопировано"; setTimeout(() => btn.textContent = "Копировать", 1500); };
+  const fb = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} ta.remove(); };
+  try { navigator.clipboard.writeText(t).then(done, fb); } catch (e) { fb(); }
+}
+$("rd-body").addEventListener("click", (e) => { const b = e.target.closest(".cp"); if (b) { e.preventDefault(); copyText(b.parentNode.querySelector("code").textContent, b); } });
+$("rd-body").addEventListener("mousedown", (e) => e.stopPropagation());
+const openReader = () => { renderReader(); $("reader").classList.add("on"); const b = $("rd-body"); b.scrollTop = 0; };
+$("more").onclick = (e) => { e.stopPropagation(); openReader(); };
+$("act").onclick = (e) => { e.stopPropagation(); openReader(); };
+$("rd-x").onclick = () => $("reader").classList.remove("on");
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("reader").classList.contains("on")) $("reader").classList.remove("on"); });
+core.on("heard", e => { if (e.text) tlReset(e.text); })
+    .on("answer", e => { TL.answer = e.text || ""; moreBtn(); })
+    .on("confirm", e => { TL.steps.push({ name: "_confirm", title: "Спрашиваю разрешение", detail: e.text || "", status: "run" }); moreBtn(); })
+    .on("confirm_done", e => { const c = [...TL.steps].reverse().find(x => x.name === "_confirm" && x.status === "run");
+      if (c) { c.status = e.ok ? "done" : "declined"; c.title = e.ok ? "Разрешили" : "Не разрешили"; moreBtn(); } })
+    .on("tool", e => {
+      const last = [...TL.steps].reverse().find(x => x.name === e.name && x.status === "run");
+      if (e.status === "run" || !last) TL.steps.push({ name: e.name, title: e.title || e.name, detail: e.detail || "", status: e.status, error: e.error || "", result: e.result || "" });
+      else Object.assign(last, { status: e.status, error: e.error || "", result: e.result || "", detail: e.detail || last.detail });
+      moreBtn();
+    });
+$("lightbox").onclick = () => $("lightbox").classList.remove("on");
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && $("lightbox").classList.contains("on")) { e.preventDefault(); $("lightbox").classList.remove("on"); } }, true);
+$("askin").addEventListener("input", fitAsk);
+$("askin").addEventListener("keydown", (e) => {
+  // Enter — обычный перенос строки; отправка явно по Ctrl/⌘+Enter, как в современных чатах агентов.
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing) { e.preventDefault(); sendAsk(); }
+  if (e.key === "Escape") $("b-type").click();
+});
+</script>
+<div id="htip" role="tooltip" aria-hidden="true"></div>
+<script>
+(function () {                                  // подсказки кнопок внутри карточки (см. #htip в стилях)
+  const tip = document.getElementById("htip"); let cur = null, timer = 0;
+  const hide = () => { clearTimeout(timer); tip.classList.remove("on"); cur = null; };
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest && e.target.closest("[title], [data-tip]");
+    if (!el || el === cur) return;
+    if (el.hasAttribute("title")) { el.dataset.tip = el.getAttribute("title"); el.removeAttribute("title"); }
+    if (!el.dataset.tip) return;
+    hide(); cur = el;
+    timer = setTimeout(() => {
+      if (cur !== el || !el.isConnected) return;
+      tip.textContent = el.dataset.tip;
+      const r = el.getBoundingClientRect(), w = Math.min(tip.offsetWidth, innerWidth - 20), h = tip.offsetHeight;
+      const x = Math.max(10, Math.min(innerWidth - w - 10, r.left + r.width / 2 - w / 2));
+      const y = r.bottom + 8 + h <= innerHeight - 6 ? r.bottom + 8 : Math.max(6, r.top - h - 8);
+      tip.style.left = x + "px"; tip.style.top = y + "px"; tip.classList.add("on");
+    }, 550);
+  });
+  document.addEventListener("mouseout", (e) => { if (cur && !cur.contains(e.relatedTarget)) hide(); });
+  ["mousedown", "wheel", "keydown", "blur"].forEach(k => addEventListener(k, hide, true));
+})();
+</script>
+<script src="assets/hud-help-titles.js"></script>
+<script src="assets/contact-suggestion.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон значка «Записать»: матово-чёрный, как карточка ассистента и значок Dewiar, без обводки (отзыв 17.10:
+     «фиолетовый надоел, может чёрный… и обводку убрать», «больше скруглить», потом «слишком скруглено») — 22dp -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="22dp"/>
+    <solid android:color="#EE0A0A0D"/>
+</shape>

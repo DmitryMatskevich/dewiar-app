@@ -1,0 +1,16 @@
+name: Идея
+description: Чего не хватает или что сделать удобнее
+labels: [идея]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что хочется
+      description: Что вы хотите делать с Dewiar и зачем — примером из жизни.
+    validations:
+      required: true
+  - type: textarea
+    id: now
+    attributes:
+      label: Как сейчас
+      description: Как вы делаете это сейчас и что мешает.

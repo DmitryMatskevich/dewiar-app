@@ -1,0 +1,84 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Название презентации</title>
+<!-- Шаблон навыка slides (SKILL.md рядом): модель копирует файл целиком и меняет только <title> и секции
+     <section class="slide …">, классы слайдов описаны в SKILL.md. Файл самодостаточный — без внешних стилей и скриптов.
+     @media print (слайд 1280×720 на страницу) нужен для PDF (core/export.py). Проверки: tests/workshop_test.py
+     (ищет <section class="slide title">) и tests/export_test.py. -->
+<style>
+/* тема по умолчанию (theme-dark) — значения :root; theme-light на <body> переопределяет их */
+:root{--bg:#0d0f1a;--bg2:#161a2e;--tx:#eef0ff;--mut:#a6abcf;--ac:#8b8cf7;--ac2:#e0aaff;--ok:#4be3a1}
+.theme-light{--bg:#f6f7fb;--bg2:#fff;--tx:#151826;--mut:#5b6080;--ac:#5b5cf0;--ac2:#a14fd8}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--tx);font:20px/1.5 "Manrope","Segoe UI",system-ui,sans-serif}
+.slide{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;padding:6vh 8vw;
+  background:radial-gradient(80% 70% at 85% 10%,color-mix(in srgb,var(--ac) 18%,transparent),transparent 60%),
+             radial-gradient(70% 60% at 0% 100%,color-mix(in srgb,var(--ac2) 14%,transparent),transparent 60%),var(--bg)}
+.slide.on{display:flex;animation:in .45s ease}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+h1{font-size:clamp(34px,5.6vw,72px);line-height:1.08;letter-spacing:-.02em;margin:.2em 0 .3em}
+h2{font-size:clamp(26px,3.6vw,48px);line-height:1.15;margin-bottom:.7em;letter-spacing:-.01em}
+h1,h2{background:linear-gradient(90deg,var(--tx),color-mix(in srgb,var(--ac2) 70%,var(--tx)));-webkit-background-clip:text;background-clip:text;color:transparent}
+.kicker{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:var(--ac)}
+.lead{font-size:clamp(18px,2vw,26px);color:var(--mut);max-width:60ch}
+.meta{margin-top:2.2em;color:var(--mut);font-size:16px}
+ul{list-style:none;display:grid;gap:.55em;font-size:clamp(18px,2.1vw,28px)}
+ul li{padding-left:1.2em;position:relative} ul li::before{content:"";position:absolute;left:0;top:.6em;width:.45em;height:.45em;border-radius:50%;background:var(--ac)}
+p{font-size:clamp(17px,1.9vw,25px);color:color-mix(in srgb,var(--tx) 88%,var(--mut));max-width:65ch;margin-bottom:.6em}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:5vw;align-items:start}
+.big .num{font-size:clamp(70px,13vw,190px);font-weight:800;line-height:1;background:linear-gradient(90deg,var(--ac),var(--ac2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.quote blockquote{font-size:clamp(26px,3.4vw,46px);line-height:1.3;max-width:28ch}
+.quote blockquote::before{content:"«"}.quote blockquote::after{content:"»"}
+.quote .who{margin-top:1em;color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:2vw}
+.card{background:color-mix(in srgb,var(--bg2) 85%,transparent);border:1px solid color-mix(in srgb,var(--tx) 10%,transparent);border-radius:20px;padding:1.4em}
+.card b{display:block;font-size:22px;margin-bottom:.4em}.card p{font-size:17px}
+.ico{font-size:44px;margin-bottom:.3em}
+table{border-collapse:collapse;font-size:clamp(15px,1.6vw,22px)}th,td{padding:.5em .9em;border-bottom:1px solid color-mix(in srgb,var(--tx) 14%,transparent);text-align:left}
+th{color:var(--mut);font-weight:600}
+.src{position:absolute;left:8vw;bottom:4vh;font-size:13px;color:var(--mut)}
+.end{align-items:center;text-align:center}
+#bar{position:fixed;left:0;bottom:0;height:4px;background:linear-gradient(90deg,var(--ac),var(--ac2));transition:width .3s;z-index:5}
+#num{position:fixed;right:22px;bottom:14px;font-size:13px;color:var(--mut);z-index:5}
+@media print{@page{size:1280px 720px;margin:0}html,body{height:auto}
+  .slide{display:flex!important;position:relative;width:1280px;height:720px;page-break-after:always;animation:none}#bar,#num{display:none}}
+</style></head>
+<body class="theme-dark">
+
+<section class="slide title">
+  <div class="kicker">Тема · 2026</div>
+  <h1>Главная мысль — одним предложением</h1>
+  <p class="lead">Подзаголовок: зачем эта презентация и что зритель унесёт с собой</p>
+  <div class="meta">Автор · дата</div>
+</section>
+
+<section class="slide">
+  <h2>Заголовок-вывод слайда</h2>
+  <ul><li>Первый пункт — коротко</li><li>Второй пункт — с цифрой: 30%</li><li>Третий пункт</li></ul>
+  <div class="src">Источник: …</div>
+</section>
+
+<section class="slide big"><div class="num">×3</div><p>Одна большая цифра и её смысл</p></section>
+
+<section class="slide cards">
+  <h2>Три идеи</h2>
+  <div class="grid"><div class="card"><div class="ico">⚡</div><b>Быстро</b><p>Пояснение</p></div>
+  <div class="card"><div class="ico">🎯</div><b>Точно</b><p>Пояснение</p></div>
+  <div class="card"><div class="ico">💡</div><b>Просто</b><p>Пояснение</p></div></div>
+</section>
+
+<section class="slide end"><h1>Спасибо!</h1><p class="lead">Вопросы · контакты</p></section>
+
+<div id="bar"></div><div id="num"></div>
+<script>
+// номер слайда — в адресе (#3): обновление страницы не сбрасывает показ. Клик в левой трети — назад, правее — вперёд.
+const S=[...document.querySelectorAll('.slide')];let i=Math.max(0,Math.min(S.length-1,(+location.hash.slice(1)||1)-1));
+function go(n){i=Math.max(0,Math.min(S.length-1,n));S.forEach((s,k)=>s.classList.toggle('on',k===i));
+  document.getElementById('bar').style.width=((i+1)/S.length*100)+'%';document.getElementById('num').textContent=(i+1)+' / '+S.length;history.replaceState(null,'','#'+(i+1));}
+addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' ','Enter'].includes(e.key)){e.preventDefault();go(i+1)}
+  if(['ArrowLeft','PageUp','Backspace'].includes(e.key)){e.preventDefault();go(i-1)}if(e.key==='Home')go(0);if(e.key==='End')go(S.length-1);
+  if(e.key==='f'||e.key==='F')(document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()).catch(()=>{})});
+addEventListener('click',e=>{if(e.target.closest('a'))return;go(e.clientX>innerWidth/3?i+1:i-1)});
+let tx=0;addEventListener('touchstart',e=>tx=e.touches[0].clientX);addEventListener('touchend',e=>{const d=e.changedTouches[0].clientX-tx;if(Math.abs(d)>40)go(d<0?i+1:i-1)});
+go(i);
+</script></body></html>

@@ -1,0 +1,41 @@
+/* One help action per section; field explanations use native title attributes.
+   The title row intentionally reaches the window edge.  A section may keep a
+   narrower reading column, but its help action belongs to the far right of
+   the working area, with a small visual gap from the window edge. */
+main { overflow-x:hidden; }
+main section[id^="p-"] h1 { display:flex; align-items:center; gap:10px; min-width:0; width:calc(100vw - 240px - 44px - 12px); max-width:none; }
+main section[id^="p-"] h1 > span:first-child { min-width:0; }
+.section-help.btn { display:inline-flex; align-items:center; gap:7px; margin-left:auto; margin-right:0; vertical-align:middle; flex:none; font:500 13px/1.4 "Manrope",sans-serif; letter-spacing:0; white-space:nowrap; }
+.help-symbol { display:inline-grid; place-items:center; width:19px; height:19px; border:1.5px solid currentColor; border-radius:50%; font-weight:600; }
+#help[hidden] { display:none; }
+#help { --help-width:380px; width:min(var(--help-width),100%); background:var(--panel,#171c28); padding:22px 22px 40px; border-left:1px solid var(--line,rgba(150,170,200,.2)); }
+#help .help-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+#help .help-top .hx { position:static; flex-shrink:0; }
+#help .help-search-label { display:block; font-size:13px; color:var(--muted); margin-bottom:14px; }
+#help-search { width:100%; margin-top:7px; }
+#help .help-navigation { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:18px; }
+#help h2 { margin:6px 0 18px; font-size:19px; overflow-wrap:anywhere; }
+#help h3 { font:600 14px/1.5 "Manrope",sans-serif; margin:22px 0 8px; }
+#help ol,#help ul { padding-left:21px; line-height:1.6; }
+#help li { margin:8px 0; }
+#help .help-example { background:var(--soft,rgba(140,160,190,.1)); border-radius:12px; padding:12px; margin:10px 0; }
+#help .help-example p { margin-bottom:0; }
+#help .help-result { display:block; width:100%; text-align:left; white-space:normal; margin:8px 0; }
+#help button:focus-visible,.section-help:focus-visible { outline:2px solid var(--accent,#859cff); outline-offset:3px; }
+@media(min-width:1250px){body.context-help-open main { padding-right:420px; }}
+@media(min-width:761px){
+  /* Home has its own header markup, so give only that title row the same edge rail. */
+  #p-home .hm-hi { position:relative; width:calc(100vw - 240px - 44px - 12px); max-width:none; justify-content:flex-start; }
+  #p-home .hm-actions { position:absolute; top:0; right:0; margin-left:0; }
+}
+@media(max-width:760px){
+  main section[id^="p-"] h1 { width:100%; }
+  #help { width:100%; }
+  .section-help.btn { margin-left:auto; margin-right:0; }
+  #p-home .hm-actions { margin-left:0; }
+}
+@media(prefers-reduced-motion:reduce){#help { transition:none; }}
+/* Readable controls even when a previous skin left light glass tokens behind. */
+html:not(.st-light) #help .btn,html:not(.st-light) .section-help.btn { background:rgba(255,255,255,.09); color:var(--ink); box-shadow:none; }
+html:not(.st-light) #help-search { background:rgba(255,255,255,.07); color:var(--ink); box-shadow:none; }
+html:not(.st-light) #help-search::placeholder { color:var(--muted); opacity:1; }

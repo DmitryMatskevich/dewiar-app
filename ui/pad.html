@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar — блокнот</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="assets/skins.css">
+<style>
+  /* Блокнот у виджета (20.10): окно рядом с карточкой (ui/app.py pad_open, ездит вместе с ней), скругление 22px —
+     PAD_RADIUS. Тема — та же, что у виджета (skins.css: --skin-bg, --ink, --muted; light — светлые, neu — мягкие
+     выпуклые формы). Вкладки — заметки «Заметки/Блокнот/*.md» (core/pad.py), правятся сразу «как выглядят»
+     (assets/padmd.js), сохраняются сами и синхронизируются между устройствами.
+     Одно движение на всё окно: при открытии лист «выезжает» из-за виджета (side: left — справа налево). */
+  :root { --r: 22px; --bg: #12131b; --ink: #ECEEF4; --muted: rgba(236,238,244,.6); --faint: rgba(236,238,244,.38);
+          --line: rgba(255,255,255,.08); --chip: rgba(255,255,255,.06); --chip2: rgba(255,255,255,.11); --acc: #8B8CF7;
+          --acc-soft: rgba(139,140,247,.16); --sel: rgba(139,140,247,.28); --code: rgba(255,255,255,.07); --shadow: none; }
+  body.light { --bg: #e7edf6; --ink: #24324a; --muted: rgba(36,50,74,.62); --faint: rgba(36,50,74,.4); --line: rgba(36,50,74,.1);
+               --chip: rgba(36,50,74,.06); --chip2: rgba(36,50,74,.1); --acc: #4f6cf0; --acc-soft: rgba(79,108,240,.12);
+               --sel: rgba(79,108,240,.22); --code: rgba(36,50,74,.07); }
+  /* фон листа — фон темы виджета (--skin-bg), если он у темы есть; своё имя, без ссылки на саму себя (WebKitGTK: цикл
+     переменных — фон пропадал, лист был тёмным при светлой теме) */
+  body { --paper: var(--skin-bg, var(--bg)); }
+  body.neu.light { --shadow: inset 2px 2px 5px var(--neu-dark, #b8c5d6), inset -2px -2px 5px var(--neu-light, #fff); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  html { background: #12131b; }
+  body { font: 14.5px/1.6 "Manrope", "Ubuntu", "Segoe UI", "Noto Sans", sans-serif; color: var(--ink);
+         -webkit-font-smoothing: antialiased; background: var(--paper); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  #wrap { position: absolute; inset: 0 var(--gap-r, 0px) 0 var(--gap-l, 0px); display: flex; flex-direction: column; border-radius: var(--r); overflow: hidden; background: var(--paper);
+          transition: transform .26s cubic-bezier(.2,.8,.2,1), opacity .2s; }
+  body.side-left #wrap.away { transform: translateX(28px); opacity: 0; }
+  body.side-right #wrap.away { transform: translateX(-28px); opacity: 0; }
+  @media (prefers-reduced-motion: reduce) { #wrap, .clip { transition: none !important; } }
+
+  /* «крепления» к виджету (просьба 20.10: «соединить условными крепежами, чтобы не банально»): две защёлки поперёк
+     зазора — от края листа до самой карточки. Форму окна под них режет ui/app.py (pad_rects). Открылся лист — защёлки
+     «щёлкают» от листа к виджету; это единственное движение, кроме самого выезда. */
+  .clip { position: absolute; height: 16px; z-index: 3; border-radius: 6px; transform: scaleX(0); opacity: 0;
+          transition: transform .22s cubic-bezier(.3,1.6,.5,1) .2s, opacity .12s .2s;
+          background: linear-gradient(#3d4656, #272e3a); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 1px 3px rgba(0,0,0,.35); }
+  .clip::before { content: ""; position: absolute; top: 6px; height: 4px; left: 5px; right: 5px; border-radius: 2px;
+                  background: rgba(0,0,0,.35); box-shadow: 0 1px 0 rgba(255,255,255,.08); }
+  .clip::after { content: ""; position: absolute; top: 4px; width: 8px; height: 8px; border-radius: 50%;
+                 background: radial-gradient(circle at 35% 35%, #8f98aa, #4c5566); box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
+  body.light .clip { background: linear-gradient(#f6f9fd, #c6d2e3); box-shadow: inset 0 1px 0 #fff, 0 1px 3px rgba(20,32,60,.28); }
+  body.light .clip::before { background: rgba(36,50,74,.16); box-shadow: 0 1px 0 rgba(255,255,255,.8); }
+  body.light .clip::after { background: radial-gradient(circle at 35% 35%, #ffffff, #9fb0c8); box-shadow: 0 0 0 1px rgba(36,50,74,.18); }
+  body.side-left .clip { right: 0; transform-origin: left center; } body.side-left .clip::after { left: 3px; }
+  body.side-right .clip { left: 0; transform-origin: right center; } body.side-right .clip::after { right: 3px; }
+  body.side-left .clip::before { left: 13px; } body.side-right .clip::before { right: 13px; }
+  body.snap .clip { transform: none; opacity: 1; }
+  body:not(.snap) .clip { transition-delay: 0s; }
+
+  /* вкладки */
+  #top { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
+  #tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+  #tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; display: flex; align-items: center; gap: 4px; max-width: 170px; padding: 6px 8px 6px 12px; border-radius: 11px;
+         color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap; user-select: none; }
+  .tab span { overflow: hidden; text-overflow: ellipsis; }
+  .tab:hover { background: var(--chip); color: var(--ink); }
+  .tab.on { background: var(--chip2); color: var(--ink); box-shadow: var(--shadow); }
+  .tab .x { width: 18px; height: 18px; border-radius: 6px; display: grid; place-items: center; opacity: 0; color: var(--muted); }
+  .tab:hover .x, .tab.on .x { opacity: .7; } .tab .x:hover { opacity: 1; background: var(--chip2); }
+  .tab.drop { box-shadow: inset 2px 0 0 var(--acc); }
+  .tab input { font: inherit; color: var(--ink); background: transparent; border: 0; outline: none; width: 120px; }
+  /* не все вкладки влезли (24.10, владелец: «перед Щитом ещё вкладка, но её не вижу и не понимаю, как на неё промотать»):
+     край ряда тает с той стороны, где есть ещё вкладки; колёсико мыши листает ряд; «⌄» у «+» — список всех вкладок */
+  #tabs.more-l { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px); mask-image: linear-gradient(90deg, transparent, #000 28px); }
+  #tabs.more-r { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+  #tabs.more-l.more-r { -webkit-mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+                        mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+  /* «Досуг» (24.10, владелец: «людям нравится, как смотрится блокнот, — можно в него игры»): тот же лист, вместо
+     вкладок и текста — полка игр (assets/arcade/shelf.js) и сама игра во фрейме. Вкладки, панель, лист и строка
+     внизу на это время прячутся; уголок размера остаётся — игру можно сделать крупнее. */
+  #play-t { display: none; flex: 1; min-width: 0; padding-left: 4px; font: 600 15px/1 "Unbounded", "Manrope", sans-serif; letter-spacing: .01em; }
+  #b-play[hidden], #b-notes[hidden] { display: none; }
+  #b-play.on { color: var(--acc); }
+  #play { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  body.play #play { display: flex; }
+  body.play #tabs, body.play #b-list, body.play #b-new, body.play #b-play, body.play #tools, body.play #sheet, body.play #foot { display: none !important; }
+  body.play #play-t { display: block; }
+  body:not(.play) #b-notes { display: none; }
+  #shelf { flex: 1; overflow-y: auto; padding: 2px 14px 16px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; scrollbar-color: var(--chip2) transparent; }
+  #shelf .ag { display: flex; gap: 14px; align-items: center; padding: 9px; border-radius: 18px; text-align: left; background: var(--chip); transition: background .15s, transform .15s; }
+  #shelf .ag:hover, #shelf .ag:focus-visible { background: var(--chip2); outline: none; }
+  #shelf .ag:active { transform: scale(.985); }
+  body.neu.light #shelf .ag { background: var(--paper); box-shadow: 5px 5px 12px var(--neu-dark, #b8c5d6), -5px -5px 12px var(--neu-light, #fff); }
+  body.neu.light #shelf .ag:hover, body.neu.light #shelf .ag:focus-visible { box-shadow: 3px 3px 8px var(--neu-dark, #b8c5d6), -3px -3px 8px var(--neu-light, #fff); }
+  .ag-cover { position: relative; flex: none; width: 118px; aspect-ratio: 16 / 10; border-radius: 13px; overflow: hidden; background: var(--chip2); }
+  .ag-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ag-play { position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+             background: linear-gradient(135deg, #667eea, #764ba2); box-shadow: 0 3px 10px rgba(102,126,234,.45); }
+  .ag-play svg { width: 12px; height: 12px; fill: #fff; margin-left: 2px; }
+  .ag-t { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .ag-t b { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .ag-t em { font-style: normal; font-size: 12.5px; line-height: 1.4; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ag-t small { font-size: 11.5px; color: var(--faint); }
+  #shelf .ag-sec { margin: 8px 6px -2px; font-size: 12px; font-weight: 700; letter-spacing: .01em; color: var(--faint); }   /* группы: головоломки, слова, против Лиры, аркады */
+  #shelf .tip { margin: 2px 4px 0; font-size: 12px; line-height: 1.5; color: var(--faint); }
+  #game { flex: 1; width: 100%; min-height: 0; border: 0; display: block; background: var(--paper); }
+  body.full #clips { display: none; } body.full #wrap { border-radius: 0 !important; margin: 0 !important; }   /* игра на весь экран — без креплений и скруглений */
+  #play.in #shelf { display: none; } #play:not(.in) #game { display: none; }
+  #b-list[hidden] { display: none; }
+  #b-list.on { background: var(--chip2); color: var(--ink); }
+  #tl { position: absolute; top: 44px; right: 46px; z-index: 6; display: none; flex-direction: column; gap: 1px; min-width: 190px; max-width: min(300px, calc(100% - 24px));
+        max-height: min(340px, calc(100% - 70px)); overflow-y: auto; padding: 6px; border-radius: 14px; background: var(--paper);
+        box-shadow: 0 12px 30px -10px rgba(0,0,0,.5), inset 0 0 0 1px var(--line); }
+  #tl.on { display: flex; }
+  /* ИИ-правка (padai.js): меню у курсора и карточка ответа снизу */
+  #b-ai:hover { color: var(--ink); }
+  #aim { position: fixed; z-index: 20; min-width: 236px; max-width: 290px; padding: 6px; border-radius: 14px; background: var(--paper);
+         box-shadow: 0 16px 40px -12px rgba(0,0,0,.55), inset 0 0 0 1px var(--line); display: flex; flex-direction: column; gap: 1px; }
+  #aim[hidden] { display: none; }
+  #aim button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 9px; text-align: left; color: var(--ink); font-size: 13.5px; }
+  #aim button span { flex: 1; } #aim button svg { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  #aim button:hover, #aim button:focus-visible { background: var(--chip2); outline: none; }
+  #aim button:hover svg, #aim button:focus-visible svg { stroke: var(--ink); }
+  #aim .airow { display: flex; gap: 2px; } #aim .airow button { flex: 1; }
+  #aim .aig { padding: 6px 10px 3px; font-size: 11.5px; font-weight: 700; color: var(--faint); }
+  #aim .aisep { display: block; height: 1px; margin: 4px 8px; background: var(--line); }
+  #aim .aifoot { padding: 6px 10px 2px; font-size: 11px; color: var(--faint); }
+  #aim .aisub { position: absolute; min-width: 170px; padding: 6px; border-radius: 14px; background: var(--paper);
+                box-shadow: 0 16px 40px -12px rgba(0,0,0,.55), inset 0 0 0 1px var(--line); }
+  #aim .aisub[hidden] { display: none; }
+  #aip { position: absolute; left: calc(var(--gap-l, 0px) + 12px); right: calc(var(--gap-r, 0px) + 12px); bottom: 38px; z-index: 8; display: flex; flex-direction: column;
+         max-height: min(62%, 460px); border-radius: 16px; background: var(--paper); box-shadow: 0 18px 44px -14px rgba(0,0,0,.6), inset 0 0 0 1px var(--line);
+         transform: translateY(8px); opacity: 0; transition: transform .2s cubic-bezier(.2,.8,.2,1), opacity .16s; }
+  #aip.on { transform: none; opacity: 1; } #aip[hidden] { display: none; }
+  body.light #aip, body.light #aim, body.light #aim .aisub { box-shadow: 0 18px 44px -16px rgba(20,32,60,.35), inset 0 0 0 1px var(--line); }
+  #aip .aih { display: flex; align-items: center; gap: 8px; padding: 10px 10px 4px 14px; }
+  #aip .ait { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; }
+  #aip .ait svg { width: 16px; height: 16px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linejoin: round; }
+  #aip.busy .ait svg { animation: aiSpin 1.6s ease-in-out infinite; }
+  @keyframes aiSpin { 50% { transform: scale(1.18) rotate(12deg); opacity: .7; } }
+  #aip .ais { color: var(--faint); font-size: 12px; flex: 1; }
+  #aip .aix { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; color: var(--faint); }
+  #aip .aix:hover { background: var(--chip); color: var(--ink); }
+  #aip .aix svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+  #aip .aib { overflow-y: auto; padding: 4px 16px 8px; font-size: 14px; line-height: 1.6; min-height: 54px; outline: none; }
+  #aip .aib > * + * { margin-top: .55em; } #aip .aib ul, #aip .aib ol { padding-left: 1.3em; }
+  #aip .aib h1, #aip .aib h2, #aip .aib h3 { font-size: 15px; } #aip .aib pre { white-space: pre-wrap; font-size: 12.5px; background: var(--code); padding: 8px 10px; border-radius: 9px; }
+  #aip .aib table { border-collapse: collapse; } #aip .aib td, #aip .aib th { border: 1px solid var(--line); padding: 3px 7px; }
+  #aip .aie { color: #e5677d; }
+  #aip .aisk { display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+  #aip .aisk i { height: 10px; border-radius: 6px; background: linear-gradient(90deg, var(--chip), var(--chip2), var(--chip)); background-size: 200% 100%; animation: aiSk 1.4s linear infinite; }
+  #aip .aisk i:nth-child(2) { width: 86%; } #aip .aisk i:nth-child(3) { width: 58%; }
+  @keyframes aiSk { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { #aip, #aip.busy .ait svg, #aip .aisk i { animation: none; transition: none; } }
+  #aip .aia { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 12px; border-top: 1px solid var(--line); }
+  #aip .aib2 { padding: 6px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--ink); background: var(--chip); }
+  #aip .aib2:hover { background: var(--chip2); } #aip .aib2.p { background: var(--acc); color: #fff; } #aip .aib2.p:hover { filter: brightness(1.08); }
+  #aip .aib2.ghost { background: none; color: var(--muted); margin-left: auto; }
+  #ed .dw-diagram { cursor: default; user-select: none; }
+  #tl button { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 9px; text-align: left; color: var(--muted); }
+  #tl button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  #tl button i { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+  #tl button[aria-current="true"] { color: var(--ink); font-weight: 700; } #tl button[aria-current="true"] i { background: var(--acc); }
+  #tl button:hover, #tl button:focus-visible { background: var(--chip); color: var(--ink); outline: none; }
+  .ib { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--muted); }
+  .ib:hover { background: var(--chip); color: var(--ink); }
+  .ib svg, .tool svg, .tab .x svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .tab .x svg { width: 12px; height: 12px; }
+
+  /* панель правки — тихая, проявляется под рукой */
+  #tools { display: flex; align-items: center; gap: 1px; padding: 0 12px 6px; flex-wrap: wrap; }
+  .tool { height: 28px; min-width: 28px; padding: 0 6px; display: grid; place-items: center; border-radius: 8px; color: var(--faint); font-weight: 700; font-size: 12.5px; }
+  .tool:hover, .tool.on { color: var(--ink); background: var(--chip); }
+  .tool:disabled { opacity: .35; cursor: default; } .tool:disabled:hover { background: none; color: var(--faint); }
+  .sep { width: 1px; height: 16px; background: var(--line); margin: 0 5px; }
+  /* узкий лист — панель в одну строку (с 0.45 на ней ещё ↶ ↷ — кнопки чуть плотнее) */
+  @media (max-width: 560px) { .tool { min-width: 22px; padding: 0 3px; } .sep { margin: 0 2px; } }
+  @media (max-width: 470px) { .tool { min-width: 21px; padding: 0 2px; } .sep { margin: 0 1px; } #tools { padding: 0 10px 6px; } }
+
+  /* лист */
+  #sheet { flex: 1; overflow-y: auto; padding: 6px 22px 22px; scrollbar-width: thin; scrollbar-color: var(--chip2) transparent; }
+  /* размер текста — свой у блокнота (22.10: «менять величину шрифта, кнопка с лупой или ползунок»): --pz, всё внутри — в em */
+  #ed { outline: none; min-height: 100%; caret-color: var(--acc); word-wrap: break-word; overflow-wrap: anywhere; font-size: calc(14.5px * var(--pz, 1)); }
+  #sheet { position: relative; }
+  #ed.blank::before { content: attr(data-ph); position: absolute; left: 22px; right: 22px; top: 6px; color: var(--faint); pointer-events: none; white-space: pre-line; }
+  #ed ::selection { background: var(--sel); }
+  #ed > * + * { margin-top: .55em; }
+  #ed h1 { font: 700 1.45em/1.3 "Unbounded", "Manrope", sans-serif; letter-spacing: -.01em; margin-top: .9em; }
+  #ed h2 { font-size: 1.17em; font-weight: 800; margin-top: .9em; }
+  #ed h3 { font-size: 1.03em; font-weight: 800; color: var(--muted); margin-top: .8em; }
+  #ed > :first-child { margin-top: 0; }
+  #ed a { color: var(--acc); text-decoration: none; border-bottom: 1px solid var(--acc-soft); cursor: text; }
+  body.ctrl #ed a { cursor: pointer; border-bottom-color: var(--acc); }
+  #ed ul, #ed ol { padding-left: 1.4em; }
+  #ed li + li, #ed li > ul, #ed li > ol { margin-top: .2em; }
+  #ed li::marker { color: var(--faint); }
+  #ed li.task { list-style: none; position: relative; margin-left: -1.4em; padding-left: 1.75em; }
+  #ed li.task::before { content: ""; position: absolute; left: 0; top: .28em; width: 15px; height: 15px; border-radius: 5px;
+                        box-shadow: inset 0 0 0 1.6px var(--faint); cursor: pointer; transition: background .15s, box-shadow .15s; }
+  #ed li.task[data-done="1"]::before { background: var(--acc) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4 6.8 11 12 5.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/13px no-repeat; box-shadow: none; }
+  #ed li.task[data-done="1"] { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--faint); }
+  #ed blockquote { padding: 2px 0 2px 14px; box-shadow: inset 3px 0 0 var(--acc-soft); color: var(--muted); }
+  #ed code { font: .86em "JetBrains Mono", ui-monospace, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  #ed pre { background: var(--code); border-radius: 12px; padding: 10px 12px; overflow-x: auto; }
+  #ed pre code { background: none; padding: 0; white-space: pre; }
+  #ed hr { border: 0; height: 1px; background: var(--line); margin: 1em 0; }
+  #ed mark { background: rgba(255,214,102,.35); color: inherit; border-radius: 3px; padding: 0 2px; }
+  /* Цвет в тексте листа (24.10, владелец: «содержимое чуть ярче… осторожно добавить цветов»), схемы «под настроение»
+     (25.10: «тёмно-синий заголовок ассоциируется со ссылками… разные схемы под настроение») — кнопка-палитра рядом с
+     размером текста, хранится в ui.pad_colors. Каждая схема — пять оттенков: --h1c, --h2c заголовки, --warm жирное и
+     код, --mk маркеры, цитаты и черта, --emc курсив. Ссылки всегда цвета темы (--acc), поэтому заголовок с ними не спутать. */
+  #ed, #cs button { --h1c: var(--ink); --h2c: #8a5a2b; --warm: #b9502a; --mk: #c4873c; --emc: color-mix(in srgb, var(--ink) 80%, #8a5a2b); }
+  body:not(.light) #ed, body:not(.light) #cs button { --h1c: var(--ink); --h2c: #e8bb8e; --warm: #ffb38a; --mk: #e0a66a; --emc: color-mix(in srgb, var(--ink) 80%, #e8bb8e); }
+  #ed[data-cs="theme"], #cs [data-cs="theme"] { --h1c: color-mix(in srgb, var(--acc) 72%, var(--ink)); --h2c: color-mix(in srgb, var(--acc) 50%, var(--ink)); --warm: color-mix(in srgb, var(--acc) 35%, #c2185b); --mk: var(--acc); --emc: color-mix(in srgb, var(--ink) 78%, var(--acc)); }
+  body:not(.light) #ed[data-cs="theme"], body:not(.light) #cs [data-cs="theme"] { --h1c: color-mix(in srgb, var(--acc) 70%, #fff); --h2c: color-mix(in srgb, var(--acc) 45%, #fff); --warm: color-mix(in srgb, var(--acc) 35%, #ff8fb8); --mk: var(--acc); --emc: color-mix(in srgb, var(--ink) 78%, var(--acc)); }
+  #ed[data-cs="forest"], #cs [data-cs="forest"] { --h1c: #22553d; --h2c: #4c7a32; --warm: #b0284f; --mk: #3f8a5e; --emc: color-mix(in srgb, var(--ink) 80%, #3f8a5e); }
+  body:not(.light) #ed[data-cs="forest"], body:not(.light) #cs [data-cs="forest"] { --h1c: #a6dcb9; --h2c: #c5df92; --warm: #ff92ad; --mk: #84c99e; --emc: color-mix(in srgb, var(--ink) 80%, #84c99e); }
+  #ed[data-cs="sea"], #cs [data-cs="sea"] { --h1c: #145a68; --h2c: #23807f; --warm: #2b55c4; --mk: #2a8f99; --emc: color-mix(in srgb, var(--ink) 80%, #2a8f99); }
+  body:not(.light) #ed[data-cs="sea"], body:not(.light) #cs [data-cs="sea"] { --h1c: #93d7e2; --h2c: #a6e2d6; --warm: #9db8ff; --mk: #74c8d3; --emc: color-mix(in srgb, var(--ink) 80%, #74c8d3); }
+  #ed[data-cs="dusk"], #cs [data-cs="dusk"] { --h1c: #573487; --h2c: #8a3c7c; --warm: #c03d64; --mk: #8a5cc8; --emc: color-mix(in srgb, var(--ink) 80%, #8a5cc8); }
+  body:not(.light) #ed[data-cs="dusk"], body:not(.light) #cs [data-cs="dusk"] { --h1c: #cdb7f6; --h2c: #eeadd9; --warm: #ff9ab5; --mk: #b89cf0; --emc: color-mix(in srgb, var(--ink) 80%, #b89cf0); }
+  #ed[data-cs="plain"], #cs [data-cs="plain"], body:not(.light) #ed[data-cs="plain"], body:not(.light) #cs [data-cs="plain"] { --h1c: var(--ink); --h2c: var(--ink); --warm: var(--ink); --mk: var(--faint); --emc: var(--ink); }
+  /* яркие схемы «как в редакторах кода» (25.10, владелец: «разнообразнее, больше цветов, чтобы не скучно» — по его
+     образцу): у каждого уровня заголовка свой цвет, жирное в пунктах и в нумерации — свои, ссылки и код — свои */
+  #ed[data-cs="editor"], #cs [data-cs="editor"] { --h1c: #0070d2; --h2c: #e0094a; --h3c: #00876a; --h4c: #8a00d6; --warm: #1f8486; --sul: #138a0a; --sol: #e0115f; --emc: var(--ink); --lnk: #5a6ff0; --mk: #e0094a; --cdc: #8a00d6; }
+  body:not(.light) #ed[data-cs="editor"], body:not(.light) #cs [data-cs="editor"] { --h1c: #9ec8ff; --h2c: #ffd700; --h3c: #3ee07a; --h4c: #c77dff; --warm: #60d8da; --sul: #f9bd70; --sol: #ff4f8f; --emc: #ffffff; --lnk: #8fa0ff; --mk: #ffd700; --cdc: #f9bd70; }
+  #ed[data-cs="monokai"], #cs [data-cs="monokai"] { --h1c: #137fa3; --h2c: #5a7f00; --h3c: #b85f00; --h4c: #7146d1; --warm: #c8104f; --sul: #7a6b00; --sol: #7146d1; --emc: color-mix(in srgb, var(--ink) 80%, #b85f00); --lnk: #137fa3; --mk: #c8104f; --cdc: #7a6b00; }
+  body:not(.light) #ed[data-cs="monokai"], body:not(.light) #cs [data-cs="monokai"] { --h1c: #66d9ef; --h2c: #a6e22e; --h3c: #fd971f; --h4c: #ae81ff; --warm: #f92672; --sul: #e6db74; --sol: #ae81ff; --emc: #f8f8f2; --lnk: #66d9ef; --mk: #f92672; --cdc: #e6db74; }
+  #ed[data-cs="carnival"], #cs [data-cs="carnival"] { --h1c: #c2185b; --h2c: #1565c0; --h3c: #00796b; --h4c: #6a1b9a; --warm: #2e7d32; --sul: #ad1457; --sol: #00838f; --emc: color-mix(in srgb, var(--ink) 80%, #c2185b); --lnk: #1565c0; --mk: #c2185b; --cdc: #6a1b9a; }
+  body:not(.light) #ed[data-cs="carnival"], body:not(.light) #cs [data-cs="carnival"] { --h1c: #ff8fb1; --h2c: #8ecbff; --h3c: #7be8d4; --h4c: #c3a6ff; --warm: #b8f28b; --sul: #ffb3e6; --sol: #7bdff2; --emc: #fff3e0; --lnk: #8ecbff; --mk: #ffd166; --cdc: #ffb3e6; }
+  #ed h1 { color: var(--h1c); }
+  #ed h2 { color: var(--h2c); } #ed h3 { color: var(--h3c, var(--h2c)); } #ed h4, #ed h5, #ed h6 { color: var(--h4c, var(--h2c)); }
+  #ed ul li strong { color: var(--sul, var(--warm)); } #ed ol li strong { color: var(--sol, var(--warm)); }
+  #ed[data-cs] a { color: var(--lnk, var(--acc)); }
+  #ed h1 + p, #ed h2 + p { margin-top: .35em; }
+  #ed strong { color: var(--warm); font-weight: 700; }
+  #ed em { color: var(--emc); }
+  #ed li::marker { color: var(--mk); }
+  #ed ol > li::marker { font-weight: 700; }
+  #ed code { color: var(--cdc, var(--warm)); background: color-mix(in srgb, var(--cdc, var(--warm)) 11%, transparent); }
+  #ed[data-cs="plain"] code { background: var(--code); }
+  #ed blockquote { box-shadow: inset 3px 0 0 var(--mk); background: linear-gradient(90deg, color-mix(in srgb, var(--mk) 12%, transparent), transparent 70%); border-radius: 0 10px 10px 0; padding: 6px 12px 6px 14px; color: var(--ink); }
+  #ed hr { height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--mk), transparent); opacity: .5; }
+  /* выбор схемы — палитра рядом с размером текста; в списке у каждой — образец: заголовок, жирное, маркер */
+  #b-cs { position: relative; }
+  #b-cs i { position: absolute; width: 5px; height: 5px; border-radius: 50%; }
+  #cs { position: fixed; z-index: 30; min-width: 214px; padding: 6px; max-height: calc(100vh - 16px); overflow-y: auto; scrollbar-width: thin; border-radius: 14px; background: var(--paper); display: none;
+        box-shadow: 0 16px 40px -14px rgba(0,0,0,.5), inset 0 0 0 1px var(--line); }
+  body.light #cs { box-shadow: 0 18px 44px -16px rgba(20,32,60,.35), inset 0 0 0 1px var(--line); }
+  #cs.on { display: block; }
+  #cs button { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 1px 10px; width: 100%; padding: 6px 10px; border-radius: 10px; text-align: left; }
+  #cs button:hover, #cs button:focus-visible { background: var(--chip); outline: none; }
+  #cs button[aria-checked="true"] { background: var(--chip2); }
+  #cs b { font-size: 14px; font-weight: 800; color: var(--h1c); }
+  #cs small { grid-column: 1; font-size: 12px; color: var(--muted); } #cs small em { font-style: normal; font-weight: 700; color: var(--warm); }
+  #cs small u { text-decoration: none; color: var(--h2c); font-weight: 700; }
+  #cs .dots { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 3px; }
+  #cs .dots i { width: 9px; height: 9px; border-radius: 50%; }
+  #ed img { max-width: 100%; border-radius: 12px; display: block; margin: 6px 0; min-height: 24px; background: var(--chip); }
+  #ed img.sel { outline: 2px solid var(--acc); }
+  #imgx { position: absolute; z-index: 5; width: 30px; height: 30px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center;
+          background: rgba(20,22,30,.72); color: #fff; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.25); transition: background .15s; }
+  #imgx[hidden] { display: none; } #imgx:hover, #imgx:focus-visible { background: #e5484d; outline: none; }
+  #imgx svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  #ed table { border-collapse: collapse; width: 100%; font-size: .93em; }
+  #ed th, #ed td { padding: 6px 9px; text-align: left; box-shadow: inset 0 -1px 0 var(--line); vertical-align: top; }
+  #ed th { font-weight: 700; color: var(--muted); font-size: .92em; }
+  #ed.blank::before { font-size: calc(14.5px * var(--pz, 1)); }
+
+  /* размер текста: кнопка «Aa» на панели — рядом всплывает ползунок */
+  #sz { position: absolute; top: 84px; right: 12px; z-index: 5; display: none; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 14px;
+        background: var(--paper); box-shadow: 0 10px 28px -10px rgba(0,0,0,.45), inset 0 0 0 1px var(--line); }
+  #sz.on { display: flex; }
+  #sz input { width: 120px; accent-color: var(--acc); }
+  #sz b { min-width: 42px; text-align: right; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; cursor: pointer; }
+  #sz .ib { width: 26px; height: 26px; font-weight: 800; }
+  /* лист широкий (22.10, владелец: «здесь же я ожидал ползунок») — ползунок прямо на панели, справа; узкий — за «Aa» */
+  @media (min-width: 600px) {
+    #b-size, #tools > span.sep:last-of-type { display: none; }
+    #sz { position: static; display: flex; margin-left: auto; padding: 0; gap: 2px; background: none; box-shadow: none; border-radius: 0; }
+    #sz input { width: 92px; margin: 0 2px; }
+    #sz .ib { width: 24px; height: 24px; font-size: 11.5px; color: var(--muted); }
+    #sz #sz-p { font-size: 14px; }
+    #sz b { min-width: 38px; font-size: 11.5px; }
+    /* не влезло в строку (25.10, владелец: «справа внизу размер шрифта и темы — смотрится странно, влево бы») — вторая
+       строка слева, ровно под ↶ ↷; признак .wrapped ставит pad.js toolsWrap() */
+    #tools.wrapped #sz { margin-left: 0; flex-basis: 100%; margin-top: 3px; }
+  }
+  /* потянуть за пустое место наверху — едет весь Dewiar: виджет и блокнот вместе (как за виджет) */
+  #top, #tools { cursor: default; }
+  body.moving, body.moving * { cursor: grabbing !important; user-select: none; }
+
+  /* растянуть лист за нижний внешний уголок (у виджета — правый нижний; здесь — тот, что дальше от виджета) */
+  #grip { position: absolute; bottom: 3px; width: 18px; height: 18px; z-index: 6; border-radius: 6px; opacity: .45; touch-action: none; }
+  #grip::before { content: ""; position: absolute; inset: 5px; border-bottom: 2px solid var(--faint); }
+  body.side-left #grip { left: 3px; cursor: nesw-resize; }
+  body.side-left #grip::before { border-left: 2px solid var(--faint); border-bottom-left-radius: 3px; }
+  body.side-right #grip { right: 3px; cursor: nwse-resize; }
+  body.side-right #grip::before { border-right: 2px solid var(--faint); border-bottom-right-radius: 3px; }
+  #grip:hover, #grip.on { opacity: 1; background: var(--chip); }
+  body.side-left #foot { padding-left: 28px; } body.side-right #foot { padding-right: 28px; }
+  #ed tbody tr:hover td { background: var(--chip); }
+
+  #foot { display: flex; align-items: center; gap: 8px; padding: 7px 16px 10px; font-size: 12px; color: var(--faint); }
+  #foot .dot { width: 6px; height: 6px; border-radius: 50%; background: #4BE3A1; flex: none; transition: background .2s; }
+  #foot.busy .dot { background: #FFC266; } #foot.bad .dot { background: #FF6B8A; }
+  #foot span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hint { font-size: 11.5px; }
+  #ask { position: absolute; inset: auto 12px 44px; padding: 12px 14px; border-radius: 14px; background: var(--chip2); backdrop-filter: blur(12px);
+         -webkit-backdrop-filter: blur(12px); display: none; gap: 10px; align-items: center; font-size: 13px; }
+  #ask.on { display: flex; } #ask b { flex: 1; font-weight: 600; }
+  #ask button { padding: 6px 12px; border-radius: 9px; background: var(--chip); font-weight: 700; }
+  #ask button.danger { background: #FF6B8A; color: #fff; }
+</style>
+</head>
+<body>
+<div id="clips"></div>
+<div id="wrap" class="away">
+  <div id="top">
+    <div id="tabs" role="tablist" aria-label="Вкладки блокнота"></div>
+    <button class="ib" id="b-list" hidden title="Все вкладки" aria-label="Все вкладки" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+    <b id="play-t">Досуг</b>
+    <button class="ib" id="b-play" hidden title="Досуг — милые игры на пару минут" aria-label="Досуг: игры"><svg viewBox="0 0 24 24"><path d="M7.5 7.5h9a4.5 4.5 0 0 1 4.3 5.8l-1.1 3.7a2.3 2.3 0 0 1-3.9.9L14 15.5h-4l-1.8 2.4a2.3 2.3 0 0 1-3.9-.9l-1.1-3.7a4.5 4.5 0 0 1 4.3-5.8z"/><path d="M8 10.5v3M6.5 12h3"/><path d="M15.5 11h.01M17.5 13h.01"/></svg></button>
+    <button class="ib" id="b-notes" title="Назад к блокноту" aria-label="Назад к блокноту"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M8 8h6M8 11.5h6M8 15h3.5"/></svg></button>
+    <button class="ib" id="b-new" title="Новая вкладка (Ctrl+T)" aria-label="Новая вкладка"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button class="ib" id="b-side" title="На другую сторону от виджета" aria-label="Блокнот — на другую сторону от виджета"><svg viewBox="0 0 24 24"><path d="M4 9h15l-3.5-3.5M20 15H5l3.5 3.5"/></svg></button>
+    <button class="ib" id="b-close" title="Убрать блокнот (Esc)" aria-label="Убрать блокнот"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <div id="tl" role="menu" aria-label="Все вкладки"></div>
+  <div id="tools" aria-label="Оформление">
+    <button class="tool" id="b-undo" title="Шаг назад (Ctrl+Z)" aria-label="Шаг назад" disabled><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button class="tool" id="b-redo" title="Шаг вперёд (Ctrl+Y или Ctrl+Shift+Z)" aria-label="Шаг вперёд" disabled><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" id="b-ai" title="ИИ-правка: выделите текст — переформулировать, упростить, перевести; без выделения — вся вкладка (или правая кнопка в тексте)" aria-label="ИИ-правка" aria-haspopup="menu"><svg viewBox="0 0 24 24"><path d="M12 3.5l1.6 4.4 4.4 1.6-4.4 1.6L12 15.5l-1.6-4.4L6 9.5l4.4-1.6zM18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg></button>
+    <button class="tool" data-c="h1" title="Заголовок (# пробел)">H1</button>
+    <button class="tool" data-c="h2" title="Подзаголовок (## пробел)">H2</button>
+    <button class="tool" data-c="bold" title="Жирный (Ctrl+B)"><svg viewBox="0 0 24 24"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/></svg></button>
+    <button class="tool" data-c="italic" title="Курсив (Ctrl+I)"><svg viewBox="0 0 24 24"><path d="M14 5h-4M14 19h-4M13 5l-2 14"/></svg></button>
+    <button class="tool" data-c="strike" title="Зачеркнуть"><svg viewBox="0 0 24 24"><path d="M5 12h14M16 7.5A3.8 3.8 0 0 0 12.2 5h-.9a3.3 3.3 0 0 0-1 6.5M8 16.5A3.8 3.8 0 0 0 11.8 19h.9a3.3 3.3 0 0 0 2.2-.8"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" data-c="ul" title="Список (- пробел)"><svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg></button>
+    <button class="tool" data-c="ol" title="Нумерованный (1. пробел)"><svg viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 5l1.5-1v5M4 14.5a1.5 1.5 0 0 1 3 0c0 1.5-3 2-3 3.5h3"/></svg></button>
+    <button class="tool" data-c="quote" title="Цитата (&gt; пробел)"><svg viewBox="0 0 24 24"><path d="M5 18c2.5-1 4-3 4-6V7H5v5h4M14 18c2.5-1 4-3 4-6V7h-4v5h4"/></svg></button>
+    <button class="tool" data-c="task" title="Задачи с галочками ([] пробел)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.5"/><path d="m4.8 7 1.2 1.2 2.2-2.4M13 7h7.5M3.5 15.5h6v6h-6zM13 18.5h7.5"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" data-c="link" title="Ссылка (Ctrl+K)"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></button>
+    <button class="tool" data-c="table" title="Таблица"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M3.5 9.5h17M3.5 14.5h17M10 9.5v10"/></svg></button>
+    <button class="tool" data-c="image" title="Картинка (или Ctrl+V)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m20.5 15.5-5-5-9 9"/></svg></button>
+    <button class="tool" data-c="hr" title="Разделитель — черта (--- и Enter)"><svg viewBox="0 0 24 24"><path d="M3.5 12h17"/><path d="M8 6.5h8M8 17.5h8" opacity=".4"/></svg></button>
+    <button class="tool" data-c="code" title="Код"><svg viewBox="0 0 24 24"><path d="m9 8-4 4 4 4M15 8l4 4-4 4"/></svg></button>
+    <span class="sep"></span>
+    <button class="tool" id="b-size" title="Размер текста (Ctrl + колёсико, Ctrl+= и Ctrl+−)" aria-label="Размер текста" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M3 18 8 6l5 12M4.7 14h6.6M15 18l3.2-7.5L21.4 18M15.9 16h4.6"/></svg></button>
+    <div id="sz" role="group" aria-label="Размер текста" title="Размер текста (Ctrl + колёсико, Ctrl+= и Ctrl+−)"><button class="ib" id="b-cs" title="Цвета текста — схема под настроение" aria-label="Цвета текста" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.3 0 2-.9 2-1.9 0-1.3-1-1.6-1-2.8 0-1 .8-1.8 1.8-1.8H17a3.5 3.5 0 0 0 3.5-3.5c0-3.9-3.8-7-8.5-7z"/><circle cx="7.6" cy="11" r="1.1"/><circle cx="10.4" cy="7.4" r="1.1"/><circle cx="14.8" cy="7.6" r="1.1"/></svg></button><button class="ib" id="sz-m" aria-label="Мельче">A−</button><input type="range" id="sz-r" min="80" max="170" step="5" aria-label="Размер текста, %"><button class="ib" id="sz-p" aria-label="Крупнее">A+</button><b id="sz-v" title="Щелчок — как было">100 %</b></div>
+    <input type="file" id="file" accept="image/*" hidden multiple>
+    <div id="cs" role="menu" aria-label="Цвета текста"></div>
+  </div>
+  <div id="play"><div id="shelf" role="list" aria-label="Игры"></div><iframe id="game" title="Игра" allow="autoplay; gamepad"></iframe></div>
+  <div id="sheet"><div id="ed" contenteditable="true" spellcheck="true" data-ph="Пишите прямо здесь — сохранится само.&#10;- пробел — список, [] пробел — задача, # пробел — заголовок.&#10;Ссылки, таблицы и картинки — просто вставьте (Ctrl+V)."></div><button id="imgx" hidden title="Убрать картинку (Delete)" aria-label="Убрать картинку"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+  <div id="foot"><i class="dot"></i><span id="st">Открываю…</span><em id="hint"></em></div>
+  <div id="grip" title="Потяните — размер блокнота. Двойной щелчок — как было"></div>
+  <div id="ask" role="alertdialog"><b id="ask-t"></b><button id="ask-no">Нет</button><button class="danger" id="ask-yes">Удалить</button></div>
+</div>
+<script src="assets/skins.js"></script>
+<script src="assets/dewiar.js"></script>
+<script src="assets/dialog.js"></script>
+<script src="assets/padmd.js"></script>
+<script src="assets/arcade/shelf.js"></script>
+<script src="assets/rich.js"></script>
+<script src="pad.js"></script>
+<script src="padai.js"></script>
+</body>
+</html>

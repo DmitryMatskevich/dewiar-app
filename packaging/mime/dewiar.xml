@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-dewiar">
+    <comment>Dewiar settings</comment>
+    <comment xml:lang="ru">Настройки Dewiar</comment>
+    <glob pattern="*.dewiar"/>
+    <icon name="dewiar"/>
+  </mime-type>
+</mime-info>

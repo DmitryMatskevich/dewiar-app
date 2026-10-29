@@ -1,0 +1,25 @@
+# Проверено на Apple Silicon, Python 3.12. Зависимости других ОС сюда не входят.
+numpy>=1.24
+onnxruntime>=1.17
+# Для Mac опубликован universal2 wheel 0.3.44; требование Linux 0.3.45 здесь не устанавливается.
+vosk==0.3.44
+onnx-asr>=0.12
+huggingface_hub>=0.23,<1.0
+piper-tts>=1.3
+httpx>=0.27
+websockets>=15.0
+pywebview>=6.2
+Pillow>=9.0
+imageio-ffmpeg>=0.5
+pypdf>=4.0
+yt-dlp>=2026.10.21
+socksio>=1.0
+truststore>=0.10
+sounddevice>=0.5
+psutil>=7.0
+pyobjc-framework-Cocoa>=11
+pyobjc-framework-Quartz>=11
+pyobjc-framework-AVFoundation>=12.2.2
+pyobjc-framework-ApplicationServices>=12.2.2
+pyobjc-framework-Contacts>=12.2.2
+pyobjc-framework-Vision>=12.2.2

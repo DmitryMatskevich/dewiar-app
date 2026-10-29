@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Настройка Dewiar для текущего пользователя (без root): служба ядра systemd --user.
+Идемпотентна, при обновлении версии переписывает юнит и перезапускает ядро.
+У службы — потолок памяти и скромная доля процессора (core/memcap.py): что бы ни случилось с ядром, рабочий стол
+не замрёт — система притормозит или перезапустит только Dewiar."""
+import subprocess
+import sys
+from pathlib import Path
+
+VERSION = "0.45.3"
+APP = Path("/opt/dewiar")
+HOME = Path.home()
+UNIT_DIR = HOME / ".config/systemd/user"
+UNIT = UNIT_DIR / "dewiar-core.service"
+MARK = HOME / ".local/share/dewiar/.setup-version"
+
+
+def limits():
+    """Строки юнита с потолками памяти по размеру памяти этого компьютера (memcap.props) или пусто."""
+    try:
+        sys.path.insert(0, str(APP / "core"))
+        import memcap
+        return "".join(p + "\n" for p in memcap.props("core"))
+    except Exception:  # noqa: BLE001 — без потолков служба работает как раньше
+        return ""
+
+
+UNIT_TEXT = f"""[Unit]
+Description=Dewiar — ядро голосового ассистента
+After=pipewire.service pipewire-pulse.service pulseaudio.service
+StartLimitIntervalSec=120
+StartLimitBurst=6
+
+[Service]
+Type=simple
+ExecStart={APP}/venv/bin/python3 {APP}/core/main.py
+Restart=on-failure
+RestartSec=3
+Nice=5
+CPUWeight=50
+IOWeight=50
+{limits()}OOMScoreAdjust=200
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def sh(*cmd):
+    return subprocess.run(list(cmd), capture_output=True, text=True)
+
+
+def main():
+    fresh = not MARK.exists() or MARK.read_text().strip() != VERSION or not UNIT.exists()
+    if fresh:
+        UNIT_DIR.mkdir(parents=True, exist_ok=True)
+        UNIT.write_text(UNIT_TEXT)
+        MARK.parent.mkdir(parents=True, exist_ok=True)
+        # прежние версии (прототип и Cortex 0.7.0): выключаем их службы, чтобы не было двух ассистентов
+        sh("systemctl", "--user", "disable", "--now", "patrik-wakeword.service")
+        sh("systemctl", "--user", "disable", "--now", "cortex-core.service")
+        old_unit = UNIT_DIR / "cortex-core.service"
+        if old_unit.exists():
+            old_unit.unlink()
+        old = HOME / ".config/autostart/patrik-overlay.desktop"
+        if old.exists():
+            old.unlink()
+        sh("systemctl", "--user", "daemon-reload")
+        sh("systemctl", "--user", "enable", "dewiar-core.service")
+        sh("systemctl", "--user", "restart", "dewiar-core.service")
+        MARK.write_text(VERSION)
+    else:
+        sh("systemctl", "--user", "start", "dewiar-core.service")
+
+
+if __name__ == "__main__":
+    main()

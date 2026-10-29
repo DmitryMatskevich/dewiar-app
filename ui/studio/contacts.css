@@ -1,0 +1,13 @@
+#p-contacts .ct-permission,#p-contacts #ct-preview,#p-contacts #ct-proposal,#p-contacts #ct-form { padding:16px 18px; margin:14px 0; background:var(--panel); border-radius:16px; }
+#p-contacts .ct-item { display:block; padding:12px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+#p-contacts .ct-choice { display:flex; align-items:flex-start; gap:12px; cursor:pointer; }
+#p-contacts .ct-choice input { margin-top:5px; flex:none; }
+#p-contacts .ct-choice b,#p-contacts .ct-choice .hint { display:block; }
+#p-contacts summary { cursor:pointer; font-weight:600; }
+#p-contacts details p { margin:10px 0; }
+#p-contacts [hidden] { display:none!important; }
+#p-contacts .ct-list { max-height:420px; overflow:auto; }
+#p-contacts .bad { color:var(--bad); }
+#p-contacts input[type=search] { max-width:520px; width:100%; }
+#p-contacts textarea { min-height:76px; }
+@media(max-width:600px){#p-contacts .row { grid-template-columns:1fr; } #contact-suggestion { bottom:75px!important; }}

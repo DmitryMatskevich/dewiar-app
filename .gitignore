@@ -1,0 +1,25 @@
+# сборки и кэш
+dist/
+.venv/
+work/
+build/
+__pycache__/
+*.pyc
+android/build/
+android/out/
+node_modules/
+*.part
+
+# модели, которые скачиваются при установке (большие)
+data/vosk-model-small-ru-0.22.zip
+
+# секреты — никогда в репозиторий
+.env
+*.env
+*.jks
+*.keystore
+provision.json
+
+# системное
+.DS_Store
+Thumbs.db

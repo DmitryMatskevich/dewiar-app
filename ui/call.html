@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Звонок — Dewiar</title>
+<link rel="icon" href="assets/logo-white.png">
+<style>
+  html, body { margin: 0; height: 100%; background: #0a0b10; color: #fff; font: 15px/1.4 "Manrope", "Ubuntu", system-ui, sans-serif; }
+  #wait { position: fixed; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.6); }
+</style>
+</head>
+<body>
+<div id="wait">Подключаюсь к Dewiar…</div>
+<script src="assets/dewiar.js"></script>
+<script src="assets/call.js"></script>
+<script>
+/* Звонок «Близким» на компьютере (открывает ядро: core/close.py → callpage.py). Ядро даёт данные звонка (call_info),
+   отправляет сигналы (call_sig — шифрует и шлёт через облако) и пересылает входящие (событие close_sig). Сам звук и видео —
+   напрямую между устройствами (assets/call.js, WebRTC). Закончился звонок — окно можно закрыть. */
+const q = new URLSearchParams(location.search), CALL = q.get("call") || "";
+let started = false;
+core.on("hello", async () => {
+  if (started) return; started = true;
+  let info;
+  try { info = await core.call("call_info", { call: CALL }); } catch (e) { document.getElementById("wait").textContent = "Звонок не найден — " + e.message; return; }
+  document.getElementById("wait").remove();
+  document.title = (info.role === "caller" ? "Звонок: " : "Звонит: ") + info.peer.name + " — Dewiar";
+  DewiarCall.start({ role: info.role, peer: info.peer, video: !!info.video, call: info.call, offer: info.offer || "",
+    transport: {
+      send: (s) => core.call("call_sig", { call: CALL, s }),
+      ice: () => core.call("call_ice", {}),
+      fast: (on) => core.call("call_fast", { call: CALL, on: !!on }).catch(() => {}),
+      done: (d) => { core.call("call_done", { call: CALL, secs: d.secs, reason: d.reason, role: d.role }).catch(() => {});
+        setTimeout(() => { document.body.innerHTML = '<div id="wait">' + (d.reason || "Звонок завершён") + ' — окно можно закрыть</div>'; try { window.close(); } catch (e) {} }, 1800); },
+    } });
+});
+// «я жива»: пока звонок идёт, страница раз в 20 с напоминает о себе — закрыли вкладку, и компьютер через ~минуту
+// перестаёт опрашивать сервер каждую секунду и снова принимает звонки
+setInterval(() => { if (DewiarCall.active()) core.call("call_fast", { call: CALL, on: true }).catch(() => {}); }, 20000);
+core.on("close_sig", e => { if (e.sig && e.sig.s) DewiarCall.signal(e.peer, e.sig.s, {}); });
+core.on("offline", () => { if (!DewiarCall.active()) document.title = "Dewiar — нет связи"; });
+</script>
+</body>
+</html>

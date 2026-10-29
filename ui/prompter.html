@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar — суфлёр</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<style>
+  /* Суфлёр: окно-карточка поверх всех окон (ui/app.py → open_prompter; скругление 24px совпадает с PROMPTER_RADIUS).
+     Ядро — core/prompter.py, событие «prompter» {kind: state|line|hint|sheet|summary|voice}. Виды: подготовка, встреча
+     (подсказка крупно, под ней — бегущая расшифровка), итог; поверх — шпаргалка и запись голоса.
+     Фирменный стиль Dewiar, как в студии (ui/studio/studio.css): фон-сцена с тремя сияниями, блоки — светлое стекло
+     без обводок (rgba 255 .05, размытие 10px, тень). Наведение и выбор — светлее стекло, тень, цвет; обводок нет нигде,
+     и у фокуса с клавиатуры тоже (ярче фон). Сигнальный цвет подсказки — фирменный розовый (метка слева, «Начните так»),
+     спокойный — фирменный голубой (пауза, «≈», «из шпаргалки»). Кнопки действия — фирменный градиент.
+     Текст — только белый разной прозрачности (--ink 1, --soft .86, --them .74, --muted .64, --faint .42), без оттенков:
+     цвет — у сигналов и значков, не у второстепенного текста. Собеседник отличается подписью и яркостью, а не цветом.
+     Клавиши: пробел — «Подсказать», ← → — прошлые подсказки, Esc — закрыть шпаргалку. */
+  :root {
+    --scene: radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%) fixed,
+             radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%) fixed,
+             radial-gradient(circle at 40% 40%, rgba(120, 219, 255, 0.2) 0%, transparent 50%) fixed,
+             linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%) fixed;
+    /* поверх содержимого (шпаргалка, запись голоса): та же сцена под дымкой — непрозрачно и без размытия (Linux) */
+    --frost: linear-gradient(rgba(255,255,255,.07), rgba(255,255,255,.07)), var(--scene);
+    --glass: rgba(255,255,255,.05); --glass2: rgba(255,255,255,.09); --glass3: rgba(255,255,255,.14);
+    --shadow: 0 10px 30px rgb(0 0 0 / 20%);
+    --brand: linear-gradient(135deg, #667eea 0%, #764ba2 100%); --brand-glow: 0 10px 26px -10px rgba(118,75,162,.85);
+    --ink: #F4F4F6; --soft: rgba(255,255,255,.86); --muted: rgba(255,255,255,.64); --faint: rgba(255,255,255,.42);
+    --accent: #8B8CF7; --them: rgba(255,255,255,.74); --cue: #FF7AC6; --calm: #78DBFF; --good: #4BE3A1; --bad: #FF6B8A; --r: 24px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #0a0a0f; }
+  body { font: 15px/1.5 "Manrope", "Ubuntu", "Segoe UI", "Noto Sans", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased;
+         font-variant-numeric: tabular-nums; user-select: none; -webkit-user-select: none; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; border-radius: var(--r); overflow: hidden; background: var(--scene); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  :focus-visible { outline: none; }
+  button:focus-visible, [role=button]:focus-visible { filter: brightness(1.25); }
+  .hidden { display: none !important; }
+  .blk { background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--shadow); }
+
+  /* шапка: перетаскивается за пустое место */
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px 20px; flex: none; }
+  header .t { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; letter-spacing: .01em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: none; }
+  .live .dot { background: var(--bad); animation: pulse 2s infinite; }
+  .paused .dot { background: var(--calm); animation: none; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,107,138,.55); } 70% { box-shadow: 0 0 0 9px rgba(255,107,138,0); } 100% { box-shadow: 0 0 0 0 rgba(255,107,138,0); } }
+  #clock { font-weight: 600; font-size: 13px; color: var(--muted); }
+  .ib { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); flex: none; transition: background .15s, color .15s; }
+  .ib:hover, .ib:focus-visible { background: var(--glass2); color: var(--ink); }
+  .ib svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  main { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 20px 18px; }
+
+  /* подготовка */
+  #setup { overflow-y: auto; gap: 14px; scrollbar-width: none; padding-top: 2px; }
+  #setup::-webkit-scrollbar { display: none; }
+  .lead { color: var(--muted); font-size: 14px; line-height: 1.45; margin: -2px 0 2px; }
+  .f { display: flex; flex-direction: column; gap: 7px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  input[type=text], textarea { width: 100%; font: 500 15px/1.45 "Manrope", sans-serif; color: var(--ink); background: var(--glass);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: var(--shadow);
+    border: 0; border-radius: 14px; padding: 11px 14px; outline: none; user-select: text; -webkit-user-select: text; transition: background .15s; }
+  input[type=text]:hover, textarea:hover { background: var(--glass2); }
+  input[type=text]:focus, textarea:focus { background: var(--glass3); }
+  textarea { resize: none; min-height: 74px; }
+  ::placeholder { color: var(--faint); }
+  #drop { display: flex; align-items: center; gap: 12px; border-radius: 16px; padding: 13px 14px; color: var(--muted); font-size: 13.5px; line-height: 1.4;
+          transition: background .15s, box-shadow .15s; cursor: pointer; }
+  #drop > svg { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--accent); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #drop:hover, #drop:focus-visible { background: var(--glass2); filter: none; }
+  #drop.over { background: rgba(255,122,198,.14); box-shadow: 0 10px 30px rgba(255,122,198,.18); }
+  #drop b { color: var(--ink); font-weight: 600; }
+  .files { display: flex; flex-wrap: wrap; gap: 6px; }
+  .files:empty { display: none; }
+  .file { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 6px 5px 11px; border-radius: 999px;
+          background: var(--glass2); font-size: 13px; font-weight: 600; }
+  .file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file small { color: var(--faint); font-weight: 500; }
+  .file button { width: 20px; height: 20px; border-radius: 50%; color: var(--faint); display: grid; place-items: center; }
+  .file button:hover { color: var(--ink); background: var(--glass3); }
+  .file.err { color: var(--bad); background: rgba(255,107,138,.12); padding-right: 11px; }
+  .opts { display: flex; flex-direction: column; gap: 2px; }
+  .frame-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 4px 0; }
+  .frame-settings label { display: flex; flex-direction: column; gap: 4px; color: var(--faint); font-size: 12px; font-weight: 600; }
+  .frame-settings select { width: 100%; color: var(--ink); background: var(--glass2); border: 0; border-radius: 10px; padding: 8px 9px; font: inherit; }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
+  .opt small { display: block; color: var(--faint); font-size: 12.5px; font-weight: 500; }
+  .sw { position: relative; width: 38px; height: 22px; flex: none; }
+  .sw input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .sw i { position: absolute; inset: 0; border-radius: 22px; background: var(--glass3); transition: .2s; pointer-events: none; }
+  .sw i::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .2s;
+                 box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  .sw input:checked + i { background: var(--brand); box-shadow: var(--brand-glow); }
+  .sw input:checked + i::after { left: 19px; }
+  .sw input:focus-visible + i { filter: brightness(1.3); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; }
+  .seg button { padding: 8px 6px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--muted); transition: background .15s, color .15s; }
+  .seg button:hover { color: var(--ink); }
+  .seg button.on { background: var(--glass3); color: var(--ink); box-shadow: 0 4px 14px rgb(0 0 0 / 22%); }
+  .go { margin-top: 4px; padding: 14px; border-radius: 16px; font-weight: 800; font-size: 15px; color: #fff; letter-spacing: .01em;
+        background: var(--brand); box-shadow: var(--brand-glow); transition: transform .1s, filter .15s, opacity .15s; }
+  .go:hover { filter: brightness(1.1); }
+  .go:active { transform: translateY(1px); }
+  .go:disabled { opacity: .45; filter: saturate(.6); cursor: default; box-shadow: none; }
+  .warn { font-size: 13px; color: var(--cue); line-height: 1.45; }
+  .warn button { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+  /* где встреча: две плитки */
+  .place { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .place button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 13px 14px 14px; border-radius: 18px;
+                  text-align: left; transition: background .2s, box-shadow .2s; }
+  .place button:hover { background: var(--glass2); }
+  .place button svg { width: 22px; height: 22px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: stroke .2s; }
+  .place button b { font-size: 14px; font-weight: 700; color: var(--soft); }
+  .place button small { font-size: 12px; line-height: 1.35; color: var(--faint); font-weight: 500; }
+  .place button.on { background: linear-gradient(135deg, rgba(102,126,234,.34) 0%, rgba(118,75,162,.34) 100%); box-shadow: 0 12px 30px -8px rgba(118,75,162,.55); }
+  .place button.on svg { stroke: #fff; }
+  .place button.on b { color: #fff; }
+  .place button.on small { color: var(--muted); }
+  /* голос владельца (очная встреча) */
+  #vbox { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 18px; }
+  #vbox .vi { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; background: rgba(139,140,247,.18); color: var(--accent); }
+  #vbox.ok .vi { background: rgba(75,227,161,.15); color: var(--good); }
+  #vbox .vi svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  #vbox .vt { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.35; }
+  #vbox .vt small { display: block; font-size: 12.5px; color: var(--faint); font-weight: 500; }
+  .mini { padding: 8px 12px; border-radius: 12px; background: var(--glass2); font-size: 13px; font-weight: 700; color: var(--ink); flex: none; transition: background .15s, filter .15s; }
+  .mini:hover { background: var(--glass3); }
+  .mini.go2 { background: var(--brand); color: #fff; box-shadow: var(--brand-glow); }
+  .mini.go2:hover { filter: brightness(1.1); }
+
+  /* встреча */
+  #live { min-height: 0; }
+  #hear { font-size: 12.5px; color: var(--faint); margin: -4px 0 8px; min-height: 0; }
+  #initial { flex: none; padding: 11px 14px; border-radius: 16px; margin-bottom: 10px; color: var(--soft); font-size: 12.5px; line-height: 1.45; }
+  #initial b { display: block; color: var(--ink); margin-bottom: 3px; }
+  #initial span { display: block; color: var(--muted); }
+  #hear.bad { color: var(--cue); }
+  #card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 18px 18px 14px 26px; border-radius: 20px; overflow: hidden;
+          transition: box-shadow .4s; }
+  #cue { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: rgba(255,122,198,.16); }
+  #cue i { position: absolute; left: 0; right: 0; top: 0; height: 0; background: var(--cue); transition: height .35s ease-out; border-radius: 0 0 4px 0; }
+  #card.ready #cue i { height: 100%; animation: glow 1.4s ease-out 1; }
+  @keyframes glow { 0% { box-shadow: 0 0 0 0 rgba(255,122,198,0); } 25% { box-shadow: 0 0 18px 3px rgba(255,122,198,.6); } 100% { box-shadow: 0 0 0 0 rgba(255,122,198,0); } }
+  #q { font-size: 13.5px; color: var(--them); line-height: 1.4; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #q:empty { display: none; }
+  #body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; user-select: text; -webkit-user-select: text; }
+  #body::-webkit-scrollbar { display: none; }
+  #why { display: none; width: fit-content; margin-bottom: 8px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+         background: rgba(255,122,198,.18); color: var(--cue); }
+  #card.stuck #why, #card.soft #why { display: block; }
+  #card.stuck { box-shadow: var(--shadow), 0 0 40px -12px rgba(255,122,198,.55); background: rgba(255,122,198,.07); }
+  #card.stuck #cue i { height: 100%; animation: nudge 1.6s ease-in-out 3; }
+  @keyframes nudge { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,122,198,0); } 50% { box-shadow: 0 0 22px 4px rgba(255,122,198,.65); } }
+  #card.soft #why { background: rgba(120,219,255,.15); color: var(--calm); }
+  #card.soft #cue { background: rgba(120,219,255,.14); }
+  #card.soft #cue i { background: var(--calm); }
+  #head { font-size: 22px; line-height: 1.32; font-weight: 750; letter-spacing: -.005em; margin-bottom: 10px; text-wrap: pretty; }
+  #head .approx { color: var(--calm); font-weight: 700; margin-right: 2px; }
+  #pts { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  #pts li { position: relative; padding-left: 16px; font-size: 15.5px; line-height: 1.45; color: var(--soft); }
+  #pts li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  #pts b { color: var(--ink); }
+  #src { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(139,140,247,.18);
+         color: var(--soft); font-size: 12.5px; font-weight: 600; }
+  #src svg { width: 13px; height: 13px; fill: none; stroke: var(--accent); stroke-width: 2; }
+  #src:empty { display: none; }
+  .caret::after { content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: var(--cue); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #empty { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px; color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+  #empty b { color: var(--ink); font-size: 17px; font-weight: 700; }
+  kbd { font: 600 12px "Manrope", sans-serif; padding: 1px 7px; border-radius: 6px; background: var(--glass3); color: var(--ink); }
+  #nav { display: flex; align-items: center; gap: 4px; margin-top: 10px; color: var(--faint); font-size: 12.5px; font-weight: 600; }
+  #nav .ib { width: 26px; height: 26px; border-radius: 8px; }
+  #nav .tag { margin-left: auto; color: var(--calm); }
+  #err { color: var(--bad); font-size: 13px; margin-top: 8px; }
+  #err:empty { display: none; }
+
+  #talk { flex: none; margin: 12px 2px 12px; display: flex; flex-direction: column; gap: 4px; min-height: 64px; max-height: 108px; overflow: hidden;
+          mask-image: linear-gradient(180deg, transparent 0%, #000 38%); -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 38%); justify-content: flex-end; }
+  .ln { display: grid; grid-template-columns: 78px 1fr; gap: 6px; font-size: 13px; line-height: 1.4; }
+  .ln span:first-child { color: var(--faint); font-weight: 600; font-size: 12px; padding-top: 1px; }
+  .ln.them span:last-child { color: var(--them); }
+  .ln.me span:last-child { color: var(--faint); }
+  .ln span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ln:last-child span:last-child { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  #title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #talk .none { color: var(--faint); font-size: 13px; }
+  .row { display: flex; gap: 8px; flex: none; }
+  #b-shot { padding: 13px 12px; min-width: 46px; }
+  #ask { flex: 1; padding: 13px; border-radius: 16px; font-weight: 800; font-size: 15px; color: #fff; letter-spacing: .01em;
+         background: var(--brand); box-shadow: var(--brand-glow); transition: transform .1s, filter .15s; }
+  #ask:hover { filter: brightness(1.1); }
+  #ask:active { transform: translateY(1px); }
+  .ghost { padding: 13px 16px; border-radius: 16px; font-weight: 700; font-size: 14px; color: var(--ink); transition: background .15s; }
+  .ghost:hover { background: var(--glass2); }
+
+  /* поверх встречи и подготовки: шпаргалка, запись голоса */
+  .over { position: absolute; inset: 58px 12px 12px; border-radius: 20px; background: var(--frost); display: flex; flex-direction: column;
+          box-shadow: 0 24px 60px -12px rgb(0 0 0 / 55%); }
+  #sheet { padding: 16px 18px; z-index: 5; }
+  .over h2 { font: 600 15px/1.3 "Unbounded", "Manrope", sans-serif; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  #sheet .lead { margin-bottom: 10px; }
+  #sheet ol { list-style: none; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; user-select: text; -webkit-user-select: text; }
+  #sheet li { padding: 10px 12px; border-radius: 14px; background: var(--glass); }
+  #sheet li .sq { display: block; font-size: 13.5px; color: var(--them); font-weight: 600; margin-bottom: 3px; }
+  #sheet li span { font-size: 14.5px; line-height: 1.45; }
+  #voice { padding: 18px 20px 18px; z-index: 6; }
+  #endask { position: absolute; inset: 0; z-index: 9; display: flex; align-items: flex-end; padding: 12px; background: rgb(6 6 12 / 55%);
+            border-radius: var(--r); animation: fadeIn .15s ease-out; }
+  #endask .card { width: 100%; padding: 20px 20px 16px; border-radius: 20px; background: var(--frost); box-shadow: 0 24px 60px -12px rgb(0 0 0 / 60%);
+                  animation: rise .18s ease-out; }
+  #endask h2 { font: 600 16px/1.3 "Unbounded", "Manrope", sans-serif; margin-bottom: 6px; }
+  #endask p { color: var(--muted); font-size: 14px; line-height: 1.45; margin-bottom: 16px; }
+  #endask .row { display: flex; gap: 10px; }
+  #endask .row button { flex: 1; margin: 0; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { #endask, #endask .card { animation: none; } }
+  #voice .lead { margin-bottom: 16px; }
+  #vcard { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 14px;
+           padding: 20px 22px; border-radius: 20px; overflow: hidden; }
+  #vsay { font-size: 12.5px; font-weight: 700; color: var(--cue); }
+  #vphrase { font-size: 23px; line-height: 1.32; font-weight: 750; text-wrap: pretty; min-height: 3.9em; }
+  #vmeter { display: flex; align-items: center; gap: 3px; height: 26px; }
+  #vmeter i { width: 4px; border-radius: 2px; background: linear-gradient(180deg, var(--calm), var(--accent)); height: 4px; transition: height .08s; }
+  #vsteps { display: flex; gap: 6px; margin: 16px 0 12px; }
+  #vsteps i { flex: 1; height: 4px; border-radius: 2px; background: var(--glass3); transition: background .3s; }
+  #vsteps i.on { background: var(--brand); }
+  #vnote { font-size: 13px; color: var(--muted); min-height: 1.4em; }
+  #vnote.bad { color: var(--bad); }
+
+  /* итог */
+  #sum { overflow-y: auto; scrollbar-width: none; user-select: text; -webkit-user-select: text; }
+  #sum::-webkit-scrollbar { display: none; }
+  #sum h1 { font: 600 18px/1.35 "Unbounded", "Manrope", sans-serif; margin-bottom: 4px; }
+  #sum h2 { font-size: 14px; font-weight: 800; color: var(--ink); margin: 18px 0 6px; }
+  #sum p, #sum li { font-size: 14.5px; line-height: 1.55; color: var(--soft); }
+  #sum ul { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+  #sum li::marker { color: var(--accent); }
+  #sum em { color: var(--muted); font-style: normal; font-size: 13px; }
+  #sum .saved { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  #sum .wait { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 30px 0; }
+  .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--glass3); border-top-color: var(--cue); animation: rot .9s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header class="pywebview-drag-region">
+    <div class="t"><span class="dot"></span><span id="title">Суфлёр</span></div>
+    <span id="clock" class="hidden">0:00</span>
+    <button class="ib hidden" id="b-pause" title="Пауза — не слушать"><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button>
+    <button class="ib hidden" id="b-stop" title="Закончить встречу и подвести итог"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg></button>
+    <button class="ib" id="b-close" title="Закрыть"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
+  </header>
+
+  <!-- подготовка встречи -->
+  <main id="setup">
+    <p class="lead">Молча слушаю разговор и показываю подсказку, когда собеседник спрашивает или возражает. Голосом не отвечаю.</p>
+    <label class="f">Встреча<input type="text" id="m-title" maxlength="120" placeholder="Например, переговоры с «Альфа-Строй»"></label>
+    <label class="f">Чего хотите добиться<textarea id="m-goal" maxlength="2000" placeholder="Цель, ваши условия и границы: «продать годовой тариф, скидка не больше 10%»"></textarea></label>
+    <label class="f">Участники<input type="text" id="m-participants" maxlength="2000" placeholder="Вы, Иван Петров, команда «Альфа»" title="Перечислите участников через запятую. Эти имена попадут в начало протокола."></label>
+    <label class="f">Темы разговора<textarea id="m-topics" maxlength="2000" placeholder="Цена, сроки, условия договора" title="Темы, которые нужно отразить в кратком summary протокола."></textarea></label>
+    <div class="f">Материалы
+      <div id="drop" class="blk" tabindex="0" role="button"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4M12 11v6M9 14l3-3 3 3"/></svg><span><b>Перетащите файлы сюда</b> или нажмите, чтобы выбрать: прайс, договор, план, резюме. PDF, Word, текст.</span></div>
+      <div class="files" id="files"></div>
+    </div>
+    <div class="f">Где встреча
+      <div class="place" id="m-place">
+        <button data-v="online" class="blk on"><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2.5"/><path d="M8.5 20h7M12 16.5V20"/></svg><b>Онлайн</b><small>Zoom, Телемост, Meet — собеседник в колонках</small></button>
+        <button data-v="live" class="blk"><svg viewBox="0 0 24 24"><circle cx="8.5" cy="8" r="3"/><circle cx="16.5" cy="9" r="2.5"/><path d="M3.5 19c.6-3 2.6-4.5 5-4.5s4.4 1.5 5 4.5M14 14.6c.8-.4 1.6-.6 2.5-.6 2 0 3.5 1.3 4 4"/></svg><b>Вживую</b><small>один микрофон, вас узнаю по голосу</small></button>
+      </div>
+    </div>
+    <div class="opts" id="o-online">
+      <label class="opt"><div>Собеседника<small>звук компьютера</small></div><span class="sw"><input type="checkbox" id="m-them" checked><i></i></span></label>
+      <label class="opt"><div>Меня<small>микрофон</small></div><span class="sw"><input type="checkbox" id="m-me" checked><i></i></span></label>
+      <label class="opt"><div>Записать разговор<small>системный звук; микрофон Dewiar не используется</small></div><span class="sw"><input type="checkbox" id="m-record" title="Записать системный звук онлайн-встречи и после окончания сделать расшифровку"><i></i></span></label>
+      <label class="opt"><div>Расшифровать после окончания<small>экономит ресурсы во время переговоров</small></div><span class="sw"><input type="checkbox" id="m-deferred" checked title="Сделать полную транскрибацию WAV после остановки встречи"><i></i></span></label>
+      <label class="opt"><div>Автоматические кадры<small>проверка экрана каждые 0,5 секунды; неизменившаяся сцена не дублируется</small></div><span class="sw"><input type="checkbox" id="m-auto-shot" title="Сохранять изменившиеся кадры экрана с локальным OCR"><i></i></span></label>
+      <label class="opt"><div>Снимок при начале записи<small>первый кадр фиксирует, что было на экране в момент старта; можно отменить</small></div><span class="sw"><input type="checkbox" id="m-first-shot" checked title="Сделать первый снимок при запуске записи"><i></i></span></label>
+      <div class="frame-settings hidden" id="m-frame-settings">
+        <label>Проверять экран<select id="m-frame-interval" title="Как часто проверять экран"><option value="0.5" selected>каждые 0,5 с</option><option value="1">каждую 1 с</option><option value="2">каждые 2 с</option><option value="5">каждые 5 с</option></select></label>
+        <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option></select></label>
+        <label style="grid-column:1/-1"><span style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;font-weight:500"><input type="checkbox" id="m-frame-video" title="Собрать видео из всех кадров" style="width:16px;height:16px"> Собрать видео из кадров (таймлапс)</span></label>
+      </div>
+      <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent"><i></i></span></label>
+    </div>
+    <div id="vbox" class="blk hidden">
+      <span class="vi"><svg viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg></span>
+      <div class="vt" id="vtext"></div>
+      <button class="mini go2" id="v-rec">Запомнить мой голос</button>
+    </div>
+    <div class="f">Когда подсказывать
+      <div class="seg blk" id="m-mode"><button data-v="auto" class="on">На вопросы и возражения</button><button data-v="manual">Только по кнопке</button></div>
+    </div>
+    <div class="opts">
+      <label class="opt"><div>Подтолкнуть, если замешкались<small>спросили, а вы молчите, — выделю ответ; пауза — подскажу, что сказать</small></div><span class="sw"><input type="checkbox" id="m-nudge" checked><i></i></span></label>
+      <label class="opt"><div>Искать и в моих Знаниях<small>папка «Знания» на этом компьютере</small></div><span class="sw"><input type="checkbox" id="m-kn"><i></i></span></label>
+      <label class="opt"><div>Сохранить расшифровку<small>текст разговора добавится в протокол</small></div><span class="sw"><input type="checkbox" id="m-keep"><i></i></span></label>
+    </div>
+    <p class="warn hidden" id="nobrain">Чтобы подсказывать, нужен «Модели». <button id="to-brain">Выбрать модель</button></p>
+    <button class="go" id="start">Начать встречу</button>
+  </main>
+
+  <!-- встреча -->
+  <main id="live" class="hidden">
+    <p id="hear"></p>
+    <div id="initial" class="blk"><b>Предварительное summary</b><span id="initial-text"></span></div>
+    <section id="card" class="blk" aria-live="polite">
+      <div id="cue"><i></i></div>
+      <div id="empty"><b>Слушаю разговор</b><span>Подсказка появится здесь, когда собеседник спросит или возразит. Нужна прямо сейчас — нажмите «Подсказать» или <kbd>пробел</kbd>.</span></div>
+      <div id="q"></div>
+      <div id="body" class="hidden"><span id="why"></span><div id="head"></div><ul id="pts"></ul><span id="src"></span></div>
+      <div id="err"></div>
+      <div id="nav" class="hidden">
+        <button class="ib" id="prev" title="Предыдущая подсказка"><svg viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></svg></button>
+        <span id="pos"></span>
+        <button class="ib" id="next" title="Следующая подсказка"><svg viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></svg></button>
+        <span class="tag hidden" id="inst">из шпаргалки</span>
+      </div>
+    </section>
+    <div id="talk"><span class="none">Расшифровка разговора появится здесь.</span></div>
+    <div class="row"><button id="ask">Подсказать</button><button class="ghost blk" id="b-shot" title="Сделать снимок экрана, распознать текст локально и вставить его в расшифровку">Снимок</button><button class="ghost blk" id="b-sheet" title="Вероятные вопросы и ответы к встрече">Шпаргалка</button></div>
+    <div id="sheet" class="over hidden"><h2>Шпаргалка<button class="ib" id="sheet-x" title="Закрыть"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></h2>
+      <p class="lead" id="sheet-lead">Вероятные вопросы собеседника и что ответить — по цели и материалам.</p><ol id="sheet-list"></ol></div>
+  </main>
+
+  <!-- итог -->
+  <main id="sum" class="hidden"></main>
+
+  <!-- запись голоса владельца -->
+  <div id="voice" class="over hidden" role="dialog" aria-label="Запоминаю ваш голос">
+    <h2>Запоминаю ваш голос<button class="ib" id="v-x" title="Отменить"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></h2>
+    <p class="lead">Прочитайте фразы вслух обычным голосом, как на встрече. Звук не сохраняю — только отпечаток голоса.</p>
+    <div id="vcard" class="blk"><span id="vsay">Скажите</span><div id="vphrase"></div><div id="vmeter"></div></div>
+    <div id="vsteps"></div>
+    <p id="vnote"></p>
+  </div>
+  <!-- «Закончить встречу?» — своё окно внутри суфлёра: системный диалог браузера в Linux шире окна и обрезалось (отзыв 11.10) -->
+  <div id="endask" class="hidden" role="alertdialog" aria-labelledby="endask-t" aria-describedby="endask-d">
+    <div class="card"><h2 id="endask-t">Закончить встречу?</h2>
+      <p id="endask-d">Подведу итог и сохраню его в папку «Встречи».</p>
+      <div class="row"><button class="ghost blk" id="endask-no">Продолжить</button><button class="go" id="endask-yes">Закончить</button></div></div>
+  </div>
+</div>
+<script src="assets/dewiar.js"></script>
+<script>
+const $ = (s) => document.querySelector(s), $$ = (s) => [...document.querySelectorAll(s)];
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let st = null, view = "setup", idx = -1, follow = true, clockT = 0, mode = "auto", place = "online", vstep = null;
+
+function show(v) {
+  view = v;
+  for (const id of ["setup", "live", "sum"]) $("#" + id).classList.toggle("hidden", id !== v);
+  const live = v === "live";
+  $("#wrap").classList.toggle("live", live && !(st && st.paused));
+  $("#wrap").classList.toggle("paused", live && !!(st && st.paused));
+  for (const id of ["#clock", "#b-pause", "#b-stop"]) $(id).classList.toggle("hidden", !live);
+}
+
+/* ---------- подготовка ---------- */
+$$("#m-mode button").forEach(b => b.onclick = () => { mode = b.dataset.v; $$("#m-mode button").forEach(x => x.classList.toggle("on", x === b)); });
+$$("#m-place button").forEach(b => b.onclick = () => { place = b.dataset.v; $$("#m-place button").forEach(x => x.classList.toggle("on", x === b)); renderPlace(); });
+function renderPlace() {
+  const live = place === "live", v = (st && st.voice) || {};
+  $("#o-online").classList.toggle("hidden", live);
+  $("#vbox").classList.toggle("hidden", !live);
+  $("#vbox").classList.toggle("ok", !!v.has);
+  $("#vtext").innerHTML = v.has ? `Ваш голос запомнен<small>остальные голоса — собеседники</small>`
+    : `Нужен ваш голос — один раз<small>четыре фразы вслух, меньше минуты</small>`;
+  $("#v-rec").textContent = v.has ? "Записать заново" : "Запомнить мой голос";
+  $("#v-rec").classList.toggle("go2", !v.has);
+  const needsVoice = live && !v.has, needsConsent = !live && $("#m-record").checked && !$("#m-consent").checked;
+  $("#start").disabled = needsVoice || needsConsent;
+  $("#start").title = needsVoice ? "Сначала запомните свой голос" : (needsConsent ? "Подтвердите согласие участников на запись" : "");
+}
+function renderRecord() {
+  const on = !!$("#m-record").checked;
+  $("#m-me").disabled = on;
+  if (on) $("#m-me").checked = false;
+  $("#m-them").disabled = false;
+  $("#m-record").title = on
+    ? "Dewiar пишет только системный звук. Для голоса с вашей стороны направьте микс встречи в BlackHole/Loopback или сохраните запись в приложении встречи."
+    : "Запись выключена. Включите только после согласия участников.";
+  $("#m-consent-wrap").classList.toggle("hidden", !on);
+  if (!on) $("#m-consent").checked = false;
+  $("#start").disabled = on && !$("#m-consent").checked;
+}
+$("#m-record").onchange = renderRecord;
+$("#m-auto-shot").onchange = () => { $("#m-frame-settings").classList.toggle("hidden", !$("#m-auto-shot").checked); };
+$("#m-consent").onchange = renderRecord;
+renderRecord();
+
+/* ---------- голос владельца ---------- */
+const VBARS = 22;
+$("#vmeter").innerHTML = "<i></i>".repeat(VBARS);
+let vlevels = new Array(VBARS).fill(0);
+function voiceShow(e) {
+  $("#voice").classList.remove("hidden");
+  vstep = e.step;
+  const ph = e.phrases || voiceShow.phrases || [], need = e.need || ph.length || 4, n = e.n ?? voiceShow.n ?? 0;
+  voiceShow.phrases = ph; voiceShow.n = n;
+  $("#vsteps").innerHTML = Array.from({ length: need }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
+  $("#vnote").classList.remove("bad");
+  if (e.step === "model") {
+    $("#vsay").textContent = "Готовлю"; $("#vphrase").textContent = "Загружаю модель голоса…";
+    $("#vnote").textContent = e.pct != null ? `${e.pct}% из 28 МБ — один раз` : "28 МБ, один раз";
+  } else if (e.step === "listen") {
+    $("#vsay").textContent = `Скажите — фраза ${Math.min(n + 1, need)} из ${need}`;
+    $("#vphrase").textContent = ph[Math.min(n, ph.length - 1)] || "";
+    $("#vnote").textContent = n ? "Есть. Следующую — когда будете готовы." : "Слушаю. Говорите в обычной громкости.";
+  } else if (e.step === "saving") {
+    $("#vsay").textContent = "Почти всё"; $("#vphrase").textContent = "Запоминаю…"; $("#vnote").textContent = "";
+  } else if (e.step === "done") {
+    $("#vsay").textContent = "Готово"; $("#vphrase").textContent = "Голос запомнен. На очной встрече отличу вас от собеседников.";
+    $$("#vsteps i").forEach(i => i.classList.add("on"));
+    $("#vnote").textContent = e.consistency < 0.5 ? "Фразы звучали по-разному — если будет путать, запишите заново в тишине." : "";
+    setTimeout(() => { if (vstep === "done") voiceHide(); }, 2200);
+  } else if (e.step === "error") {
+    $("#vsay").textContent = "Не получилось"; $("#vphrase").textContent = e.error || "";
+    $("#vnote").textContent = "Попробуйте ещё раз."; $("#vnote").classList.add("bad");
+  } else if (e.step === "cancel") voiceHide();
+}
+function voiceHide() { $("#voice").classList.add("hidden"); vstep = null; core.call("prompter_state").then(s => { st = s; render(); }).catch(() => {}); }
+$("#v-rec").onclick = () => { voiceShow.n = 0; core.call("prompter_voice", { action: "start" }).catch(e => voiceShow({ step: "error", error: e.message })); };
+$("#v-x").onclick = () => { if (vstep === "listen" || vstep === "model") core.call("prompter_voice", { action: "cancel" }).catch(() => {}); voiceHide(); };
+core.on("level", (e) => {
+  if (vstep !== "listen" || e.src !== "mic") return;
+  vlevels = vlevels.slice(1).concat([Math.min(1, e.v * 1.6)]);
+  $$("#vmeter i").forEach((b, i) => { b.style.height = (4 + vlevels[i] * 22) + "px"; });
+});
+function renderFiles(list) {
+  $("#files").innerHTML = (list || []).map(f => `<span class="file"><span>${esc(f.name)}</span><small>${Math.max(1, Math.round(f.chars / 1000))} тыс. зн.</small>`
+    + `<button data-n="${esc(f.name)}" title="Убрать"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></span>`).join("");
+  $$("#files button").forEach(b => b.onclick = () => core.call("prompter_file_remove", { name: b.dataset.n }).catch(() => {}));
+}
+function fileErr(name, msg) {
+  const s = document.createElement("span"); s.className = "file err"; s.textContent = `${name}: ${msg}`;
+  $("#files").appendChild(s); setTimeout(() => s.remove(), 6000);
+}
+async function sendFile(f) {
+  if (f.size > 30 * 1024 * 1024) return fileErr(f.name, "больше 30 МБ");
+  const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+  try { await core.call("prompter_file", { name: f.name, data }); } catch (e) { fileErr(f.name, e.message); }
+}
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => [...(e.dataTransfer.files || [])].forEach(sendFile));
+const pick = async () => {
+  const a = api();
+  if (a && a.pick_file) {
+    const p = await a.pick_file("Документы (*.pdf;*.docx;*.odt;*.txt;*.md;*.html;*.csv)");
+    if (p) core.call("prompter_file", { path: p }).catch(e => fileErr(p.split(/[\\/]/).pop(), e.message));
+    return;
+  }
+  const i = document.createElement("input"); i.type = "file"; i.multiple = true; i.onchange = () => [...i.files].forEach(sendFile); i.click();
+};
+drop.onclick = pick;
+drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => e.preventDefault());
+$("#to-brain").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
+$("#start").onclick = async () => {
+  $("#start").disabled = true;
+  try {
+    st = await core.call("prompter_start", { title: $("#m-title").value, goal: $("#m-goal").value, mode, them: $("#m-them").checked,
+      me: $("#m-me").checked, knowledge: $("#m-kn").checked, keep_text: $("#m-keep").checked || $("#m-record").checked, place, nudge: $("#m-nudge").checked,
+      participants: $("#m-participants").value, topics: $("#m-topics").value, record: $("#m-record").checked,
+      deferred: $("#m-deferred").checked, source: "system", consent: $("#m-consent").checked,
+      auto_frames: $("#m-auto-shot").checked, auto_interval: Number($("#m-frame-interval").value),
+      frame_quality: Number($("#m-frame-quality").value), frame_video: $("#m-frame-video").checked,
+      auto_first_frame: $("#m-first-shot").checked });
+    idx = -1; follow = true; render();
+  } catch (e) { $("#nobrain").textContent = e.message; $("#nobrain").classList.remove("hidden"); }
+  finally { $("#start").disabled = false; renderPlace(); }
+};
+
+/* ---------- встреча ---------- */
+function tick() {
+  clearInterval(clockT);
+  const t0 = st && st.meeting && st.meeting.started;
+  const upd = () => { if (!t0) return; const s = Math.max(0, Math.floor(Date.now() / 1000 - t0)); $("#clock").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  upd(); clockT = setInterval(upd, 1000);
+}
+function inline(t) { return esc(t).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(\d[\d\s.,]*\d|\d)(\s?(?:%|₽|руб[а-яё]*|тал[а-яё]*|\$|€|дн[а-яё]*|недел[а-яё]*|мес[а-яё]*|лет|года?|мест[а-яё]*|шт)(?![а-яё]))/gi, "<b>$1$2</b>"); }
+function renderHint() {
+  const hs = (st && st.hints || []).filter(h => !h.empty);
+  if (!hs.length) { $("#empty").classList.remove("hidden"); $("#body").classList.add("hidden"); $("#nav").classList.add("hidden"); $("#q").textContent = "";
+    $("#card").classList.remove("ready", "stuck", "soft"); $("#cue i").style.height = "0"; $("#err").textContent = ""; return; }
+  if (follow || idx < 0 || idx >= hs.length) idx = hs.length - 1;
+  const h = hs[idx];
+  $("#empty").classList.add("hidden"); $("#body").classList.remove("hidden");
+  $("#q").textContent = h.q ? `«${h.q.length > 160 ? h.q.slice(0, 160) + "…" : h.q}»`
+    : ({ me: "Вы подбираете слова — вот на что опереться", pause: "В разговоре пауза", stuck: "" }[h.why] ?? "По вашей просьбе");
+  const stuck = !!h.stuck || h.why === "stuck" || h.why === "me", soft = h.why === "pause";
+  $("#card").classList.toggle("stuck", stuck); $("#card").classList.toggle("soft", soft && !stuck);
+  $("#why").textContent = stuck ? "Начните так" : soft ? "Можно сказать" : "";
+  const lines = String(h.text || "").split("\n").map(s => s.trim()).filter(Boolean);
+  const src = lines.find(s => /^источник\s*:/i.test(s));
+  const rest = lines.filter(s => s !== src);
+  let head = (rest[0] || "").replace(/^[•\-*]\s*/, "");
+  const approx = head.startsWith("≈");
+  head = head.replace(/^≈\s*/, "");
+  $("#head").innerHTML = (approx ? `<span class="approx" title="Из общих знаний — в материалах ответа нет">≈</span>` : "") + inline(head);
+  $("#pts").innerHTML = rest.slice(1).map(s => `<li>${inline(s.replace(/^[•\-*]\s*/, ""))}</li>`).join("");
+  $("#src").innerHTML = src ? `<svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4"/></svg>${esc(src.replace(/^источник\s*:\s*/i, ""))}` : "";
+  const writing = !h.done && !h.instant;
+  ($("#pts").lastElementChild || $("#head")).classList.toggle("caret", writing);
+  if (writing && $("#pts").lastElementChild) $("#head").classList.remove("caret");
+  const pct = h.done || h.instant ? 100 : Math.min(92, 18 + (h.text || "").length / 2.2);
+  $("#cue i").style.height = pct + "%";
+  $("#card").classList.toggle("ready", !!h.done);
+  $("#inst").classList.toggle("hidden", !h.instant);
+  $("#err").textContent = h.error ? "Модель не ответила: " + h.error : "";
+  $("#nav").classList.toggle("hidden", hs.length < 2);
+  $("#pos").textContent = `${idx + 1} из ${hs.length}`;
+}
+function renderTalk() {
+  const ls = (st && st.lines || []).slice(-5);
+  $("#talk").innerHTML = ls.length ? ls.map(l => `<div class="ln ${l.who}"><span>${l.who === "them" ? "Собеседник" : l.who === "screen" ? "Экран" : "Вы"}</span><span title="${esc(l.path || "")}">${esc(l.text)}</span></div>`).join("")
+    : `<span class="none">Расшифровка разговора появится здесь.</span>`;
+}
+function renderInitial() {
+  const p = (st && st.summary_preview) || {};
+  if (!p.when) { $("#initial").classList.add("hidden"); return; }
+  $("#initial").classList.remove("hidden");
+  $("#initial-text").textContent = `Когда: ${p.when} · Участники: ${p.participants || "не указаны"} · Темы: ${p.topics || "не указаны"} · Что решили: ${p.decisions || "будет после расшифровки"}`;
+}
+function renderSheet() {
+  const sh = (st && st.sheet) || [];
+  $("#sheet-list").innerHTML = sh.map(x => `<li><span class="sq">${esc(x.q)}</span><span>${inline(x.a)}</span></li>`).join("");
+  $("#sheet-lead").textContent = sh.length ? "Вероятные вопросы собеседника и что ответить — по цели и материалам."
+    : (st && st.meeting && (st.meeting.goal || (st.files || []).length) ? "Готовлю — обычно это меньше минуты." : "Шпаргалка готовится, когда есть цель встречи или материалы.");
+}
+function render() {
+  if (!st) return;
+  $("#nobrain").classList.toggle("hidden", !!st.brain);
+  renderFiles(st.files); renderPlace();
+  if (st.on) {
+    show("live"); tick();
+    $("#title").textContent = $("#title").title = (st.meeting && st.meeting.title) || "Встреча";
+    $("#hear").textContent = st.paused ? "На паузе — не слушаю." : (st.status || "");
+    $("#hear").classList.toggle("bad", /не слышу|не слушаю/.test(st.status || "") || st.paused);
+    $("#b-pause").title = st.paused ? "Продолжить" : "Пауза — не слушать";
+    $("#b-pause").innerHTML = st.paused ? '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg>';
+    renderInitial(); renderHint(); renderTalk(); renderSheet();
+  } else if (view === "live" || view === "sum") {
+    clearInterval(clockT); $("#title").textContent = "Итог встречи"; show("sum");
+  } else { $("#title").textContent = "Суфлёр"; show("setup"); }
+}
+function md(t) {
+  return esc(t).replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/^\*(.*)\*$/gm, "<em>$1</em>").replace(/^_(.*)_$/gm, "<em>$1</em>")
+    .replace(/(?:^- .*(?:\n|$))+/gm, m => "<ul>" + m.trim().split("\n").map(l => `<li>${l.slice(2)}</li>`).join("") + "</ul>")
+    .replace(/^(?!<h|<ul|<li|<em)(.+)$/gm, "<p>$1</p>").replace(/\n+/g, "");
+}
+function renderSum(e) {
+  show("sum"); $("#title").textContent = "Итог встречи";
+  $("#sum").innerHTML = e.busy ? `<div class="wait"><span class="spin"></span>${e.phase === "transcribe" ? "Расшифровываю запись разговора…" : "Подвожу итог встречи…"}</div>`
+    : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
+      + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
+  if ($("#again")) $("#again").onclick = () => { show("setup"); $("#title").textContent = "Суфлёр"; };
+  if ($("#done")) $("#done").onclick = closeWin;
+}
+$("#ask").onclick = () => { follow = true; core.call("prompter_hint", {}).catch(e => { $("#err").textContent = e.message; }); };
+$("#b-shot").onclick = () => core.call("prompter_screenshot", { ocr: true }).catch(e => { $("#err").textContent = e.message; });
+$("#b-pause").onclick = () => core.call("prompter_pause", { on: !(st && st.paused) });
+$("#b-stop").onclick = () => core.call("prompter_stop", { summary: true });
+$("#b-sheet").onclick = () => { renderSheet(); $("#sheet").classList.toggle("hidden"); };
+$("#sheet-x").onclick = () => $("#sheet").classList.add("hidden");
+$("#prev").onclick = () => { follow = false; idx = Math.max(0, idx - 1); renderHint(); };
+$("#next").onclick = () => { const n = (st.hints || []).filter(h => !h.empty).length; idx = Math.min(n - 1, idx + 1); follow = idx === n - 1; renderHint(); };
+function closeWin(sure) {
+  if (st && st.on && sure !== true) { endAsk(); return; }       // встреча идёт — сначала спросить (своим окном, не системным диалогом)
+  if (st && st.on) core.call("prompter_stop", { summary: true });
+  const a = api(); if (a && a.close_prompter) a.close_prompter(); else window.close();
+}
+function endAsk(open = true) {
+  $("#endask").classList.toggle("hidden", !open);
+  if (open) setTimeout(() => $("#endask-yes").focus(), 30);
+}
+$("#endask-no").onclick = () => endAsk(false);
+$("#endask-yes").onclick = () => { endAsk(false); closeWin(true); };
+$("#endask").onclick = (e) => { if (e.target.id === "endask") endAsk(false); };
+$("#b-close").onclick = closeWin;
+let prompterHotkey = "Ctrl+Shift+S";
+function hotkeyMatch(e, spec) {
+  const p = String(spec || "Ctrl+Shift+S").toLowerCase().split("+").map(x => x.trim());
+  const key = p.at(-1), ctrl = p.includes("ctrl") || p.includes("control"), alt = p.includes("alt") || p.includes("option");
+  const meta = p.includes("cmd") || p.includes("command") || p.includes("meta");
+  return e.key.toLowerCase() === key && e.ctrlKey === ctrl && e.shiftKey === p.includes("shift") && e.altKey === alt && e.metaKey === meta;
+}
+document.addEventListener("keydown", (e) => {
+  if (!$("#endask").classList.contains("hidden")) {           // открыт вопрос «Закончить встречу?»
+    if (e.key === "Escape") { e.preventDefault(); endAsk(false); }
+    return;
+  }
+  if (view !== "live" || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+  if (e.key === " " || e.key === "Enter") { e.preventDefault(); $("#ask").click(); }
+  else if (hotkeyMatch(e, prompterHotkey)) { e.preventDefault(); $("#b-shot").click(); }
+  else if (e.key === "ArrowLeft") $("#prev").click();
+  else if (e.key === "ArrowRight") $("#next").click();
+  else if (e.key === "Escape") $("#sheet").classList.add("hidden");
+});
+
+/* ---------- события ядра ---------- */
+core.on("hello", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || "Ctrl+Shift+S"; core.call("prompter_state").then(s => { st = s; render(); if (!s.on && s.summary && view === "sum") renderSum({ summary: s.summary }); }).catch(() => {}); });
+core.on("settings", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || prompterHotkey; });
+core.on("prompter", (e) => {
+  if (e.kind === "state") {
+    const was = st && st.on; st = e.state;
+    if (was && !st.on && !(st.lines || []).length && !(st.meeting && st.meeting.record)) { view = "setup"; render(); }   // встреча без единой реплики — итога не будет
+    else if (!(was && !st.on)) render();                                            // закончилась — ждём итог (событие summary)
+    return;
+  }
+  if (!st) return;
+  if (e.kind === "line") { st.lines = (st.lines || []).concat([e.line]).slice(-30); if (view === "live") renderTalk(); }
+  else if (e.kind === "hint") {
+    const hs = st.hints || (st.hints = []); const i = hs.findIndex(h => h.id === e.hint.id);
+    if (i >= 0) hs[i] = e.hint; else hs.push(e.hint);
+    if (view === "live") renderHint();
+  } else if (e.kind === "sheet") { st.sheet = e.sheet; renderSheet(); }
+  else if (e.kind === "summary") renderSum(e);
+  else if (e.kind === "voice") { voiceShow(e); if (e.step === "done") { st.voice = Object.assign(st.voice || {}, { has: true }); renderPlace(); } }
+});
+render();
+</script>
+</body>
+</html>

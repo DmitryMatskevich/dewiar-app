@@ -1,0 +1,139 @@
+/* Темы оформления Dewiar — общие для виджета (ui/hud.html), студии (образцы в «Оформлении») и телефона.
+   Класс .skin-<id> задаёт переменные: --skin-bg — фон (значение для свойства background), --glass и --glass-shadow —
+   стеклянные блоки, --muted — второстепенный текст (на светлых темах — плотнее; 25.10 ещё плотнее, №242: «неудобно читать светлые буквы на сером фоне»). Список, названия и группы —
+   assets/skins.js. Текстура — зерно матового стекла (skins/grain.webp; url() — прямыми правилами: относительный url в var() считается от страницы, а не от этого файла; #card — карточка виджета
+   (прямо в body; у телефона #card — другой блок внутри сцены), #scene — фон телефона) — картинки skins/*.webp из tools/skin_textures.py. */
+
+.skin-calm {
+  --skin-bg: radial-gradient(130% 90% at 15% 95%, rgba(120,119,198,.26) 0%, transparent 60%),
+             radial-gradient(120% 80% at 90% 5%, rgba(193,235,255,.2) 0%, transparent 60%),
+             linear-gradient(160deg, #11121a 0%, #1b1d30 45%, #262038 75%, #33203a 100%);
+}
+.skin-brand {
+  --skin-bg: radial-gradient(circle at 20% 80%, rgba(120,119,198,.3) 0%, transparent 50%),
+             radial-gradient(circle at 80% 20%, rgba(255,119,198,.3) 0%, transparent 50%),
+             radial-gradient(circle at 40% 40%, rgba(120,219,255,.2) 0%, transparent 50%),
+             linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #16213e 100%);
+}
+.skin-graphite {
+  --skin-bg: radial-gradient(circle at 50% 0%, rgba(255,255,255,.07) 0%, transparent 60%),
+             linear-gradient(180deg, #16161a 0%, #0d0d10 60%, #09090b 100%);
+}
+.skin-neon {
+  --skin-bg: radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--persona, var(--pc, #8A9BFF)) 14%, transparent) 0%, transparent 58%),
+             linear-gradient(180deg, #151519 0%, #0b0b0e 55%, #09090b 100%);
+}
+
+/* металл — светлые: стекло плотнее, тень мягче, подписи ярче */
+.skin-steel {
+  --skin-bg: radial-gradient(circle at 80% 20%, rgb(167 172 187) 0%, #4a5167 93%);
+}
+.skin-platinum {
+  --skin-bg: radial-gradient(circle at 100% 30%, #ffffff -14%, #000000 115%);
+}
+.skin-steel, .skin-platinum { --glass: rgb(255 255 255 / 9%); --glass-shadow: 0 0 20px rgba(0,0,0,.18); --muted: rgba(255,255,255,.78); }
+
+
+/* атмосфера */
+.skin-nebula {
+  --skin-bg: radial-gradient(1.2px 1.2px at 30px 40px, rgba(255,255,255,.8), transparent) 0 0 / 170px 170px,
+             radial-gradient(1px 1px at 120px 90px, rgba(255,255,255,.55), transparent) 0 0 / 170px 170px,
+             radial-gradient(1px 1px at 80px 150px, rgba(200,220,255,.6), transparent) 0 0 / 230px 230px,
+             radial-gradient(70% 45% at 75% 25%, rgba(150,90,220,.32) 0%, transparent 70%),
+             radial-gradient(60% 45% at 20% 75%, rgba(40,160,200,.26) 0%, transparent 70%),
+             linear-gradient(160deg, #07070d 0%, #0d0b1a 55%, #06060b 100%);
+}
+.skin-aurora {
+  --skin-bg: radial-gradient(60% 28% at 30% 20%, rgba(80,240,180,.32) 0%, transparent 70%),
+             radial-gradient(50% 24% at 70% 32%, rgba(60,200,230,.26) 0%, transparent 70%),
+             radial-gradient(55% 30% at 55% 12%, rgba(170,110,255,.22) 0%, transparent 70%),
+             linear-gradient(180deg, #071420 0%, #06101a 55%, #04090f 100%);
+}
+.skin-ocean {
+  --skin-bg: radial-gradient(90% 50% at 50% 0%, rgba(120,220,255,.2) 0%, transparent 65%),
+             linear-gradient(180deg, #0c2f40 0%, #082233 45%, #05141f 100%);
+}
+
+/* стекло: окно непрозрачное, поэтому «запотевшее стекло» — размытые цветные поля, светлая дымка и мелкое зерно */
+html body.skin-frost > #card, html body.skin-frost #scene, .lk-prev.skin-frost {
+  background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
+              linear-gradient(rgba(255,255,255,.12), rgba(255,255,255,.07)),
+              radial-gradient(65% 48% at 18% 20%, rgba(130,175,255,.75) 0%, transparent 72%),
+              radial-gradient(60% 48% at 88% 70%, rgba(255,150,195,.55) 0%, transparent 72%),
+              radial-gradient(55% 42% at 78% 10%, rgba(140,245,215,.42) 0%, transparent 72%),
+              linear-gradient(165deg, #2b3448 0%, #252b3d 55%, #1d2232 100%);
+}
+.skin-frost, .skin-fog { --glass: rgb(255 255 255 / 11%); --glass-shadow: 0 0 20px rgba(0,0,0,.2); --muted: rgba(255,255,255,.78); }
+html body.skin-fog > #card, html body.skin-fog #scene, .lk-prev.skin-fog {
+  background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
+              radial-gradient(120% 30% at 50% 92%, rgba(255,255,255,.2) 0%, transparent 70%),
+              radial-gradient(110% 26% at 25% 62%, rgba(255,255,255,.1) 0%, transparent 70%),
+              radial-gradient(90% 22% at 80% 40%, rgba(230,240,255,.08) 0%, transparent 70%),
+              linear-gradient(180deg, #2a3140 0%, #3a4456 55%, #4b5568 100%);
+}
+.skin-dusk {
+  --skin-bg: radial-gradient(70% 55% at 12% 12%, rgba(110,150,255,.7) 0%, transparent 70%),
+             radial-gradient(65% 55% at 92% 38%, rgba(255,165,140,.42) 0%, transparent 70%),
+             radial-gradient(90% 70% at 50% 105%, rgba(28,36,88,1) 0%, transparent 75%),
+             linear-gradient(180deg, rgba(0,0,0,.12), rgba(0,0,0,.28)), #1b2245;
+}
+
+/* светлые: тёмный текст (--ink), стекло и тени — свои */
+.skin-glass {
+  --skin-bg: radial-gradient(60% 45% at 12% 8%, rgba(255,170,195,.95) 0%, transparent 70%),
+             radial-gradient(55% 45% at 92% 18%, rgba(205,170,255,.9) 0%, transparent 70%),
+             radial-gradient(75% 55% at 50% 105%, rgba(255,200,170,.9) 0%, transparent 75%),
+             linear-gradient(160deg, #ffd3df 0%, #f1d6ff 50%, #ffe2d3 100%);
+  --glass: rgba(255,255,255,.42); --glass-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 10px 30px rgba(120,60,140,.16);
+  --ink: #2b2540; --muted: rgba(43,37,64,.74);
+}
+.skin-snow {
+  --skin-bg: radial-gradient(120% 60% at 50% 0%, #ffffff 0%, transparent 70%), linear-gradient(180deg, #f8f9fb 0%, #eceff4 100%);
+  --glass: #ffffff; --glass-shadow: 0 8px 24px rgba(20,30,60,.08), 0 1px 3px rgba(20,30,60,.07);
+  --ink: #1d2230; --muted: rgba(29,34,48,.72);
+}
+/* неоморфизм: фон и блоки — один материал, форма — от двух теней (светлой сверху-слева и тёмной снизу-справа) */
+.skin-neu {
+  --skin-bg: #e4e9f0; --glass: #e4e9f0; --neu-dark: #c2c9d4; --neu-light: #ffffff;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #2a3140; --muted: rgba(42,49,64,.73);
+}
+.skin-neudark {
+  --skin-bg: #262a31; --glass: #262a31; --neu-dark: #191c21; --neu-light: #333943;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+}
+.skin-neusky {
+  --skin-bg: #dbe5f1; --glass: #dbe5f1; --neu-dark: #b8c5d6; --neu-light: #f7fbff;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #24324a; --muted: rgba(36,50,74,.73);
+}
+/* «Небесный вечер» — тёмная пара «Небесного» (20.10): тот же оттенок неба, только сумерки — дымчатый сине-серый,
+   свет по краю чуть холоднее, чем у «Графитового», и без глубокой синевы «Ночного» */
+.skin-neudusk {
+  --skin-bg: #232a35; --glass: #232a35; --neu-dark: #171c24; --neu-light: #2f3846;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #e6edf7; --muted: rgba(230,237,247,.62);
+}
+.skin-neumint {
+  --skin-bg: #dde9e5; --glass: #dde9e5; --neu-dark: #bccdc7; --neu-light: #fafffd;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+  --ink: #233b35; --muted: rgba(35,59,53,.73);
+}
+.skin-neunavy {
+  --skin-bg: #1e2638; --glass: #1e2638; --neu-dark: #141a27; --neu-light: #2a344b;
+  --glass-shadow: 7px 7px 16px var(--neu-dark), -7px -7px 16px var(--neu-light);
+}
+
+/* «Вижн»: панель из тёплого серого стекла, сквозь которое угадывается комната — свет окна, дерево, голубая стена;
+   блоки внутри — светлее, с бликом по верхней кромке */
+html body.skin-vision > #card, html body.skin-vision #scene, .lk-prev.skin-vision {
+  background: url("skins/grain.webp") 0 0 / 160px 160px repeat,
+              linear-gradient(rgba(118,116,114,.42), rgba(96,94,92,.48)),
+              radial-gradient(55% 40% at 18% 12%, rgba(255,244,226,.85) 0%, transparent 70%),
+              radial-gradient(50% 45% at 88% 88%, rgba(160,112,78,.75) 0%, transparent 72%),
+              radial-gradient(45% 40% at 85% 22%, rgba(170,192,214,.6) 0%, transparent 70%),
+              radial-gradient(60% 40% at 25% 85%, rgba(90,110,80,.45) 0%, transparent 72%),
+              linear-gradient(160deg, #a49d94 0%, #7d776f 55%, #5c5650 100%);
+}
+.skin-vision { --glass: rgba(255,255,255,.14); --glass-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 10px 26px rgba(0,0,0,.18);
+  --muted: rgba(255,255,255,.75); }

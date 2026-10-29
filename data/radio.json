@@ -1,0 +1,184 @@
+{
+ "_how": "Список радиостанций Dewiar. Правьте прямо здесь: name — как назвать вслух, url — адрес потока, tags — жанры словами через пробел (по ним ассистент выбирает: «включи джаз», «что-нибудь спокойное»), aliases — как ещё могут назвать станцию (необязательно). Программы перечитывают файл раз в 6 часов.",
+ "genres": [
+  "поп",
+  "рок",
+  "джаз",
+  "релакс",
+  "танцевальная",
+  "ретро",
+  "дип хаус",
+  "новости",
+  "классика",
+  "эмбиент",
+  "лаунж"
+ ],
+ "stations": [
+  {
+   "name": "Русское Радио",
+   "url": "https://pub0101.101.ru:8000/stream/air/aac/64/100",
+   "tags": "русское поп",
+   "aliases": [
+    "русское"
+   ]
+  },
+  {
+   "name": "Рекорд",
+   "url": "https://radiorecord.hostingradio.ru/rr_main96.aacp",
+   "tags": "клубная танцевальная",
+   "aliases": [
+    "рекорд",
+    "радио рекорд"
+   ]
+  },
+  {
+   "name": "Маруся ФМ",
+   "url": "https://radio-holding.ru:9433/marusya_default",
+   "tags": "русские хиты поп"
+  },
+  {
+   "name": "Вести ФМ",
+   "url": "https://icecast-vgtrk.cdnvideo.ru/vestifm_mp3_192kbps",
+   "tags": "новости разговорное"
+  },
+  {
+   "name": "Маяк",
+   "url": "https://icecast-vgtrk.cdnvideo.ru/mayakfm_mp3_192kbps",
+   "tags": "разговорное",
+   "aliases": [
+    "маяк фм"
+   ]
+  },
+  {
+   "name": "NRJ",
+   "url": "https://pub0101.101.ru:8000/stream/air/aac/64/99",
+   "tags": "энерджи поп"
+  },
+  {
+   "name": "Relax FM",
+   "url": "https://pub0201.101.ru:8000/stream/air/aac/64/200",
+   "tags": "релакс спокойно"
+  },
+  {
+   "name": "Ultra",
+   "url": "https://nashe1.hostingradio.ru:18000/ultra-128.mp3",
+   "tags": "рок альтернатива"
+  },
+  {
+   "name": "Jazz",
+   "url": "https://nashe1.hostingradio.ru/jazz-128.mp3",
+   "tags": "джаз",
+   "aliases": [
+    "джаз",
+    "радио джаз"
+   ]
+  },
+  {
+   "name": "Вата",
+   "url": "https://radio.promodj.com/vata-192",
+   "tags": "дип хаус deep"
+  },
+  {
+   "name": "Ретро Хит",
+   "url": "https://retro.volna.top/Retro",
+   "tags": "ретро 80 90"
+  },
+  {
+   "name": "Ремикс ФМ",
+   "url": "https://remixfm.volna.top/RemixFM",
+   "tags": "ремиксы"
+  },
+  {
+   "name": "Русский рок",
+   "url": "https://air.volna.top/RusRock",
+   "tags": "рок"
+  },
+  {
+   "name": "Mixadance",
+   "url": "https://stream.mixadance.fm/mixadance",
+   "tags": "танцевальная микс"
+  },
+  {
+   "name": "Монстры рока СССР",
+   "url": "https://stream.zeno.fm/d2acdq2w908uv",
+   "tags": "рок ссср"
+  },
+  {
+   "name": "Groove Salad",
+   "url": "https://ice5.somafm.com/groovesalad-128-mp3",
+   "tags": "чилаут электроника релакс эмбиент",
+   "aliases": [
+    "грув салад",
+    "грув",
+    "сома фм",
+    "soma fm"
+   ]
+  },
+  {
+   "name": "Drone Zone",
+   "url": "https://ice5.somafm.com/dronezone-128-mp3",
+   "tags": "эмбиент релакс спокойно",
+   "aliases": [
+    "дрон зон",
+    "дрон зона",
+    "для сна"
+   ]
+  },
+  {
+   "name": "Secret Agent",
+   "url": "https://ice5.somafm.com/secretagent-128-mp3",
+   "tags": "лаунж джаз ретро",
+   "aliases": [
+    "сикрет эйджент",
+    "секретный агент"
+   ]
+  },
+  {
+   "name": "Lush",
+   "url": "https://ice5.somafm.com/lush-128-mp3",
+   "tags": "релакс чилаут вокал спокойно",
+   "aliases": [
+    "лаш"
+   ]
+  },
+  {
+   "name": "Deep Space One",
+   "url": "https://ice5.somafm.com/deepspaceone-128-mp3",
+   "tags": "эмбиент электроника космос",
+   "aliases": [
+    "дип спейс",
+    "дип спейс ван",
+    "космос"
+   ]
+  },
+  {
+   "name": "Radio Swiss Jazz",
+   "url": "https://stream.srg-ssr.ch/srgssr/rsj/mp3/128",
+   "tags": "джаз спокойно",
+   "aliases": [
+    "свисс джаз",
+    "швейцарский джаз",
+    "радио свисс джаз"
+   ]
+  },
+  {
+   "name": "Radio Swiss Classic",
+   "url": "https://stream.srg-ssr.ch/srgssr/rsc_de/mp3/128",
+   "tags": "классика классическая спокойно",
+   "aliases": [
+    "свисс классик",
+    "классическая музыка",
+    "классика"
+   ]
+  },
+  {
+   "name": "Radio Swiss Pop",
+   "url": "https://stream.srg-ssr.ch/srgssr/rsp/mp3/128",
+   "tags": "поп спокойно",
+   "aliases": [
+    "свисс поп",
+    "швейцарский поп"
+   ]
+  }
+ ]
+}

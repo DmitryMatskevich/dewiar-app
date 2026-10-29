@@ -1,0 +1,1785 @@
+<!doctype html>
+<!-- Студия Dewiar (окно настроек): только разметка. Оформление — studio/studio.css, код — studio/*.js; скрипты
+     подключаются внизу по порядку и делят одну глобальную область ($, core, toast… объявлены раньше, чем используются).
+     Раздел — <section id="p-ИМЯ">, кнопка меню — data-p="ИМЯ" (studio/core.js), «Помощь» — ключ ИМЯ в assets/help.js / assets/help-current.js.
+     Поле с data-k="раздел.ключ" само показывает и сохраняет настройку ядра (bindFields/refreshStatic в studio/brain.js).
+     Код находит элементы по id: id должны быть уникальны на всей странице, переименовывая — ищите в studio/*.js.
+     Адрес открывает ui/app.py: ?token=…&port=… — для связи с ядром (assets/dewiar.js), &frame=1 — своя рамка окна
+     на Linux (скрипт сразу за рамкой), #раздел — какой раздел открыть. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar — студия</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<link rel="stylesheet" href="studio/studio.css">
+<link rel="stylesheet" href="assets/skins.css">
+<link rel="stylesheet" href="studio/theme.css">
+<!-- тема — до первой отрисовки (стили выше уже загружены): окно сразу в своём стиле, без вспышки фирменного фона -->
+<script src="assets/skins.js"></script>
+<script src="studio/theme.js"></script>
+<link rel="stylesheet" href="studio/context-help.css">
+<link rel="stylesheet" href="studio/contacts.css">
+</head>
+<body>
+<div id="upd"><div class="box">
+  <div class="logo"><img src="assets/logo-white.png" alt=""><i></i></div>
+  <small id="upd-ver">Dewiar</small>
+  <h2 id="upd-t">Устанавливаю…</h2>
+  <div id="upd-bar"><b></b></div>
+  <p id="upd-line"></p>
+  <ol><li>Пароль</li><li>Установка</li><li>Перезапуск</li></ol>
+  <button class="btn" id="upd-x" style="display:none">Закрыть</button>
+</div></div>
+<div id="tbar"><img class="lg" src="assets/logo-white.png" alt=""><div class="tt"><b>Dewiar</b>студия</div>
+  <div class="wb">
+    <button id="wb-min" title="Свернуть"><svg viewBox="0 0 14 14"><path d="M2.5 7h9"/></svg></button>
+    <button id="wb-max" title="Развернуть"><svg viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.5"/></svg></button>
+    <button id="wb-x" class="x" title="Закрыть"><svg viewBox="0 0 14 14"><path d="M3 3l8 8M11 3l-8 8"/></svg></button>
+  </div></div>
+<div class="grip n"></div><div class="grip s"></div><div class="grip w"></div><div class="grip e"></div>
+<div class="grip nw"></div><div class="grip ne"></div><div class="grip sw"></div><div class="grip se"></div><div id="fedge"></div>
+<script>
+(() => {
+  if (new URLSearchParams(location.search).get("frame") !== "1") return;
+  document.documentElement.classList.add("framed");
+  const ICON_MAX = '<rect x="2.5" y="2.5" width="9" height="9" rx="1.5"/>';
+  const ICON_RES = '<rect x="2.5" y="4.5" width="7" height="7" rx="1.3"/><path d="M5 4.5V3.6c0-.6.5-1.1 1.1-1.1h4.3c.6 0 1.1.5 1.1 1.1v4.3c0 .6-.5 1.1-1.1 1.1h-.9"/>';
+  // Зовёт ui/app.py, когда окно развёрнуто или прижато к краю: тогда без скругления и краёв (html.max).
+  // Состояние запоминается в ui.studio_max — следующая студия откроется так же.
+  window.frameState = (max) => {
+    document.documentElement.classList.toggle("max", !!max);
+    const b = document.getElementById("wb-max");
+    b.title = max ? "Вернуть размер" : "Развернуть"; b.querySelector("svg").innerHTML = max ? ICON_RES : ICON_MAX;
+    try { if (window.__dwMax !== !!max) { window.__dwMax = !!max; core.call("settings_save", { patch: { ui: { studio_max: !!max } } }).catch(() => {}); } } catch (e) {}
+  };
+  // Кнопки окна — методы pywebview (studio_min/max/close в ui/app.py); ядро здесь не нужно.
+  const call = (m) => { const a = window.pywebview && window.pywebview.api; if (a && a[m]) return a[m](); };
+  document.getElementById("wb-min").onclick = () => call("studio_min");
+  document.getElementById("wb-max").onclick = async () => { const r = await call("studio_max"); if (r !== undefined) frameState(r); };
+  document.getElementById("wb-x").onclick = () => call("studio_close");
+})();
+</script>
+<nav>
+  <div class="brand" id="agent-toggle" role="button" tabindex="0" aria-pressed="true" title="Показать окно агента. Повторное нажатие свернёт его и уберёт с экрана"><canvas id="brand"></canvas><div><b id="bname">Dewiar</b><span id="bsub">голосовой ассистент</span></div></div>
+  <button class="cchip" id="nav-cloud" style="display:none" title="ИИ-баланс: на сколько хватит моделей Dewiar. Нажмите — подробности и пополнение"><span>ИИ-баланс</span><em></em><i><b></b></i></button>
+  <button data-p="home" class="cur" title="Сегодня и все приложения Dewiar">Главная</button>
+  <div class="ng">Каждый день</div>
+  <button data-p="chat" title="Вся переписка с персонажами — голосом и текстом">Чат</button>
+  <button data-p="contacts">Контакты</button>
+  <button data-p="calendar">Календарь</button>
+  <button data-p="reminders">Дела и напоминания</button>
+  <button data-p="notes" title="Все заметки: поиск, фото и файлы">Заметки</button>
+  <button data-p="pay" title="Обязательные оплаты: счета, сроки, показания, итоги года">Платежи<i class="ndot" id="pay-dot"></i></button>
+  <button data-p="vault" title="Пароли, пин-коды, коды от домофона — найти и скопировать">Сейф паролей</button>
+  <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
+  <button data-p="ref" title="Приглашённые друзья: созвездие, ссылка, награды">Рефералы</button>
+  <button data-p="tasks">Задачи</button>
+  <button data-p="prompter" title="Молчаливые подсказки на встречах и переговорах">Суфлёр</button>
+  <div class="ng">Знания</div>
+  <button data-p="memory">Память</button>
+  <button data-p="diary" title="Дневник, душа, конституция и что ассистент знает о вас">Душа</button>
+  <button data-p="soul" class="sub">Душа</button>
+  <button data-p="const" class="sub">Конституция</button>
+  <button data-p="me" class="sub">Обо мне</button>
+  <button data-p="folder">Папка</button>
+  <div class="ng">Настройка</div>
+  <button data-p="personas">Персонажи</button>
+  <button data-p="tricks" title="Короткие фразы, которые помощник понимает сразу">Что я умею</button>
+  <button data-p="brain" title="Модели — выбор и приоритеты для общения, планирования и программирования">Модели</button>
+  <button data-p="ears">Слух</button>
+  <button data-p="voice">Голос</button>
+  <button data-p="look">Оформление</button>
+  <button data-p="sound">Звук и поведение</button>
+  <button data-p="hands">Руки</button>
+  <button data-p="skills">Плагины</button>
+  <button data-p="features" title="Что показывать: игры, встречи, радар, суфлёр — включайте только нужное">Возможности</button>
+  <div class="ng">Связи и данные</div>
+  <button data-p="dw" id="nav-dw">Dewiar.pro<i class="ndot" id="dw-dot"></i></button>
+  <button data-p="connect">Подключение</button>
+  <button data-p="servers">Серверы</button>
+  <button data-p="safety">Безопасность</button>
+  <div class="grow"></div>
+  <button data-p="about">О программе</button>
+  <button class="chip" id="wlc-chip" title="Первые шаги">✨ Первые шаги</button>
+  <div class="conn" id="conn"><i></i><span>нет связи с ядром</span></div>
+</nav>
+
+<main>
+  <section id="p-home" class="cur wide">
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+      <linearGradient id="hg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b7bff"/><stop offset="1" stop-color="#4f6cf0"/></linearGradient>
+      <linearGradient id="hg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8fb8"/><stop offset="1" stop-color="#d45cff"/></linearGradient>
+      <linearGradient id="hg3" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fc3ff"/><stop offset="1" stop-color="#3a7bff"/></linearGradient>
+      <linearGradient id="hg4" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffc24b"/><stop offset="1" stop-color="#ff8a3d"/></linearGradient>
+      <linearGradient id="hg5" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd45c"/><stop offset="1" stop-color="#f2a73b"/></linearGradient>
+      <linearGradient id="hg6" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3fe0b5"/><stop offset="1" stop-color="#14a389"/></linearGradient>
+      <linearGradient id="hg7" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a6b"/><stop offset="1" stop-color="#ff5f8a"/></linearGradient>
+      <linearGradient id="hg8" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9b8cff"/><stop offset="1" stop-color="#6a4cff"/></linearGradient>
+    </defs></svg>
+    <div id="hm-body">
+      <div class="hm-hi"><div><h1 id="hm-greet">Здравствуйте</h1><p id="hm-date"></p></div><div class="hm-actions"><div class="sn-wrap" id="sn"></div><div id="home-help-slot"></div></div></div>
+      <div class="hm-today" id="hm-today"></div>
+      <div class="hm-h"><h2>Приложения</h2><span class="hint" id="hm-edit-hint" hidden>Переключатель — показать или скрыть: скрытое пропадает и из меню слева, но продолжает работать. Выключить совсем — в «<a href="#" data-go="features">Возможностях</a>». Перетащите значок — переставить</span><button class="btn small ghost" id="hm-edit">Настроить главную</button></div>
+      <div class="hm-apps" id="hm-apps"></div>
+      <div class="hm-more2"><div class="hm-card2" id="hm-chat"></div><div class="hm-card2" id="hm-pad"></div></div>
+      <div class="hm-h"><h2>Настройка</h2><span class="hint">раз настроили — и можно не возвращаться</span></div>
+      <div class="hm-set" id="hm-set"></div>
+    </div>
+  </section>
+
+  <section id="p-personas" class="wide">
+    <h1>Персонажи</h1>
+    <p class="lead">Команда помощников: у каждого своё дело, характер, голос и облик. Лира — главная и умеет всё, Патрик помогает обдумать решения, остальные из «Готовых» сильнее в своём. Позовите любого по имени («Лира, …», «Патрик, …») или нажмите на карточку.</p>
+    <div class="team-sw">
+      <div class="switch"><div>Главный сам передаёт вопрос специалисту<span>Лира сама передаёт вопрос тому, кто в команде сильнее: обсудить идею или решение — Патрику; добавленным из «Готовых» — их темы (код — Кодеру, «включи/открой» — Джарвису, «объясни» — Эве, рецепт — Гастону). Специалист отвечает своим голосом.</span></div><label class="tg"><input type="checkbox" data-k="team.route"><i></i></label></div>
+      <div class="switch"><div>После ответа — снова главный<span>Выключено — разговор продолжает тот, кому передали.</span></div><label class="tg"><input type="checkbox" data-k="team.back"><i></i></label></div>
+      <div class="switch"><div>Сам замечает, что вы вернулись<span>Отошли от компьютера на 20 минут и дольше — по возвращении коротко скажет главное: что готово, что ждёт ответа, что скоро. Утром — сводка дня. Сказать нечего — промолчит; ночью, на созвоне и когда виджет спрятан — тоже.</span></div><label class="tg"><input type="checkbox" data-k="welcome.on"><i></i></label></div>
+    </div>
+    <div class="grid" id="pgrid"></div>
+    <h2 style="margin-top:28px">Готовые персонажи</h2>
+    <p class="hint" style="margin-bottom:14px">В команде с самого начала двое — Лира и Патрик. Остальных добавьте, если нужны: каждый со своим характером, знаниями и голосом. Зовите по имени — или Лира передаст вопрос сама. Убрать — «Изменить» → «Удалить». Своего — «Создать».</p>
+    <div class="grid" id="ggrid"></div>
+  </section>
+
+  <section id="p-calendar" class="wide">
+    <h1>Календарь</h1>
+    <p class="lead">Ваш день, деньги и дела — в одном месте. Скажите «купил кофе за 8 рублей», «получил зарплату 3000»,
+      «напомни в пятницу в 15:00 позвонить Лёше» — всё появится здесь. «Сколько я потратил за неделю?» — ответит голосом.</p>
+    <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="feed">Список</button></div>
+
+    <div id="ct-month">
+      <div class="calbar">
+        <button class="btn icon" id="cal-prev" title="Предыдущий месяц">‹</button>
+        <button class="btn icon" id="cal-next" title="Следующий месяц">›</button>
+        <b id="cal-title">Месяц</b>
+        <button class="btn small" id="cal-today">Сегодня</button>
+        <span style="flex:1"></span>
+        <div class="calf" id="cal-filter"></div>
+      </div>
+      <div class="calwrap">
+        <div class="calgrid" id="cal-grid"></div>
+        <aside class="calside" id="cal-side"></aside>
+      </div>
+    </div>
+
+    <div id="ct-money" style="display:none">
+      <div class="calbar">
+        <div class="tabs" id="mo-per" style="margin:0"><button data-per="today">Сегодня</button><button data-per="week">Неделя</button><button data-per="month" class="on">Месяц</button><button data-per="prev">Прошлый месяц</button><button data-per="year">Год</button><button data-per="custom">Период…</button></div>
+        <span id="mo-custom" style="display:none;gap:6px;align-items:center"><input type="date" id="mo-from"> — <input type="date" id="mo-to"></span>
+      </div>
+      <div class="mocards" id="mo-cards"></div>
+      <div class="mowrap">
+        <div class="mopanel"><div class="k">Расходы по категориям</div><div id="mo-cats"></div><div class="k" style="margin-top:16px">По дням</div><svg id="mo-days" viewBox="0 0 600 90" preserveAspectRatio="none"></svg></div>
+        <div class="mopanel">
+          <div class="k">Добавить</div>
+          <div class="moadd">
+            <select id="mo-kind"><option value="expense">Расход</option><option value="income">Доход</option></select>
+            <input type="number" id="mo-amount" placeholder="сумма" min="0" step="0.01">
+            <input type="text" id="mo-cat" placeholder="категория" list="mo-cats-list">
+            <input type="text" id="mo-note" placeholder="что именно (необязательно)">
+            <input type="date" id="mo-date">
+            <button class="btn primary" id="mo-add">Записать</button>
+          </div>
+          <datalist id="mo-cats-list"></datalist>
+          <div class="k" style="margin-top:14px">Операции</div>
+          <div id="mo-list"></div>
+        </div>
+      </div>
+    </div>
+
+
+    <div id="ct-feed" style="display:none">
+      <div id="cal-feed"></div>
+    </div>
+  </section>
+
+  <section id="p-notes" class="wide">
+    <h1>Заметки</h1>
+    <p class="lead">Всё, что вы записали голосом, с телефона или здесь. Помощница знает эти заметки и отвечает по ним:
+      «что я записывал про ремонт?»</p>
+    <div class="nt-bar"><label class="nt-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      <input id="nt-q" type="search" placeholder="Найти: слово или несколько слов" autocomplete="off"></label><span class="nt-count" id="nt-count"></span>
+      <button class="btn primary" id="nt-add">Новая заметка</button></div>
+    <div class="nt-cols"><div id="nt-list" class="nt-list"></div><div id="nt-view" class="nt-view"></div></div>
+  </section>
+  <section id="p-pay" class="wide">
+    <div class="py-title"><div><h1>Платежи</h1>
+      <p class="lead">Обязательные оплаты: что, когда и сколько — с реквизитами, показаниями и квитанциями. Голосом:
+        «Лира, оплатил газ 47,84, показания 28135», «что у меня не оплачено?»</p></div>
+      <div class="py-act"><button class="btn" id="py-imp">Перенести из органайзера</button><button class="btn primary" id="py-add">Новый платёж</button></div></div>
+    <div class="py-tabs" id="py-tabs" role="tablist"><button role="tab" data-t="month" class="on">Этот месяц</button><button role="tab" data-t="year">Год</button><button role="tab" data-t="stats">Аналитика</button></div>
+    <div id="py-body"></div>
+    <aside id="py-drawer" class="py-drawer glass" hidden aria-label="Платёж"></aside>
+  </section>
+  <section id="p-ref" class="wide">
+    <h1>Рефералы</h1>
+    <p class="lead">Друзья, которых вы позвали в Dewiar. Каждый засчитанный — звезда в вашем созвездии и талеры на счёт.
+      С приглашёнными можно переписываться и созваниваться — позовите их в «Близкие».</p>
+    <div class="rf-box">
+      <div class="rf-sky" id="rf-net"><div class="rf-wait">Загружаю созвездие…</div></div>
+      <aside class="rf-side">
+        <div class="rf-card" id="rf-inv">
+          <span class="hint" style="margin:0">Ваш код</span>
+          <b class="rf-code" id="rf-code">—</b>
+          <div class="rf-qr" id="rf-qr"></div>
+          <div class="dw-path" id="rf-link"></div>
+          <div class="actions" style="margin:8px 0 0"><button class="btn primary" id="rf-copy" style="flex:1">Скопировать приглашение</button></div>
+          <p class="hint" id="rf-rules" style="margin:10px 0 0"></p>
+        </div>
+        <details class="rf-card" id="rf-use" style="display:none"><summary class="hint" style="cursor:pointer;margin:0">Есть код приглашения?</summary>
+          <div class="actions" style="margin:8px 0 0"><input type="text" id="rf-ucode" placeholder="6 букв и цифр" style="flex:1;min-width:0;text-transform:uppercase"><button class="btn" id="rf-ugo">Ввести</button></div></details>
+        <p class="res" id="rf-res"></p>
+      </aside>
+    </div>
+    <div class="rf-lists">
+      <div id="rf-by"></div>
+      <h2 id="rf-h">Приглашённые</h2>
+      <div class="rf-list" id="rf-list"></div>
+      <p class="hint" style="max-width:62ch;margin-top:12px">Переписываться и созваниваться можно с теми, кого пригласили вы, и с тем, кто пригласил вас, — когда оба согласны:
+        «Позвать в Близкие» — друг увидит приглашение и примет его или откажется.</p>
+    </div>
+  </section>
+  <section id="p-tricks" class="wide">
+    <h1>Что я умею</h1>
+    <p class="lead">Короткие фразы, которые я понимаю сразу. Скажите голосом — или нажмите ▶, и фраза уйдёт мне. Где «…» — допишите своё в «Чате».</p>
+    <div id="tr-box" class="tr-box"></div>
+  </section>
+  <section id="p-chat" class="wide">
+    <h1>Чат</h1>
+    <p class="lead">Вся переписка с персонажами: что вы сказали голосом или написали и что они ответили. Удобнее текстом — пишите здесь:
+      ответ появится в ленте и прозвучит голосом, если голос не выключен в виджете. Фото и файлы — скрепкой, перетаскиванием или Ctrl+V.</p>
+    <div class="cl-chat ch-chat" id="ch-box">
+      <div class="ch-search"><label for="ch-search">Поиск по переписке</label><input id="ch-search" type="search" placeholder="Слово или фраза…"><button class="btn small" id="ch-search-clear">Сбросить</button></div>
+      <div class="ch-search"><label for="ch-scope">Показать</label><select id="ch-scope"><option value="active">Переписка</option><option value="archive">Архив</option></select><label for="ch-thread">Беседа</label><select id="ch-thread"></select><button class="btn small" id="ch-new">Новый чат</button></div>
+      <div class="ch-bar"><span class="hint" id="ch-res" role="status" style="margin:0;flex:1"></span><button class="btn small" id="ch-archive" data-chat-action="archive">В архив</button><button class="btn small" id="ch-restore" data-chat-action="restore" hidden>Восстановить</button><button class="btn small danger" id="ch-clear" data-chat-action="delete">Удалить чат</button></div>
+      <div class="cl-empty" id="ch-empty"><b>Здесь будет ваша переписка</b><span>Скажите «Лира, …» или напишите ниже — разговор появится в ленте.</span></div>
+      <div class="cl-msgs" id="ch-msgs"></div>
+      <div class="ch-atts" id="ch-atts"></div>
+      <div class="cl-send"><label class="btn icon" title="Прикрепить фото или файл (txt, docx, pdf, jpeg, png — до 11 МБ). Можно перетащить сюда или вставить Ctrl+V"><input type="file" id="ch-file" hidden multiple accept=".txt,.md,.csv,.doc,.docx,.odt,.pdf,.rtf,.html,.json,.xlsx,.pptx,image/*"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg></label><textarea id="ch-text" rows="1" placeholder="Сообщение…"></textarea><button class="btn primary" id="ch-go">Отправить</button></div>
+      <div class="ch-drop" id="ch-drop">Отпустите — приложу к сообщению</div>
+    </div>
+  </section>
+  <section id="p-close" class="wide">
+    <h1>Близкие</h1>
+    <p class="lead">Переписка между помощниками. Скажите «Лира, напиши маме, что я задержусь» — у мамы её помощница покажет
+      сообщение и прочитает вслух. Сообщения и файлы шифруются на устройствах: сервер Dewiar их прочитать не может.</p>
+    <div class="cl-tabs" id="cl-tabs" role="tablist"><button data-t="chat" class="on" role="tab" aria-selected="true">Переписка</button><button data-t="near" role="tab" aria-selected="false">Рядом</button><button data-t="meet" role="tab" aria-selected="false">Встречи</button></div>
+    <div class="cl-near" id="cl-near" hidden></div>
+    <div class="cl-meet" id="cl-meet" hidden></div>
+    <div class="cl-box">
+      <aside class="cl-side">
+        <button class="cl-me" id="cl-me" type="button" title="Моя карточка: фото, имя, о себе"><i class="cl-ava" id="cl-me-ava"></i>
+          <span><small>Близкие видят вас как</small><b id="cl-me-name">Ваше имя</b><small id="cl-me-about"></small></span><em>Изменить</em></button>
+        <div id="cl-offers"></div>
+        <div id="cl-people"></div>
+        <button class="btn primary" id="cl-inv-go" style="width:100%">Пригласить близкого</button>
+        <details class="cl-add"><summary class="hint">Пришла ссылка-приглашение?</summary>
+          <div class="actions" style="margin:8px 0 0"><input type="text" id="cl-link" placeholder="вставьте ссылку" style="flex:1;min-width:0"><button class="btn" id="cl-link-go">Принять</button></div></details>
+        <div class="switch slim"><div>Читать сообщения вслух<span>Помощница скажет: «Мама пишет: …»</span></div><label class="tg"><input type="checkbox" id="cl-speak" checked><i></i></label></div>
+        <p class="res" id="cl-res"></p>
+      </aside>
+      <div class="cl-main">
+        <div class="cl-card" id="cl-card" hidden>
+          <div class="cl-card-face">
+            <button class="cl-face-drop" id="cl-face-drop" type="button" aria-label="Выбрать фото"><i class="cl-ava" id="cl-card-ava"></i><span>Сменить фото</span></button>
+            <div class="actions" style="margin:0;justify-content:center"><label class="btn small">Выбрать<input type="file" accept="image/*" id="cl-face-file" hidden></label><button class="btn small" id="cl-face-del" type="button">Убрать</button></div>
+            <small class="hint">или вставьте Ctrl+V,<br>или перетащите сюда</small>
+          </div>
+          <div class="cl-card-f">
+            <h3>Моя карточка</h3>
+            <label class="f"><span>Имя</span><input type="text" id="cl-myname" placeholder="как вас называть" maxlength="40"></label>
+            <label class="f"><span>О себе <i id="cl-about-n">0 / 160</i></span><textarea id="cl-about" maxlength="160" rows="2" placeholder="пара слов: чем живёте, что любите"></textarea></label>
+            <div class="switch slim"><div>Показывать фото во «Встречах»<span>Люди рядом увидят его на вашей карточке. Выключено — фото видят только близкие.</span></div><label class="tg"><input type="checkbox" id="cl-face-meet"><i></i></label></div>
+            <p class="hint" style="margin:0">Фото хранится на dewiar.pro, как аватар в мессенджере, — его видят только ваши близкие (и люди рядом во «Встречах», если включено). Переписка по-прежнему шифруется на устройствах.</p>
+            <div class="actions" style="margin:0"><button class="btn primary" id="cl-card-save" type="button">Сохранить</button><button class="btn" id="cl-card-x" type="button">Закрыть</button><span class="res" id="cl-card-res"></span></div>
+          </div>
+        </div>
+        <div class="cl-invite" id="cl-invite" style="display:none">
+          <div class="cl-qr" id="cl-qr"></div>
+          <div class="cl-inv-t">
+            <h3>Пригласить в «Близкие»</h3>
+            <p class="hint">Пусть близкий наведёт камеру телефона на код или откроет ссылку — и нажмёт «Открыть приглашение в Dewiar».
+              Ссылка действует 7 дней, по ней может прийти несколько человек.</p>
+            <div class="dw-path" id="cl-inv-link"></div>
+            <div class="actions" style="margin:6px 0 0"><button class="btn primary" id="cl-inv-copy">Скопировать ссылку</button><button class="btn" id="cl-inv-new">Новая ссылка</button><span style="flex:1"></span><button class="btn" id="cl-inv-x">Закрыть</button></div>
+            <p class="hint" style="margin:8px 0 0">Печать Dewiar читают сам Dewiar и Google Lens. Камера не узнаёт? <a href="#" id="cl-inv-qr">Показать обычный QR</a></p>
+          </div>
+        </div>
+        <div class="cl-chat" id="cl-chat">
+          <div class="cl-empty" id="cl-empty"><b>Здесь будет переписка</b><span>Пригласите близкого — когда он примет приглашение, можно писать прямо отсюда или голосом.</span></div>
+          <div class="cl-head" id="cl-head" style="display:none"><i class="cl-ava" id="cl-ava"></i><div><b id="cl-who"></b><span id="cl-devs"></span></div><span style="flex:1"></span><button class="btn small" id="cl-call" title="Позвонить — окно звонка откроется в браузере">Позвонить</button><button class="btn small" id="cl-vcall" title="Видеозвонок">Видео</button><button class="btn small" id="cl-pick" title="Отметить сообщения и удалить их у себя (одно — правой кнопкой по нему)">Удалить сообщения</button><button class="btn small danger" id="cl-del">Убрать из близких</button></div>
+          <div class="cl-msgs" id="cl-msgs"></div>
+          <div class="cl-emo" id="cl-emo" hidden></div>
+          <div class="cl-send" id="cl-send" style="display:none">
+            <button class="btn icon" id="cl-emo-b" title="Эмодзи" aria-label="Эмодзи" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.2 4.2 0 0 0 7 0M9 9.6v.01M15 9.6v.01"/></svg></button>
+            <label class="btn icon" title="Прикрепить файл (до 10 МБ)"><input type="file" id="cl-file" hidden multiple><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg></label>
+            <textarea id="cl-text" rows="1" placeholder="Сообщение…"></textarea>
+            <button class="btn primary" id="cl-go">Отправить</button>
+          </div>
+          <div class="cl-files" id="cl-files"></div>
+          <div class="cl-selbar" id="cl-selbar" hidden>
+            <span id="cl-selnum">Нажмите на сообщения, которые убрать</span><span style="flex:1"></span>
+            <button class="btn small" id="cl-selall">Отметить все</button>
+            <button class="btn small danger" id="cl-seldel" disabled>Удалить у меня</button>
+            <button class="btn small" id="cl-selx">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section id="p-reminders" class="wide">
+    <h1>Дела и напоминания</h1>
+    <p class="lead">Скажите «Агент, напомни завтра в 9 позвонить маме», «напоминай каждый день в 8 выпить таблетки» или «таймер на 10 минут» — или напишите здесь. В нужный момент по центру экрана появится будильник со звонком; ответить можно кнопкой или голосом: «понял», «отложи на 10 минут».
+      Сделали дело — скажите «Агент, я позвонил маме, отметь» или впишите его здесь: ассистент считает сделанное за день, серии и достижения.
+      А дела по расписанию ассистент выполняет сам: «каждое утро в 9 присылай курс доллара в Телеграм», «по пятницам в 18 собирай,
+      что я сделал за неделю», «каждый день в 8 делай утреннюю сводку».</p>
+    <div class="dbanner" id="d-head"></div>
+    <div class="radd">
+      <input type="text" id="d-phrase" placeholder="Что сделали? Например: отправил отчёт · позвонил Игорю" maxlength="120" autocomplete="off">
+      <button class="btn" id="d-add">Отметить сделанным</button>
+    </div>
+    <div id="d-list"></div>
+    <h2>Напоминания</h2>
+    <div class="radd">
+      <input type="text" id="r-phrase" placeholder="например: завтра в 9 позвонить маме · по будням в 8:30 планёрка · через 20 минут духовка" autocomplete="off">
+      <button class="btn primary" id="r-add">Добавить</button>
+    </div>
+    <div class="rparse" id="r-parse"></div>
+    <div id="r-list"></div>
+    <h2>Готовые дела</h2>
+    <p class="hint" style="margin:-4px 0 14px">Ассистент сам выполняет их по расписанию — ищет, считает, собирает — и говорит итог голосом или присылает в Telegram или MAX. Выберите время и нажмите «Включить».</p>
+    <div class="jpre" id="j-pre"></div>
+    <h2>Будильник</h2>
+    <div class="row">
+      <label class="f">Звонок<span style="display:flex;gap:8px"><select data-k="reminders.sound" id="r-sound"><option value="signature">Струна — фирменный Dewiar</option><option value="chasha">Чаша</option><option value="kolodec">Колодец</option><option value="hor">Хор</option><option value="glubina">Глубина</option><option value="motif">Прежний мотив Dewiar</option><option value="bells">Колокольчики</option><option value="soft">Мягкий</option><option value="classic">Классический будильник</option></select><button class="btn" id="r-listen">Послушать</button></span></label>
+      <label class="f">Звенит, пока не ответите<select data-k="reminders.ring_minutes"><option value="1">1 минуту</option><option value="2">2 минуты</option><option value="5">5 минут</option><option value="10">10 минут</option></select></label>
+    </div>
+    <div class="switch"><div>Окно по центру экрана<span>Большая карточка поверх всех окон с кнопками «Готово» и «Отложить». Выключено — только звонок, голос и уведомление.</span></div><label class="tg"><input type="checkbox" data-k="reminders.window"><i></i></label></div>
+    <div class="switch"><div>Произносить напоминание голосом<span>Между звонками ассистент говорит, о чём напоминание.</span></div><label class="tg"><input type="checkbox" data-k="reminders.speak"><i></i></label></div>
+    <div class="actions"><button class="btn" id="r-try">Проверить: напомнить через 10 секунд</button></div>
+  </section>
+
+  <section id="p-prompter">
+    <h1>Суфлёр</h1>
+    <p class="lead">Подсказки на встрече — молча, на экране. Суфлёр слушает собеседника и вас — онлайн (звук компьютера) или вживую
+      (один микрофон, вас узнаёт по голосу), — а когда собеседник спрашивает или возражает, показывает короткую подсказку: что
+      ответить, цифры из ваших материалов, встречный вопрос. Замешкались с ответом — выделит, с чего начать. Голосом в это
+      время ассистент не отвечает и на имя не откликается.</p>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:18px" id="pr-record-settings">
+      <h3 style="font-size:15px;margin-bottom:6px">Запись встреч</h3>
+      <p class="hint" style="margin-bottom:12px">Эти параметры применяются к расшифровке переговоров и автоматическим кадрам. Весь звук и снимки остаются на этом Mac.</p>
+      <div class="row">
+        <label class="f">Модель записи<select data-k="prompter.stt_engine" id="pr-stt-engine">
+          <option value="inherit">Как в разделе «Слух»</option><option value="gigaam">GigaAM — точная локальная модель</option>
+          <option value="vosk">Vosk — лёгкая модель</option><option value="remote">Сервер из раздела «Слух»</option>
+        </select><span class="hint">Можно выбрать отдельный распознаватель, не меняя голосовые команды.</span></label>
+        <label class="f">Вариант GigaAM<select data-k="prompter.stt_model" id="pr-stt-model">
+          <option value="gigaam-v3-e2e-rnnt">v3 e2e RNNT — точнее</option><option value="gigaam-v3-e2e-ctc">v3 e2e CTC — быстрее</option><option value="gigaam-v3-rnnt">v3 RNNT — без пунктуации</option>
+        </select><span class="hint" id="pr-stt-status">Около 250 МБ, скачивается один раз.</span></label>
+      </div>
+      <div class="actions" style="margin-top:10px"><button class="btn small" id="pr-stt-download">Скачать выбранную модель</button><span class="res" id="pr-stt-result"></span></div>
+      <div class="row" style="margin-top:14px">
+        <label class="f">Источник кадров<select data-k="prompter.capture_source" id="pr-capture-source">
+          <option value="screen">Весь экран (по умолчанию)</option><option value="region">Часть экрана по координатам</option><option value="application">Окно приложения</option>
+        </select></label>
+        <label class="f">Кнопка снимка<input type="text" data-k="prompter.capture_hotkey" placeholder="Ctrl+Shift+S" title="Сочетание действует в окне суфлёра; например Ctrl+Alt+S"></label>
+      </div>
+      <div class="row" style="margin-top:10px" id="pr-region-fields">
+        <label class="f">X<input type="number" data-k="prompter.capture_region.x" min="0"></label><label class="f">Y<input type="number" data-k="prompter.capture_region.y" min="0"></label>
+        <label class="f">Ширина<input type="number" data-k="prompter.capture_region.width" min="2"></label><label class="f">Высота<input type="number" data-k="prompter.capture_region.height" min="2"></label>
+      </div>
+      <label class="f" style="margin-top:10px" id="pr-app-field">Приложение или заголовок окна<input type="text" data-k="prompter.capture_application" placeholder="например, Microsoft Teams" title="Ищется среди видимых окон macOS по имени приложения или заголовку"></label>
+      <div class="switch" style="margin-top:8px"><div>Первый снимок при начале записи<span>Включено по умолчанию: фиксирует экран до первой реплики. Можно отключить.</span></div><label class="tg"><input type="checkbox" data-k="prompter.auto_first_frame"><i></i></label></div>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:18px" id="pr-schedule-settings">
+      <h3 style="font-size:15px;margin-bottom:6px">Фоновая запись по времени</h3>
+      <p class="hint">Dewiar запустит запись без открытого окна и остановит её в указанное время. Разрешения микрофона, звука и экрана должны быть выданы заранее.</p>
+      <div class="row"><label class="f">Название<input type="text" id="pr-s-title" placeholder="Планёрка команды"></label><label class="f">Начать<input type="datetime-local" id="pr-s-start"></label><label class="f">Закончить<input type="datetime-local" id="pr-s-end"></label></div>
+      <div class="switch" style="margin-top:8px"><div>Согласие участников<span>Подтверждаю, что участники предупреждены о записи.</span></div><label class="tg"><input type="checkbox" id="pr-s-consent"><i></i></label></div>
+      <div class="actions" style="margin-top:10px"><button class="btn primary" id="pr-s-add">Запланировать</button><span class="res" id="pr-s-result"></span></div>
+      <div id="pr-s-list" class="hint" style="margin-top:10px">Загрузка расписания…</div>
+    </div>
+    <div class="prof on pr-hero">
+      <div class="pr-demo" aria-hidden="true"><i></i><div><span>«А если у нас пятьдесят мест?»</span><b>Цена за место падает до 140 — скидка 12%</b>
+        <em>годовой договор — ещё минус 10%</em><em>внедрение за две недели</em></div></div>
+      <div class="pr-how"><p>Перед встречей положите в окно суфлёра прайс, договор или план и напишите цель — он заранее соберёт
+        шпаргалку вероятных вопросов. После встречи — итог: о чём договорились и кто что делает, файлом в папку «Встречи».</p>
+        <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="pr-open">Открыть суфлёр</button></div>
+        <p class="hint" style="margin-top:10px">Ещё: «Лира, включи суфлёр». Во время созвона виджет предложит его сам.</p></div>
+    </div>
+    <h3 style="font-size:15px;margin:20px 0 8px">Прошлые встречи</h3>
+    <div id="pr-list" class="pr-list"></div>
+  </section>
+
+  <section id="p-tasks" class="wide">
+    <h1>Задачи</h1>
+    <p class="lead">Большая работа в фоне: ассистент сам составляет план, выполняет шаги, пишет журнал и сообщает голосом, когда готово.
+      Скажите «Агент, разберись…», «исправь в проекте…» — или поставьте задачу здесь. Для задач по коду он работает в копии проекта:
+      изменения вы смотрите и принимаете сами.</p>
+    <div class="actions" style="margin:0 0 16px"><button class="btn primary" id="t-new">Новая задача</button></div>
+    <div class="prof on" id="t-form" style="display:none;padding:16px 18px;margin-bottom:16px">
+      <label class="f">Что сделать<textarea id="t-goal" placeholder="Например: в проекте сайта при отправке формы ошибка 500 — найди причину, исправь и проверь тестами"></textarea></label>
+      <div class="row" style="margin-top:12px">
+        <label class="f">Папка проекта (для работы с кодом, необязательно)<input type="text" id="t-proj" placeholder="~/Проекты/сайт"></label>
+        <label class="f">Название (необязательно)<input type="text" id="t-title"></label>
+      </div>
+      <div id="t-new-team"></div>
+      <div class="actions"><button class="btn primary" id="t-go">Начать</button><button class="btn" id="t-pick">Выбрать папку…</button><button class="btn" id="t-cancel">Отмена</button></div>
+    </div>
+    <div id="t-ideas">
+      <h2 style="margin-top:6px">С чего начать</h2>
+      <p class="hint" style="margin:-4px 0 14px">Нажмите на идею — задача подставится, останется нажать «Начать». Или скажите то же самое голосом.</p>
+      <div class="tideas" id="t-ideas-grid"></div>
+    </div>
+    <div class="fbox" id="t-box">
+      <div class="ftree" id="t-list"></div>
+      <div class="fview" id="t-view"><div class="fempty">Задач пока нет — или выберите задачу слева.</div></div>
+    </div>
+    <h2>Настройки задач</h2>
+    <div class="row">
+      <label class="f">Модель для задач<select id="t-llm"></select><span class="hint">Для сложного кода можно выбрать модель посильнее, чем для разговора.</span></label>
+      <label class="f">Шагов без передышки<input type="number" min="10" max="500" data-k="tasks.max_steps"><span class="hint">После них — минута передышки, и задача продолжает.</span></label>
+      <label class="f">Передышек подряд<input type="number" min="1" max="100" data-k="tasks.cycles"><span class="hint">Потом задача ждёт вашего «продолжи». 80 × 15 = 1200 шагов — часы работы. Если два круга подряд ничего не продвинулось, задача остановится раньше.</span></label>
+    </div>
+    <div class="switch"><div>Выполнять команды в проекте без вопроса<span>Тесты, сборка, git — в рабочей копии проекта. Выключено: ассистент спрашивает перед каждой командой.</span></div><label class="tg"><input type="checkbox" data-k="tasks.auto_run"><i></i></label></div>
+    <div class="switch"><div>Самопроверка итога моделью<span>Перед «готово» итог ещё раз коротко и независимо смотрит модель: выполнена ли цель, есть ли обещанные файлы (немного расходует заряд). Готовые файлы кодом проверяются всегда — оборванный HTML, битая таблица, сломанный документ ассистент чинит сам.</span></div><label class="tg"><input type="checkbox" data-k="tasks.self_check"><i></i></label></div>
+    <div class="switch"><div>Учиться на прошлых задачах<span>Раз в несколько задач ассистент делает выводы из своих ошибок — короткие правила в «Память/Уроки задач.md» (их можно править) — и соблюдает их дальше. А на ваших поправках в разговоре («нет, я же просил…») учится всегда: правила — в «Память/Уроки.md», их тоже можно править.</span></div><label class="tg"><input type="checkbox" data-k="tasks.learn"><i></i></label></div>
+  </section>
+
+  <section id="p-folder" class="wide">
+    <h1>Папка</h1>
+    <p class="lead">Всё, что ассистент делает для вас, — обычные файлы: заметки, дневник, лаборатория со скриптами и
+      его память о вас. Их можно открывать, править и удалять.</p>
+    <div class="actions" style="margin:0 0 16px">
+      <span class="fpath" id="f-root"></span>
+      <button class="btn primary" id="f-open">Открыть в файлах</button>
+      <button class="btn" id="f-reload">Обновить</button>
+    </div>
+    <p class="hint" id="f-folder-note">Рабочая папка — это источник файлов Dewiar. Смена папки не удаляет прежние файлы: новая папка становится текущей, её «Знания» переиндексируются в фоне, а дополнительные папки «Знаний» остаются подключёнными отдельно.</p>
+    <div class="fsync" id="f-sync"></div>
+    <div class="fbox">
+      <div class="ftree" id="f-tree"></div>
+      <div class="fview" id="f-view"><div class="fempty">Выберите файл слева.<br><span class="hint">Ассистент заполнит папку сам: скажите
+        «Агент, запиши…», «составь список…», «запомни, что…».</span></div></div>
+    </div>
+  </section>
+
+  <section id="p-memory" class="wide">
+    <h1>Память</h1>
+    <p class="lead">Всё, что ассистент знает и делал с вами, — одной живой картой: факты о вас, заметки, дневник, документы, задачи и навыки. Связи появляются сами: ссылки [[между заметками]], #теги, люди и места, которые встречаются в разных записях.</p>
+    <div class="mstats" id="m-stats"></div>
+    <button class="m-ram-entry prof on" id="m-ram-open" type="button"
+            title="Оперативная память: показать общий объём занятой и свободной ОЗУ, отдельно память Dewiar и текущего персонажа, а также выбрать приложения для штатного закрытия">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M12 2v4M15 2v4M9 18v4M12 18v4M15 18v4M2 9h4M2 12h4M2 15h4M18 9h4M18 12h4M18 15h4"/></svg>
+      <span><b>Оперативная память</b><small id="m-ram-entry-summary">ОЗУ компьютера, Dewiar и приложения — открыть подробности</small></span>
+      <i aria-hidden="true">›</i>
+    </button>
+    <div class="mgrow"><svg id="m-growth" viewBox="0 0 600 46" preserveAspectRatio="none"></svg><span id="m-growth-t"></span></div>
+    <div class="mtools">
+      <div class="mlegend" id="m-legend"></div>
+      <span style="flex:1"></span>
+      <input type="search" id="m-find" placeholder="найти в памяти: слово, имя, «пароль»…">
+      <button class="btn small" id="m-fit" title="Вся карта по центру (или двойной щелчок по пустому месту карты)">По центру</button>
+      <button class="btn small" id="m-reload" title="Обновить">Обновить</button>
+      <button class="btn small" id="m-motion" title="Огоньки по связям и «живая» карта. На слабом компьютере лучше выключить: карта разложится один раз и замрёт">Анимация</button>
+      <button class="btn small" id="m-full" title="Во весь экран (Esc — выйти)">На весь экран</button>
+      <div class="mpanes"><button id="mp-left" class="on" title="Показать или скрыть список заметок"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>Заметки</button><button id="mp-right" class="on" title="Показать или скрыть заметку"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>Запись</button></div>
+    </div>
+    <div class="mwrap">
+      <aside id="m-notes">
+        <div class="mn-head"><button class="btn small primary" id="mn-new">+ Новая заметка</button></div>
+        <div class="mn-tabs"><button data-t="tree" class="cur">Структура</button><button data-t="new">Новые</button></div>
+        <input type="search" id="mn-filter" placeholder="фильтр по названию">
+        <div id="mn-list"><p class="hint" style="padding:8px">Загружаю…</p></div>
+      </aside>
+      <div class="msplit" id="ms-l" title="Потяните, чтобы изменить ширину"></div>
+      <div id="m-graph"></div>
+      <div class="msplit" id="ms-r" title="Потяните, чтобы изменить ширину"></div>
+      <aside id="m-side"><p class="hint">Выберите заметку слева или узел на карте — здесь откроется запись: читать, править, сохранять. Колёсико — масштаб карты, перетаскивание — двигать.</p></aside>
+    </div>
+  </section>
+
+  <section id="p-diary" class="wide">
+    <h1>Дневник</h1>
+    <p class="lead" id="d-lead">Здесь ассистент записывает свою жизнь рядом с вами: что было, что он узнал о вас, о чём думал.
+      Днём — короткие мысли после разговоров, а ночью он перечитывает прожитый день и пишет о нём — и делает выводы на завтра.</p>
+    <div class="dtop">
+      <div class="dins" id="d-ins"></div>
+      <div class="dctl">
+        <button class="btn primary" id="d-now">Записать о сегодняшнем дне</button>
+        <div class="switch slim"><div>Писать ночью<span>После 3:00 — или утром, когда компьютер проснётся</span></div><label class="tg"><input type="checkbox" data-k="diary.night"><i></i></label></div>
+      </div>
+    </div>
+    <div class="dbox">
+      <div class="ddays" id="d-days"></div>
+      <article class="dpage" id="d-page"><div class="fempty">Загружаю…</div></article>
+    </div>
+  </section>
+
+  <section id="p-soul" class="wide">
+    <h1>Душа</h1>
+    <p class="lead" id="s-lead">Автопортрет ассистента от первого лица: кто он, что для него важно, что он понял о вас и как меняется.
+      Пишет и обновляет его сам — раз в неделю ночью, перечитав свой дневник. Можно читать и поправить: ваши правки он сохранит.</p>
+    <div class="soulbar"><div class="chips" id="s-who"></div>
+      <button class="btn small" id="s-edit">Поправить</button><button class="btn small primary" id="s-upd">Обновить по дневнику</button></div>
+    <article class="dpage soulpage" id="s-page"><div class="fempty">Загружаю…</div></article>
+    <div class="switch"><div>Душа участвует в разговорах<span>Ассистент помнит свой автопортрет в каждом ответе. Выключено — душа только для чтения здесь.</span></div><label class="tg"><input type="checkbox" data-k="soul.on"><i></i></label></div>
+    <div class="switch"><div>Обновлять душу самой<span>Раз в неделю ночью, после записи в дневник. Выключено — только по кнопке.</span></div><label class="tg"><input type="checkbox" data-k="soul.auto"><i></i></label></div>
+  </section>
+
+  <section id="p-const" class="wide">
+    <h1>Конституция</h1>
+    <p class="lead">Принципы, которые ассистент соблюдает всегда — с любым персонажем и в любом настроении. Меняете их только вы:
+      ассистент их читает, но не правит. Это обычный файл «Память/Конституция.md» — виден и в Obsidian.</p>
+    <div class="soulbar"><span style="flex:1"></span><button class="btn small" id="c-reset">Вернуть исходную</button><button class="btn small primary" id="c-edit">Править</button></div>
+    <article class="dpage constpage" id="c-page"><div class="fempty">Загружаю…</div></article>
+    <div class="switch"><div>Учитывать конституцию<span>Принципы идут в каждый разговор. Выключать стоит только для опытов.</span></div><label class="tg"><input type="checkbox" data-k="soul.constitution"><i></i></label></div>
+  </section>
+
+  <section id="p-me">
+    <h1>Обо мне</h1>
+    <p class="lead">Что ассистент знает о вас и ваших делах. Всё хранится на этом компьютере, в папке ассистента.</p>
+    <div class="row" style="margin-bottom:6px"><label class="f">Как вас зовут<input type="text" placeholder="необязательно" data-k="user_name"></label></div>
+    <!-- следы экзамена способностей (core/examtrace.py): похожее на его проверочные фразы — человек отмечает и убирает сам -->
+    <div id="me-exam" class="xtrace" hidden>
+      <b>Похоже, сюда попали записи экзамена Dewiar</b>
+      <p>Это проверочные фразы экзамена способностей — писали их не вы. Отметьте, что убрать; остальное останется как есть.</p>
+      <div id="me-exam-list"></div>
+      <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="me-exam-go">Убрать отмеченное</button><button class="btn" id="me-exam-keep">Оставить</button></div>
+    </div>
+    <h2>Что ассистент помнит</h2>
+    <p class="hint" style="margin-bottom:10px">Ассистент читает это перед каждым ответом и дописывает сам, когда узнаёт что-то важное надолго («запомни, что…»). Правьте и стирайте свободно.</p>
+    <textarea id="me-mem" rows="9" style="width:100%;resize:vertical" placeholder="- Работаю бухгалтером, начало дня в 9:00&#10;- Дочь Маша, 7 лет&#10;- Люблю короткие ответы"></textarea>
+    <div class="actions"><button class="btn primary" id="me-save">Сохранить</button><span class="res" id="me-res"></span></div>
+
+    <h2>Мои документы — «Знания»</h2>
+    <p class="hint" style="margin-bottom:12px">Положите сюда инструкции, договоры, регламенты, книги — и спрашивайте: «что в моих документах про отпуск?». Подходят PDF, Word, ODT, TXT, Markdown, HTML, CSV. Работает без интернета.</p>
+    <div class="actions" style="margin:0 0 12px">
+      <label class="btn primary">Добавить файлы…<input type="file" id="kn-file" multiple accept=".pdf,.docx,.odt,.txt,.md,.html,.htm,.csv" hidden></label>
+      <button class="btn" id="kn-open">Открыть папку</button>
+      <span class="res" id="kn-res"></span>
+    </div>
+    <div id="kn-list" class="kn-list"></div>
+    <h3 style="margin:18px 0 6px">Искать и в своих папках</h3>
+    <p class="hint" style="margin-bottom:10px">Документы, рабочая папка, папка с договорами — ассистент найдёт ответ и там, файлы остаются на месте. Читаются PDF, Word, ODT, текст, Markdown, HTML, CSV; служебные и скрытые папки пропускаются. Под ответом — какой файл, нажать — открыть.</p>
+    <div id="kn-folders" class="kn-list"></div>
+    <div class="actions" style="margin:8px 0 0"><button class="btn" id="kn-fadd">Добавить папку…</button><span class="res" id="kn-fres"></span></div>
+    <div class="actions" style="margin-top:14px">
+      <input type="text" id="kn-q" placeholder="проверить поиск: например, «отпуск»" style="flex:1;min-width:220px">
+      <button class="btn" id="kn-go">Найти</button>
+    </div>
+    <div id="kn-found"></div>
+    <p class="hint" id="kn-site" style="margin-top:14px"></p>
+  </section>
+
+  <section id="p-dw" class="wide">
+    <h1>Dewiar.pro</h1>
+    <p id="dw-disabled" class="lead" hidden>Сервисы Dewiar отключены: облако, объявления, телеметрия и проверка обновлений. Модели Ollama, Codex и Claude настраиваются в разделе «Модели».</p>
+    <p class="lead">Подключите Dewiar.pro — модели, Знания и голоса включатся сами. Метка в углу карточки: зелёная — работает,
+      жёлтая — стоит взглянуть, красная — не работает. «Проверить всё» — проверит каждую.</p>
+    <div class="dw-weak" id="dw-weak" style="display:none"></div>
+    <div class="dw-top"><button class="btn primary" id="dw-check">Проверить всё</button><span class="dw-sum" id="dw-sum"></span></div>
+    <div class="dw-grid">
+      <div class="dwc hero" id="dwc-acc">
+        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg><h3>Аккаунт dewiar.pro</h3><span class="dws" id="dws-acc">—</span></div>
+        <div id="dw-acc-out">
+          <p class="hint">Подключили — и всё настроится само: модели Dewiar с зарядом в талерах, Знания (ваши документы и публичная библиотека), распознавание речи на сервере для слабых компьютеров. Пароль не сохраняется.</p>
+          <ol class="dw-steps"><li>Аккаунта нет — он и не нужен: <a href="#" data-free>«Подключить бесплатно»</a> — без регистрации, на счёте сразу подарок.</li><li>Логин и пароль — только если команда Dewiar сама создала вам аккаунт (например, для организации). Регистрации на сайте нет, и ничего на почту не приходит — если вы не получали логин от нас, вход не нужен.</li></ol>
+          <div class="actions" style="margin:0;flex-wrap:wrap">
+            <input type="text" id="dw-login" placeholder="логин" autocomplete="username" style="flex:1;min-width:130px">
+            <input type="password" id="dw-pass" placeholder="пароль" autocomplete="current-password" style="flex:1;min-width:130px">
+            <button class="btn primary" id="dw-go">Войти</button>
+          </div>
+          <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Свой сервер вместо dewiar.pro</summary>
+            <input type="url" id="dw-server" placeholder="https://dewiar.pro" spellcheck="false" style="width:100%;margin-top:8px"></details>
+        </div>
+        <div id="dw-acc-in" style="display:none">
+          <div class="dw-kv"><span>Вы вошли</span><b id="dw-who"></b><span>Сайт</span><div id="dw-host"></div></div>
+          <div class="actions" style="margin:0"><span style="flex:1"></span><button class="btn" id="dw-out">Выйти</button></div>
+        </div>
+        <p class="res" id="dw-acc-res" style="margin-top:6px"></p>
+      </div>
+      <div class="dwc" id="dwc-cloud">
+        <div class="dh"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><h3>Модели Dewiar</h3><span class="dws" id="dws-cloud">—</span></div>
+        <div id="dw-cloud-on" style="display:none">
+          <div style="display:flex;align-items:baseline;gap:12px"><span class="dw-big" id="dw-pct">—</span><span class="hint" id="dw-turns" style="margin:0"></span></div>
+          <div class="dw-bar"><i id="dw-fill" style="width:0"></i></div>
+          <p class="hint" id="dw-cloud-who" style="margin:4px 0 10px"></p>
+          <div class="actions" style="margin:0"><button class="btn primary" id="dw-cloud-use" style="display:none">Отвечать моделями Dewiar</button><span style="flex:1"></span><button class="btn" id="dw-topup">Пополнить</button></div>
+        </div>
+        <div id="dw-cloud-off"><p class="hint">Модели на сервере Dewiar: думать может слабый компьютер, заряд — в талерах. Подключатся сами после входа в аккаунт.</p>
+          <div class="actions" id="dw-cloud-acc" style="margin:0 0 8px;display:none"><button class="btn primary" id="dw-cloud-go">Подключить модели Dewiar</button></div>
+          <details><summary class="hint" style="cursor:pointer">Есть код из 6 цифр с другого устройства или ключ dw-…</summary>
+            <div class="actions" style="margin:8px 0 0"><input type="text" id="dw-key" placeholder="123 456 или dw-xxxxxx-xxxxxx-…" style="flex:1;min-width:220px"><button class="btn" id="dw-key-go">Подключить</button></div></details></div>
+        <p class="res" id="dw-cloud-res" style="margin-top:6px"></p>
+      </div>
+      <div class="dwc" id="dwc-speech">
+        <div class="dh"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11.5" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><h3>Слух и голос</h3><span class="dws" id="dws-speech">—</span></div>
+        <p class="hint">Распознавать речь и озвучивать ответы может сервер Dewiar — компьютеру почти ничего не нужно. Пропала связь — ассистент сам вернётся к своему.</p>
+        <div class="switch"><div>Распознавать речь на сервере<span id="dw-stt-why">Быстро и точно даже на слабом компьютере; немного расходует заряд.</span></div><label class="tg"><input type="checkbox" id="dw-stt"><i></i></label></div>
+        <div class="switch" id="dw-tts-row"><div>Голос Dewiar<span>Ассистент говорит живым голосом с сервера. Это тот же пункт «Голос Dewiar», что в разделе <a href="#" id="dw-tts-sec">«Голос»</a>, — включайте здесь или там.</span></div><label class="tg"><input type="checkbox" id="dw-tts"><i></i></label></div>
+        <p class="res" id="dw-speech-res"></p>
+      </div>
+      <div class="dwc" id="dwc-sync">
+        <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 7h-9.5a5.5 5.5 0 0 0 0 11H14"/><path d="m17 4 3 3-3 3"/><path d="M4 17h9.5"/><path d="m7 20-3-3 3-3"/></svg><h3>Синхронизация</h3><span class="dws" id="dws-sync">—</span></div>
+        <p class="hint">Телефон и компьютеры — одно и то же: напоминания и будильники, заметки и списки, расходы, память «Обо мне». Через сервер Dewiar, по вашему аккаунту или ключу — на всех устройствах тот же вход.</p>
+        <div class="switch"><div>Синхронизировать<span id="dw-sync-via">—</span></div><label class="tg"><input type="checkbox" id="dw-sync-on"><i></i></label></div>
+        <div class="switch"><div>Шифровать на устройстве<span id="dw-e2e-why">Заметки, дела, деньги и память уходят в облако уже зашифрованными — ключ знают только ваши устройства, сервер dewiar.pro их не прочитает. Включите на одном — остальные получат ключ сами.</span></div><label class="tg"><input type="checkbox" id="dw-e2e"><i></i></label></div>
+        <div class="actions" style="margin:0"><span class="hint" id="dw-sync-st" style="flex:1;margin:0"></span><button class="btn" id="dw-sync-now">Синхронизировать сейчас</button></div>
+      </div>
+      <div class="dwc" id="dwc-kb">
+        <div class="dh"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><h3>Знания</h3><span class="dws" id="dws-kb">—</span></div>
+        <p class="hint" id="dw-kb-text">Ваши документы на dewiar.pro и публичная библиотека. Загружают их на сайте, ассистент ищет в них ответы.</p>
+        <div class="actions" style="margin:0;flex-wrap:wrap"><input type="text" id="dw-q" placeholder="вопрос к Знаниям" style="flex:1;min-width:200px"><button class="btn" id="dw-ask">Спросить</button></div>
+        <div class="hint" id="dw-ans" style="margin-top:10px;white-space:pre-wrap"></div>
+        <div class="actions" style="margin:6px 0 0"><button class="btn" id="dw-kb-persona">Подключить персонажу…</button></div>
+      </div>
+      <div class="dwc" id="dwc-chat">
+        <div class="dh"><svg viewBox="0 0 24 24"><path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.2A8.5 8.5 0 1 1 21 12z"/></svg><h3>Мессенджеры</h3><span class="dws" id="dws-chat">—</span></div>
+        <p class="hint">Пишите ассистенту из телефона: текстом, голосовыми, фото. Боты Dewiar — без своего бота и настроек.</p>
+        <div class="switch"><div>Telegram<span id="dw-tg">не подключён</span></div><button class="btn" id="dw-tg-go">Подключить</button></div>
+        <div class="switch"><div>MAX<span id="dw-mx">не подключён</span></div><button class="btn" id="dw-mx-go">Подключить</button></div>
+      </div>
+      <div class="dwc" id="dwc-phone">
+        <div class="dh"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg><h3>Телефон</h3><span class="dws run">Android</span></div>
+        <div style="display:flex;gap:16px;align-items:center">
+          <div class="dw-qr" id="dw-qr"></div>
+          <ol class="dw-steps" style="margin:0 0 0 18px"><li>Наведите камеру телефона на код — скачается Dewiar.</li><li>В приложении: Настройки → «Модели» → «Аккаунт dewiar.pro» — тот же логин.</li><li>Всё: модели, Знания и заряд — общие.</li></ol>
+        </div>
+      </div>
+      <div class="dwc" id="dwc-ref">
+        <div class="dh"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M18 8v6M15 11h6"/></svg><h3>Рефералы</h3><span class="dws" id="dws-ref">—</span></div>
+        <p class="hint" id="dw-ref-text">Поделитесь Dewiar — подарки талерами и вам, и другу.</p>
+        <div class="actions" style="margin:0"><button class="btn primary" id="dw-ref-open">Открыть «Рефералы»</button></div>
+      </div>
+    </div>
+    <details class="dw-more" id="dw-more">
+      <summary><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg><span><b>Компьютер, сеть, антивирус и обновления</b>
+        <em>Если ассистент тормозит, сайт не открывается или пропали файлы — загляните сюда.</em></span><i class="dw-more-sum" id="dw-more-sum"></i></summary>
+      <div class="dw-grid">
+        <div class="dwc" id="dwc-pc">
+          <div class="dh"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><h3>Этот компьютер</h3><span class="dws" id="dws-pc">—</span></div>
+          <div class="dw-kv" id="dw-pc-kv"></div>
+          <div class="switch"><div>Лёгкий режим<span>Для слабых компьютеров: распознавание — сервер Dewiar или лёгкая модель, голос — лёгкий Piper.</span></div><label class="tg"><input type="checkbox" id="dw-light"><i></i></label></div>
+          <div class="switch"><div>Предупреждать, когда не хватает памяти<span>Открыто много других программ и компьютер ушёл в подкачку — подскажу, кто занимает память и что закрыть.</span></div><label class="tg"><input type="checkbox" data-k="device.mem_warn"><i></i></label></div>
+          <p class="hint" id="dw-pc-adv" style="margin-top:8px"></p>
+        </div>
+        <div class="dwc" id="dwc-av" style="display:none">
+          <div class="dh"><svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg><h3>Антивирус</h3><span class="dws" id="dws-av">—</span></div>
+          <p class="hint" id="dw-av-text"></p>
+          <div class="dw-path" id="dw-av-path"></div>
+          <ol class="dw-steps" id="dw-av-steps"></ol>
+          <div class="actions" style="margin:0;flex-wrap:wrap"><button class="btn primary" id="dw-av-ex" style="display:none">Открыть настройки Защитника</button><button class="btn" id="dw-av-copy">Скопировать путь</button></div>
+          <p class="res" id="dw-av-res"></p>
+        </div>
+        <div class="dwc" id="dwc-net">
+          <div class="dh"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z"/></svg><h3>Сеть</h3><span class="dws" id="dws-net">—</span></div>
+          <p class="hint">Провайдер блокирует dewiar.pro? Укажите прокси — через него пойдут только запросы к Dewiar (вход, модели, Знания, речь, обновления), остальное — напрямую.</p>
+          <div class="actions" style="margin:0;flex-wrap:wrap"><input type="text" id="dw-px" placeholder="socks5://адрес:порт или http://адрес:порт" spellcheck="false" style="flex:1;min-width:200px"><button class="btn primary" id="dw-px-save" style="flex:none;white-space:nowrap">Сохранить</button></div>
+          <div class="switch" style="border:0;padding:10px 0 0"><div>Использовать прокси Dewiar<span>Свой прокси не нужен: его выдаёт dewiar.pro тем, кто вошёл аккаунтом или подключил ключ. Только для серверов Dewiar — Telegram и остальной интернет идут напрямую. Свой прокси, если указан, главнее.</span></div>
+            <label class="tg"><input type="checkbox" id="dw-px-dw"><i></i></label></div>
+          <div class="switch" style="border:0;padding:10px 0 0"><div>Поиск и страницы через сервер Dewiar<span>Если провайдер режет поисковик или сайт, ассистент ищет и читает через сервер Dewiar (нужен вход или ключ). Выключите — тогда только напрямую.</span></div>
+            <label class="tg"><input type="checkbox" id="dw-web"><i></i></label></div>
+          <p class="res" id="dw-net-res"></p>
+        </div>
+        <div class="dwc" id="dwc-upd">
+          <div class="dh"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg><h3>Обновления</h3><span class="dws" id="dws-upd">—</span></div>
+          <p class="hint" id="dw-upd-text"></p>
+          <div class="actions" style="margin:0"><button class="btn" id="dw-upd-go">Проверить</button><button class="btn primary" id="dw-upd-open" style="display:none">Обновить…</button></div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section id="p-contacts" class="wide">
+    <h1>Контакты</h1>
+    <p class="lead">Контакты macOS и локальные копии Dewiar. Импортируйте все доступные карточки или только выбранные. Записи не добавляются в контекст модели автоматически.</p>
+    <div class="ct-permission"><h2>Доступ к Контактам macOS</h2><p id="ct-permission" class="hint" role="status">Проверка доступа доступна по кнопке.</p>
+      <div class="actions"><button id="ct-permit" class="btn">Разрешить доступ к Контактам</button><button id="ct-native-settings" class="btn">Настройки macOS</button><button id="ct-permission-refresh" class="btn">Проверить доступ</button><button id="ct-read" class="btn primary" disabled>Прочитать доступные контакты</button></div>
+      <p class="hint">Импортируются имя, телефоны, почта, организация и дата рождения. Фотографии, личные заметки и адреса не читаются. При ограниченном доступе видны только разрешённые macOS карточки.</p>
+    </div>
+    <p id="ct-status" role="status" aria-live="polite"></p>
+    <div id="ct-proposal" hidden></div>
+    <div id="ct-preview" hidden><h2>Выбор для импорта</h2><p id="ct-source-total" class="hint"></p><input id="ct-source-search" type="search" aria-label="Найти карточки macOS" placeholder="Имя, телефон, почта…">
+      <div class="actions"><button id="ct-select-all" class="btn">Выбрать все доступные</button><button id="ct-select-none" class="btn">Снять выбор</button></div>
+      <div id="ct-source-list" class="ct-list"></div><button id="ct-more" class="btn" hidden>Показать ещё</button>
+      <label class="f"><span><input id="ct-update" type="checkbox"> Обновлять существующие локальные копии из macOS</span><span class="hint">По умолчанию ранее сохранённые копии не перезаписываются. Отсутствие карточки в системном списке не удаляет её из Dewiar.</span></label>
+      <button id="ct-import" class="btn primary" disabled>Импортировать выбранные (0)</button>
+    </div>
+    <h2>Карточки Dewiar</h2><p id="ct-count" class="hint"></p>
+    <div class="actions"><button id="ct-new" class="btn primary">Создать контакт</button><input id="ct-local-search" type="search" placeholder="Поиск в Dewiar…" aria-label="Найти локальный контакт"></div>
+    <form id="ct-form" hidden><h2>Новая карточка</h2><div class="row">
+      <label class="f">Фамилия<input data-ct="family_name" maxlength="300"></label><label class="f">Имя<input data-ct="given_name" maxlength="300"></label><label class="f">Отчество<input data-ct="middle_name" maxlength="300"></label>
+      <label class="f">Организация<input data-ct="organization" maxlength="300"></label><label class="f">Дата рождения (необязательно)<input data-ct="birthday" type="date"></label>
+      <label class="f">Телефоны, по одному в строке<textarea data-ct="phones"></textarea></label><label class="f">Почта, по одному адресу в строке<textarea data-ct="emails"></textarea></label>
+    </div><label class="f"><span><input id="ct-to-mac" type="checkbox" checked> Сохранить также в Контактах macOS</span><span class="hint">По умолчанию новая карточка создаётся в обоих приложениях. Системная адресная книга может синхронизировать её через ваши учётные записи.</span></label>
+      <div class="actions"><button class="btn primary" type="submit">Проверить и создать</button><button id="ct-form-cancel" class="btn" type="button">Отмена</button></div>
+    </form>
+    <p id="ct-local-total" class="hint"></p><div id="ct-local-list"></div><div class="actions"><button id="ct-local-prev" class="btn" disabled>Предыдущие 100</button><button id="ct-local-next" class="btn" disabled>Следующие 100</button></div>
+    <label class="f"><span><input id="ct-suggest" type="checkbox" checked> Предлагать карточку при упоминании ФИО</span><span class="hint">Предложение не прерывает ваш вопрос. Перед созданием или копированием нужно подтвердить конкретную карточку; совпадение ФИО само по себе не объединяет людей.</span></label>
+  </section>
+
+  <section id="p-connect">
+    <h1>Подключение</h1>
+    <div class="prof on acc-go-dw" id="acc-goto" style="padding:14px 18px;margin-bottom:22px">
+      <p class="hint" style="margin:0;flex:1">Вход аккаунтом dewiar.pro, модели, Знания и синхронизация — в разделе «Dewiar.pro».</p>
+      <button class="btn" id="acc-goto-btn">Открыть «Dewiar.pro»</button>
+    </div>
+    <!-- прежний вход аккаунтом: один вход — в «Dewiar.pro»; блок остаётся скрытым, links.js по-прежнему его заполняет -->
+    <div class="prof on" id="acc-box" style="display:none">
+      <h3 style="font-size:15px;margin-bottom:6px">Аккаунт Dewiar</h3>
+      <div id="acc-out">
+        <p class="hint" style="margin-bottom:12px">Войдите логином и паролем от dewiar.pro — и всё настроится само: ассистент ответит по вашим Знаниям (документы, папки, публичная библиотека), а если своей модели нет — подключит модели Dewiar с зарядом в талерах. Пароль не сохраняется.</p>
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          <input type="text" id="acc-login" placeholder="логин" autocomplete="username" style="flex:1;min-width:160px">
+          <input type="password" id="acc-pass" placeholder="пароль" autocomplete="current-password" style="flex:1;min-width:160px">
+          <button class="btn primary" id="acc-go">Войти</button>
+        </div>
+        <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Другой сервер</summary>
+          <input type="url" id="acc-server" placeholder="https://dewiar.pro" style="width:100%;margin-top:8px">
+        </details>
+      </div>
+      <div id="acc-in" style="display:none">
+        <p id="acc-who" style="margin-bottom:6px"></p>
+        <p class="hint" style="margin-bottom:12px">Знания подключены. Спросите голосом: «что в моих документах про отпуск?» — или проверьте здесь.</p>
+        <div class="actions" style="margin:0">
+          <input type="text" id="acc-q" placeholder="вопрос к Знаниям" style="flex:1;min-width:220px">
+          <button class="btn" id="acc-ask">Спросить</button>
+          <button class="btn" id="acc-out-btn">Выйти</button>
+        </div>
+        <div id="acc-answer" class="hint" style="margin-top:10px;white-space:pre-wrap"></div>
+      </div>
+      <p class="res" id="acc-res" style="margin-top:8px"></p>
+    </div>
+    <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Почта</h3>
+      <p class="hint" style="margin-bottom:12px">Ассистент сможет прислать вам результат («пришли мне это на почту»), отправить письмо по вашей просьбе (всегда спросит «отправить?») и рассказать, что нового во входящих.</p>
+      <div class="actions" style="margin:0;flex-wrap:wrap">
+        <input type="email" id="ml-addr" placeholder="ваш адрес, например ivan@yandex.ru" autocomplete="email" style="flex:1;min-width:200px">
+        <input type="password" id="ml-pass" placeholder="пароль приложения" autocomplete="off" style="flex:1;min-width:170px">
+        <button class="btn primary" id="ml-save">Подключить</button>
+      </div>
+      <p class="hint" id="ml-help" style="margin-top:8px"></p>
+      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Серверы почты (подставляются сами)</summary>
+        <div class="row" style="margin-top:10px">
+          <label class="f">Имя отправителя<input type="text" id="ml-name" placeholder="Dewiar"></label>
+          <label class="f">Логин (если не совпадает с адресом)<input type="text" id="ml-login"></label>
+          <label class="f">SMTP — отправка<input type="text" id="ml-smtp" placeholder="smtp.yandex.ru"></label>
+          <label class="f">Порт и защита<span style="display:flex;gap:6px"><input type="number" id="ml-sport" style="width:90px"><select id="ml-sec"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">без шифрования</option></select></span></label>
+          <label class="f">IMAP — чтение<input type="text" id="ml-imap" placeholder="imap.yandex.ru"></label>
+          <label class="f">Порт IMAP<input type="number" id="ml-iport" style="width:90px"></label>
+        </div>
+      </details>
+      <div class="actions" id="ml-on" style="display:none;margin-top:10px">
+        <span class="res ok" id="ml-state"></span><span style="flex:1"></span>
+        <button class="btn" id="ml-test">Письмо себе</button><button class="btn" id="ml-off">Отключить</button>
+      </div>
+      <p class="res" id="ml-res" style="margin-top:6px"></p>
+    </div>
+    <div class="prof on" id="tg-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Telegram — ассистент в телефоне</h3>
+      <p class="hint" style="margin-bottom:12px">Пишите ассистенту из Telegram — текстом, голосовыми, фото и документами, — он ответит как дома и помнит весь разговор. Туда же придут итоги задач, напоминания и вопросы «выполнить?» с кнопками. Аккаунт и настройки не нужны: одна кнопка — и бот Dewiar ваш.</p>
+      <div id="tg-setup">
+        <div id="tg-shared" class="tg-shared" style="display:none">
+          <div><b>Бот Dewiar</b><span>Нажмите «Подключить Telegram», затем «Открыть Telegram» и в нём «Запустить» — всё, бот ваш.</span></div>
+          <button class="btn primary" id="tg-shared-go">Подключить Telegram</button>
+        </div>
+        <div id="tg-shared-info" class="tg-shared" style="display:none"><div><b>Бот Dewiar</b><span id="tg-shared-why"></span></div></div>
+        <details id="tg-own"><summary class="hint" style="cursor:pointer;margin-bottom:10px" id="tg-own-sum">Свой бот (создаётся у @BotFather)</summary>
+        <ol class="tg-steps">
+          <li>Откройте <a href="https://t.me/BotFather" target="_blank">@BotFather</a> в Telegram, отправьте <kbd>/newbot</kbd> и придумайте боту имя (например, «Мой Dewiar»).</li>
+          <li>BotFather пришлёт токен вида <kbd>123456789:AAH…</kbd> — скопируйте и вставьте сюда.</li>
+        </ol>
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          <input type="password" id="tg-token" placeholder="токен бота от @BotFather" autocomplete="off" style="flex:1;min-width:240px">
+          <button class="btn primary" id="tg-connect">Подключить</button>
+        </div>
+        <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Свой адрес Bot API</summary>
+          <label class="f" style="margin-top:10px">Адрес Bot API (свой сервер Bot API или зеркало)<input type="text" id="tg-api" placeholder="https://api.telegram.org"></label>
+        </details>
+        </details>
+      </div>
+      <div id="tg-pair" class="tg-pair" style="display:none">
+        <div class="tg-pair-l">
+          <b>Остался один шаг.</b> Нажмите «Открыть Telegram» (или «В браузере», если Telegram у вас в браузере) — откроется бот <a id="tg-link" target="_blank">@бот</a>, нажмите в нём
+          <b>«Запустить»</b>. Telegram на телефоне? Наведите камеру на QR-код.
+          <div class="tg-code"><a class="btn primary" id="tg-open" target="_blank">Открыть Telegram</a><a class="btn" id="tg-web" target="_blank" title="Если Telegram открыт только в браузере (Telegram Web)">В браузере</a><button class="btn" id="tg-copy">Скопировать ссылку</button></div>
+          <span class="hint"><i class="spin-dot"></i> жду, когда нажмёте «Запустить»…</span>
+          <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Кнопки «Запустить» нет?</summary>
+            <p class="hint" style="margin-top:6px">Отправьте боту сообщение: <span id="tg-code" style="user-select:all;color:#fff">/start …</span></p></details>
+        </div>
+        <div id="tg-qr" title="Ссылка на бота — для телефона"></div>
+      </div>
+      <div id="tg-on" style="display:none">
+        <div class="actions" style="margin:0 0 10px"><span class="res ok" id="tg-state"></span></div>
+        <div class="switch"><div>Присылать в Telegram важное<span>Итоги задач (с файлом отчёта), напоминания, вопросы задач и уведомления.</span></div><label class="tg"><input type="checkbox" id="tg-notify"><i></i></label></div>
+        <div class="switch"><div>На голосовые — отвечать и голосом<span>Ответ придёт текстом и голосовым сообщением, голосом текущего персонажа.</span></div><label class="tg"><input type="checkbox" id="tg-vreply"><i></i></label></div>
+        <div class="switch" id="tg-off-row"><div>Отвечать, когда компьютер выключен<span id="tg-off-why">Бот Dewiar сам отвечает с сервера: вопросы, заметки, список покупок, напоминания. Включится компьютер — всё окажется и на нём.</span></div><label class="tg"><input type="checkbox" id="tg-offline"><i></i></label></div>
+        <div class="switch"><div>Озвучивать дома ответы на сообщения из Telegram<span>Выключено — дома тихо, ответ приходит только в Telegram.</span></div><label class="tg"><input type="checkbox" id="tg-voice"><i></i></label></div>
+        <div class="actions" style="margin:10px 0 0">
+          <span style="flex:1"></span>
+          <button class="btn" id="tg-test">Проверить связь</button><button class="btn" id="tg-recode">Сменить владельца</button><button class="btn" id="tg-off">Отключить</button>
+        </div>
+      </div>
+      <p class="res" id="tg-res" style="margin-top:6px"></p>
+      <details id="tg-px-box" style="margin-top:10px"><summary class="hint" style="cursor:pointer">Telegram заблокирован? Прокси <span id="tg-px-on" style="color:rgba(255,255,255,.75)"></span></summary>
+        <p class="hint" style="margin:8px 0 10px">Бот Dewiar работает через сайт dewiar.pro — обычно прокси ему не нужен. Свой бот ходит в Telegram напрямую: если Telegram у провайдера закрыт, укажите SOCKS5- или HTTP-прокси
+          (<kbd>socks5://логин:пароль@адрес:1080</kbd>, ссылка <kbd>t.me/socks?…</kbd> тоже подойдёт). MTProto-прокси (с secret) работают только в самом приложении Telegram — ассистенту нужен SOCKS5/HTTP или VPN. Пусто — без прокси.</p>
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          <input type="text" id="tg-proxy" placeholder="socks5://адрес:порт" autocomplete="off" style="flex:1;min-width:240px">
+          <button class="btn" id="tg-proxy-save">Проверить и сохранить</button>
+        </div>
+      </details>
+    </div>
+    <div class="prof on" id="mx-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">MAX — ассистент в мессенджере MAX</h3>
+      <p class="hint" style="margin-bottom:12px">То же, что Telegram, но в MAX: пишите текстом и голосовыми, присылайте фото и документы, получайте итоги задач, напоминания и вопросы «выполнить?» с кнопками. Работает и там, где Telegram закрыт.</p>
+      <div id="mx-setup">
+        <div class="tg-shared">
+          <div><b>Бот Dewiar в MAX</b><span>Нажмите «Подключить MAX», затем «Открыть MAX» и в нём «Начать» — бот ваш. Свой бот не нужен.</span></div>
+          <button class="btn primary" id="mx-shared-go">Подключить MAX</button>
+        </div>
+        <details><summary class="hint" style="cursor:pointer;margin-bottom:10px">Дополнительно: свой бот организации</summary>
+          <p class="hint" style="margin:0 0 10px">В MAX создавать ботов могут только ИП и организации: кабинет <a href="https://business.max.ru" target="_blank">business.max.ru</a> → «Чат-боты» → создать → «Интеграция» → токен.</p>
+          <div class="actions" style="margin:0;flex-wrap:wrap">
+            <input type="password" id="mx-token" placeholder="токен бота MAX" autocomplete="off" style="flex:1;min-width:240px">
+            <button class="btn primary" id="mx-connect">Подключить</button>
+          </div>
+        </details>
+      </div>
+      <div id="mx-pair" class="tg-pair" style="display:none">
+        <div class="tg-pair-l">
+          <b>Остался один шаг.</b> Нажмите «Открыть MAX» — откроется бот <a id="mx-link" target="_blank">бот</a>, нажмите в нём <b>«Начать»</b>. MAX на телефоне? Наведите камеру на QR-код.
+          <div class="tg-code"><a class="btn primary" id="mx-open" target="_blank">Открыть MAX</a><button class="btn" id="mx-copy">Скопировать ссылку</button></div>
+          <span class="hint"><i class="spin-dot"></i> жду, когда нажмёте «Начать»…</span>
+          <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Кнопки «Начать» нет?</summary>
+            <p class="hint" style="margin-top:6px">Отправьте боту сообщение: <span id="mx-code" style="user-select:all;color:#fff">/start …</span></p></details>
+        </div>
+        <div id="mx-qr" class="qrbox" title="Ссылка на бота — для телефона"></div>
+      </div>
+      <div id="mx-on" style="display:none">
+        <div class="actions" style="margin:0 0 10px"><span class="res ok" id="mx-state"></span></div>
+        <div class="switch"><div>Присылать в MAX важное<span>Итоги задач, напоминания, вопросы задач и уведомления.</span></div><label class="tg"><input type="checkbox" id="mx-notify"><i></i></label></div>
+        <div class="switch"><div>На голосовые — отвечать и голосом<span>Ответ придёт текстом и голосовым сообщением.</span></div><label class="tg"><input type="checkbox" id="mx-vreply"><i></i></label></div>
+        <div class="switch"><div>Озвучивать дома ответы на сообщения из MAX<span>Выключено — дома тихо, ответ приходит только в MAX.</span></div><label class="tg"><input type="checkbox" id="mx-voice"><i></i></label></div>
+        <div class="actions" style="margin:10px 0 0">
+          <span style="flex:1"></span>
+          <button class="btn" id="mx-test">Проверить связь</button><button class="btn" id="mx-recode">Сменить владельца</button><button class="btn" id="mx-off">Отключить</button>
+        </div>
+      </div>
+      <p class="res" id="mx-res" style="margin-top:6px"></p>
+    </div>
+    <div class="prof on" id="ph-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Dewiar на телефоне (Android)</h3>
+      <p class="hint" style="margin-bottom:12px">Тот же ассистент в кармане: разговор голосом, напоминания и будильники, звонки, умный дом.
+        Наведите камеру телефона на первый код — скачается приложение. Потом на второй — оно возьмёт настройки этого компьютера.</p>
+      <div class="ph-qrs">
+        <div class="ph-q"><div id="ph-qr1" class="qr"></div><b>1. Установить</b><span>скачать Dewiar.apk</span></div>
+        <div class="ph-q"><div id="ph-qr2" class="qr ph-hide"><button class="btn" id="ph-show">Показать код</button></div><b>2. Перенести настройки</b><span>мозг, слух, голос, умный дом</span></div>
+      </div>
+      <p class="hint" id="ph-note" style="margin-top:10px"></p>
+    </div>
+    <div class="prof on" id="ob-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Obsidian — ваши заметки и знания</h3>
+      <p class="hint" style="margin-bottom:12px">Ассистент кладёт свои заметки, списки, дневник и «Обо мне» в папку <b>Dewiar</b> вашего хранилища —
+        правьте их в Obsidian, он увидит сразу. И ищет ответы во всех ваших заметках: «что у меня записано про отпуск?». Ваши заметки он не меняет.</p>
+      <div id="ob-setup">
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          <select id="ob-vault" style="flex:1;min-width:240px"></select>
+          <button class="btn" id="ob-pick">Выбрать папку…</button>
+          <button class="btn primary" id="ob-go">Подключить</button>
+        </div>
+      </div>
+      <div id="ob-on" style="display:none">
+        <div class="actions" style="margin:0 0 10px"><span class="res ok" id="ob-state"></span></div>
+        <div class="switch"><div>Искать ответы во всём хранилище<span>Выключено — ассистент видит только свою папку Dewiar.</span></div><label class="tg"><input type="checkbox" id="ob-search"><i></i></label></div>
+        <div class="switch"><div>Всё хранилище — одинаковое на всех компьютерах<span>Работа и дом: заметки Obsidian (тексты .md) синхронизируются через облако Dewiar — где правили позже, та версия и остаётся; правили в двух местах сразу — рядом сохранится копия «(конфликт…)», удалённое уходит в корзину Obsidian. Включите на каждом компьютере (нужен тот же вход или ключ Dewiar). Картинки и вложения пока не переносятся. Папка DEWIAR синхронизируется всегда.</span></div><label class="tg"><input type="checkbox" id="ob-all"><i></i></label></div>
+        <div class="actions" style="margin:10px 0 0">
+          <span style="flex:1"></span>
+          <button class="btn" id="ob-open">Открыть в Obsidian</button><button class="btn" id="ob-sync">Синхронизировать</button><button class="btn" id="ob-off">Отключить</button>
+        </div>
+      </div>
+      <p class="res" id="ob-res" style="margin-top:6px"></p>
+    </div>
+    <div class="prof on" id="sh-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Умный дом Яндекса — тот же, что у Алисы</h3>
+      <p class="hint" style="margin-bottom:12px">Свет, розетки, кондиционер, шторы, пылесос и сценарии из приложения «Дом с Алисой». Голосом, сразу:
+        «включи свет в спальне», «весь свет на 30 процентов», «сделай свет теплее», «кондиционер на 22», «запусти сценарий Спокойной ночи».</p>
+      <div id="sh-setup">
+        <ol class="shsteps">
+          <li><div><b>Разрешите Dewiar ваш умный дом</b><span>Яндекс попросит войти — тем же аккаунтом, что в «Доме с Алисой», — и нажать «Разрешить».</span></div>
+            <a class="btn primary" id="sh-auth" target="_blank" style="text-decoration:none">Получить ключ</a></li>
+          <li><div><b>Вставьте ключ, который покажет Яндекс</b><span>Длинная строка, начинается с <code>y0_</code>. Скопируйте её целиком.</span></div></li>
+        </ol>
+        <div class="actions" style="margin:0;flex-wrap:wrap">
+          <input type="password" id="sh-token" placeholder="y0_…" style="flex:1;min-width:220px" autocomplete="off" spellcheck="false">
+          <button class="btn primary" id="sh-go">Подключить</button>
+        </div>
+        <details id="sh-own" style="margin-top:10px"><summary class="hint" style="cursor:pointer">Своё приложение Яндекса — необязательно</summary>
+          <p class="hint" style="margin:8px 0 4px">Нужно, только если кнопка «Получить ключ» не открывается или хочется своё приложение вместо общего Dewiar:</p>
+          <ol class="steps" style="margin-top:4px">
+            <li>Откройте <a href="https://oauth.yandex.ru/client/new/" target="_blank">oauth.yandex.ru/client/new</a> → «Для доступа к API или отладки».</li>
+            <li>Название — «Dewiar»; доступы: «Умный дом» — <b>просмотр (iot:view)</b> и <b>управление (iot:control)</b>.</li>
+            <li>Redirect URI — <code>https://oauth.yandex.ru/verification_code</code>. Создайте, скопируйте <b>ClientID</b> (32 знака) сюда — и снова «Получить ключ».</li>
+          </ol>
+          <div class="actions" style="margin:4px 0 0"><input type="text" id="sh-cid" placeholder="ClientID приложения (необязательно)" style="flex:1;min-width:220px" spellcheck="false"></div>
+        </details>
+      </div>
+      <div id="sh-on" style="display:none">
+        <div id="sh-devs" class="chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+        <div class="actions" style="margin:0"><span class="res ok" id="sh-state" style="flex:1"></span>
+          <button class="btn" id="sh-refresh">Обновить</button><button class="btn" id="sh-phone">На телефон</button><button class="btn" id="sh-off">Отключить</button></div>
+        <p class="hint" style="margin:8px 0 0">На ваших связанных устройствах (тот же аккаунт или «Добавить устройство») умный дом подключится сам — ключ уходит
+          зашифрованным, сервер Dewiar его не видит. «На телефон» — для телефона, который с этим компьютером не связан.</p>
+        <div id="sh-qrbox" style="display:none;margin-top:12px"><div class="actions" style="align-items:center;gap:16px;flex-wrap:wrap"><div class="cl-qr" id="sh-qr"></div>
+          <p class="hint" style="flex:1;min-width:220px;margin:0">Откройте Dewiar на телефоне и скажите «отсканируй код» (или «Близкие» → «Сканировать») — телефон спросит
+          и подключит этот же умный дом. Мозг и голос телефона не меняются. В коде — ключ от вашего дома: не показывайте его чужим.</p></div></div>
+      </div>
+      <p class="res" id="sh-res" style="margin-top:6px"></p>
+    </div>
+    <div class="prof on" id="cal-box" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Календари Google и Яндекс</h3>
+      <p class="hint" style="margin-bottom:12px">Встречи из ваших календарей — в календаре студии, в утренней сводке и в ответах («что у меня завтра?»);
+        за несколько минут до встречи ассистент напомнит. Только чтение: в ваших календарях он ничего не меняет.</p>
+      <div id="cs-list"></div>
+      <div class="actions" style="margin:0;flex-wrap:wrap">
+        <input type="url" id="cs-url" placeholder="секретная ссылка iCal (…/basic.ics)" style="flex:1;min-width:260px" autocomplete="off">
+        <button class="btn primary" id="cs-add">Подключить</button>
+      </div>
+      <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Где взять ссылку</summary>
+        <ol class="steps" style="margin-top:8px">
+          <li><b>Google:</b> calendar.google.com → ⚙ «Настройки» → слева ваш календарь → «Интеграция календаря» → <b>«Секретный адрес в формате iCal»</b> → скопировать.</li>
+          <li><b>Яндекс:</b> calendar.yandex.ru → ⋯ у календаря → «Настроить» → «Экспорт» → формат iCal → скопировать ссылку.</li>
+          <li><b>Outlook, iCloud</b> — тоже работает: ссылка «опубликовать календарь» в формате ICS.</li>
+        </ol>
+        <p class="hint">Ссылка секретная — по ней видно все события. Храните её как пароль; если она утекла, в настройках календаря её можно сбросить.</p>
+      </details>
+      <div class="actions" style="margin:12px 0 0;align-items:center;gap:10px"><span style="font-size:13.5px">Напоминать о встрече за</span>
+        <input type="number" min="0" max="120" data-k="calendars.remind_minutes" style="width:80px;text-align:center"><span class="hint">мин (0 — не напоминать)</span></div>
+      <p class="res" id="cs-res" style="margin-top:6px"></p>
+    </div>
+    <p class="lead">Самый быстрый способ настроить всё сразу: введите адрес сервера Dewiar — модель, распознавание речи, голос и навыки подключатся сами. Перед применением вы увидите, что изменится.</p>
+    <div class="actions" style="margin:0">
+      <input type="text" id="c-addr" placeholder="например: dewiar.ru или 192.168.1.10:8090" style="flex:1;min-width:260px">
+      <button class="btn primary" id="c-go">Подключить</button>
+    </div>
+    <p class="res" id="c-res" style="margin-top:8px"></p>
+    <div id="c-preview" class="prof on" style="display:none;margin-top:16px;padding:16px 18px">
+      <h3 id="c-name" style="font-size:15px;margin-bottom:8px"></h3>
+      <ul id="c-lines" style="margin:0 0 10px 18px;color:var(--muted);font-size:13.5px"></ul>
+      <ul id="c-warn" style="margin:0 0 10px 18px;color:#FFB86B;font-size:13.5px"></ul>
+      <label class="f" id="c-keyrow" style="display:none;margin-bottom:10px">Код доступа<input type="password" id="c-key"><span class="hint" id="c-keyhint"></span></label>
+      <div class="actions" style="margin-top:6px"><button class="btn primary" id="c-apply">Применить</button><button class="btn" id="c-cancel">Отмена</button></div>
+    </div>
+    <p class="hint" id="c-current" style="margin-top:14px"></p>
+    <h2>Файл настроек</h2>
+    <p class="hint" style="margin-bottom:12px">Перенести настройки на другой компьютер или раздать готовые пользователям. Файлы .dewiar открываются двойным щелчком.</p>
+    <div class="actions" style="margin-top:0">
+      <label class="btn">Импортировать файл…<input type="file" id="c-file" accept=".dewiar,.json,application/json" hidden></label>
+      <button class="btn" id="c-export">Экспортировать…</button>
+      <label class="hint" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="c-secrets"> включить ключи доступа</label>
+    </div>
+  </section>
+
+  <section id="p-brain">
+    <h1>Модели</h1>
+    <p class="lead">Настройте отдельные очереди моделей для трёх типов работы. «Общение» используется по умолчанию для всех задач, кроме планирования и программирования.</p>
+    <div class="card model-routing">
+      <div class="model-role-tabs" id="model-role-tabs" role="tablist" aria-label="Назначение моделей">
+        <button class="model-role-tab on" type="button" role="tab" aria-selected="true" aria-controls="model-role-panel" data-model-role="communication" title="Модели для обычного общения, вопросов и всех задач без отдельного назначения">Общение</button>
+        <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="planning" title="Модели для планирования, обсуждения и совета участников">Планирование</button>
+        <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="coding" title="Модели для программирования, проекта, тестов и ревью кода">Программирование</button>
+      </div>
+      <div id="model-role-panel" role="tabpanel" aria-live="polite">
+        <h2 id="model-role-title">Общение</h2>
+        <p class="hint" id="model-role-description">Обычные ответы, вопросы и задачи, которым не назначено планирование или программирование.</p>
+        <label class="f role-token-limit" title="Верхний предел длины ответа для всех моделей этой очереди. Если у отдельного профиля задан меньший лимит, используется меньшее значение.">Максимум токенов в ответе для этой очереди
+          <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Максимум токенов ответа для текущей очереди" title="Ограничивает длину ответа выбранной очереди: Общение, Планирование или Программирование. Это не лимит средств и не размер контекста.">
+          <span class="hint">Это верхняя граница ответа, а не остаток средств. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192. Можно указать до 32768.</span>
+        </label>
+        <div class="model-role-add actions" id="model-role-add" hidden>
+          <label class="f">Добавить уже подключённую модель в эту очередь<select id="model-role-add-select" aria-label="Выбор подключённой модели для очереди"></select></label>
+          <button class="btn small" id="model-role-add-button" type="button" title="Добавить выбранную модель в текущую очередь">Добавить в очередь</button>
+        </div>
+      </div>
+      <label><input type="checkbox" data-k="llm.auto_select"> Автовыбор модели по приоритету и расписанию</label>
+      <p class="hint">1 — наивысший приоритет, 9 — самый низкий. Внутри выбранной вкладки сначала берётся доступная модель с наивысшим приоритетом. Часы — по времени Mac; 20:00–24:00 означает до полуночи. Если модель не ответила до начала выдачи, Dewiar пробует следующую в этой же очереди.</p>
+      <div class="actions"><button class="btn small" id="model-limits-refresh">Обновить лимиты и доступность</button><span id="model-routing-status" class="hint" role="status"></span></div>
+      <div class="model-routing-table"><table><thead><tr><th>Модель</th><th>Приоритет</th><th>Часы</th><th>Автовыбор</th><th>Баланс и лимиты</th><th></th></tr></thead><tbody id="model-routing-rows"></tbody></table></div>
+    </div>
+    <div class="card" id="subscription-models" style="margin-bottom:20px;padding:16px">
+      <h2>Модели по подписке</h2>
+      <p class="hint">Codex и Claude Code через официальный вход. История запроса отправляется в OpenAI или Anthropic и расходует лимит вашего плана. API-ключ не нужен. В режиме «только локально» подключение заблокировано.</p>
+      <div id="subscription-cards"></div>
+      <p class="hint">Codex использует отдельный вход Dewiar. Claude Code использует ваш вход в CLI. Встроенные инструменты CLI отключены; действия выполняются через обычные разрешения Dewiar. Изображения пока не поддерживаются.</p>
+    </div>
+    <div class="cloudc" id="cloud-card" style="display:none">
+      <div class="cc-h"><div><b>ИИ-баланс · модели Dewiar</b><span id="cc-sub"></span></div><div class="cc-pct" id="cc-pct"></div></div>
+      <div class="cc-bar"><i id="cc-fill"></i></div>
+      <div class="cc-f"><span id="cc-turns"></span><span class="cc-act"><button class="btn small primary" id="cc-top">Пополнить</button>
+        <button class="btn small" id="cc-use">Отвечать моделями Dewiar</button><button class="btn small" id="cc-ref">Обновить</button><button class="btn small" id="cc-pair" title="Код из 6 цифр — тот же ключ на другом компьютере или телефоне">Добавить устройство</button><button class="btn small danger" id="cc-off">Убрать ключ</button></span></div>
+      <p class="res" id="cc-pair-res" style="margin:6px 0 0"></p>
+      <div class="cc-pay" id="cc-pay" style="display:none">
+        <p class="hint" id="cc-topup" style="margin:0 0 10px;white-space:pre-line;line-height:1.55"></p>
+        <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
+          <label class="f" style="width:150px">Сколько талеров<input type="text" id="cp-amount" inputmode="decimal" placeholder="например, 5"></label>
+          <label class="f" style="flex:1;min-width:220px">Комментарий<input type="text" id="cp-note" placeholder="как оплатили: карта, перевод, дата"></label>
+        </div>
+        <div class="cp-shot" id="cp-shot" tabindex="0"><span id="cp-shot-t">Приложите снимок оплаты — нажмите сюда или вставьте Ctrl+V</span><img id="cp-img" alt=""></div>
+        <input type="file" id="cp-file" accept="image/png,image/jpeg,image/webp" hidden>
+        <div class="actions" style="margin:10px 0 0"><button class="btn primary" id="cp-send">Отправить заявку</button><span class="res" id="cp-res"></span></div>
+        <div id="cp-list"></div>
+      </div>
+      <div class="cc-use" id="cc-usage"></div>
+      <div class="cc-opts">
+        <label class="f" id="cc-model-w" style="display:none">Модель облака<select id="cc-model"></select></label>
+        <label class="f">Если облако не отвечает или заряд кончился<select id="cc-fb"></select></label>
+        <div class="switch" id="cc-stt-w" style="display:none;border:0;padding:4px 0 0"><div>Распознавать речь в облаке<span>Для слабого компьютера: голос в текст превращает сервер Dewiar (немного расходует заряд).</span></div>
+          <label class="tg"><input type="checkbox" id="cc-stt"><i></i></label></div>
+      </div>
+    </div>
+    <div class="wz" id="wz">
+      <button class="wtile easy" data-w="dwkey"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg><b>Подключить бесплатно</b><span>Проще всего: модели Dewiar без регистрации — или аккаунт dewiar.pro, ключ, код с телефона</span></button>
+      <button class="wtile" data-w="local"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg><b>На этом компьютере</b><span>Ollama или LM Studio — бесплатно и без интернета</span></button>
+      <button class="wtile" data-w="server"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg><b>Сервер компании или дома</b><span>vLLM, Ollama, llama.cpp на другом компьютере — нужен только адрес</span></button>
+      <button class="wtile" data-w="cloud"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><b>Ключ любимого сервиса</b><span>OpenAI, Claude, OpenRouter, DeepSeek или любой сервис по адресу — своим ключом</span></button>
+    </div>
+
+    <div class="wpanel" id="w-dwkey">
+      <h3>Модели Dewiar</h3>
+      <div class="dk-have" id="dk-have"><b>Dewiar уже есть на телефоне или другом компьютере?</b>
+        <span>Не отправляйте новую заявку — введите код с того устройства: тогда память, заметки, блокнот и счёт будут общими. Код там: «Модели» → «Добавить устройство».</span>
+        <button class="btn small" id="dk-have-go">Ввести код</button></div>
+      <div class="dk-join" id="dk-join" style="margin-bottom:14px">
+        <p class="hint" style="margin:0 0 8px"><b>Попробовать без регистрации.</b> Напишите, как к вам обращаться и как связаться — как только заявку одобрят,
+          всё подключится само, с подарком на счёте; если заявку проверяют вручную — придёт чуть позже. На другие устройства ключ переносится кодом из 6 цифр.</p>
+        <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
+          <label class="f" style="flex:1;min-width:160px">Как к вам обращаться<input type="text" id="jn-name" autocomplete="name"></label>
+          <label class="f" style="flex:1;min-width:200px">Почта, Telegram или телефон<input type="text" id="jn-contact" spellcheck="false"></label>
+          <label class="f" style="flex:2;min-width:200px">Зачем (необязательно)<input type="text" id="jn-note"></label>
+          <button class="btn primary" id="jn-go">Отправить заявку</button>
+        </div>
+        <p class="res" id="jn-res" style="margin-top:6px"></p>
+      </div>
+      <div class="dk-acc" id="dk-acc"></div>
+      <p class="hint" style="margin:14px 0 8px" id="dk-or">Или ключ от администратора — строка, которая начинается с <b>dw-</b>:</p>
+      <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
+        <label class="f" style="flex:1;min-width:260px">Ключ dw-… или код с другого устройства<input type="text" id="dk-key" placeholder="dw-xxxxxx-xxxxxx-xxxxxx-xxxxxx или 6 цифр" autocomplete="off" spellcheck="false"></label>
+        <button class="btn primary" id="dk-go">Подключить</button>
+      </div>
+      <p class="hint" style="margin-top:8px">Подойдёт и слабому компьютеру: думает сервер Dewiar, а здесь — только голос и руки.
+        Сколько осталось заряда, видно здесь и внизу меню слева.</p>
+      <details style="margin-top:6px"><summary class="hint" style="cursor:pointer">Другой адрес облака</summary>
+        <label class="f" style="margin-top:8px;max-width:520px">Адрес<input type="url" id="dk-url" placeholder="https://dewiar.pro/dwrapp/cloud.php"></label></details>
+      <p class="res" id="dk-res" style="margin-top:6px"></p>
+    </div>
+
+    <div class="wpanel" id="w-server">
+      <h3>Адрес сервера</h3>
+      <div class="actions" style="margin:0;align-items:flex-end">
+        <label class="f" style="flex:2;min-width:200px">Адрес<input type="text" id="sv-host" placeholder="192.168.1.10 или dewiar.pro"></label>
+        <label class="f" style="width:120px">Порт<input type="text" id="sv-port" inputmode="numeric" placeholder="любой"></label>
+        <button class="btn primary" id="sv-go">Найти</button>
+      </div>
+      <p class="hint" style="margin-top:8px">Порт можно не указывать — проверю обычные (vLLM 8000, Ollama 11434, llama.cpp 8080, LM Studio 1234).</p>
+      <div id="sv-found" style="display:none;margin-top:12px;align-items:flex-end" class="actions">
+        <span class="res ok" id="sv-what"></span>
+        <label class="f" style="min-width:220px">Модель<select id="sv-model"></select></label>
+        <button class="btn primary" id="sv-use">Подключить</button>
+      </div>
+      <p class="res" id="sv-res" style="margin-top:6px"></p>
+    </div>
+
+    <div class="wpanel" id="w-local">
+      <h3>Модель на этом компьютере</h3>
+      <div class="actions" style="margin:0 0 12px"><button class="btn primary" id="discover">Найти Ollama или LM Studio</button><span class="res" id="discres"></span></div>
+      <p id="local-model-installations" class="hint" role="status" style="white-space:pre-line">Проверяю локальные программы…</p>
+      <button class="btn small" id="local-model-status-refresh" style="margin-bottom:12px">Обновить статус</button>
+      <div class="prof on" style="padding:16px;margin:12px 0" id="strata-panel">
+        <h3>Strata — приложение или движок без окна</h3>
+        <p class="hint">Через API доступны модели, загруженные в Strata. Без окна можно запустить установленный пакет через официальный CLI. Веса повторно не скачиваются; нужен совместимый пакет Strata с GGUF и tokenizer, не произвольный GGUF.</p>
+        <div class="row"><label class="f" style="flex:1">API Strata<input id="strata-url" value="auto" spellcheck="false"><span class="hint">«auto» найдёт запущенный Strata Desktop на Mac; адрес можно указать вручную.</span></label><label class="f">Ключ API, если задан в Strata<input id="strata-key" type="password" autocomplete="off"></label></div>
+        <div class="actions"><button class="btn" id="strata-probe">Получить список моделей Strata</button><select id="strata-api-model" aria-label="Модель Strata"></select><button class="btn primary" id="strata-use" disabled>Использовать модель</button></div>
+        <p class="res" id="strata-api-result" role="status"></p>
+        <hr><p class="hint" id="strata-status" role="status">Проверяю движок Strata…</p>
+        <div class="row"><label class="f" style="flex:1">Установленный пакет<select id="strata-package"></select></label><label class="f">Контекст, токенов<input id="strata-context" type="number" value="4096" min="1024" max="32768" step="1024"></label></div>
+        <div class="actions"><button class="btn" id="strata-start">Запустить без окна Strata</button><button class="btn" id="strata-use-owned" disabled>Использовать движок Dewiar</button><button class="btn" id="strata-stop" disabled>Остановить движок Dewiar</button><button class="btn small" id="strata-refresh">Обновить</button></div>
+        <p class="hint">Запуск только по кнопке, на 127.0.0.1, с отдельным ключом. При нехватке памяти Dewiar покажет приложения, которые можно закрыть вручную; сам он ничего не закрывает. При закрытии Dewiar останавливается только его движок. Этот режим — текст, без зрения и MTP.</p>
+      </div>
+      <details id="lc-how"><summary class="hint" style="cursor:pointer">Установка и запуск Ollama / LM Studio — инструкция</summary>
+        <ol class="steps" id="lc-steps"></ol>
+        <p class="hint">Названия моделей берутся из списка Ollama или LM Studio. В macOS переименовывать их не нужно.</p>
+      </details>
+    </div>
+
+    <div class="wpanel" id="w-cloud">
+      <h3>Облачная модель по ключу</h3>
+      <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
+        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek</option><option value="gemini">Google Gemini</option><option value="kimi">Kimi (Moonshot)</option><option value="glm">GLM (Z.ai)</option><option value="qwen">Qwen (Alibaba)</option><option value="mistral">Mistral</option><option value="xai">Grok (xAI)</option><optgroup label="Российские — оплата картой РФ"><option value="proxyapi">ProxyAPI</option><option value="vsegpt">VseGPT</option></optgroup><option value="custom">Другой — по адресу</option></select></label>
+        <label class="f" id="ck-url-f" style="flex:1;min-width:240px;display:none">Адрес (OpenAI-совместимый)<input type="url" id="ck-url" placeholder="https://api.example.ru/v1" spellcheck="false" autocomplete="off"></label>
+        <label class="f" style="flex:1;min-width:240px">Ключ API<input type="password" id="ck-key" placeholder="вставьте ключ" autocomplete="off"></label>
+        <button class="btn primary" id="ck-go">Подключить</button>
+      </div>
+      <p class="hint" style="margin-top:8px" id="ck-hint"></p>
+      <div id="ck-found" style="display:none;margin-top:10px;align-items:flex-end" class="actions">
+        <label class="f" style="min-width:280px">Модель<select id="ck-model"></select></label>
+        <button class="btn" id="ck-use">Выбрать эту</button>
+      </div>
+      <p class="res" id="ck-res" style="margin-top:6px"></p>
+    </div>
+
+    <div class="wdone" id="w-done" style="display:none"></div>
+    <p class="hint wadmin">Администратор прислал файл <b>.dewiar</b>? Это готовые настройки — откройте его двойным щелчком или в разделе
+      <a href="#" id="w-toconnect">«Подключение»</a>, и всё настроится само.</p>
+
+    <h2>Подключённые модели</h2>
+    <div id="profiles"></div>
+    <details style="margin:4px 0 8px"><summary class="hint" style="cursor:pointer">Добавить вручную (для опытных)</summary>
+      <div class="chips" id="presets" style="margin-top:10px"></div>
+    </details>
+    <div class="switch"><div>Думать над сложными просьбами<span>Стихи, расчёты, анализ, планы, код — модель сначала обдумывает ответ: дольше, зато лучше. Простые вопросы — как раньше, сразу.</span></div><label class="tg"><input type="checkbox" data-k="llm.think_auto"><i></i></label></div>
+    <div class="switch"><div>Короткая инструкция для модели — проба<span>Описания навыков (около четверти инструкции) идут не к каждому вопросу, а только к подходящему. Своей модели на компьютере — меньше читать перед каждым ответом. Включите, прогоните экзамен и сравните оценки и время с выключенным.</span></div><label class="tg"><input type="checkbox" data-k="llm.lean_prompt"><i></i></label></div>
+    <h2>Память разговора</h2>
+    <div class="row">
+      <label class="f">Последних реплик — дословно (раньше — кратко)<input type="number" min="0" max="50" data-k="llm.history_turns"></label>
+      <label class="f">Новый разговор после тишины, сек<input type="number" min="30" max="604800" data-k="llm.history_reset_seconds"></label>
+    </div>
+  </section>
+
+  <section id="p-ears">
+    <h1>Слух</h1>
+    <p class="lead">Как ассистент узнаёт своё имя и превращает вашу речь в текст.</p>
+    <div class="prof on" id="srv-stt" style="padding:16px 18px;margin-bottom:22px;display:none">
+      <h3 style="font-size:15px;margin-bottom:6px">Распознавание на сервере Dewiar</h3>
+      <p class="hint" style="margin-bottom:12px">GigaAM на видеокарте сервера: фраза превращается в текст за доли секунды, даже на слабом компьютере. Нет связи с сервером — распознаёт этот компьютер, как обычно.</p>
+      <div class="actions" style="margin:0"><button class="btn primary" id="srv-stt-go">Включить</button><span class="res" id="srv-stt-res"></span></div>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:22px" id="nm">
+      <h3 style="font-size:15px;margin-bottom:6px">Научить имени</h3>
+      <p class="hint" style="margin-bottom:12px">Скажите имя персонажа три раза — так, как будете звать его обычно. Ассистент запомнит звучание именно вашего голоса и будет узнавать имя мгновенно, даже без интернета и больших моделей. Лучше в тишине, с паузой после каждого раза.</p>
+      <div class="actions" style="margin:0">
+        <select id="nm-p" style="width:auto;min-width:160px"></select>
+        <button class="btn primary" id="nm-go">Начать</button>
+        <button class="btn" id="nm-cancel" style="display:none">Отмена</button>
+        <div id="nm-dots" style="display:flex;gap:8px;margin-left:6px"></div>
+      </div>
+      <p class="res" id="nm-res" style="margin-top:10px;font-size:14px"></p>
+      <div class="row" style="margin-top:12px">
+        <label class="f">Чувствительность к имени<input type="range" min="0.7" max="1.4" step="0.05" data-k="audio.name_sensitivity"><span class="hint">Левее — реже ложные срабатывания, правее — отзывается охотнее.</span></label>
+        <div class="f" style="justify-content:end"><button class="btn small danger" id="nm-forget" style="align-self:flex-start">Забыть мой голос для этого имени</button></div>
+      </div>
+    </div>
+    <h2 style="margin-top:0">Что я слышу</h2>
+    <p class="hint" style="margin-bottom:8px">Каждая фраза вокруг — и нашёл ли я в ней имя. Если зовёте, а я молчу, — загляните сюда.</p>
+    <div id="hear" style="font-size:13.5px;background:rgba(255,255,255,.05);border-radius:14px;padding:6px 12px;min-height:44px;max-height:230px;overflow:auto;margin-bottom:22px"><p class="hint" id="hear-empty" style="padding:8px 0">Пока тихо. Скажите что-нибудь.</p></div>
+    <h2>Распознавание фраз</h2>
+    <label class="opt" data-eng="dewiar" id="srv-stt-opt" style="display:none"><input type="radio" name="stt"><div><b>Сервер Dewiar</b><span>Быстро и точно даже на слабом компьютере, немного расходует заряд. Настраивать ничего не нужно — работает по вашему аккаунту dewiar.pro или ключу Dewiar. Пропала связь — ассистент сам перейдёт на распознавание этого компьютера.</span></div></label>
+    <label class="opt" data-eng="gigaam"><input type="radio" name="stt"><div><b>GigaAM v3 на этом компьютере</b><span>Лучшее качество для русского, работает на процессоре, без интернета. Скачивается один раз, около 250 МБ.</span></div></label>
+    <div class="sub" data-for="gigaam"><label class="f">Вариант модели<select data-k="stt.gigaam_model">
+      <option value="gigaam-v3-e2e-rnnt">v3 e2e RNNT — с пунктуацией, точнее</option>
+      <option value="gigaam-v3-e2e-ctc">v3 e2e CTC — с пунктуацией, быстрее</option>
+      <option value="gigaam-v3-rnnt">v3 RNNT — без пунктуации</option></select></label></div>
+    <label class="opt" data-eng="remote"><input type="radio" name="stt"><div><b>Свой сервер распознавания</b><span>Для тех, у кого свой сервер: любой OpenAI-совместимый <kbd>/v1/audio/transcriptions</kbd> — например, GigaAM из комплекта Dewiar Server. Адрес и ключ вписываете сами.</span></div></label>
+    <div class="sub row" data-for="remote">
+      <label class="f">Адрес<input type="url" placeholder="http://server:8090/v1" data-k="stt.remote.base_url"></label>
+      <label class="f">Ключ, если нужен<input type="password" data-k="stt.remote.api_key"></label>
+      <label class="f">Модель<input type="text" data-k="stt.remote.model"></label>
+      <label class="f">Язык<input type="text" data-k="stt.remote.language"></label>
+    </div>
+    <label class="opt" data-eng="vosk"><input type="radio" name="stt"><div><b>Vosk</b><span>Маленькая модель из комплекта. Работает сразу, но ошибается заметно чаще.</span></div></label>
+    <p class="hint" id="sttstat"></p>
+    <h2>Скачано на этом компьютере</h2>
+    <p class="hint" style="margin-bottom:8px">Модели слуха: что уже есть и сколько занимает. «Скачать» — заранее, ничего не переключая.</p>
+    <div class="mdl" id="mdl-ears"><p class="hint">Смотрю…</p></div>
+  </section>
+
+  <section id="p-voice">
+    <h1>Голос</h1>
+    <p class="lead">Чем ассистент говорит. Голос у каждого персонажа свой — выбирается в карточке персонажа.</p>
+    <label class="opt" data-tts="dewiar" id="srv-tts" style="display:none"><input type="radio" name="tts"><div><b>Голос Dewiar — живые голоса с сервера</b><span>Тот же голос, что на телефоне: у каждого персонажа свой, Лира звучит одинаково везде. Компьютер не нагружается. Нет связи с сервером — ассистент сам перейдёт на свой голос.</span><span class="res" id="srv-tts-res"></span></div></label>
+    <label class="opt" data-tts="vosk"><input type="radio" name="tts"><div><b>Vosk TTS — русские голоса (рекомендуем)</b><span>Нейросетевой синтез от создателей Vosk: чистое русское произношение и ударения, несколько мужских и женских голосов, без интернета. Скачивается один раз; пока скачивается — говорит Piper.</span></div></label>
+    <div class="sub" data-for="vosk">
+      <div id="vk-list" class="hint">Загружаю голоса…</div>
+    </div>
+    <label class="opt" data-tts="piper"><input type="radio" name="tts"><div><b>Piper на этом компьютере</b><span>Быстрый нейросетевой синтез без интернета. Четыре русских голоса, каждый скачивается при первом использовании (~60 МБ).</span></div></label>
+    <label class="opt" data-tts="remote"><input type="radio" name="tts"><div><b>Свой сервер синтеза</b><span>Для тех, у кого свой сервер голоса с адресом <kbd>/v1/audio/speech</kbd> (как у OpenAI). Голос Dewiar выбирать не здесь — он первым в списке. Если сервер недоступен — ассистент сам перейдёт на Piper.</span></div></label>
+    <div class="sub" data-for="remote">
+      <div class="row">
+        <label class="f">Адрес<input type="url" placeholder="http://server:8091/v1" data-k="tts.remote.base_url"></label>
+        <label class="f">Ключ, если нужен<input type="password" data-k="tts.remote.api_key"></label>
+        <label class="f">Модель<input type="text" placeholder="Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" data-k="tts.remote.model"></label>
+        <label class="f">Частота звука, Гц<input type="number" data-k="tts.remote.sample_rate"></label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label class="f">Голос героинь<input type="text" placeholder="свой у персонажа (serena…)" data-k="tts.remote.voice_f"></label>
+        <label class="f">Голос героев<input type="text" placeholder="свой у персонажа (aiden…)" data-k="tts.remote.voice_m"></label>
+      </div>
+      <label class="f" style="margin-top:12px">Дополнительные параметры запроса (JSON)<input type="text" id="ttsextra"></label>
+      <p class="hint">Для Qwen3-TTS оставьте <kbd>{"language": "Russian"}</kbd>, голоса — пустыми. Для OpenAI — <kbd>{}</kbd>, голоса, например, <kbd>nova</kbd> и <kbd>onyx</kbd>.</p>
+    </div>
+    <label class="opt" data-tts="elevenlabs"><input type="radio" name="tts"><div><b>ElevenLabs — своим ключом</b><span>Один из самых живых голосов, в том числе по-русски. Нужен ключ ElevenLabs; платите вы сами по их тарифу. Не отвечает — ассистент сам перейдёт на Piper.</span></div></label>
+    <div class="sub" data-for="elevenlabs">
+      <div class="row">
+        <label class="f">Ключ<input type="password" placeholder="sk_…" data-k="tts.eleven.api_key"></label>
+        <label class="f">Модель<select data-k="tts.eleven.model"><option value="eleven_flash_v2_5">Быстрая — Flash v2.5</option><option value="eleven_multilingual_v2">Лучшее качество — Multilingual v2</option></select></label>
+        <label class="f">Голос героинь (ID)<input type="text" placeholder="EXAVITQu4vr4xnSDxMaL — Sarah" data-k="tts.eleven.voice_f"></label>
+        <label class="f">Голос героев (ID)<input type="text" placeholder="JBFqnCBsd6RMkjVDRZzb — George" data-k="tts.eleven.voice_m"></label>
+      </div>
+      <p class="hint">Ключ — на elevenlabs.io → профиль → API Keys; хранится только на этом компьютере. ID голоса — в разделе «Voices» на сайте (кнопка «ID»). Пусто — стандартные Sarah и George.</p>
+    </div>
+    <label class="opt" data-tts="espeak"><input type="radio" name="tts"><div><b class="tts-sys">Системный голос (macOS / eSpeak)</b><span class="tts-sys-d">Роботизированный голос. Только на крайний случай.</span></div></label>
+    <label class="opt" data-tts="off"><input type="radio" name="tts"><div><b>Без голоса</b><span>Ответы только текстом в виджете.</span></div></label>
+    <h2>Скачано на этом компьютере</h2>
+    <p class="hint" style="margin-bottom:8px">Голоса: что уже есть и сколько занимает. «Скачать» — заранее, ничего не переключая; без интернета скачанное работает.</p>
+    <div class="mdl" id="mdl-voice"><p class="hint">Смотрю…</p></div>
+    <h2>Темп речи</h2>
+    <label class="f"><input type="range" min="0.7" max="1.4" step="0.05" data-k="tts.speed"><span class="hint" id="speedv"></span></label>
+    <h2>Обработка голоса</h2>
+    <p class="hint" style="margin-bottom:12px">Ниже, глубже, с пространством — как у ИИ в кино. Работает с любым синтезатором и почти не нагружает компьютер.
+      «Как у персонажа» — у каждого своя обработка (выбирается в карточке персонажа). Нажмите на вариант — он выберется и сразу прозвучит голосом текущего персонажа (▶).</p>
+    <div class="fxgrid" id="fxgrid"></div>
+    <h2>Откуда голоса</h2>
+    <p class="hint">Piper — открытый проект синтеза речи (Rhasspy). Его четыре русских голоса — Денис, Дмитрий, Руслан и Ирина — обучены
+      энтузиастами на небольших открытых записях дикторов, поэтому у них акцент и особенности произношения. Vosk TTS обучен
+      командой Alpha Cephei на качественных русских записях и знает ударения — звучит солиднее. Самый живой вариант —
+      Qwen3-TTS на вашем сервере («Сервер синтеза»): естественная интонация и клонирование любого голоса по короткой записи.</p>
+  </section>
+
+  <section id="p-hands">
+    <h1>Руки</h1>
+    <p class="lead">Что ассистент умеет делать сам. Модель решает, когда вызвать умение, — вы решаете, какие умения ему доступны и где он должен сначала спросить разрешения.</p>
+    <div id="mac-app-access" class="card" style="display:none">
+      <h2>Приложения и окна Mac</h2>
+      <p>«Открой Калькулятор», «Закрой Калькулятор», «Перенеси Safari на второй экран», «Перемести курсор на Safari». Для поручения вроде «открой приложение и создай заметку» агент сначала открывает программу, читает доступные кнопки и поля, затем нажимает и вводит текст по названиям элементов и проверяет результат. На Mac для этого используется системный Универсальный доступ — отдельный Playwright для обычных приложений не нужен. Закрытие обычное: приложение может запросить сохранение документов. Курсор перемещается без нажатия.</p>
+      <p id="mac-app-status" class="hint" role="status" aria-live="polite"></p>
+      <div class="actions"><button id="mac-app-settings" class="btn">Открыть Универсальный доступ</button><button id="mac-app-refresh" class="btn ghost">Проверить доступ</button></div>
+    </div>
+    <h2 style="margin-top:6px">Музыка</h2>
+    <label class="f" style="max-width:520px">Где включать музыку, когда просят жанр или настроение
+      <select data-k="music.service">
+        <option value="auto">Сам выберу: недавно открыта Яндекс Музыка — в ней, иначе радио Dewiar</option>
+        <option value="radio">Радио Dewiar — играет сразу, внутри ассистента</option>
+        <option value="yandex">Яндекс Музыка — приложение или сайт</option>
+        <option value="youtube">YouTube Music — в браузере</option>
+      </select>
+      <span class="hint">Кнопки уже открытого плеера — голосом: «играй», «пауза», «следующий трек», «предыдущий трек». «Включи джаз в Яндекс Музыке» — сразу там.</span></label>
+    <h2>Умения</h2>
+    <div id="toollist"></div>
+    <h2>Поиск в интернете</h2>
+    <label class="f">Свой SearXNG (необязательно)<input type="url" placeholder="пусто — DuckDuckGo" data-k="tools.search_url"><span class="hint">Если держите свой поисковик SearXNG на сервере — укажите адрес, поиск станет приватным и стабильнее.</span></label>
+    <h2>Напоминания</h2>
+    <div id="remlist" class="hint">Все напоминания — на странице «Напоминания».</div>
+  </section>
+
+  <section id="p-skills">
+    <h1>Плагины</h1>
+    <p class="lead">Плагин — готовое умение одной кнопкой: инструкция для помощницы, нужные подключения, ваши настройки и дела
+      по расписанию. Установили — и просто говорите. Ничего дополнительно ставить не нужно.</p>
+    <div class="plg-cats" id="plg-cats" role="tablist" aria-label="Категории"></div>
+    <div class="plg-grid" id="plg-grid"></div>
+    <div class="actions plg-own">
+      <label class="btn">Установить плагин из файла…<input type="file" id="plg-file" accept=".zip" hidden></label>
+      <button class="btn ghost" id="plg-guide-b">Как сделать свой плагин</button>
+      <span class="res" id="plg-res"></span>
+    </div>
+    <h2>Навыки</h2>
+    <p class="hint" style="margin:-4px 0 10px">Отдельные умения без настроек: встроенные уже работают, свой навык можно описать словами или установить от других (формат SKILL.md — как у Claude).</p>
+    <div class="actions" style="margin:0 0 6px"><button class="btn primary" id="sk-new">Создать навык</button></div>
+    <div id="sklist"></div>
+    <div class="actions">
+      <label class="btn">Установить из файла…<input type="file" id="sk-file" accept=".zip,.md" hidden></label>
+      <input type="url" id="sk-url" placeholder="или ссылка на .zip / SKILL.md" style="flex:1;min-width:220px">
+      <button class="btn" id="sk-urlgo">Установить</button>
+      <button class="btn" id="sk-folder">Открыть папку навыков</button>
+    </div>
+    <p class="res" id="sk-res"></p>
+    <h2>Каталог навыков</h2>
+    <div class="actions" style="margin-top:0">
+      <input type="url" id="cat-url" placeholder="адрес каталога, например https://dewiar.ru/skills/catalog.json" style="flex:1;min-width:260px">
+      <button class="btn" id="cat-go">Открыть каталог</button>
+    </div>
+    <div id="catlist" style="margin-top:8px"></div>
+    <h2>MCP-серверы</h2>
+    <p class="hint" style="margin:-4px 0 10px">Подключения к внешним программам и сервисам: файлы, базы, сервисы. Серверы плагинов тоже здесь — с пометкой плагина.</p>
+    <div id="mcplist"></div>
+    <div class="chips" style="margin:12px 0" id="mcp-presets"></div>
+    <details id="mcp-add" class="prof" style="padding:6px 16px">
+      <summary style="cursor:pointer;padding:8px 0">Добавить свой сервер</summary>
+      <div class="row" style="margin:10px 0">
+        <label class="f">Название<input type="text" id="m-name" placeholder="files"></label>
+        <label class="f">Тип<select id="m-type"><option value="stdio">Программа на компьютере (stdio)</option><option value="http">Сервер по адресу (HTTP)</option></select></label>
+        <label class="f m-stdio">Команда<input type="text" id="m-cmd" placeholder="npx -y @modelcontextprotocol/server-filesystem ~"></label>
+        <label class="f m-stdio">Переменные окружения<input type="text" id="m-env" placeholder="KEY=значение; KEY2=значение"></label>
+        <label class="f m-http" style="display:none">Адрес<input type="url" id="m-url" placeholder="https://example.ru/mcp"></label>
+        <label class="f m-http" style="display:none">Токен, если нужен<input type="password" id="m-tok"></label>
+      </div>
+      <div class="actions" style="margin:0 0 12px"><button class="btn primary" id="m-save">Добавить</button><span class="res" id="m-res"></span></div>
+    </details>
+  </section>
+
+  <section id="p-look">
+    <h1>Оформление</h1>
+    <p class="lead">Размер, фон виджета и то, как голос отзывается вокруг портрета, — выбираются отдельно, любые сочетания. Меняется сразу: держите виджет рядом и смотрите.</p>
+    <h2>Размер</h2>
+    <div class="zm" id="zm">
+      <div class="zm-row">
+        <div class="zm-l"><b>Масштаб интерфейса</b><span>Студия и виджет целиком, вместе с окнами. В любом окне — Ctrl + и Ctrl −, Ctrl 0 — обычный размер.</span></div>
+        <div class="zm-ctl"><button class="zm-b" data-k="zoom" data-d="-1" title="Мельче (Ctrl −)" aria-label="Мельче">−</button><input type="range" id="zm-zoom" min="0.7" max="1.5" step="0.05" aria-label="Масштаб интерфейса"><button class="zm-b" data-k="zoom" data-d="1" title="Крупнее (Ctrl +)" aria-label="Крупнее">+</button><output id="zm-zoom-v">100 %</output></div>
+      </div>
+      <div class="zm-row">
+        <div class="zm-l"><b>Размер текста</b><span>Ответы в виджете, «Чат», заметки и память. Кнопки и меню остаются как есть.</span></div>
+        <div class="zm-ctl"><button class="zm-b" data-k="text" data-d="-1" aria-label="Текст мельче">−</button><input type="range" id="zm-text" min="0.85" max="1.4" step="0.05" aria-label="Размер текста"><button class="zm-b" data-k="text" data-d="1" aria-label="Текст крупнее">+</button><output id="zm-text-v">100 %</output></div>
+      </div>
+      <div class="zm-prev"><div class="cl-m"><div class="tx">Завтра в Минске облачно, днём до +11, ночью небольшой дождь — зонт не помешает.</div></div><button class="btn small ghost" id="zm-reset">Как было</button></div>
+    </div>
+    <h2>Фон</h2>
+    <div id="lk-skins"></div>
+    <h2>Когда помощница говорит</h2>
+    <div class="lk-grid" id="lk-fx"></div>
+    <div class="switch"><div>Портрет смотрит на курсор<span>Курсор над виджетом — персонаж переводит на него взгляд, лицо чуть смещается. По умолчанию выключено. На телефоне — по наклону, там свой переключатель.</span></div><label class="tg"><input type="checkbox" data-k="ui.cursor_look"><i></i></label></div>
+    <div class="switch" id="lk-smooth"><div>Прозрачное окно виджета<span>Гладкие скруглённые края виджета (Linux с композитором). Если виджет мигает, а его фон и кнопки пропадают, — выключите и перезапустите Dewiar. С видеокартой NVIDIA окно и так сплошное: там прозрачное мигало.</span></div><label class="tg"><input type="checkbox" data-k="ui.hud_smooth"><i></i></label></div>
+    <p class="hint">На телефоне тема и анимация выбираются отдельно: «Настройки» → «Ещё» → «Оформление».</p>
+  </section>
+
+  <section id="p-features">
+    <h1>Возможности</h1>
+    <p class="lead">Dewiar умеет много. Включите только то, чем пользуетесь, — остальное не будет попадаться на глаза.
+      Выключенное ничего не теряет: включите — и всё на месте. Разговор, заметки, напоминания и блокнот есть всегда.</p>
+    <div class="switch"><div>Досуг — милые игры<span>Двадцать две игры на пару минут: сказки «Огонёк», «Хутор Одуванчик» и «Кто боится темноты», «Каляка» — дорисуй мостик ручкой, «Колючая почта», «Выше облаков» — прыжки до луны, «Найди пару» на память, «Пять в ряд» против Лиры, головоломки (Тетрис, Конфетки, Слияние, Судоку, Пятнашки), слова (Кроссворд, «Пять букв»), рисованные Крестики-нолики и Реверси против Лиры, аркады. Кнопка с джойстиком у виджета, в блокноте или фраза «Лира, давай поиграем». Управление — клавиатурой, мышью или геймпадом.</span></div><label class="tg"><input type="checkbox" data-k="features.games"><i></i></label></div>
+    <div class="switch"><div>Рядом<span>«Близкие» → «Рядом»: на карте видно, кто из близких где, если они сами делятся местом.</span></div><label class="tg"><input type="checkbox" data-k="features.near"><i></i></label></div>
+    <div class="switch"><div>Встречи<span>«Близкие» → «Встречи»: знакомства с людьми, которые сейчас рядом с вашим телефоном.</span></div><label class="tg"><input type="checkbox" data-k="features.meet"><i></i></label></div>
+    <div class="switch"><div>Суфлёр<span>Молчаливые подсказки на встречах и созвонах; на созвоне виджет сам предложит его включить.</span></div><label class="tg"><input type="checkbox" data-k="features.prompter"><i></i></label></div>
+    <p class="hint">На телефоне — свои переключатели: «Настройки» → «Ещё» → «Возможности».</p>
+  </section>
+
+  <section id="p-sound">
+    <h1>Звук и поведение</h1>
+    <p class="lead">Микрофон, эхоподавление и то, как ассистент ведёт разговор.</p>
+    <div class="prof" id="mac-mic-access" style="display:none;padding:16px;margin-bottom:18px">
+      <h3>Доступ к микрофону macOS</h3>
+      <p id="mac-mic-status" class="hint" role="status" aria-live="polite">Проверяю разрешение…</p>
+      <div class="actions"><button class="btn primary" id="mac-mic-request">Разрешить доступ</button><button class="btn" id="mac-mic-refresh">Проверить доступ</button><button class="btn" id="mac-mic-settings">Открыть настройки macOS</button></div>
+      <p class="hint" style="margin:10px 0 0">Системное разрешение даёт приложению доступ к устройству. Текущая сборка работает в текстовом режиме; голосовой ввод пока не включён.</p>
+    </div>
+    <div class="prof on" id="wf-box" style="display:none;padding:14px 16px;margin-bottom:16px">
+      <b>Окно виджета выключено</b><p class="hint" style="margin:4px 0 10px">Оно дважды не загрузилось на этом компьютере, поэтому Dewiar работает без него: слушает голос, студия открывается из значка в трее. Обновили Windows или Microsoft Edge WebView2? Попробуйте снова.</p>
+      <button class="btn small" id="wf-on">Включить окно виджета снова</button>
+    </div>
+    <div class="row">
+      <label class="f">Микрофон<select data-k="audio.input" id="devin"></select></label>
+      <label class="f">Динамики<select data-k="audio.output" id="devout"></select></label>
+    </div>
+    <div class="switch"><div>Эхоподавление<span id="aecst">Ассистент не слышит сам себя, и его можно перебить голосом.</span></div><label class="tg"><input type="checkbox" data-k="audio.echo_cancel"><i></i></label></div>
+    <div class="switch"><div>Я в наушниках<span>Эха нет — ассистент слушает и во время ответа, его можно перебить голосом, даже если эхоподавления нет (например, в Windows).</span></div><label class="tg"><input type="checkbox" data-k="audio.headphones"><i></i></label></div>
+    <div class="switch"><div>Отзываться на имя любого персонажа<span>«Лира, …» — и отвечает Лира. Если выключить, слушает только имя активного.</span></div><label class="tg"><input type="checkbox" data-k="all_names"><i></i></label></div>
+    <div class="switch"><div>Узнавать любые имена<span>Короткие фразы проверяет точная модель, поэтому работают имена, которых нет в словаре, — например, «Нова» или «Девиар». Немного нагружает процессор, только когда кто-то говорит.</span></div><label class="tg"><input type="checkbox" data-k="audio.asr_wake"><i></i></label></div>
+    <div class="switch"><div>Звуковые сигналы<span>Короткий сигнал «слушаю» и «больше не слушаю».</span></div><label class="tg"><input type="checkbox" data-k="audio.sounds"><i></i></label></div>
+    <div class="switch"><div>Сигнал «ваша очередь»<span>Тихий звук, когда ответ закончен и можно сразу говорить, без имени.</span></div><label class="tg"><input type="checkbox" data-k="audio.turn_tone"><i></i></label></div>
+    <h2>Закинуть идею одной клавишей</h2>
+    <div class="capbox" id="cap-box">
+      <div class="switch slim"><div>Окно «Закинуть идею» по сочетанию клавиш<span>Из любой программы: свежий скриншот из буфера уже приложен — напишите пару слов и Enter. «Напомни завтра в 10 …» — напоминание с картинками, остальное — в заметки «Идеи». Без модели и без голоса.</span></div><label class="tg"><input type="checkbox" id="cap-on"><i></i></label></div>
+      <div class="row capkey">
+        <label class="f">Сочетание<input type="text" id="cap-key" placeholder="Ctrl+Alt+N" autocomplete="off" spellcheck="false"></label>
+        <button class="btn small" id="cap-try">Открыть окно сейчас</button>
+      </div>
+      <p class="hint" id="cap-st"></p>
+      <p class="hint" id="cap-cmdh" hidden>Команда для своего сочетания: <code id="cap-cmd"></code></p>
+    </div>
+    <h2>Разговор</h2>
+    <div class="row">
+      <label class="f">Как перебивать<select data-k="audio.barge_in">
+        <option value="smart">Просто начать говорить (рекомендуем)</option>
+        <option value="any_speech">Любым звуком речи — мгновенно</option>
+        <option value="wakeword">Только именем или «стоп», «хватит», «пауза»</option>
+        <option value="off">Не перебивать</option></select></label>
+      <label class="f">Говорить без имени после ответа, сек<input type="number" min="0" max="30" data-k="audio.follow_up_seconds"></label>
+      <label class="f">Пауза, после которой фраза закончена, мс<input type="number" min="300" max="2000" step="50" data-k="audio.end_silence_ms"></label>
+      <div class="switch slim"><div>Подстраиваться под мою манеру речи<span id="pause-learn">Если вы продолжаете говорить сразу после того, как ассистент решил, что фраза закончена, — он начнёт ждать дольше; со временем вернётся к обычной паузе.</span></div><label class="tg"><input type="checkbox" data-k="audio.end_silence_auto"><i></i></label></div>
+      <div class="switch slim"><div>Отвечать и на длинный рассказ без имени<span>Обычно длинную фразу без имени после ответа (дольше 9 секунд) ассистент принимает за разговор людей рядом и молчит. Включите, если вы сами часто рассказываете долго; разговоры рядом тогда тоже могут попадать к нему.</span></div><label class="tg"><input type="checkbox" data-k="audio.follow_long"><i></i></label></div>
+      <label class="f">Как вас зовут<input type="text" placeholder="необязательно" data-k="user_name"></label>
+      <label class="f">Во время созвона<select data-k="audio.meeting">
+        <option value="pause">Не слушать имя — только по кнопке (рекомендуем)</option>
+        <option value="main">Слушать только имя главного персонажа</option>
+        <option value="normal">Как обычно</option></select>
+        <span class="hint">Созвон — когда микрофоном пользуется другая программа: Zoom, Teams, Telegram, Meet в браузере. Так ассистент не откликается на разговор коллег и не нагружает компьютер.</span></label>
+    </div>
+  </section>
+
+  <section id="p-servers" class="wide">
+    <h1>Серверы</h1>
+    <p class="lead">Ассистент заходит на ваши серверы по SSH и разбирается сам: смотрит место, память, службы и журналы, объясняет простыми словами, что нашёл, и предлагает исправление. Каждую команду вы подтверждаете — голосом, кнопкой или в Telegram/MAX. Разрушительное («удалить всё», форматирование диска) он не выполнит ни при каких просьбах.</p>
+    <div class="sv-say"><span>«Проверь место на сервере сайта»</span><span>«Почему не открывается сайт? Посмотри nginx»</span><span>«Что грузит сервер?»</span><span>«Перезапусти nginx на сервере»</span><span>«Когда истекает сертификат?»</span></div>
+    <div id="sv-nossh" class="prof on" style="display:none;padding:14px 16px;margin-bottom:16px"></div>
+    <div id="sv-list"></div>
+    <h2>Добавить сервер</h2>
+    <div class="prof on" style="padding:16px 18px">
+      <div class="row">
+        <label class="f">Как называть<input type="text" id="sv-name" placeholder="сайт"></label>
+        <label class="f">Адрес<input type="text" id="ssh-host" placeholder="dewiar.pro или 203.0.113.10"></label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Пользователь<input type="text" id="sv-user" placeholder="root или admin" autocomplete="off"></label>
+        <label class="f">Порт SSH<input type="number" id="ssh-port" value="22" min="1" max="65535"></label>
+      </div>
+      <label class="f" style="margin-top:10px">Пароль — один раз, чтобы поставить ключ Dewiar (нигде не сохраняется)<input type="password" id="sv-pass" autocomplete="new-password" placeholder="пусто — если ключ уже стоит на сервере"></label>
+      <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">Дополнительно: другие названия, свой ключ</summary>
+        <div class="row" style="margin-top:10px">
+          <label class="f">Ещё называть (через запятую)<input type="text" id="sv-alias" placeholder="сервер сайта, прод, vps"></label>
+          <label class="f">Свой файл ключа (вместо ключа Dewiar)<input type="text" id="sv-keyfile" placeholder="~/.ssh/id_ed25519"></label>
+        </div>
+      </details>
+      <div class="actions"><button class="btn primary" id="sv-add">Добавить и проверить</button></div>
+      <p class="res" id="ssh-res"></p>
+    </div>
+    <h2>Ключ Dewiar</h2>
+    <p class="hint" style="margin:-4px 0 10px">Dewiar входит на серверы по своему ключу (создаётся на этом компьютере, в копию без пароля не попадает). Вход по паролю на сервере выключен? Допишите строку ниже в <kbd>~/.ssh/authorized_keys</kbd> на сервере — или выполните команду в терминале этого компьютера (пароль спросит сам терминал), затем «Добавить» с пустым паролем.</p>
+    <div class="sv-key" id="sv-key">ключ появится после первого сервера</div>
+    <div class="actions" style="flex-wrap:wrap"><button class="btn" id="sv-key-copy">Скопировать ключ</button><button class="btn" id="sv-cmd-copy">Скопировать команду для терминала</button><button class="btn" id="sv-key-make">Создать ключ</button></div>
+  </section>
+
+  <section id="p-vault">
+    <h1>Сейф паролей</h1>
+    <p class="lead">Пароли, пин-коды, коды от домофона. Зашифрованы ключом этого компьютера, в заметки, Obsidian и языковую модель
+      не попадают. Лира вслух их не читает никогда — только показывает на экране.</p>
+    <div class="vl-bar">
+      <label class="vl-find"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg>
+        <input type="search" id="vl-q" placeholder="Найти: почта, банк, вайфай…" autocomplete="off" spellcheck="false" aria-label="Поиск в сейфе"></label>
+      <button class="btn primary" id="vl-add">Добавить</button>
+    </div>
+    <form class="vl-form" id="vl-form" hidden autocomplete="off">
+      <h3 id="vl-form-h">Новая запись</h3>
+      <div class="vl-grid">
+        <label class="f"><span>Что это</span><input type="text" id="vl-name" maxlength="120" placeholder="Почта Яндекса, вайфай дома, домофон"></label>
+        <label class="f"><span>Логин <i>необязательно</i></span><input type="text" id="vl-login" maxlength="160" placeholder="имя, почта или телефон" autocomplete="off"></label>
+        <label class="f vl-pass"><span>Пароль или код</span>
+          <span class="vl-pw"><input type="password" id="vl-value" maxlength="500" autocomplete="new-password" spellcheck="false">
+            <button type="button" class="vl-ib" id="vl-eye" aria-label="Показать пароль" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg></button>
+            <button type="button" class="btn small" id="vl-gen" title="Придумать надёжный пароль: 16 знаков">Придумать</button></span>
+          <i class="vl-str" id="vl-str" aria-live="polite"></i></label>
+        <label class="f"><span>Сайт <i>необязательно</i></span><input type="text" id="vl-url" maxlength="300" placeholder="mail.yandex.ru" autocomplete="off"></label>
+        <label class="f vl-wide"><span>Заметка <i>необязательно</i></span><input type="text" id="vl-note" maxlength="300" placeholder="секретный вопрос, номер договора…"></label>
+      </div>
+      <div class="actions" style="margin:0"><button class="btn primary" id="vl-save" type="submit">Сохранить</button><button class="btn" id="vl-cancel" type="button">Отмена</button>
+        <span style="flex:1"></span><button class="btn danger" id="vl-del" type="button" hidden>Удалить</button></div>
+      <p class="res" id="vl-res"></p>
+    </form>
+    <div class="vl-list" id="vl-list"></div>
+    <p class="hint vl-foot">Скопированный пароль сам стирается из буфера обмена через 30 секунд. Голосом: «запомни пароль от вайфая: …»,
+      «какой пароль от вайфая?» — ответ появится на экране. В резервную копию сейф попадает только с паролем копии.</p>
+  </section>
+  <section id="p-safety">
+    <h1>Безопасность</h1>
+    <p class="lead">Что ассистент видит, что хранит и куда отправляет — на одной странице. Сверху стоп-кран: одно нажатие, и наружу не уходит ничего.</p>
+    <div class="prof on sfstop" id="sf-stop">
+      <label class="tg sfbig"><input type="checkbox" id="sf-lo" aria-describedby="sf-lo-hint"><i></i></label>
+      <div class="sftxt"><h2>Ничего не уходит с компьютера <span id="sf-lo-state"></span></h2><p id="sf-lo-hint"></p><div class="sfnow" id="sf-now"></div></div>
+    </div>
+    <div class="sfcols">
+      <div class="prof on sfcard">
+        <h3>Куда идут ваши данные</h3><p class="hint">Схема — по вашим настройкам сейчас.</p>
+        <div id="sf-map"></div>
+        <div class="sflegend"><span><b style="background:var(--sf-g)"></b>остаётся у вас</span><span><b style="background:var(--sf-b)"></b>уходит зашифрованным</span><span><b style="background:var(--sf-a)"></b>уходит открыто — и кому</span><span><b style="background:var(--sf-x)"></b>на паузе</span></div>
+        <p class="sfwhy" id="sf-why" aria-live="polite"></p>
+        <details class="sfmore"><summary>Подробно о ваших данных</summary><div class="priv" id="priv-box"></div></details>
+      </div>
+      <div class="prof on sfcard">
+        <h3>Замки</h3><p class="hint">Что ассистенту можно трогать на этом компьютере.</p>
+        <div id="sf-locks"></div>
+      </div>
+    </div>
+    <div class="prof on sfcard" id="sf-rights-card">
+      <h3>Что ассистент делает сам, а что — только с вашего «да»</h3><p class="hint">По вашим настройкам сейчас. Чего он не сделает никогда — внизу страницы.</p>
+      <div id="sf-rights"></div>
+      <div class="actions sfr-acts"><button class="btn" id="sfr-safe">Только безопасное</button><button class="btn" id="sfr-all">Включить всё</button><button class="btn" id="sfr-one">Настроить по одному</button></div>
+      <p class="hint sfr-note" id="sfr-note" aria-live="polite"></p>
+    </div>
+    <div class="prof on sfcard">
+      <h3>Что уходило наружу сегодня</h3><p class="hint">Каждое соединение из программы — куда и что это. Тексты разговоров, ключи и адреса страниц сюда не пишутся: только узел и вид. Пароли из сейфа наружу не уходят никогда.</p>
+      <div id="sf-log"></div>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Сейф</h3>
+      <p class="hint" style="margin-bottom:12px">Пароли, пин-коды, коды от домофона, ключи. Зашифрованы ключом этого компьютера и лежат отдельно: не попадают
+        в заметки, в Obsidian и в языковую модель. Голосом: «запомни пароль от вайфая: …», «какой пароль от вайфая?» — ответ появится на экране, вслух не читается.</p>
+      <div class="actions" style="margin:4px 0 0"><button class="btn primary" id="v-open">Открыть «Сейф паролей»</button><span class="hint" id="v-count" style="margin:0"></span></div>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:6px">Резервная копия</h3>
+      <p class="hint" style="margin-bottom:8px">Быстрее — на «Главной», кнопка «Слепок знаний»: закрытый или открытый слепок одним нажатием и бережное восстановление «Добавить недостающее».</p>
+      <p class="hint" style="margin-bottom:12px">Одним файлом всё, что ассистент знает и умеет: персонажи, заметки, дневник, деньги, календарь, напоминания, навыки,
+        настройки. Модели и голоса не входят — скачаются заново. Перенести на другой компьютер: сделайте копию, поставьте там Dewiar и нажмите «Восстановить».</p>
+      <div class="actions" style="margin:0;flex-wrap:wrap">
+        <input type="password" id="bk-pass" placeholder="пароль копии — необязательно" style="flex:1;min-width:220px" autocomplete="new-password">
+        <button class="btn primary" id="bk-make">Сделать копию</button>
+      </div>
+      <p class="hint" id="bk-pass-hint" style="margin:6px 0 10px">С паролем копия зашифрована и в неё войдёт всё: сейф, пароль почты, ключи моделей и облака, токены ботов, ключи серверов. Без пароля — всё, кроме них: при восстановлении ключи этого компьютера останутся на месте. Для переноса на другой компьютер — копия с паролем.</p>
+      <div class="switch"><div>Делать копию раз в неделю<span>Тихо, в фоне. Хранятся четыре последние, без сейфа и паролей.</span></div><label class="tg"><input type="checkbox" data-k="backup.auto"><i></i></label></div>
+      <div class="rgroup" style="display:flex;align-items:center;gap:8px"><span style="flex:1">Копии</span>
+        <button class="btn" id="bk-open" style="padding:6px 12px;font-size:12.5px">Открыть папку</button>
+        <button class="btn" id="bk-dir" style="padding:6px 12px;font-size:12.5px">Другая папка…</button>
+        <button class="btn" id="bk-file" style="padding:6px 12px;font-size:12.5px">Восстановить из файла…</button></div>
+      <p class="hint" id="bk-where" style="margin:-2px 0 10px"></p>
+      <div id="bk-list"></div>
+      <p class="res" id="bk-res" style="margin-top:6px"></p>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:22px">
+      <h3 style="font-size:15px;margin-bottom:10px">Чего ассистент не сделает никогда</h3>
+      <ul class="never">
+        <li>Не удалит системные папки, домашнюю папку целиком, «Документы», «Загрузки», «Рабочий стол» и свою папку — даже если попросить.</li>
+        <li>Удаляет только в корзину и только после вашего «да». На «удали всё» или «сотри всё» — переспросит, что именно.</li>
+        <li>Не отформатирует диск, не тронет загрузчик, системный реестр и учётные записи.</li>
+        <li>Команды с правами администратора, удаление программ — только с предупреждением в вопросе.</li>
+        <li>Скрипты фоновых задач удаляют файлы только в папке своей задачи.</li>
+        <li>«Выключи компьютер» — через минуту; передумали — «отмени выключение» или кнопка в виджете.</li>
+        <li>На созвоне не слушает разговор — только по кнопке (меняется в «Звук и поведение»).</li>
+        <li>Пароли из сейфа языковая модель не видит.</li>
+      </ul>
+    </div>
+  </section>
+
+  <dialog class="nwdlg daydlg" id="day-dlg" aria-labelledby="dd-title">
+    <div class="dd-head">
+      <button class="btn icon" id="dd-prev" title="Предыдущий день (←)" aria-label="Предыдущий день">‹</button>
+      <div class="dd-t"><h2 id="dd-title" tabindex="-1">День</h2><p class="nwsub" id="dd-sub"></p></div>
+      <button class="btn icon" id="dd-next" title="Следующий день (→)" aria-label="Следующий день">›</button>
+      <button class="btn icon dd-x" id="dd-x" title="К месяцу (Esc)" aria-label="Закрыть">✕</button>
+    </div>
+    <div id="dd-body"></div>
+    <div class="dd-addk">Добавить на этот день</div>
+    <div id="dd-add"></div>
+  </dialog>
+  <dialog class="nwdlg anndlg" id="ann-dlg" aria-labelledby="an-title">
+    <img id="an-img" alt="" hidden>
+    <p class="nwsub" id="an-k"></p>
+    <h2 id="an-title" tabindex="-1"></h2>
+    <p id="an-text"></p>
+    <div class="an-row"><a class="btn pri" id="an-go" target="_blank" rel="noopener" hidden></a><button class="btn" id="an-ok">Понятно</button></div>
+  </dialog>
+  <dialog class="nwdlg" id="news-dlg" aria-labelledby="nw-title">
+    <h2 id="nw-title" tabindex="-1" autofocus>Что нового</h2><p class="nwsub" id="nw-sub"></p><div id="nw-list"></div>
+    <div class="actions" style="margin:16px 0 0;justify-content:flex-end"><button class="btn primary" id="nw-ok">Понятно</button></div>
+  </dialog>
+  <dialog class="nwdlg strata-memory-dlg" id="strata-memory-dlg" aria-labelledby="strata-memory-title">
+    <h2 id="strata-memory-title">Освободить память для Strata</h2>
+    <p class="nwsub" id="strata-memory-summary"></p>
+    <p class="res" id="strata-memory-result" role="status" aria-live="polite"></p>
+    <div id="strata-memory-list" class="strata-memory-list"></div>
+    <div class="actions" style="margin:16px 0 0;justify-content:flex-end;gap:8px">
+      <button class="btn" id="strata-memory-refresh" title="Заново измерить свободную память и список приложений">Обновить список</button>
+      <button class="btn" id="strata-memory-close" title="Закрыть выбранные приложения после подтверждения">Закрыть выбранные</button>
+      <button class="btn primary" id="strata-memory-cancel">Готово</button>
+    </div>
+  </dialog>
+  <dialog class="nwdlg mram-dlg" id="m-ram-dlg" aria-labelledby="m-ram-title">
+    <h2 id="m-ram-title">Оперативная память</h2>
+    <p class="nwsub">Только физическая ОЗУ, не место на диске. Dewiar и текущий персонаж показаны отдельно от других приложений; персонаж работает внутри ядра и не создаёт отдельный процесс.</p>
+    <div class="mram-own" id="m-ram-own" hidden></div>
+    <p class="mram-summary" id="m-ram-summary" role="status" aria-live="polite">Проверяю оперативную память…</p>
+    <div class="mram-list" id="m-ram-list"><p class="hint">Загружаю список приложений…</p></div>
+    <p class="res" id="m-ram-result" role="status" aria-live="polite"></p>
+    <div class="actions mram-dialog-actions">
+      <button class="btn" id="m-ram-refresh" title="Заново измерить свободную и занятую ОЗУ, Dewiar и список приложений">Обновить сведения</button>
+      <button class="btn danger" id="m-ram-close" title="После подтверждения штатно закрыть выбранные приложения; Dewiar завершит своё окно и ядро">Закрыть выбранные</button>
+      <button class="btn primary" id="m-ram-done" title="Закрыть окно оперативной памяти без завершения выбранных приложений">Готово</button>
+    </div>
+  </dialog>
+  <section id="p-about">
+    <h1 id="ab-title">Dewiar</h1>
+    <p class="lead">Ядро работает в фоне, виджет и эта студия подключаются к нему.</p>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:18px">
+      <h3 style="font-size:15px;margin-bottom:6px">Проверка</h3>
+      <p class="hint" style="margin-bottom:12px">Микрофон, мозг, распознавание, голос, интернет, место и версия — по пунктам. Если что-то не так, рядом будет, что сделать.</p>
+      <div class="actions" style="margin:0"><button class="btn primary" id="sc-go">Проверить всё</button><button class="btn" id="ab-news">✨ Что нового</button><button class="btn" id="ab-intro" title="Персонаж сам расскажет о себе голосом, проверит микрофон и покажет кнопки">👋 Познакомиться заново</button></div>
+      <div class="sclist" id="sc-list"></div>
+    </div>
+    <div class="prof on bug" id="bug" style="padding:16px 18px;margin-bottom:18px">
+      <h3 style="font-size:15px;margin-bottom:6px">Сообщить о проблеме</h3>
+      <p class="hint" style="margin-bottom:12px">Что-то не так — напишите пару слов. Разработчик увидит ваши слова, снимок экрана и журнал работы
+        (без ключей и паролей), ответит прямо сюда, а когда исправит — Dewiar скажет вам. Ещё быстрее — кнопка с жучком в виджете
+        (снимет экран в момент проблемы) или голосом: «сообщи об ошибке: …».</p>
+      <div class="repoffer" id="rep-offer" hidden><b>Был сбой.</b> <span id="rep-offer-t"></span> Отправлять разработчику отчёт о таких сбоях самому?
+        <span class="row"><button class="btn small primary" id="rep-yes">Да, отправлять</button><button class="btn small" id="rep-no">Не надо</button></span></div>
+      <div class="bugrow">
+        <div class="bugshot" id="bug-shot">
+          <img id="bug-img" alt="Снимок экрана" hidden>
+          <div class="bugempty" id="bug-empty"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5l1.5-2h5L16 5"/></svg><span>Снимка нет</span></div>
+          <div class="bugbar"><button class="btn small" id="bug-snap" title="Снять весь экран сейчас (окно студии тоже попадёт)">Снять экран</button>
+            <label class="btn small" title="Картинка с компьютера; или Ctrl+V — из буфера, или перетащите сюда">Картинка…<input type="file" id="bug-file" accept="image/*" hidden></label>
+            <label class="chk"><input type="checkbox" id="bug-use" checked> приложить</label></div>
+        </div>
+        <div class="bugtxt">
+          <textarea id="rep-note" rows="4" maxlength="2000" placeholder="Что случилось? Например: «спросил погоду — молчит» или «в машине не слышит меня». Снимок из буфера — Ctrl+V"></textarea>
+          <input type="text" id="bug-who" maxlength="40" placeholder="Как подписать вас в «Помощниках проекта» — необязательно">
+          <p class="hint">Отчёт отправляется на ваш сервер обработки. Если сервер не задан или недоступен — на <b>dmatskevich@gmail.com</b>, тема <b>Ошибка обработки персональный агент</b>, через подключённую почту. Выбранный снимок и технический журнал прилагаются. Без почты отчёт останется локально до повторной отправки.</p>
+          <label class="f">Адрес сервера обработки ошибок<input type="url" data-k="report.server_url" placeholder="https://ваш-сервер/api/reports"></label>
+          <label class="f">Ключ сервера, если требуется<input type="password" data-k="report.server_key" autocomplete="off"></label>
+          <div id="report-delivery" class="hint" role="status"></div>
+          <button class="btn small" id="report-mail-setup">Настроить почту отправителя</button>
+          <div class="actions" style="margin:0"><button class="btn primary" id="bug-send">Отправить разработчику</button>
+            <button class="btn" id="rep-go" title="Отчёт одним файлом на рабочий стол — если нет интернета">Сохранить отчёт в файл</button><span class="res" id="rep-res"></span></div>
+        </div>
+      </div>
+      <div id="report-pending"></div>
+      <div id="bug-mine"></div>
+      <div id="bug-thanks"></div>
+      <div class="switch" style="margin-top:12px"><div>Отправлять отчёт самому, если что-то сломалось<span>Только при ошибках, не чаще раза в полдня на одну и ту же. В отчёте — журнал работы (в нём бывают ваши последние фразы ассистенту) и настройки без ключей и паролей.</span></div><label class="tg"><input type="checkbox" data-k="report.auto"><i></i></label></div>
+      <div class="switch"><div>Анонимный пульс для разработчика<span>Раз в несколько часов: версия, система, за сколько секунд запустился, сколько было сбоев и их текст. Без разговоров, файлов, ключей и имени компьютера — так разработчик видит, что у людей ломается чаще всего.</span></div><label class="tg"><input type="checkbox" data-k="report.pulse"><i></i></label></div>
+    </div>
+    <div class="prof on" style="padding:16px 18px;margin-bottom:18px">
+      <h3 style="font-size:15px;margin-bottom:6px">Обновления</h3>
+      <p class="hint" id="up-state">Проверяю…</p>
+      <div class="md" id="up-notes" style="margin-top:8px;font-size:13.5px"></div>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn primary" id="up-install" style="display:none">Обновить</button>
+        <button class="btn" id="up-check">Проверить сейчас</button>
+      </div>
+      <label class="f" style="margin-top:12px">Адрес обновлений<input type="url" placeholder="https://dewiar.pro/dwrapp/latest.json" data-k="updates.url"></label>
+    </div>
+    <details class="prof on ctxv" id="ctxv" style="padding:14px 18px;margin-top:18px">
+      <summary><b>Для отладки: что Лира сейчас учитывает</b> <span class="hint">— из чего складывается каждый её ответ</span></summary>
+      <p class="hint" style="margin:10px 0">Это читает модель перед каждым ответом. Если ответы «плывут» — посмотрите, нет ли тут
+        лишнего или неверного, и поправьте там, куда ведёт ссылка.</p>
+      <div id="ctxv-list"></div>
+      <div class="actions" style="margin-top:10px"><button class="btn small" id="ctxv-re">Обновить</button><button class="btn small" id="ctxv-full">Показать подсказку целиком</button></div>
+      <pre id="ctxv-pre" hidden></pre>
+    </details>
+    <dl class="status" id="status"></dl>
+  </section>
+</main>
+
+<div id="wlc"><div class="box">
+  <canvas id="wlc-ent"></canvas>
+  <h2>Добро пожаловать в Dewiar</h2>
+  <p class="sub">Три шага — и ассистент готов. Любой можно пропустить и вернуться позже: кнопка «Первые шаги» внизу меню.</p>
+  <div class="wst" data-s="1"><i>1</i><div><b>Модели — кто будет думать</b><span data-t>Ключ Dewiar, свой сервер, программа на компьютере или облако по ключу.</span></div><button class="btn primary" data-go="brain">Выбрать</button></div>
+  <div class="wst" data-s="2"><i>2</i><div><b>Микрофон и имя</b><span data-t id="wlc-s2">Скажите: «Лира, привет». Не откликается — научите имени.</span></div><button class="btn" data-go="ears">Научить имени</button></div>
+  <div class="wst" data-s="3"><i>3</i><div><b>Telegram — ассистент в телефоне</b><span data-t>Одна кнопка — и пишите ему откуда угодно. Можно позже.</span></div><button class="btn" data-go="connect">Подключить</button></div>
+  <div class="tries" id="wlc-tries"><p class="th"><b>Попробуйте сказать</b> — голосом или нажмите на фразу</p><div class="tlist" id="wlc-tlist"></div></div>
+  <details class="free" id="wlc-free"><summary>Что здесь бесплатно?</summary><p>Программа — целиком. Думать ей помогает «мозг»: облако Dewiar по входу (расход считается в ИИ-талерах, на старте они уже есть), ваш компьютер с Ollama или LM Studio — бесплатно, но нужна видеокарта, — или сервис по своему ключу: тогда платите сервису.</p></details>
+  <div class="actions" style="margin:18px 0 0;justify-content:flex-end"><button class="btn" id="wlc-intro" style="margin-right:auto" title="Персонаж сам расскажет о себе голосом, проверит микрофон и покажет кнопки">👋 Познакомиться</button><button class="btn" id="wlc-later">Позже</button><button class="btn primary" id="wlc-done">Готово</button></div>
+</div></div>
+<aside class="drawer" id="help" hidden aria-label="Помощь по интерфейсу Dewiar">
+  <div class="help-top"><span class="hint">ПОМОЩЬ ПО РАЗДЕЛУ</span><button type="button" class="btn icon hx" id="help-x" aria-label="Закрыть справку">✕</button></div>
+  <label class="help-search-label">Поиск по справке<input type="search" id="help-search" placeholder="Микрофон, приоритет, архив…" autocomplete="off"></label>
+  <div class="help-navigation"><button type="button" class="btn small" id="help-current">Текущий раздел</button><button type="button" class="btn small" id="help-all">Все темы</button></div>
+  <div id="help-results" hidden></div><div id="help-body"></div>
+</aside>
+<div class="drawer" id="drawer">
+  <button class="btn icon hx" id="e-x" title="Закрыть (Esc)" aria-label="Закрыть">✕</button>
+  <canvas class="preview" id="pv"></canvas>
+  <h1 id="dtitle">Персонаж</h1>
+  <div class="row" style="margin-top:14px">
+    <label class="f">Имя<input type="text" id="e-name"></label>
+    <label class="f">Пол<select id="e-gender"><option value="male">мужской</option><option value="female">женский</option><option value="neutral">без пола</option></select></label>
+  </div>
+  <div class="row one" style="margin-top:12px">
+    <label class="f">Имя для вызова<input type="text" id="e-wake" placeholder="например: нова"><span class="hint">Можно несколько через запятую. Подойдёт любое слово; лучше заметное, которое редко звучит в обычной речи.</span></label>
+    <label class="f">Одной строкой<input type="text" id="e-tag"></label>
+    <label class="f">Характер<textarea id="e-char" placeholder="Кто это, как говорит, на «ты» или на «вы»…"></textarea></label>
+  </div>
+  <h2>Знания</h2>
+  <p class="hint" style="margin:-4px 0 10px">Базы с сайта Dewiar, по которым персонаж отвечает: ваши папки и разделы публичной библиотеки. Перед каждым ответом он ищет в них нужное и опирается на найденное — с цитатами и источниками, а картинки из книги показывает в виджете.</p>
+  <div id="e-kb"></div>
+  <h2>Облик</h2>
+  <div class="styles" id="e-styles"></div>
+  <div class="actions" style="margin-top:10px"><label class="btn small">Загрузить своё фото<input type="file" id="e-photo" accept="image/*" hidden></label><button class="btn small" id="e-nophoto">Убрать фото</button></div>
+  <h2>Цвет</h2>
+  <div class="swatches" id="e-colors"></div>
+  <h2>Голос</h2>
+  <div class="row">
+    <label class="f">Голос Piper<select id="e-piper"></select></label>
+    <label class="f">Темп<input type="range" min="0.75" max="1.3" step="0.05" id="e-len"></label>
+    <label class="f">Голос на сервере (Qwen3-TTS)<input type="text" id="e-remote" placeholder="vivian, ryan… или имя клона"></label>
+    <label class="f">Обработка голоса<select id="e-fx"></select></label>
+    <label class="f">Голос Vosk TTS<select id="e-vosk"></select></label>
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="e-save">Сохранить</button>
+    <button class="btn" id="e-listen">Послушать</button>
+    <button class="btn" id="e-teach">Научить имени</button>
+    <button class="btn" id="e-cancel">Закрыть</button>
+    <span style="flex:1"></span>
+    <button class="btn danger" id="e-del">Удалить</button>
+  </div>
+  <p class="res" id="e-res" style="margin-top:10px"></p>
+</div>
+<div class="drawer plg-d" id="pld" style="width:min(560px,100%)" role="dialog" aria-modal="true" aria-labelledby="pld-name"></div>
+<div class="drawer" id="plg-guide" style="width:min(680px,100%)" role="dialog" aria-modal="true" aria-label="Как сделать свой плагин"></div>
+<div class="drawer" id="skd" style="width:min(640px,100%)">
+  <h1 id="skd-title">Новый навык</h1>
+  <div class="prof on" style="padding:12px 14px;margin:14px 0 6px">
+    <label class="f">Составить с ассистентом — опишите словами, что должен уметь навык<textarea id="skd-idea" style="min-height:64px" placeholder="Например: когда я говорю «режим фокуса» — выключи звук, открой список задач и поставь таймер на 25 минут"></textarea></label>
+    <div class="actions" style="margin-top:8px"><button class="btn" id="skd-draft">Составить</button><span class="res" id="skd-dres"></span></div>
+  </div>
+  <div class="row one" style="margin-top:10px">
+    <label class="f">Имя (латиница, цифры, дефис)<input type="text" id="skd-name" placeholder="focus-mode"></label>
+    <label class="f">Когда применять<textarea id="skd-desc" style="min-height:58px" placeholder="Режим фокуса: тишина, задачи, таймер. Когда просят «режим фокуса», «хочу поработать»."></textarea><span class="hint">Модель видит только это описание и по нему решает, нужен ли навык. Пишите, какими словами о нём просят.</span></label>
+    <label class="f">Инструкции для ассистента<textarea id="skd-body" style="min-height:260px;font-family:ui-monospace,monospace;font-size:13px" placeholder="1. Вызови set_volume с mute=true…"></textarea></label>
+  </div>
+  <h2>Дополнительные файлы</h2>
+  <p class="hint" style="margin-bottom:8px">Справочники, шаблоны, скрипты — ассистент прочитает их, когда понадобится (read_skill_file).</p>
+  <div id="skd-files"></div>
+  <button class="btn small" id="skd-addfile">Добавить файл</button>
+  <div class="actions">
+    <button class="btn primary" id="skd-save">Сохранить</button>
+    <button class="btn" id="skd-zip">Скачать .zip</button>
+    <button class="btn" id="skd-close">Закрыть</button>
+    <span style="flex:1"></span>
+    <button class="btn danger" id="skd-del">Удалить</button>
+  </div>
+  <p class="res" id="skd-res" style="margin-top:10px"></p>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<script src="assets/entities.js"></script>
+<script src="assets/zoom.js"></script>
+<script src="assets/privacy.js"></script>
+<script src="assets/vendor/zxing.min.js"></script>
+<script src="assets/codes.js"></script>
+<script src="assets/refnet.js"></script>
+<script src="assets/dewiar.js"></script>
+<script src="assets/dialog.js"></script>
+<script src="assets/qrcode.js"></script>
+<script src="assets/help.js"></script>
+<script src="assets/help-current.js"></script>
+<script src="assets/help-video-reference.js"></script>
+<script src="assets/help-video-notes.js"></script>
+<script src="studio/core.js"></script>
+<script src="studio/tasks.js"></script>
+<script src="studio/day.js"></script>
+<script src="studio/welcome.js"></script>
+<script src="studio/icons.js"></script>
+<script src="studio/memory.js"></script>
+<script src="studio/links.js"></script>
+<script src="studio/safety.js"></script>
+<script src="studio/folder.js"></script>
+<script src="studio/soul.js"></script>
+<script src="studio/personas.js"></script>
+<script src="studio/brain.js"></script>
+<script src="studio/subscriptions.js"></script>
+<script src="studio/connect.js"></script>
+<script src="studio/plugins.js"></script>
+<script src="studio/dewiar.js"></script>
+<script src="studio/look.js"></script>
+<script src="studio/home.js"></script>
+<script src="studio/close.js"></script>
+<script src="studio/radar.js"></script>
+<script src="studio/meet.js"></script>
+<script src="studio/refs.js"></script>
+<script src="studio/notes.js"></script>
+<script src="studio/pay.js"></script>
+<script src="studio/vault.js"></script>
+<script src="studio/snapshot.js"></script>
+<script src="studio/capture.js"></script>
+<script src="studio/mic-permission.js"></script>
+<script src="studio/mac-apps.js"></script>
+<script src="assets/rich.js"></script>
+<script src="studio/chat.js"></script>
+<script src="studio/tricks.js"></script>
+<script src="studio/news.js"></script>
+<script src="studio/contacts.js"></script>
+<script src="assets/contact-suggestion.js"></script>
+<script src="studio/context-help.js"></script>
+<script src="studio/prompter.js"></script>
+</body>
+</html>

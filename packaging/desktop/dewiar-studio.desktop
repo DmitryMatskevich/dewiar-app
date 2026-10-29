@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Dewiar — студия
+Comment=Персонажи, модели, голос и микрофон
+Exec=/usr/bin/dewiar --settings
+Icon=dewiar
+Terminal=false
+Categories=Utility;Settings;
+StartupWMClass=Dewiar

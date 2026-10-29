@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Dewiar
+Comment=Голосовой ассистент — виджет на рабочем столе
+Exec=/usr/bin/dewiar --autostart
+Icon=dewiar
+Terminal=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3

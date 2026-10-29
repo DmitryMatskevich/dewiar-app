@@ -1,0 +1,382 @@
+{
+  "source": "https://www.youtube.com/watch?v=lXRiHj9j9Pk",
+  "title": "Я сделал ДЖАРВИСА. На вашем компьютере, бесплатно, код открыт",
+  "duration": 4433,
+  "basis": "Авторские русские субтитры, 344 сегмента, все 30 глав. Полный текст остаётся в локальном work/video-reference; в репозиторий не включён.",
+  "chapters": [
+    {
+      "id": "V01",
+      "start": 0,
+      "end": 42,
+      "chapter": "Фонарик голосом — знакомство",
+      "scope": "mobile",
+      "tests": [
+        "torch1024_test.py"
+      ],
+      "remaining": "Фонарик Android; нужен телефон, у Mac такого фонарика нет."
+    },
+    {
+      "id": "V02",
+      "start": 42,
+      "end": 105,
+      "chapter": "Год агентов и год утечек — зачем это всё",
+      "scope": "context",
+      "tests": [],
+      "remaining": "Мотивация автора; заявления о приватности требуют отдельного аудита, здесь не доказаны."
+    },
+    {
+      "id": "V03",
+      "start": 105,
+      "end": 232,
+      "chapter": "Что было до: память RAG и харнес",
+      "scope": "external",
+      "tests": [
+        "knowledge_test.py"
+      ],
+      "remaining": "Предыдущие RAG и веб-харнес автора — отдельные продукты. Локально проверяется только интерфейс своей базы знаний."
+    },
+    {
+      "id": "V04",
+      "start": 232,
+      "end": 377,
+      "chapter": "Знакомьтесь, Лира: виджет, голос, персонажи",
+      "scope": "desktop",
+      "tests": [
+        "personas_templates_test.py",
+        "personas_talk_test.py",
+        "macos_chat_test.py",
+        "hold_dictation_test.py"
+      ],
+      "remaining": "Нужны реальный микрофон, wake word, перебивание, звук, вложения и проверка качества модели; голос в .app пока выключен."
+    },
+    {
+      "id": "V05",
+      "start": 377,
+      "end": 413,
+      "chapter": "Жучок: сообщить об ошибке со скриншотом",
+      "scope": "service",
+      "tests": [
+        "reports1019_test.py",
+        "redact_tokens1025_test.py",
+        "macos_windows_test.py"
+      ],
+      "remaining": "Снимок Mac перенесён с проверкой разрешения записи экрана; отказ и обработка изображения проверены на фикстуре. Нужны реальный снимок с выданным разрешением и доставка на тестовый сервер; настоящая жалоба автору не отправлялась."
+    },
+    {
+      "id": "V06",
+      "start": 413,
+      "end": 518,
+      "chapter": "Где хранятся данные",
+      "scope": "desktop",
+      "tests": [
+        "macos_backup_test.py",
+        "sync_safety_test.py",
+        "security1019_test.py"
+      ],
+      "remaining": "Нужен отдельный аудит сетевых потоков и сервера; проверки хранения и изоляции не доказывают все заявления ролика."
+    },
+    {
+      "id": "V07",
+      "start": 518,
+      "end": 739,
+      "chapter": "Свой персонаж на своей базе знаний",
+      "scope": "model",
+      "tests": [
+        "knowledge_test.py",
+        "personas_rename_test.py",
+        "personas_templates_test.py"
+      ],
+      "remaining": "Нужна живая модель для ответов по документам и полный цикл создания персонажа в Cocoa."
+    },
+    {
+      "id": "V08",
+      "start": 739,
+      "end": 918,
+      "chapter": "Календарь, деньги, дела, заметки, геймификация",
+      "scope": "desktop",
+      "tests": [
+        "money_test.py",
+        "calendars_test.py",
+        "reminders_test.py",
+        "life1018_test.py",
+        "dayplan1017_test.py",
+        "notes_test.py"
+      ],
+      "remaining": "Нужно проверить утреннюю сводку и уведомления после сна Mac; фонового LaunchAgent ещё нет."
+    },
+    {
+      "id": "V09",
+      "start": 918,
+      "end": 1151,
+      "chapter": "Близкие: звонки и видеосвязь внутри Лиры",
+      "scope": "devices",
+      "tests": [
+        "close_crypto_test.py",
+        "close_robust_test.py",
+        "life1018_test.py"
+      ],
+      "remaining": "Нужны два устройства и тестовый аккаунт: обмен, аудио и видео, восстановление звонка после сна, разрешения Mac."
+    },
+    {
+      "id": "V10",
+      "start": 1151,
+      "end": 1379,
+      "chapter": "Талеры и мозг: своя модель, Ollama, OpenAI, Anthropic",
+      "scope": "service",
+      "tests": [
+        "llm_compat_test.py",
+        "providers1020_test.py"
+      ],
+      "remaining": "Нужны реальные Ollama/LM Studio и провайдеры. Оплата, баланс, лимиты и подписки Codex/Claude Code ещё не приняты."
+    },
+    {
+      "id": "V11",
+      "start": 1379,
+      "end": 1419,
+      "chapter": "Рефералы",
+      "scope": "service",
+      "tests": [
+        "refs_section_test.py"
+      ],
+      "remaining": "Нужен тестовый сервер рефералов; реальные приглашения не отправлялись."
+    },
+    {
+      "id": "V12",
+      "start": 1419,
+      "end": 1626,
+      "chapter": "Длинная задача: калькулятор ипотеки",
+      "scope": "model",
+      "tests": [
+        "long_task_test.py",
+        "task_honest_test.py",
+        "task_parts_test.py",
+        "code_safety_test.py"
+      ],
+      "remaining": "Нужна живая модель: построить ипотечный калькулятор, проверить расчёты и интерфейс, отчёт и фоновые повторы."
+    },
+    {
+      "id": "V13",
+      "start": 1626,
+      "end": 1778,
+      "chapter": "Транскрибация видео с рабочего стола",
+      "scope": "hardware",
+      "tests": [
+        "video1018_test.py"
+      ],
+      "remaining": "Тест субтитров по ссылке не проверяет транскрибацию локального видео: нужны GigaAM/Vosk, аудиофайл и worker в .app."
+    },
+    {
+      "id": "V14",
+      "start": 1778,
+      "end": 1850,
+      "chapter": "Суфлёр для переговоров",
+      "scope": "hardware",
+      "tests": [
+        "prompter_end_test.py"
+      ],
+      "remaining": "Проверяется окно Cocoa; звук собеседника, loopback, распознавание и подсказки в реальном созвоне ещё не приняты. Скрытие из демонстрации экрана не гарантировано."
+    },
+    {
+      "id": "V15",
+      "start": 1850,
+      "end": 2150,
+      "chapter": "Память, душа, конституция, дневник",
+      "scope": "desktop",
+      "tests": [
+        "diary_test.py",
+        "graph_test.py",
+        "night_test.py",
+        "notes_test.py"
+      ],
+      "remaining": "Восстановление факта после нового разговора дополнительно прошло с настоящей gemma4:12b. Нужны ночной проход без окна, догон после сна и длительная проверка обновления души."
+    },
+    {
+      "id": "V16",
+      "start": 2150,
+      "end": 2342,
+      "chapter": "Из конспекта — презентация",
+      "scope": "model",
+      "tests": [
+        "long_task_test.py",
+        "task_honest_test.py"
+      ],
+      "remaining": "Нужна живая модель: конспект в презентацию, открытие и визуальная проверка артефакта; отдельного результата пока нет."
+    },
+    {
+      "id": "V17",
+      "start": 2342,
+      "end": 2660,
+      "chapter": "Слух и голоса: свой сервер, Piper, ElevenLabs",
+      "scope": "hardware",
+      "tests": [
+        "tts_eleven_test.py",
+        "tts_client_test.py",
+        "speak_text_test.py"
+      ],
+      "remaining": "Проверяются протоколы голоса на локальных серверах. Реальное STT/TTS, эффекты, микрофон, динамики и загруженные модели не приняты.",
+      "manual_tests": [
+        "audio_out_test.py"
+      ]
+    },
+    {
+      "id": "V18",
+      "start": 2660,
+      "end": 2755,
+      "chapter": "Темы оформления и масштаб",
+      "scope": "desktop",
+      "tests": [
+        "look_test.py",
+        "zoom_test.py"
+      ],
+      "remaining": "Темы проверяются Chromium, масштаб и окна — Cocoa. Нужна визуальная приёмка всех тем именно в WebKit Mac."
+    },
+    {
+      "id": "V19",
+      "start": 2755,
+      "end": 2901,
+      "chapter": "Быстрые идеи по Ctrl+Alt+N и с телефона",
+      "scope": "desktop",
+      "tests": [
+        "pc_capture_test.py",
+        "macos_windows_test.py"
+      ],
+      "remaining": "Сохранение идеи и повторное окно проверяются Cocoa. Глобальное Ctrl+Alt+N на Mac и обмен с телефоном пока не реализованы/не приняты."
+    },
+    {
+      "id": "V20",
+      "start": 2901,
+      "end": 2981,
+      "chapter": "Руки, скиллы, MCP",
+      "scope": "service",
+      "tests": [
+        "stage5_unit_test.py",
+        "prompt_tools_test.py",
+        "tools_unit_test.py",
+        "video1018_test.py",
+        "macos_windows_test.py"
+      ],
+      "remaining": "MCP и навыки — тестовые серверы. Запуск адресов и .app перенесён на /usr/bin/open и проверен контрактами; нужны реальный браузер, установленные навыки и внешние интеграции."
+    },
+    {
+      "id": "V21",
+      "start": 2981,
+      "end": 3194,
+      "chapter": "Почта, Obsidian, Telegram, умный дом",
+      "scope": "service",
+      "tests": [
+        "mail_test.py",
+        "smarthome_test.py",
+        "obsidian_test.py"
+      ],
+      "remaining": "Почта/умный дом — поддельные серверы, Obsidian — временное хранилище. Нужны Telegram, MAX, свои календари и устройства; реальных отправок и переключений не было."
+    },
+    {
+      "id": "V22",
+      "start": 3194,
+      "end": 3366,
+      "chapter": "Резервные копии, серверы, безопасность",
+      "scope": "service",
+      "tests": [
+        "backup_test.py",
+        "macos_backup_test.py",
+        "code_safety_test.py",
+        "security1019_test.py",
+        "macos_windows_test.py"
+      ],
+      "remaining": "Нужны свой SSH-хост, сейф и восстановление на другом устройстве. Установка обновлений .app пока ручная; защита команд не является песочницей."
+    },
+    {
+      "id": "V23",
+      "start": 3366,
+      "end": 3435,
+      "chapter": "Первый запуск: Лира всё объяснит сама",
+      "scope": "hardware",
+      "tests": [
+        "intro_test.py"
+      ],
+      "remaining": "Проверяется логика знакомства. Голосовой первый запуск, системные разрешения и обучение имени на Mac ещё не приняты."
+    },
+    {
+      "id": "V24",
+      "start": 3435,
+      "end": 3544,
+      "chapter": "Таймеры и напоминания голосом",
+      "scope": "desktop",
+      "tests": [
+        "reminders_test.py",
+        "hold_dictation_test.py"
+      ],
+      "remaining": "Таймер и окно проверяются; голосовые действия требуют живого микрофона и полного голосового запуска .app."
+    },
+    {
+      "id": "V25",
+      "start": 3544,
+      "end": 3758,
+      "chapter": "Жучок и автоэкзамены на каждый релиз",
+      "scope": "model",
+      "tests": [
+        "exam_test.py",
+        "exam_new_test.py",
+        "exam_isolation_test.py"
+      ],
+      "remaining": "Проверяется экзаменационный механизм с запрограммированной моделью, включая провалы. Полный экзамен способностей на настоящей модели и телефоне ещё не выполнен."
+    },
+    {
+      "id": "V26",
+      "start": 3758,
+      "end": 3838,
+      "chapter": "Сканер QR, DataMatrix и Честный знак",
+      "scope": "mobile",
+      "tests": [],
+      "remaining": "Нужны камера телефона, QR/DataMatrix, переход по ссылке и тестовый запрос в Честный знак. Нативный сканер Mac не перенесён."
+    },
+    {
+      "id": "V27",
+      "start": 3838,
+      "end": 3948,
+      "chapter": "Чек и стикер: фото → ответ и напоминание",
+      "scope": "model",
+      "tests": [
+        "exam_test.py",
+        "exam_new_test.py",
+        "phone_photo_test.py"
+      ],
+      "remaining": "Чек и напоминание со стикера дополнительно прошли на настоящей gemma4:12b с синтетическими изображениями. Нужны фотографии с реальной камеры, сложные чеки и проверка других моделей."
+    },
+    {
+      "id": "V28",
+      "start": 3948,
+      "end": 4024,
+      "chapter": "Если завтра дождь — зонт, если нет — рассада",
+      "scope": "model",
+      "tests": [
+        "video_condition_test.py"
+      ],
+      "remaining": "Обе ветки прогноза проверяются настоящим ядром и инструментами с программируемой моделью. Реальные поиск и рассуждение модели ещё не приняты."
+    },
+    {
+      "id": "V29",
+      "start": 4024,
+      "end": 4094,
+      "chapter": "Патрик против кофейни",
+      "scope": "model",
+      "tests": [
+        "personas_talk_test.py",
+        "boundaries_test.py"
+      ],
+      "remaining": "Проверяются инструкции и разделение характеров. Адекватность и отсутствие поддакивания требуют оценки настоящей модели."
+    },
+    {
+      "id": "V30",
+      "start": 4094,
+      "end": 4433,
+      "chapter": "Итоги и как помочь проекту",
+      "scope": "hardware",
+      "tests": [],
+      "remaining": "Узнавание голоса владельца требует записи/калибровки на Mac. Лайки, комментарии и звёзды — просьбы автора, не функция приложения; действий с аккаунтами не было.",
+      "manual_tests": [
+        "calib_test.py"
+      ]
+    }
+  ]
+}

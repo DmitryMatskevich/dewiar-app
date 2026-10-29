@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Dewiar — закинуть идею</title>
+<link href="assets/fonts.css" rel="stylesheet">
+<style>
+  /* «Закинуть идею» (одна клавиша, ui/hotkey.py → ui/app.py show_capture): мысль и картинки — в два движения, без модели
+     и без голоса. Картинка из буфера (только что сделанный скриншот) прикладывается сама; Ctrl+V — ещё, файлы —
+     перетащить или скрепкой. Enter — сохранить: «напомни завтра в 10 …» — напоминание с картинками, остальное — заметка
+     в «Заметки/Идеи» (ядро capture_save). Под полем сразу видно, что получится (capture_parse). Esc — закрыть: набранное
+     не пропадает, вернётся при следующем открытии. Окно без рамки, скругление 24 px = CAPTURE_RADIUS в app.py. */
+  :root { --ink: #F5F3FF; --muted: #A9A5C4; --dim: #7E7A99; --field: rgba(255,255,255,.055); --line: rgba(255,255,255,.09);
+          --idea: #9D8CFF; --idea2: #5FD7E8; --rem: #FFC978; --ok: #4BE3A1; --bad: #FF8FA8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: #0d0b14; }
+  body { font: 15px/1.45 "Manrope", "Ubuntu", "Segoe UI", "Noto Sans", sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 18px 20px 16px; border-radius: 24px;
+          border: 1px solid rgba(157,140,255,.22);
+          background: radial-gradient(90% 70% at 0% 0%, rgba(157,140,255,.20), transparent 60%),
+                      radial-gradient(70% 60% at 100% 100%, rgba(95,215,232,.12), transparent 60%),
+                      linear-gradient(180deg, #16121f 0%, #0d0b14 100%); }
+  #wrap.drop { border-color: var(--idea2); box-shadow: inset 0 0 0 2px rgba(95,215,232,.5); }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; cursor: move; }
+  .bulb { width: 34px; height: 34px; flex: none; border-radius: 11px; display: grid; place-items: center;
+          background: linear-gradient(135deg, var(--idea) 0%, var(--idea2) 100%); box-shadow: 0 6px 18px rgba(130,140,255,.35); }
+  .bulb svg { width: 19px; height: 19px; stroke: #120f1c; fill: none; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+  h1 { font: 600 16.5px/1.2 "Unbounded", "Manrope", sans-serif; letter-spacing: .01em; flex: 1; }
+  #x { width: 32px; height: 32px; border-radius: 50%; border: 0; cursor: pointer; background: rgba(255,255,255,.06); color: var(--muted);
+       display: grid; place-items: center; }
+  #x:hover { background: rgba(255,255,255,.13); color: #fff; }
+  #x svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  #t { flex: 1; min-height: 0; width: 100%; resize: none; border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px;
+       background: var(--field); color: var(--ink); font: 500 17px/1.5 "Manrope", sans-serif; outline: none; }
+  #t::placeholder { color: var(--dim); }
+  #t:focus { border-color: rgba(157,140,255,.55); box-shadow: 0 0 0 3px rgba(157,140,255,.14); }
+  #atts { display: none; gap: 8px; margin-top: 10px; overflow-x: auto; padding-bottom: 2px; }
+  #atts.on { display: flex; }
+  .att { position: relative; flex: none; width: 96px; height: 66px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line);
+         background: var(--field) center/cover no-repeat; }
+  .att.file { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 8px; color: var(--muted);
+              font-size: 11px; font-weight: 600; }
+  .att.file b { font-size: 11px; color: var(--idea2); letter-spacing: .04em; }
+  .att.file span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .att small { position: absolute; left: 6px; bottom: 5px; padding: 1px 6px; border-radius: 6px; background: rgba(13,11,20,.72);
+               color: #fff; font-size: 10.5px; font-weight: 600; }
+  .att button { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: 0; cursor: pointer;
+                background: rgba(13,11,20,.75); color: #fff; display: grid; place-items: center; }
+  .att button svg { width: 11px; height: 11px; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; }
+  footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  #what { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); }
+  #what i { flex: none; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-style: normal; font-size: 14px;
+            background: rgba(157,140,255,.16); }
+  #what.rem i { background: rgba(255,201,120,.18); }
+  #what span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #what b { color: var(--ink); font-weight: 600; }
+  #what.rem b { color: var(--rem); }
+  .ib { width: 42px; height: 42px; flex: none; border-radius: 13px; border: 1px solid var(--line); cursor: pointer; background: var(--field);
+        color: var(--muted); display: grid; place-items: center; }
+  .ib:hover { color: #fff; background: rgba(255,255,255,.1); }
+  .ib svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  #go { height: 42px; padding: 0 18px; border-radius: 13px; border: 0; cursor: pointer; color: #120f1c; font: 700 15px/1 "Manrope", sans-serif;
+        background: linear-gradient(135deg, #B9AEFF 0%, var(--idea) 45%, var(--idea2) 100%); box-shadow: 0 8px 22px rgba(130,140,255,.32);
+        display: flex; align-items: center; gap: 8px; transition: filter .12s, transform .12s; }
+  #go:hover { filter: brightness(1.07); } #go:active { transform: scale(.98); } #go:disabled { opacity: .55; cursor: default; }
+  #go kbd { font: 600 11px/1 "Manrope", sans-serif; padding: 3px 5px; border-radius: 5px; background: rgba(18,15,28,.18); }
+  #hint { margin-top: 8px; font-size: 12px; color: var(--dim); }
+  #hint.bad { color: var(--bad); }
+  button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  /* сохранено: окно на мгновение становится подтверждением и закрывается */
+  #done { position: absolute; inset: 0; border-radius: 24px; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+          background: radial-gradient(80% 70% at 50% 40%, rgba(75,227,161,.16), transparent 70%), #0d0b14; text-align: center; padding: 30px; }
+  #done.on { display: flex; animation: pop .32s cubic-bezier(.2,1.3,.4,1); }
+  #done .ck { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, #8EF0C6, var(--ok)); }
+  #done .ck svg { width: 34px; height: 34px; stroke: #0d2a1e; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  #done b { font: 600 19px/1.3 "Unbounded", "Manrope", sans-serif; }
+  #done span { color: var(--muted); font-size: 14px; max-width: 460px; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { #done.on { animation: none; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header class="pywebview-drag-region">
+    <span class="bulb" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2.2h5c.1-1 .5-1.7 1.1-2.2A6 6 0 0 0 12 3z"/></svg></span>
+    <h1>Закинуть идею</h1>
+    <button id="x" title="Закрыть (Esc) — набранное останется" aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </header>
+  <textarea id="t" spellcheck="true" aria-label="Мысль или напоминание"
+            placeholder="Мысль, ссылка, задача — что угодно.&#10;Или «напомни завтра в 10 обсудить макет»"></textarea>
+  <div id="atts" aria-label="Приложено"></div>
+  <footer>
+    <div id="what"><i>📝</i><span>В заметки <b>«Идеи»</b></span></div>
+    <input type="file" id="file" multiple hidden>
+    <button class="ib" id="att" title="Приложить файл или картинку" aria-label="Приложить файл"><svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l8-8"/></svg></button>
+    <button id="go">Сохранить <kbd>Enter</kbd></button>
+  </footer>
+  <div id="hint">Ctrl+V — картинка из буфера, файлы — перетащить сюда. Shift+Enter — новая строка, Esc — закрыть.</div>
+  <div id="done" role="status"><div class="ck"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div><b id="d-h"></b><span id="d-s"></span></div>
+</div>
+<script src="assets/dewiar.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const X = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>';
+const esc = (t) => String(t || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const store = { get(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } },
+                set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} } };
+let atts = [], saving = false, parseT = 0, booted = false;          // {kind: image|file, name, url|b64, clip?}
+const sig = (u) => u.length + ":" + u.slice(-64);                   // отпечаток картинки из буфера: та же — не прикладываем снова
+function render() {
+  $("atts").classList.toggle("on", atts.length > 0);
+  $("atts").innerHTML = atts.map((a, i) => a.kind === "image"
+    ? `<div class="att" style="background-image:url('${a.url}')" title="${esc(a.name)}">${a.clip ? "<small>из буфера</small>" : ""}<button data-i="${i}" aria-label="Убрать">${X}</button></div>`
+    : `<div class="att file" title="${esc(a.name)}"><b>${esc((a.name.split(".").pop() || "файл").slice(0, 4).toUpperCase())}</b><span>${esc(a.name)}</span><button data-i="${i}" aria-label="Убрать">${X}</button></div>`).join("");
+  document.querySelectorAll("#atts button").forEach(b => b.onclick = () => { atts.splice(+b.dataset.i, 1); render(); capFocus(); });
+}
+const b64of = (f) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(f); });
+async function addFiles(list) {
+  for (const f of list) {
+    if (atts.length >= 12) break;
+    if (f.size > 11e6) { hint(`«${f.name}» больше 11 МБ — положите его в папку ассистента`, true); continue; }
+    try { const url = await b64of(f);
+      if (/^image\//.test(f.type) && !/svg/.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url });
+      else atts.push({ kind: "file", name: f.name || "файл", b64: url }); }
+    catch (e) { hint(`«${f.name}» не прочитался`, true); }
+  }
+  render(); capFocus();
+}
+// картинка из буфера: страница её получает не всегда (WebKitGTK) — тогда через окно (Api.clipboard_image, как в виджете)
+async function clipImage(auto) {
+  const a = window.api && window.api(); let url = "";
+  try { url = a && a.clipboard_image ? await a.clipboard_image() : ""; } catch (e) {}
+  if (!url) { if (!auto) hint("В буфере обмена нет картинки — скопируйте снимок и нажмите Ctrl+V ещё раз", true); return false; }
+  if (auto && store.get("cap_clip") === sig(url)) return false;     // этот снимок уже закидывали — второй раз сам не прикладываем
+  if (atts.some(x => x.url && sig(x.url) === sig(url))) return false;
+  atts.unshift({ kind: "image", name: "Снимок " + new Date().toLocaleTimeString("ru-RU").replace(/:/g, "-") + (/^data:image\/png/.test(url) ? ".png" : ".jpg"), url, clip: true });
+  render(); return true;
+}
+function hint(t, bad) { const h = $("hint"); h.textContent = t; h.classList.toggle("bad", !!bad);
+  clearTimeout(h._t); if (bad) h._t = setTimeout(() => { h.classList.remove("bad"); h.textContent = HINT; }, 4500); }
+const HINT = $("hint").textContent;
+function capFocus() { const t = $("t"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+window.capFocus = capFocus;
+async function preview() {
+  const t = $("t").value.trim(), w = $("what");
+  if (!/^\s*(напомни|напоминай|разбуди|будильник|таймер|засеки)/i.test(t)) { w.className = ""; w.innerHTML = `<i>📝</i><span>В заметки <b>«Идеи»</b></span>`; return; }
+  let r = null; try { r = await core.call("capture_parse", { text: t }); } catch (e) {}
+  if (r && r.kind === "reminder") { w.className = "rem"; w.innerHTML = `<i>⏰</i><span>Напомню <b>${esc(r.when)}</b>${r.repeat_text ? ", " + esc(r.repeat_text) : ""}: ${esc(r.text)}</span>`; }
+  else { w.className = "rem"; w.innerHTML = `<i>⏰</i><span>Когда напомнить? Например: <b>завтра в 10</b></span>`; }
+}
+async function save() {
+  if (saving) return;
+  const text = $("t").value.trim();
+  if (!text && !atts.length) { hint("Напишите мысль или вставьте картинку", true); capFocus(); return; }
+  saving = true; $("go").disabled = true;
+  try {
+    const r = await core.call("capture_save", { text, images: atts.filter(a => a.kind === "image").map(a => a.url),
+                                                files: atts.filter(a => a.kind === "file").map(a => ({ name: a.name, b64: a.b64 })) });
+    const clip = atts.find(a => a.clip); if (clip) store.set("cap_clip", sig(clip.url));
+    store.set("cap_draft", ""); $("t").value = ""; atts = []; render();
+    const n = r.att ? `, вложений: ${r.att}` : "";
+    $("d-h").textContent = r.kind === "reminder" ? `Напомню ${r.when}` : "Сохранено в «Идеи»";
+    $("d-s").textContent = (r.title || "") + n;
+    $("done").classList.add("on");
+    setTimeout(close, 1300);
+  } catch (e) { hint(e.message || "Не сохранилось — ядро Dewiar не отвечает", true); }
+  saving = false; $("go").disabled = false;
+}
+function close() { store.set("cap_draft", $("t").value); const a = window.api && window.api(); if (a && a.close_capture) a.close_capture(); else window.close(); }
+$("go").onclick = save;
+$("x").onclick = close;
+$("att").onclick = () => $("file").click();
+$("file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
+$("t").addEventListener("input", () => { store.set("cap_draft", $("t").value); clearTimeout(parseT); parseT = setTimeout(preview, 220); });
+$("t").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(); }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } });
+document.addEventListener("paste", (e) => {
+  const files = [...(e.clipboardData && e.clipboardData.items || [])].filter(x => x.kind === "file").map(x => x.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); addFiles(files); return; }
+  if (e.clipboardData && !e.clipboardData.getData("text")) { e.preventDefault(); clipImage(false); }
+});
+const wrap = $("wrap");
+document.addEventListener("dragover", (e) => { e.preventDefault(); wrap.classList.add("drop"); });
+document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) wrap.classList.remove("drop"); });
+document.addEventListener("drop", (e) => { e.preventDefault(); wrap.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
+$("t").value = store.get("cap_draft");
+render(); capFocus(); preview();
+// окно открыли — сразу приложить свежий снимок из буфера (pywebview отдаёт api чуть позже загрузки страницы)
+async function boot() { if (booted) return; booted = true; await clipImage(true); capFocus(); }
+// окно не закрывается, а прячется (app.py close_capture) — при следующем сочетании: чистое, с новым снимком из буфера
+window.capOpen = async () => { $("done").classList.remove("on"); saving = false; $("go").disabled = false;
+  if (!$("t").value) $("t").value = store.get("cap_draft"); capFocus(); preview(); await clipImage(true); capFocus(); };
+window.addEventListener("pywebviewready", boot);
+setTimeout(() => { if (window.pywebview && window.pywebview.api) boot(); }, 400);
+core.on("hello", () => { preview(); });
+</script>
+</body>
+</html>

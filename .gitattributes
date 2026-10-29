@@ -1,0 +1,22 @@
+# Текст — с LF (сборка идёт на Linux, установщик Windows собирает makensis там же); командные файлы Windows — с CRLF
+* text=auto eol=lf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Двоичное — без правок концов строк и без построчного diff
+*.png   binary
+*.webp  binary
+*.jpg   binary
+*.ico   binary
+*.onnx  binary
+*.wav   binary
+*.mp3   binary
+*.zip   binary
+*.ttf   binary
+*.woff2 binary
+
+# Статистика языков GitHub: чужие библиотеки не считаются кодом проекта
+ui/assets/vendor/** linguist-vendored
+ui/assets/qrcode.js linguist-vendored
+docs/**             linguist-documentation

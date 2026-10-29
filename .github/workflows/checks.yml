@@ -1,0 +1,38 @@
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    name: Быстрые проверки
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Библиотеки
+        run: |
+          # зеркала Ubuntu иногда виснут — каждый шаг с пределом по времени и повторами, без вечного ожидания
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          timeout 420 sudo apt-get $APT update -qq || echo "::warning::apt-get update не успел — ставлю из того, что есть"
+          timeout 420 sudo apt-get $APT install -y -qq espeak-ng ffmpeg >/dev/null || echo "::warning::espeak-ng/ffmpeg не поставились"
+          python -m pip install --upgrade pip
+          pip install --timeout 60 --retries 3 -r requirements.txt playwright fastapi uvicorn python-multipart
+          timeout 600 python -m playwright install --with-deps chromium || timeout 600 python -m playwright install chromium
+
+      - name: Проверки
+        run: tests/run_quick.sh python

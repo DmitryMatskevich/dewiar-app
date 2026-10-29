@@ -1,0 +1,4 @@
+#!/bin/sh
+# Запуск Dewiar: донастроить службу пользователя (идемпотентно) и открыть виджет.
+/opt/dewiar/venv/bin/python3 /opt/dewiar/dewiar-setup
+exec /opt/dewiar/venv/bin/python3 /opt/dewiar/ui/app.py "$@"
