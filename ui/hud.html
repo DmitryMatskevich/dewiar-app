@@ -54,8 +54,8 @@
   body.light #cap .bot::-webkit-scrollbar-thumb { background: rgba(0,0,0,.2); }
   body.light #bot .rep, body.light #yn button:not(.yes), body.light #team-list button.cur { background: rgba(20,20,40,.07); color: var(--ink); }
   body.light #act, body.light #task, body.light #upd:not(.on), body.light #health, body.light #cloudlow { color: var(--ink); }
-  body.light .btn:hover, body.light .btn:focus-visible, body.light #corner .btn:hover, body.light .ab:hover { color: var(--ink); background: rgba(20,20,40,.07); }
-  body.light #corner .btn, body.light #corner-l .btn { color: var(--muted); }
+  body.light .btn:hover, body.light .btn:focus-visible, body.light #corner .btn:hover, body.light #corner-r .btn:hover, body.light .ab:hover { color: var(--ink); background: rgba(20,20,40,.07); }
+  body.light #corner .btn, body.light #corner-r .btn, body.light #corner-l .btn { color: var(--muted); }
   body.light #team { background: #fff; color: var(--ink); box-shadow: 0 14px 40px rgba(20,30,60,.18), 0 0 0 100vmax rgba(20,30,60,.12); }
   body.light #team-list button:hover, body.light #team-list button:focus-visible { background: rgba(20,20,40,.05); }
   body.light .team-close { background: rgba(20,20,40,.07); color: var(--muted); }
@@ -400,12 +400,16 @@
   #intro-skip:hover { color: var(--ink); background: rgba(255,255,255,.14); }
   body.intro #intro-skip { display: block; }
   body.mini #intro-skip { display: none !important; }
-  #corner, #corner-l { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity .2s; z-index: 5; }
+  #corner, #corner-l, #corner-r { position: absolute; top: 10px; right: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity .2s; z-index: 5; }
   #corner-l { right: auto; left: 10px; opacity: 1; }
+  /* Управление образом помощника всегда видно в первой строке справа: его не нужно искать наведением. */
+  #corner-r { opacity: 1; }
+  /* остальные правые действия раскрываются левее постоянной кнопки образа, не перекрывая её. */
+  #corner { right: 40px; }
   #card:hover #corner, #corner:focus-within, #card:hover #corner-l, #corner-l:focus-within { opacity: 1; }
-  #corner .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
-  #corner .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
-  #corner .btn svg, #corner-l .btn svg { width: 15px; height: 15px; }
+  #corner .btn, #corner-r .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
+  #corner .btn:hover, #corner-r .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
+  #corner .btn svg, #corner-r .btn svg, #corner-l .btn svg { width: 15px; height: 15px; }
   #corner.pinned { opacity: 1; }
   #corner-l.lo { opacity: 1; }
   #corner-l.lo #b-lo, body.light #corner-l.lo #b-lo { color: #2fbf83; }
@@ -418,12 +422,14 @@
   @media (prefers-reduced-motion: reduce) { #b-upd.busy svg { animation: none; } }                                  /* блокнот открыт — кнопка видна и подсвечена */
   #b-pad.on, #b-play.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
   body.light #b-pad.on, body.light #b-play.on { color: var(--accent, #4f6cf0); background: rgba(79,108,240,.12); }
+  /* «Досуг» открывается голосом или из окна блокнота, но не занимает место в первой строке HUD. */
+  #corner #b-play { display: none !important; }
   #b-play[hidden] { display: none; }
   #b-orb.on { color: var(--accent, #8B8CF7); background: rgba(139,140,247,.14); }
   /* Legacy input/persona controls stay in the DOM for command compatibility,
      but must never reserve space in the redesigned bottom bar. */
   #bar > [hidden] { display: none !important; }
-  body.mini #corner, body.mini #corner-l { display: none; }
+  body.mini #corner, body.mini #corner-l, body.mini #corner-r { display: none; }
 
   /* ---------- значок ---------- */
   body.mini #card { padding: 0; justify-content: center; }     /* значок — в той же теме, что и карточка */
@@ -559,12 +565,15 @@
     <!-- обновление одним нажатием (24.10, владелец: «возле жучка не хватает значка обновления») -->
     <button class="btn" id="b-upd" title="Обновления — проверить и обновить одним нажатием" aria-label="Обновления"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
   </div>
+  <div id="corner-r">
+    <!-- Глаз всегда доступен справа в первой строке: скрыть/вернуть большой образ помощника. -->
+    <button class="btn" id="b-orb" title="Скрыть большой образ Лиры и освободить место для ответа" aria-label="Скрыть большой образ Лиры" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+  </div>
   <div id="corner">
     <!-- блокнот у виджета (20.10): вкладки, ссылки, картинки, таблицы, задачи — выезжает рядом, синхронизируется (ui/pad.html) -->
-    <!-- «Досуг» (24.10): милые игры в том же листе, что блокнот (ui/pad.html, assets/arcade); выключается в «Возможностях» -->
+    <!-- «Досуг» остаётся доступен голосом и в окне блокнота, но не выводится в первой строке HUD. -->
     <button class="btn" id="b-play" hidden title="Досуг — милые игры на пару минут. Или скажите: «Лира, давай поиграем»"><svg viewBox="0 0 24 24"><path d="M7.5 7.5h9a4.5 4.5 0 0 1 4.3 5.8l-1.1 3.7a2.3 2.3 0 0 1-3.9.9L14 15.5h-4l-1.8 2.4a2.3 2.3 0 0 1-3.9-.9l-1.1-3.7a4.5 4.5 0 0 1 4.3-5.8z"/><path d="M8 10.5v3M6.5 12h3"/><path d="M15.5 11h.01M17.5 13h.01"/></svg></button>
     <button class="btn" id="b-pad" title="Блокнот — вкладки под рукой: ссылки, задачи, таблицы, картинки. Синхронизируется между устройствами"><svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M8 8h6M8 11.5h6M8 15h3.5"/><path d="M17.5 7h2M17.5 11h2"/></svg></button>
-    <button class="btn" id="b-orb" title="Скрыть большой образ Лиры и освободить место для ответа" aria-label="Скрыть большой образ Лиры" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
     <button class="btn" id="b-tray" title="Спрятать — появлюсь сам, когда позовёте по имени или придёт напоминание"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
   </div>
   <div id="bar">

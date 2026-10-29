@@ -58,11 +58,20 @@ ok('t.style.height = "24px"' in src and 't.scrollHeight' in src and 't.classList
 ok('#ask { margin-top: auto; }' in src and '#mid::after { content: ""; display: none; }' in src,
    "строка ввода закреплена над нижней панелью без пустого места под ней")
 ok('id="b-orb"' in src and 'setOrbVisible(!orbShown, true)' in src, "верхняя кнопка скрывает и возвращает большой образ")
+ok('id="corner-r"' in src and src.index('id="corner-r"') < src.index('id="corner"'),
+   "кнопка образа вынесена в отдельный правый блок первой строки")
+ok('#corner-r { opacity: 1; }' in src and 'body.mini #corner-r' in src,
+   "кнопка образа видна постоянно в обычном окне и скрывается только в режиме значка")
+ok('#corner { right: 40px; }' in src,
+   "дополнительные правые кнопки раскрываются левее кнопки образа и не перекрывают её")
+ok('#corner #b-play { display: none !important; }' in src,
+   "кнопка «Досуг» убрана из первой строки HUD")
 ok('chat-open' in src and '#card.chat-open #cap' in src, "ответ и чат растягиваются при расширении окна")
 ok('box.classList.toggle("show")' in src and 'function tapOrb()' in src, "круг помощника открывает выбор персонажа")
 ok("Ctrl+Enter (или ⌘+Enter)" in help_src and "выбрать устройство macOS" in help_src
-   and "автоматически добавляется" in help_src and "слева от микрофона" in help_src,
-   "справка объясняет новую клавиатуру, автоматическую диктовку и уровень записи")
+   and "автоматически добавляется" in help_src and "слева от микрофона" in help_src
+   and "справа в первой строке" in help_src and "Досуг" in help_src,
+   "справка объясняет клавиатуру, диктовку, правую кнопку образа и доступ к «Досугу»")
 
 if fails:
     raise SystemExit(f"Ошибок: {len(fails)}")
