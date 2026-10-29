@@ -21,7 +21,7 @@
     try { const x = await core.call("prompter_models", { model: $("#pr-stt-model").value }); out.textContent = x.installed ? `Скачана · ${x.mb} МБ` : `Не скачана · около ${x.mb} МБ`; }
     catch (_) { /* ядро могло быть ещё занято запуском */ }
   }
-  function fmt(ts) { try { return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (_) { return "—"; } }
+  function fmt(ts) { if (!ts) return "до ручной остановки"; try { return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (_) { return "—"; } }
   async function loadSchedules() {
     const box = $("#pr-s-list"); if (!box) return;
     try {
