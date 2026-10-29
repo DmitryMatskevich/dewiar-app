@@ -47,7 +47,12 @@ class TextMode(unittest.TestCase):
                     self.assertFalse(page.locator("#orb").evaluate("e => e.classList.contains('holding')"))
                     self.assertTrue(page.locator("#askin").is_visible())
                     self.assertTrue(page.locator("#bubble").is_hidden())
+                    self.assertTrue(page.locator("#b-voice-inline").evaluate("e => e.classList.contains('on')"))
+                    self.assertEqual(page.locator("#note").inner_text(), "")
                     self.assertNotIn("Режим сервера", page.locator("#note").inner_text())
+                    page.click("#b-voice-inline")
+                    page.wait_for_timeout(250)
+                    self.assertTrue(page.locator("#cap").evaluate("e => !e.classList.contains('show')"))
                     browser.close()
             finally:
                 asyncio.run(core.stop())

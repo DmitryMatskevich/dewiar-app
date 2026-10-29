@@ -24,6 +24,10 @@ for ident in ("b-mic", "b-type", "b-team"):
 ok('e.key === "Enter" && !e.shiftKey' not in src, "старое поведение Shift+Enter не осталось")
 for ident in ("a-mic", "a-mic-pick", "dict-level", "b-voice-inline"):
     ok(f'id="{ident}"' in src, f"элемент {ident} присутствует")
+ok('aria-pressed="false"' in src and 'textOnly || unavailable' in src,
+   "динамик имеет состояние и показывает выключенный звук уже в текстовом режиме")
+ok('showCap("", textOnly ? "Отвечаю только текстом' not in src,
+   "переключение динамика не открывает временное сообщение поверх первой строки")
 for ident in ("dict-tools", "dict-cancel", "dict-done"):
     ok(f'id="{ident}"' not in src, f"лишний элемент {ident} не показывается")
 for command in ("dictation_start", 'core.call("devices")'):
@@ -70,8 +74,9 @@ ok('chat-open' in src and '#card.chat-open #cap' in src, "ответ и чат �
 ok('box.classList.toggle("show")' in src and 'function tapOrb()' in src, "круг помощника открывает выбор персонажа")
 ok("Ctrl+Enter (или ⌘+Enter)" in help_src and "выбрать устройство macOS" in help_src
    and "автоматически добавляется" in help_src and "слева от микрофона" in help_src
-   and "справа в первой строке" in help_src and "Досуг" in help_src,
-   "справка объясняет клавиатуру, диктовку, правую кнопку образа и доступ к «Досугу»")
+   and "справа в первой строке" in help_src and "Досуг" in help_src
+   and "динамик с крестиком" in help_src and "не открывает карточку сообщения" in help_src,
+   "справка объясняет клавиатуру, диктовку, правую кнопку образа, звук и доступ к «Досугу»")
 
 if fails:
     raise SystemExit(f"Ошибок: {len(fails)}")

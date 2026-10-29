@@ -536,7 +536,7 @@
           <button class="ab" id="a-clip" title="Вставить картинку из буфера обмена (Ctrl+V)"><svg viewBox="0 0 24 24"><rect x="6" y="4.5" width="12" height="16" rx="2.2"/><path d="M9.5 4.5V3.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1v.9M9.5 11h5M9.5 14.5h5"/></svg></button>
           <button class="ab" id="a-shot" title="Приложить снимок экрана"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
-          <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
+          <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
           <button class="ab" id="a-mic" title="Диктовка в поле: говорите, пауза завершит фразу" aria-label="Начать диктовку"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
@@ -916,9 +916,17 @@ $("intro-skip").onclick = (ev) => { ev.stopPropagation(); core.call("intro_stop"
 
 /* «Отвечать текстом»: голос молчит, ответы — только в виджете (как значок динамика в телефоне) */
 let textOnly = false;
-function setTextOnly(on) { textOnly = !!on; $("b-voice-inline").classList.toggle("on", textOnly); $("b-voice-inline").title = textOnly ? "Отвечать голосом" : "Отвечать только текстом"; }
+function setTextOnly(on) {
+  textOnly = !!on;
+  const b = $("b-voice-inline");
+  const unavailable = audioMode === "text";
+  b.classList.toggle("on", textOnly || unavailable);
+  b.title = unavailable ? "Голосовой ответ пока недоступен — работает текстовый режим" : textOnly ? "Включить голосовой ответ" : "Выключить голосовой ответ";
+  b.setAttribute("aria-label", b.title);
+  b.setAttribute("aria-pressed", String(textOnly));
+}
 $("b-voice-inline").onclick = guard($("b-voice-inline"), () => core.call("settings_save", { patch: { tts: { text_only: !textOnly } } })
-  .then(s => { setTextOnly(s.tts.text_only); showCap("", textOnly ? "Отвечаю только текстом — голос молчит." : "Снова отвечаю голосом."); hideCapLater(2500); }).catch(showErr));
+  .then(s => { setTextOnly(s.tts.text_only); }).catch(showErr));
 /* ---------- таймеры: обратный отсчёт ---------- */
 let TMR = [], tmrTick = 0;
 const tmrAt = (x) => new Date(x.at).getTime(), tmrFrom = (x) => new Date(x.created || x.at).getTime();
@@ -958,6 +966,7 @@ function updateAudioMode(mode) {
   $("b-mic").disabled = mode === "text" && !voiceSwitchAvailable();
   $("b-mic").title = mode === "text" ? (voiceSwitchAvailable() ? "Включить голосовой режим" : "Голосовой ввод недоступен в текстовом режиме") : muted ? "Включить микрофон" : "Выключить микрофон";
   $("b-mic").setAttribute("aria-label", $("b-mic").title);
+  setTextOnly(textOnly);
   setState(state);
 }
 window.addEventListener("pywebviewready", () => updateAudioMode(audioMode));

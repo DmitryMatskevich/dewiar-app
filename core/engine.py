@@ -259,7 +259,6 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         """Студия и настройки доступны сразу; слух запускается, как только готова модель Vosk."""
         if self.server:
             log.info("Режим сервера: без микрофона и звука — задачи, синхронизация, Telegram и напоминания работают")
-            self.status["note"] = "Голосовой ввод пока недоступен. Напишите сообщение в чате."
             self._start_background()
         self.health_begin()                                    # «Здоровье»: время запуска, нагрузка, пульс (core/health.py)
         self._auto_provision()
