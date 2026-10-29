@@ -65,9 +65,7 @@ try:
                 break
         ok("Вижу картинку 640x480" in cap, f"картинка дошла до модели: {cap[:80]}")
         pg.evaluate("window.CLIP = ''")
-        pg.click("#b-type"); pg.wait_for_timeout(300)
-        if pg.evaluate("document.getElementById('ask').style.display") != "block":
-            pg.click("#b-type"); pg.wait_for_timeout(300)
+        # Поле текста теперь открыто постоянно; старую кнопку «Текст» намеренно убрали из панели.
         pg.click("#a-clip"); pg.wait_for_timeout(400)
         ok("нет картинки" in pg.evaluate("document.getElementById('cap').textContent") and pg.evaluate("atts.length") == 0,
            "в буфере нет картинки — понятная подсказка, без отчёта об ошибке")

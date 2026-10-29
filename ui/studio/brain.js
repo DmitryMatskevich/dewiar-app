@@ -325,7 +325,9 @@ function renderProfiles() {
    оставалась у прежней модели. Ничего не поменялось — не трогаем (список моделей и итог «Проверить» остаются); человек
    печатает в поле профиля — перерисовка сбила бы ввод: тогда только отметка. */
 function profilesSync() {
-  const box = $("#profiles"); if (!box || !S.llm || JSON.stringify([S.llm.active, S.llm.profiles || {}, activeModelRole]) === profSig) return;
+  const box = $("#profiles");
+  const sig = JSON.stringify([S?.llm?.active, S?.llm?.profiles || {}, S?.llm?.role_max_tokens, activeModelRole]);
+  if (!box || !S.llm || sig === profSig) return;
   const a = document.activeElement, ids = Object.keys((S.llm && S.llm.profiles) || {});
   const typing = a && box.contains(a) && a.matches("input,select,textarea") && a.type !== "radio";
   const visibleIds = roleEntries().map(([id]) => id);

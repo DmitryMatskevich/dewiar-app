@@ -68,7 +68,7 @@ with sync_playwright() as p:
     pg.evaluate("() => { S.stt = { engine: 'system' }; S.llm = Object.assign({}, S.llm, { cloud: false, stt: false }); saveS(); }")
     pg.evaluate(STUB, ["谢谢"])
     pg.evaluate("() => listen()"); pg.wait_for_timeout(800)
-    ok("слышит не по-русски" in pg.text_content("#bot") and "Мозге" in pg.text_content("#bot"), "сервера нет — сказано, что делать")
+    ok("слышит не по-русски" in pg.text_content("#bot") and "Модели" in pg.text_content("#bot"), "сервера нет — сказано, что делать")
     # Каляка
     pg.evaluate("() => playOpen('')"); pg.wait_for_timeout(300)
     games = pg.evaluate("[...document.querySelectorAll('#play-body .ag')].map(b => b.dataset.game)")

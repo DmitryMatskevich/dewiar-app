@@ -190,6 +190,15 @@ html.st-light.st-neu :is(.btn.primary, .chip.on, .tabs button.on) {
   background: linear-gradient(135deg, #354bc2 0%, #25378f 100%);
   color: #fff;
 }
+/* Состояние умного дома — тёплое, но с тёмной подписью даже в светлом неоморфизме.
+   Уточняем контекст и задаём именно background-color: тесты и браузеры не должны
+   считать прозрачный фон градиента основной подложкой. */
+html.st-light.st-neu #sh-devs .chip.shd.on {
+  background: #ffe7bd !important;
+  background-color: #ffe7bd !important;
+  color: #6a4210 !important;
+  box-shadow: inset 0 0 0 1px rgba(196,132,40,.35);
+}
 /* Отключённые основные действия остаются читаемыми: общая opacity:.5 делала белый текст
    на светлом фоне практически невидимым (например, пока не выдан доступ к контактам). */
 html.st-light .btn.primary:disabled { opacity: 1; }

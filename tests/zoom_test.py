@@ -48,14 +48,16 @@ api.save_pos = lambda m="card": [1000, 600]            # карточка 300×4
 api._place = lambda m, cx, cy: placed.append((m, cx, cy)) or [cx, cy]
 A.set_zoom_sizes(1)
 p = api.set_zoom(0.8)
-ok(A.SIZES == {"card": (240, 336)} and ("resize", 240, 336) in gws["card"].calls,
-   f"виджет 80 %: окно 240×336 (шарика больше нет): {A.SIZES}")
-ok(p == [1060, 684] and placed == [("card", 1060, 684)], f"правый нижний угол карточки на месте (1300, 1020): {p}")
+expected_08 = tuple(round(v * 0.8) for v in A.CARD_DEFAULT)
+ok(A.SIZES == {"card": expected_08} and ("resize", *expected_08) in gws["card"].calls,
+   f"виджет 80 %: окно под текущим размером карточки (шарика больше нет): {A.SIZES}")
+expected_pos = [1000 + A.CARD_DEFAULT[0] - expected_08[0], 600 + A.CARD_DEFAULT[1] - expected_08[1]]
+ok(p == expected_pos and placed == [("card", *expected_pos)], f"правый нижний угол карточки на месте: {p}")
 ok(A.card_r() == 22, f"скругление окна — под масштаб: {A.card_r()}")
 ok(api.set_zoom(0.8) is None and len(placed) == 1, "тот же масштаб — окна не трогаем")
 api.in_tray = True; placed.clear()
 api.set_zoom(1.0)
-ok(A.SIZES["card"] == (300, 420) and not placed, "виджет в трее — только размер, без показа")
+ok(A.SIZES["card"] == A.CARD_DEFAULT and not placed, "виджет в трее — только размер, без показа")
 A.set_zoom_sizes(1)
 
 # ── 2. студия и виджет в браузере (ядро — настоящее, модель не нужна) ──
