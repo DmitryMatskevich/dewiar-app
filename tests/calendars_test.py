@@ -15,6 +15,7 @@ from calsync import parse_ics, occurrences  # noqa: E402
 now = datetime.now().replace(second=0, microsecond=0)
 soon = now + timedelta(minutes=3)
 tom = (now + timedelta(days=1)).replace(hour=10, minute=0)
+far = now + timedelta(days=8)
 f = lambda d: d.strftime("%Y%m%dT%H%M%S")
 ICS = f"""BEGIN:VCALENDAR
 VERSION:2.0
@@ -41,6 +42,12 @@ DTSTART:{f(tom + timedelta(days=1, hours=5))}
 DTEND:{f(tom + timedelta(days=1, hours=6))}
 SUMMARY:Планёрка (перенесли)
 END:VEVENT
+BEGIN:VEVENT
+UID:a3
+DTSTART:{f(far)}
+DTEND:{f(far + timedelta(hours=1))}
+SUMMARY:Дальняя встреча
+END:VEVENT
 END:VCALENDAR
 """
 occ = occurrences(parse_ics(ICS), now - timedelta(days=1), now + timedelta(days=10))
@@ -66,7 +73,7 @@ PORT, LLM_PORT = 8823, 8153
 (tmp / "cfg").mkdir()
 (tmp / "cfg/settings.json").write_text(json.dumps({
     "persona": "dewiar", "stt": {"engine": "vosk"}, "tts": {"engine": "off"}, "audio": {"sounds": False, "follow_up_seconds": 0},
-    "calendars": {"remind_minutes": 5},
+    "calendars": {"remind_minutes": 20160},
     "llm": {"active": "m", "profiles": {"m": {"name": "mock", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM_PORT}/v1", "model": "chat"}}}}))
 env = dict(os.environ, DEWIAR_CONFIG_DIR=str(tmp / "cfg"), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_PORT=str(PORT),
            DEWIAR_ASSUME_AEC="1", DEWIAR_WORKSPACE_DIR=str(tmp / "ws"), DEWIAR_CAL_TICK="2", NO_PROXY="127.0.0.1,localhost",
@@ -108,6 +115,7 @@ async def run():
     R["add"] = await call("cal_add", url="webcal://127.0.0.1:8157/cal/secret.ics".replace("webcal://", "http://"))
     R["month"] = (await call("calendar_month", year=tom.year, month=tom.month))["data"]
     R["push"] = await wait_for(lambda e: e["type"] == "push" and "Созвон с заказчиком" in e.get("text", ""), 20)
+    R["far_push"] = await wait_for(lambda e: e["type"] == "push" and "Дальняя встреча" in e.get("text", ""), 4)
     rd.cancel()
 
 try:
@@ -120,10 +128,11 @@ finally:
 log = (tmp / "core.log").read_text(encoding="utf-8")
 ok(R.get("bad") and not R["bad"].get("ok") and "ссылк" in (R["bad"].get("error") or ""), f"плохая ссылка — понятная ошибка: {(R.get('bad') or {}).get('error')}")
 add = (R.get("add") or {}).get("data") or {}
-ok(add.get("items") and add["items"][0]["name"] == "Работа" and add["items"][0]["status"]["count"] == 3,
+ok(add.get("items") and add["items"][0]["name"] == "Работа" and add["items"][0]["status"]["count"] == 4,
    "календарь подключён: имя из файла, события посчитаны")
 day = (R.get("month") or {}).get("days", {}).get(tom.date().isoformat(), [])
 ok(any(x["type"] == "event" and x["title"] == "Планёрка" and x["time"] == "10:00" and x["cal"] == "Работа" for x in day),
    "событие — в календаре студии (тип «встреча», время, календарь)")
 ok(R.get("push") and "Через" in R["push"].get("title", ""), "за 5 минут до встречи — уведомление «Через N мин»")
+ok(not R.get("far_push"), "проактивная проверка не сообщает о событии дальше семи дней")
 sys.path.insert(0, str(ROOT / "core"))

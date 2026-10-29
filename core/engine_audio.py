@@ -1167,7 +1167,12 @@ class AudioMixin:
         threading.Thread(target=go, daemon=True).start()
 
     def _calendar_loop(self):
-        """Календари Google/Яндекс: обновлять раз в 30 минут; за N минут до встречи — напомнить."""
+        """Календари Google/Яндекс: обновлять раз в 30 минут; за N минут до встречи — напомнить.
+
+        Проактивные сообщения не заглядывают дальше недели. Дальние события остаются
+        доступны в календаре и по прямому вопросу, но не превращаются в «что-то скоро».
+        """
+        proactive_limit = 7 * 24 * 60
         told, last = set(), 0.0
         tick = float(os.environ.get("DEWIAR_CAL_TICK") or 30)      # шаг проверки, с; тесты ставят меньше
         self.stopping.wait(min(20, tick))
@@ -1177,7 +1182,7 @@ class AudioMixin:
                     last = time.monotonic()
                     self.calendars.refresh()
                     self.emit("calendars", **self.calendars.public())
-                mins = int(self.s.get("calendars", "remind_minutes") or 0)
+                mins = min(int(self.s.get("calendars", "remind_minutes") or 0), proactive_limit)
                 if mins > 0 and self.calendars.items():
                     now = datetime.now()
                     for e in self.calendars.events(now, now + timedelta(minutes=mins + 1)):
