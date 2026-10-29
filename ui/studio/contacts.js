@@ -28,10 +28,27 @@
     $c('#ct-read').disabled=!s.granted;$c('#ct-native-settings').hidden=s.state==='unavailable';
     clearTimeout(permissionTimer);if(s.pending)permissionTimer=setTimeout(refreshPermission,1000);
   }
-  async function refreshPermission(){
-    const a=window.api?.();
-    if(a?.contacts_permission)setPermission(await a.contacts_permission());
-    else {const state=await core.call('contacts_state');setPermission(state.permission);}
+  async function refreshPermission(announce=false){
+    if(announce)message('Проверяю разрешение macOS на доступ к Контактам…');
+    const a=window.api?.();let value;
+    try{
+      if(a?.contacts_permission)value=await a.contacts_permission();
+      else value=(await core.call('contacts_state')).permission;
+    }catch(nativeError){
+      // The native bridge can be unavailable for a moment while a pywebview window
+      // is becoming ready. Fall back to the core's read-only status instead of
+      // making the button appear inert.
+      if(!a?.contacts_permission)throw nativeError;
+      try{value=(await core.call('contacts_state')).permission;}catch(_){throw nativeError;}
+    }
+    setPermission(value);
+    if(announce){
+      const text=value?.granted
+        ? (value.limited?'Доступ к Контактам macOS подтверждён (только выбранные карточки).':'Доступ к Контактам macOS подтверждён.')
+        : 'Доступ к Контактам macOS пока не подтверждён. Откройте «Настройки macOS», включите Dewiar и проверьте ещё раз.';
+      message(text,!value?.granted,{popup:true,title:'Проверка доступа к Контактам'});
+    }
+    return value;
   }
   async function load(){
     try{const state=await core.call('contacts_state');$c('#ct-count').textContent=`В Dewiar: ${state.count}`;$c('#ct-suggest').checked=state.suggest;await refreshPermission();await loadLocal();await loadProposal();}
@@ -68,7 +85,7 @@
   }
   $c('#ct-permit').onclick=()=>operation(async()=>{const a=window.api?.();if(!a?.request_contacts_access)throw Error('Откройте Dewiar.app на Mac');setPermission(await a.request_contacts_access());});
   $c('#ct-native-settings').onclick=()=>operation(async()=>{await window.api().open_contacts_settings();});
-  $c('#ct-permission-refresh').onclick=()=>operation(refreshPermission);
+  $c('#ct-permission-refresh').onclick=()=>operation(()=>refreshPermission(true));
   $c('#ct-read').onclick=()=>operation(async()=>{message('Читаю доступные Контакты macOS…');preview=await core.call('contacts_prepare_import',{},120000);selected=new Set();shown=50;$c('#ct-preview').hidden=false;renderPreview();message('Выберите все или отдельные карточки, затем подтвердите импорт.');});
   $c('#ct-select-all').onclick=()=>{if(preview){selected=new Set(preview.contacts.map(r=>r.source_id));renderPreview();}};
   $c('#ct-select-none').onclick=()=>{selected.clear();renderPreview();};
