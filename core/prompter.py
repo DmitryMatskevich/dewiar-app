@@ -140,9 +140,11 @@ class Prompter:
         self._t0 = 0.0
         self._record_wave = None
         self._record_path = ""
+        self._record_error = ""
         self._transcript_path = ""
         self._session_dir = None
         self._screenshots = []
+        self._frame_events = []
         self._last_frame_sig = None
         self._frame_thread = None
         self._frames_enabled = False
@@ -152,6 +154,7 @@ class Prompter:
         self._video_dir = None
         self._video_frames = 0
         self._video_path = ""
+        self._video_export_busy = False
         self._record_lock = threading.RLock()
         self._loop_cap = None
         self._loop_thread = None
@@ -293,14 +296,22 @@ class Prompter:
         with self._lock:
             m = dict(self.meeting)
             preview = self._summary_preview(m) if m else {}
+            audio_path = Path(self._record_path) if self._record_path else None
+            audio_bytes = audio_path.stat().st_size if audio_path and audio_path.is_file() else 0
+            audio_ready = audio_bytes > 44  # Один WAV-заголовок ещё не является записью.
             rec = {"enabled": bool(m.get("record")), "deferred": bool(m.get("deferred")),
                    "name": Path(self._record_path).name if self._record_path else "",
-                   "ready": bool(self._record_path and Path(self._record_path).is_file()),
+                   "ready": audio_ready,
+                   "bytes": audio_bytes,
+                   "audio_source": m.get("audio_source") or "system",
+                   "error": self._record_error,
                    "transcript": Path(self._transcript_path).name if self._transcript_path else "",
                    "screenshots": len(self._screenshots)}
             rec.update({"frame_interval": self._frame_interval, "frame_quality": self._frame_quality,
                         "video": bool(self._video_enabled), "video_frames": self._video_frames,
-                        "video_path": Path(self._video_path).name if self._video_path else ""})
+                        "video_path": Path(self._video_path).name if self._video_path else "",
+                        "export_busy": self._video_export_busy,
+                        "can_export": not self.on and bool(self._frame_events) and audio_ready})
             return {"on": self.on, "paused": self.paused, "meeting": m, "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
@@ -416,7 +427,10 @@ class Prompter:
         except Exception:  # noqa: BLE001 — протокол всё равно можно сохранить в резервный каталог
             d = self._dir / "recordings"
             d.mkdir(parents=True, exist_ok=True)
-        started = datetime.now()
+        # Use the same timestamp as the Markdown summary.  Using a second
+        # datetime.now() here could cross a minute boundary and leave the
+        # audio orphaned from its meeting row.
+        started = datetime.fromtimestamp((self.meeting or {}).get("started") or time.time())
         safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
         path = d / f"{started:%Y-%m-%d %H%M} {safe}.wav"
         with self._record_lock:
@@ -434,7 +448,7 @@ class Prompter:
         except Exception:  # noqa: BLE001
             root = self._dir / "transcripts"
             root.mkdir(parents=True, exist_ok=True)
-        started = datetime.now()
+        started = datetime.fromtimestamp((self.meeting or {}).get("started") or time.time())
         safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
         path = root / f"{started:%Y-%m-%d %H%M} {safe}.txt"
         n = 2
@@ -526,9 +540,11 @@ class Prompter:
     def start(self, title="", goal="", mode="auto", them=True, me=True, knowledge=False, keep_text=False, place="online", nudge=True,
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
               auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
-              capture_source="screen", capture_region=None, capture_application="", scheduled_end=None):
+              capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
+        if self._video_export_busy:
+            raise ValueError("Дождитесь создания видео встречи.")
         live = place == "live"
         if record and not consent:
             raise ValueError("для записи переговоров подтвердите согласие участников")
@@ -548,9 +564,11 @@ class Prompter:
         if self.on:
             self.stop(summary=False)
         self._record_path = ""
+        self._record_error = ""
         self._transcript_path = ""
         self._session_dir = None
         self._screenshots = []
+        self._frame_events = []
         self._last_frame_sig = None
         try:
             self._frame_interval = max(0.5, min(5.0, float(auto_interval or 0.5)))
@@ -579,6 +597,9 @@ class Prompter:
         self._capture_region = dict(capture_region or {})
         self._capture_application = str(capture_application or "")[:160]
         record = bool(record) and not live and bool(them)
+        record_source = str((cfg.get("audio_source") if record_source is None else record_source) or "system").lower()
+        if record_source not in ("system", "microphone"):
+            record_source = "system"
         with self._lock:
             self.meeting = {"title": (title or "").strip()[:120] or "Встреча", "goal": (goal or "").strip()[:2000],
                             "mode": "manual" if mode == "manual" else "auto", "them": bool(them) and not live, "me": bool(me) or live,
@@ -586,6 +607,7 @@ class Prompter:
                             "knowledge": bool(knowledge), "keep_text": bool(keep_text) or record,
                             "participants": self._meta_list(participants), "topics": self._meta_list(topics),
                             "record": record, "deferred": bool(deferred) if record else False,
+                            "audio_source": record_source,
                             "source": (source or "system")[:40], "auto_frames": bool(auto_frames), "started": time.time()}
             if scheduled_end:
                 self.meeting["scheduled_end"] = float(scheduled_end)
@@ -604,6 +626,9 @@ class Prompter:
         if record:
             try:
                 self._record_open(self.meeting["title"])
+                # Both sources are opened by the meeting worker. Pause the
+                # normal assistant capture so the WAV is not corrupted by a
+                # second PortAudio stream.
                 self._suspend_engine_mic(True)
             except Exception:
                 self.on = False
@@ -611,7 +636,7 @@ class Prompter:
                 self._record_close()
                 self._suspend_engine_mic(False)
                 raise
-            # В этом режиме микрофон принадлежит Zoom/Meet/Телемосту. Dewiar получает только системный микс.
+            # The meeting worker owns the selected input while recording.
             self.meeting["me"] = False
         self._stop = threading.Event()
         self._await, self._pause_hint_t, self._them_voice_t, self._t0 = None, 0.0, 0.0, time.monotonic()
@@ -632,10 +657,11 @@ class Prompter:
             self.status = "собеседника не слушаю — подсказки по кнопке и на ваши фразы"
         if self.meeting["goal"] or self.files:
             threading.Thread(target=self._prepare_sheet, name="prompter-sheet", daemon=True).start()
+        source_name = "системный звук" if record_source == "system" else "микрофон"
         log.info("🎬 Суфлёр включён: «%s» (%s, %s; собеседник: %s, я: %s; запись: %s)", self.meeting["title"], "вживую" if live else "онлайн",
                  "подсказки на вопросы" if self.meeting["mode"] == "auto" else "по кнопке",
                  "по голосу" if live else ("да" if self.meeting["them"] else "нет"), "да" if self.meeting["me"] else "нет",
-                 "системный звук" if record else "нет")
+                 source_name if record else "нет")
         self.eng.set_state("idle")
         self._state()
         return self.public()
@@ -673,7 +699,10 @@ class Prompter:
         if self._video_enabled:
             self._finalize_frame_video()
         log.info("🎬 Суфлёр выключен: реплик %d, подсказок %d", len(self.lines), len(self.hints))
-        if summary and (self.lines or self.meeting.get("record")):
+        # Даже тихая встреча должна оставить карточку в «Встречах»: иначе
+        # пользователь не узнаёт, что запись стартовала, и не видит ошибку
+        # источника звука.
+        if summary and self.meeting:
             if self.meeting.get("record") and self.meeting.get("deferred") and self._record_path:
                 threading.Thread(target=self._post_transcribe, name="prompter-transcribe", daemon=True).start()
             else:
@@ -765,20 +794,29 @@ class Prompter:
         """Поток prompter-them: звук компьютера → фразы по VAD (как в _listen: начало — 2 кадра речи, конец — 0,6 с
         тишины, не длиннее 20 с) → очередь распознавания."""
         import os
-        from audio_io import LoopbackCapture
+        from audio_io import Capture, LoopbackCapture
         from listen import SileroVAD
-        cap = LoopbackCapture(wav_path=os.environ.get("DEWIAR_PROMPTER_WAV") or None)
+        wav_path = os.environ.get("DEWIAR_PROMPTER_WAV") or None
+        if wav_path:
+            cap = LoopbackCapture(wav_path=wav_path)
+        elif self.meeting.get("audio_source") == "microphone":
+            device = self.eng.s.get("audio", "input") if hasattr(self.eng.s, "get") else ""
+            cap = Capture(device=device or "", strict_device=bool(device))
+        else:
+            cap = LoopbackCapture()
         self._loop_cap = cap
         try:
             self.status = "слушаю: " + cap.open()
         except Exception as e:  # noqa: BLE001
+            self._record_error = str(e)[:240] if self.meeting.get("record") else ""
             self.status = (f"запись не началась: {e}" if self.meeting.get("record")
                            else f"звук компьютера не слышу ({e}) — подсказки по кнопке и на ваши фразы")
             log.warning("🎬 Суфлёр: %s", self.status)
             self._state()
             return
         if self.meeting.get("record"):
-            self.status = "записываю системный звук; микрофон Dewiar не используется"
+            self.status = ("записываю микрофон в WAV; микрофон Dewiar не используется" if self.meeting.get("audio_source") == "microphone"
+                           else "записываю системный звук; микрофон Dewiar не используется")
         self._state()
         vad = SileroVAD(DATA_DIR / "silero_vad.onnx")
         end_frames = int(0.6 / FRAME_S)
@@ -829,6 +867,8 @@ class Prompter:
         path = self._record_path
         self._emit("summary", summary="", busy=True, phase="transcribe", recording=Path(path).name if path else "")
         try:
+            if not path or not Path(path).is_file() or Path(path).stat().st_size <= 44:
+                raise RuntimeError(self._record_error or "аудиофайл пустой — проверьте источник записи и разрешение микрофона/звука")
             if hasattr(self.eng, "current_stt"):
                 segments = self.eng.transcribe_file(path, stt=self._meeting_stt())
             else:  # компактные тестовые/внешние движки используют старую сигнатуру
@@ -1103,6 +1143,12 @@ class Prompter:
                                       region=self._capture_region, application=self._capture_application)
             except (EyesError, PermissionError, OSError) as exc:
                 raise ValueError(str(exc)) from exc
+        from meeting_video import frame_stamp, write_frame
+        captured = time.time()
+        elapsed = max(0.0, captured - self.meeting.get("started", captured))
+        with self._record_lock:
+            audio_time = self._record_wave.tell() / 16000 if self._record_wave else 0.0
+        stamp = frame_stamp(captured, elapsed, audio_time if self.meeting.get("record") else elapsed)
         # При включённой сборке видео сохраняем каждый такт отдельно, даже
         # если кадр не изменился: сцены в расшифровке по-прежнему дедуплицируются.
         if auto and self._video_enabled:
@@ -1111,11 +1157,8 @@ class Prompter:
                 self._video_dir = root / (Path(self._transcript_path).stem if self._transcript_path else "Встреча") / "Видео-кадры"
                 self._video_dir.mkdir(parents=True, exist_ok=True)
             try:
-                from PIL import Image
                 q = max(40, min(100, int(quality or self._frame_quality)))
-                buf = io.BytesIO()
-                Image.open(io.BytesIO(data)).convert("RGB").save(buf, "JPEG", quality=q, optimize=True)
-                (self._video_dir / f"frame_{self._video_frames:06d}.jpg").write_bytes(buf.getvalue())
+                write_frame(self._video_dir / f"frame_{self._video_frames:06d}.jpg", data, stamp, q)
                 self._video_frames += 1
             except Exception as exc:  # noqa: BLE001 — кадр сцены всё равно можно сохранить ниже
                 log.info("🎬 Кадр для видео не сохранён: %s", exc)
@@ -1128,7 +1171,9 @@ class Prompter:
             self._last_frame_sig = sig
         digest = hashlib.sha1(data).hexdigest()[:12]
         if any(x.get("sha1") == digest for x in self._screenshots):
-            return next(x for x in self._screenshots if x.get("sha1") == digest)
+            existing = next(x for x in self._screenshots if x.get("sha1") == digest)
+            self._remember_frame(existing["path"], stamp)
+            return dict(existing)
         if self._session_dir is None:
             root = Path(self._transcript_path).parent if self._transcript_path else self._dir
             self._session_dir = root / (Path(self._transcript_path).stem if self._transcript_path else "Встреча")
@@ -1137,17 +1182,7 @@ class Prompter:
         n = len(self._screenshots) + 1
         suffix = ".jpg" if auto else ".png"
         path = frames / f"{n:04d}-{digest}{suffix}"
-        if auto:
-            try:
-                from PIL import Image
-                q = max(40, min(100, int(quality or self._frame_quality)))
-                buf = io.BytesIO()
-                Image.open(io.BytesIO(data)).convert("RGB").save(buf, "JPEG", quality=q, optimize=True)
-                path.write_bytes(buf.getvalue())
-            except Exception:
-                path.write_bytes(data)
-        else:
-            path.write_bytes(data)
+        write_frame(path, data, stamp, max(40, min(100, int(quality or self._frame_quality))) if auto else None)
         text = ""
         if ocr:
             try:
@@ -1155,12 +1190,13 @@ class Prompter:
                 text = recognize(data)
             except Exception as exc:  # noqa: BLE001
                 log.info("🎬 OCR кадра не выполнился: %s", exc)
-        t = round(time.time() - self.meeting.get("started", time.time()), 1)
+        t = round(elapsed, 1)
         rel = str(path.relative_to(Path(self._transcript_path).parent)) if self._transcript_path else str(path)
         line = {"who": "screen", "kind": "screen", "text": text or "Снимок экрана", "t": t,
                 "path": rel, "ocr": text}
-        entry = {"path": rel, "ocr": text, "sha1": digest, "t": t}
+        entry = {"path": rel, "ocr": text, "sha1": digest, "t": t, **stamp}
         self._screenshots.append(entry)
+        self._remember_frame(rel, stamp)
         with self._lock:
             self.lines.append(line)
             self.lines = self.lines[-400:]
@@ -1168,6 +1204,46 @@ class Prompter:
         self._emit("line", line=line)
         self._state()
         return dict(entry)
+
+    def _remember_frame(self, path, stamp):
+        # Reappearing scenes must return to their current audio time.
+        if self._frame_events and self._frame_events[-1]["path"] == path:
+            return
+        entry = {"path": path, **stamp}
+        self._frame_events.append(entry)
+        if self._session_dir:
+            with (self._session_dir / "frames.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def export_meeting_video(self):
+        with self._lock:
+            if self.on:
+                raise ValueError("Сначала завершите запись встречи.")
+            if self._video_export_busy:
+                return {"busy": True}
+            if not self._frame_events or not self._record_path:
+                raise ValueError("Нужны сохранённые кадры и аудиозапись встречи.")
+            events = [dict(item) for item in self._frame_events]
+            audio = self._record_path
+            root = Path(self._transcript_path).parent
+            output = self._session_dir / "Видео" / "Видео встречи.mp4"
+            self._video_export_busy = True
+
+        def build():
+            try:
+                from meeting_video import build_meeting_video
+                from eyes import ffmpeg_path
+                path = build_meeting_video(events, audio, root, output, ffmpeg_path())
+                self._video_path = path
+                self._emit("video", busy=False, path=path)
+            except Exception as exc:
+                log.exception("Видео встречи не создано")
+                self._emit("video", busy=False, error=str(exc))
+            finally:
+                self._video_export_busy = False
+                self._state()
+        threading.Thread(target=build, name="meeting-video", daemon=True).start()
+        return {"busy": True}
 
     def _frame_loop(self):
         """Проверять экран с заданным интервалом; неизменившиеся сцены отбрасывать."""
@@ -1183,8 +1259,8 @@ class Prompter:
                     self._state()
 
     def _finalize_frame_video(self):
-        """Собрать MP4-таймлапс из локальных JPEG-кадров, если доступен ffmpeg."""
-        if not self._video_dir or self._video_frames < 2:
+        """Собрать MP4 из кадров; при записи встречи добавить исходный WAV."""
+        if not self._video_dir or not self._frame_events:
             return ""
         try:
             root = Path(self._video_dir).parent
@@ -1193,6 +1269,15 @@ class Prompter:
             from eyes import ffmpeg_path
             ff = ffmpeg_path()
             if not ff:
+                return ""
+            audio = Path(self._record_path) if self._record_path else None
+            if audio and audio.is_file() and audio.stat().st_size > 44:
+                from meeting_video import build_meeting_video
+                self._video_path = build_meeting_video(
+                    self._frame_events, audio, Path(self._transcript_path).parent,
+                    out.with_name("Видео встречи.mp4"), ff)
+                return self._video_path
+            if self._video_frames < 2:
                 return ""
             result = subprocess.run([ff, "-y", "-framerate", str(round(1.0 / self._frame_interval, 4)),
                                      "-i", str(self._video_dir / "frame_%06d.jpg"), "-c:v", "libx264",
@@ -1259,9 +1344,10 @@ class Prompter:
         body = (f"# {m.get('title', 'Встреча')}\n\n## Summary\n"
                 f"- Когда: {preview['when']}\n- Участники: {preview['participants']}\n- Темы: {preview['topics']}\n"
                 f"- Что решили: {preview['decisions']}\n\n"
-                f"*{started:%d.%m.%Y %H:%M} · {mins} мин · суфлёр Dewiar*\n\n"
+                f"*{started:%d.%m.%Y %H:%M} · {mins} мин · Встречи Dewiar*\n\n"
                 + (f"**Цель:** {m['goal']}\n\n" if m.get("goal") else "")
                 + (f"**Аудиозапись:** `Аудио/{Path(record_path).name}`\n\n" if record_path else "")
+                + (f"**Статус аудиозаписи:** {self._record_error}\n\n" if self._record_error else "")
                 + (f"**Расшифровка:** `Расшифровки/{Path(self._transcript_path).name}`\n\n" if self._transcript_path else "")
                 + (text or "_Итог не получился — модель не ответила._")
                 + ("\n\n## Материалы\n" + "\n".join(f"- {f['name']}" for f in self.files) if self.files else "")

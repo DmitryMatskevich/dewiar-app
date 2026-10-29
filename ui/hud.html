@@ -886,9 +886,9 @@ function reportOffer(e) {
 // созвон начался (core/engine_audio._meeting_watch) — предложить суфлёр: молча слушает и подсказывает на экране
 function prompterOffer(e) {
   if (mode !== "card") return;
-  showCap(null, "Идёт созвон" + (e.apps && e.apps.length ? ` (${e.apps.join(", ")})` : "") + ". Включить суфлёр? Я буду молча слушать и подсказывать на экране.", false);
+  showCap(null, "Идёт созвон" + (e.apps && e.apps.length ? ` (${e.apps.join(", ")})` : "") + ". Включить режим встречи? Я буду молча слушать и подсказывать на экране.", false);
   const row = document.createElement("div"); row.className = "repask";
-  const yes = document.createElement("button"); yes.className = "rep"; yes.textContent = "Открыть суфлёр";
+  const yes = document.createElement("button"); yes.className = "rep"; yes.textContent = "Открыть встречи";
   const no = document.createElement("button"); no.className = "rep"; no.textContent = "Не сейчас";
   yes.onclick = (ev) => { ev.stopPropagation(); const a = api(); if (a && a.open_prompter) a.open_prompter(); hideCapLater(300); };
   no.onclick = (ev) => { ev.stopPropagation(); hideCapLater(300); };

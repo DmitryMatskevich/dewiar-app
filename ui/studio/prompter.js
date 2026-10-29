@@ -37,7 +37,8 @@
     try {
       await core.call("prompter_schedule", { title: $("#pr-s-title").value || "Встреча по расписанию",
         start_at: new Date(start).toISOString(), end_at: end ? new Date(end).toISOString() : null,
-        options: { record: true, deferred: true, consent: true, auto_first_frame: !!get("prompter.auto_first_frame"),
+        options: { record: true, deferred: true, consent: true, record_source: get("prompter.audio_source") || "system",
+          auto_first_frame: !!get("prompter.auto_first_frame"),
           capture_source: get("prompter.capture_source") || "screen", capture_region: get("prompter.capture_region") || {}, capture_application: get("prompter.capture_application") || "",
           auto_frames: true, auto_interval: Number(get("prompter.frame_interval") || 1),
           frame_quality: Number(get("prompter.frame_quality") || 85), frame_video: !!get("prompter.frame_video"),

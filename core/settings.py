@@ -162,6 +162,8 @@ DEFAULTS = {
     "prompter": {
         "stt_engine": "inherit",       # inherit | gigaam | vosk | remote
         "stt_model": "gigaam-v3-e2e-rnnt",
+        "audio_source": "system",      # system (BlackHole/Loopback) | microphone
+        "record_audio_default": False,   # только значение переключателя в новом окне встречи
         "capture_hotkey": "Ctrl+Shift+S",
         "auto_first_frame": True,
         "capture_source": "screen",    # screen | region | application

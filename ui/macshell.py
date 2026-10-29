@@ -116,8 +116,8 @@ def install_meeting_status(api):
                 self.header.setTitle_(f"Записывается: {title}")
             elif on:
                 self.item.button().setTitle_("Dewiar")
-                self.item.button().setToolTip_(f"Суфлёр работает: {title}")
-                self.header.setTitle_(f"Суфлёр работает: {title}")
+                self.item.button().setToolTip_(f"Режим встречи работает: {title}")
+                self.header.setTitle_(f"Режим встречи работает: {title}")
             else:
                 self.item.button().setTitle_("Dewiar")
                 self.item.button().setToolTip_("Открыть Dewiar")

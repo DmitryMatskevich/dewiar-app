@@ -394,7 +394,8 @@ class CommandsMixin:
                                 a.get("source", "system"), a.get("consent", False), a.get("auto_frames", False),
                                 a.get("auto_interval", 0.5), a.get("frame_quality", 85), a.get("frame_video", False),
                                 a.get("auto_first_frame", True), a.get("capture_source", "screen"),
-                                a.get("capture_region"), a.get("capture_application", ""), a.get("scheduled_end"))
+                                a.get("capture_region"), a.get("capture_application", ""), a.get("scheduled_end"),
+                                a.get("record_source"))
             if cmd == "prompter_voice":                    # голос владельца: start — записать, stop — сохранить, forget
                 act = a.get("action", "start")
                 if act == "start":
@@ -404,6 +405,8 @@ class CommandsMixin:
                 return pr.enroll_stop(save=act != "cancel")
             if cmd == "prompter_stop":
                 return pr.stop(summary=a.get("summary", True))
+            if cmd == "prompter_video":
+                return pr.export_meeting_video()
             if cmd == "prompter_pause":
                 return pr.pause(a.get("on", True))
             if cmd == "prompter_hint":
@@ -469,10 +472,37 @@ class CommandsMixin:
                 return pr.add_file(a.get("name", ""), data=data, path=a.get("path", ""))
             if cmd == "prompter_file_remove":
                 return pr.remove_file(a.get("name", ""))
-            if cmd == "prompter_meetings":                 # итоги прошлых встреч — студия, «Суфлёр»
+            if cmd == "prompter_meetings":                 # итоги прошлых встреч — студия, «Встречи»
                 d = self.workspace.ensure() / "Встречи"
                 fs = sorted(d.glob("*.md"), reverse=True)[:40] if d.is_dir() else []
-                return [{"name": f.stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size} for f in fs]
+                rows = []
+                for f in fs:
+                    stem = f.stem
+                    audio = d / "Аудио" / f"{stem}.wav"
+                    audio_ready = audio.is_file() and audio.stat().st_size > 44
+                    # Older builds used a second clock for the WAV name. If
+                    # that crossed a minute boundary, recover the only WAV
+                    # with the same meeting start minute.
+                    if not audio_ready and len(stem) >= 15:
+                        candidates = [x for x in (d / "Аудио").glob(f"{stem[:15]}*.wav")
+                                      if x.is_file() and x.stat().st_size > 44]
+                        if len(candidates) == 1:
+                            audio, audio_ready = candidates[0], True
+                    # Видео создаётся после итогового Markdown, поэтому ищем
+                    # его при каждом открытии списка, а не только в памяти.
+                    videos = []
+                    for candidate in (d / "Расшифровки" / stem / "Видео").glob("*.mp4") if (d / "Расшифровки" / stem / "Видео").is_dir() else []:
+                        if candidate.is_file():
+                            videos.append(candidate)
+                    if not videos:
+                        videos = [x for x in d.rglob("*.mp4") if x.is_file() and (stem in x.name or stem in str(x.parent))]
+                    row = {"name": stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size,
+                           "audio": f"Встречи/Аудио/{audio.name}" if audio_ready else "",
+                           "audio_size": audio.stat().st_size if audio_ready else 0,
+                           "video": f"Встречи/{videos[0].relative_to(d).as_posix()}" if videos else "",
+                           "video_size": videos[0].stat().st_size if videos else 0}
+                    rows.append(row)
+                return rows
             if cmd == "prompter_meeting_remove":           # студия, «Прошлые встречи» → корзина (отзыв 17.10: «как удалить прошлую встречу?»)
                 rel = str(a.get("path") or "")
                 if not rel.startswith("Встречи/") or "/" in rel[len("Встречи/"):] or not rel.endswith(".md"):

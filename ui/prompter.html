@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Dewiar — суфлёр</title>
+<title>Dewiar — встречи</title>
 <link href="assets/fonts.css" rel="stylesheet">
 <style>
   /* Суфлёр: окно-карточка поверх всех окон (ui/app.py → open_prompter; скругление 24px совпадает с PROMPTER_RADIUS).
@@ -251,7 +251,7 @@
 <body>
 <div id="wrap">
   <header class="pywebview-drag-region">
-    <div class="t"><span class="dot"></span><span id="title">Суфлёр</span></div>
+    <div class="t"><span class="dot"></span><span id="title">Встречи</span></div>
     <span id="clock" class="hidden">0:00</span>
     <button class="ib hidden" id="b-pause" title="Пауза — не слушать"><svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg></button>
     <button class="ib hidden" id="b-stop" title="Закончить встречу и подвести итог"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg></button>
@@ -260,7 +260,7 @@
 
   <!-- подготовка встречи -->
   <main id="setup">
-    <p class="lead">Молча слушаю разговор и показываю подсказку, когда собеседник спрашивает или возражает. Голосом не отвечаю.</p>
+    <p class="lead">Записываю встречу по вашему выбору, делаю расшифровку и протокол. Подсказки во время разговора остаются доступными.</p>
     <label class="f">Встреча<input type="text" id="m-title" maxlength="120" placeholder="Например, переговоры с «Альфа-Строй»"></label>
     <label class="f">Чего хотите добиться<textarea id="m-goal" maxlength="2000" placeholder="Цель, ваши условия и границы: «продать годовой тариф, скидка не больше 10%»"></textarea></label>
     <label class="f">Участники<input type="text" id="m-participants" maxlength="2000" placeholder="Вы, Иван Петров, команда «Альфа»" title="Перечислите участников через запятую. Эти имена попадут в начало протокола."></label>
@@ -278,7 +278,8 @@
     <div class="opts" id="o-online">
       <label class="opt"><div>Собеседника<small>звук компьютера</small></div><span class="sw"><input type="checkbox" id="m-them" checked><i></i></span></label>
       <label class="opt"><div>Меня<small>микрофон</small></div><span class="sw"><input type="checkbox" id="m-me" checked><i></i></span></label>
-      <label class="opt"><div>Записать разговор<small>системный звук; микрофон Dewiar не используется</small></div><span class="sw"><input type="checkbox" id="m-record" title="Записать системный звук онлайн-встречи и после окончания сделать расшифровку"><i></i></span></label>
+      <label class="opt"><div>Записать аудиофайл<small>WAV останется на Mac и будет расшифрован после встречи</small></div><span class="sw"><input type="checkbox" id="m-record" title="Записать аудио встречи и после окончания сделать расшифровку"><i></i></span></label>
+      <label class="opt hidden" id="m-record-source-wrap"><div>Источник аудио<small>для системного звука нужен BlackHole или Loopback</small></div><span><select id="m-record-source" title="Источник WAV для записи встречи"><option value="system">Системный звук</option><option value="microphone">Микрофон</option></select></span></label>
       <label class="opt"><div>Расшифровать после окончания<small>экономит ресурсы во время переговоров</small></div><span class="sw"><input type="checkbox" id="m-deferred" checked title="Сделать полную транскрибацию WAV после остановки встречи"><i></i></span></label>
       <label class="opt"><div>Автоматические кадры<small>проверка экрана каждые 0,5 секунды; неизменившаяся сцена не дублируется</small></div><span class="sw"><input type="checkbox" id="m-auto-shot" title="Сохранять изменившиеся кадры экрана с локальным OCR"><i></i></span></label>
       <label class="opt"><div>Снимок при начале записи<small>первый кадр фиксирует, что было на экране в момент старта; можно отменить</small></div><span class="sw"><input type="checkbox" id="m-first-shot" checked title="Сделать первый снимок при запуске записи"><i></i></span></label>
@@ -287,7 +288,7 @@
         <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option></select></label>
         <label style="grid-column:1/-1"><span style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;font-weight:500"><input type="checkbox" id="m-frame-video" title="Собрать видео из всех кадров" style="width:16px;height:16px"> Собрать видео из кадров (таймлапс)</span></label>
       </div>
-      <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent"><i></i></span></label>
+      <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent" checked><i></i></span></label>
     </div>
     <div id="vbox" class="blk hidden">
       <span class="vi"><svg viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg></span>
@@ -391,10 +392,10 @@ function renderRecord() {
   if (on) $("#m-me").checked = false;
   $("#m-them").disabled = false;
   $("#m-record").title = on
-    ? "Dewiar пишет только системный звук. Для голоса с вашей стороны направьте микс встречи в BlackHole/Loopback или сохраните запись в приложении встречи."
+    ? "Dewiar сохраняет выбранный источник в WAV и использует его для полной расшифровки и видео. Для системного звука нужен BlackHole/Loopback."
     : "Запись выключена. Включите только после согласия участников.";
   $("#m-consent-wrap").classList.toggle("hidden", !on);
-  if (!on) $("#m-consent").checked = false;
+  $("#m-record-source-wrap").classList.toggle("hidden", !on);
   $("#start").disabled = on && !$("#m-consent").checked;
 }
 $("#m-record").onchange = renderRecord;
@@ -481,7 +482,7 @@ $("#start").onclick = async () => {
       deferred: $("#m-deferred").checked, source: "system", consent: $("#m-consent").checked,
       auto_frames: $("#m-auto-shot").checked, auto_interval: Number($("#m-frame-interval").value),
       frame_quality: Number($("#m-frame-quality").value), frame_video: $("#m-frame-video").checked,
-      auto_first_frame: $("#m-first-shot").checked });
+      auto_first_frame: $("#m-first-shot").checked, record_source: $("#m-record-source").value });
     idx = -1; follow = true; render();
   } catch (e) { $("#nobrain").textContent = e.message; $("#nobrain").classList.remove("hidden"); }
   finally { $("#start").disabled = false; renderPlace(); }
@@ -571,7 +572,7 @@ function render() {
     renderInitial(); renderHint(); renderTalk(); renderSheet(); renderCaptureLive();
   } else if (view === "live" || view === "sum") {
     clearInterval(clockT); $("#title").textContent = "Итог встречи"; show("sum");
-  } else { $("#title").textContent = "Суфлёр"; show("setup"); }
+  } else { $("#title").textContent = "Встречи"; show("setup"); }
 }
 function md(t) {
   return esc(t).replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
@@ -579,12 +580,31 @@ function md(t) {
     .replace(/(?:^- .*(?:\n|$))+/gm, m => "<ul>" + m.trim().split("\n").map(l => `<li>${l.slice(2)}</li>`).join("") + "</ul>")
     .replace(/^(?!<h|<ul|<li|<em)(.+)$/gm, "<p>$1</p>").replace(/\n+/g, "");
 }
+let videoExportBusy = false, videoExportResult = null;
+function renderMeetingVideo() {
+  const button = $("#create-meeting-video"), result = $("#meeting-video-result");
+  if (!button) return;
+  const rec = st?.recording || {};
+  button.disabled = !!st?.on || videoExportBusy || !!rec.export_busy || !rec.can_export;
+  if ($("#again")) $("#again").disabled = videoExportBusy || !!rec.export_busy;
+  button.textContent = videoExportBusy || rec.export_busy ? "Создаю видео встречи…" : "Создать видео встречи";
+  button.title = rec.can_export ? "Кадры и записанный звук с сохранением времени" : "Нужны завершённая аудиозапись и сохранённые кадры";
+  if (result) result.textContent = videoExportResult?.error || (videoExportResult?.path ? "Сохранено: " + videoExportResult.path : rec.video_path ? "Видео: " + rec.video_path : "");
+}
+async function createMeetingVideo() {
+  videoExportBusy = true; videoExportResult = null; renderMeetingVideo();
+  try { await core.call("prompter_video", {}); }
+  catch (e) { videoExportBusy = false; videoExportResult = {error: e.message}; renderMeetingVideo(); }
+}
 function renderSum(e) {
   show("sum"); $("#title").textContent = "Итог встречи";
   $("#sum").innerHTML = e.busy ? `<div class="wait"><span class="spin"></span>${e.phase === "transcribe" ? "Расшифровываю запись разговора…" : "Подвожу итог встречи…"}</div>`
     : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
       + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
-  if ($("#again")) $("#again").onclick = () => { show("setup"); $("#title").textContent = "Суфлёр"; };
+  $("#sum").insertAdjacentHTML("beforeend", '<div class="row" style="margin-top:12px"><button class="ghost blk" type="button" id="create-meeting-video">Создать видео встречи</button></div><p class="saved" id="meeting-video-result" role="status" style="overflow-wrap:anywhere"></p>');
+  $("#create-meeting-video").onclick = createMeetingVideo;
+  renderMeetingVideo();
+  if ($("#again")) $("#again").onclick = () => { show("setup"); $("#title").textContent = "Встречи"; };
   if ($("#done")) $("#done").onclick = closeWin;
 }
 $("#ask").onclick = () => { follow = true; core.call("prompter_hint", {}).catch(e => { $("#err").textContent = e.message; }); };
@@ -635,11 +655,20 @@ document.addEventListener("keydown", (e) => {
 });
 
 /* ---------- события ядра ---------- */
-core.on("hello", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || "Ctrl+Shift+S"; core.call("prompter_state").then(s => { st = s; render(); if (!s.on && s.summary && view === "sum") renderSum({ summary: s.summary }); }).catch(() => {}); });
+core.on("hello", (e) => {
+  prompterHotkey = e?.settings?.prompter?.capture_hotkey || "Ctrl+Shift+S";
+  const cfg = e?.settings?.prompter || {};
+  if ($("#m-record-source") && cfg.audio_source) $("#m-record-source").value = cfg.audio_source;
+  if ($("#m-record") && cfg.record_audio_default != null) $("#m-record").checked = !!cfg.record_audio_default;
+  renderRecord();
+  core.call("prompter_state").then(s => { st = s; render(); if (!s.on && s.summary && view === "sum") renderSum({ summary: s.summary }); }).catch(() => {});
+});
 core.on("settings", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || prompterHotkey; });
 core.on("prompter", (e) => {
   if (e.kind === "state") {
     const was = st && st.on; st = e.state;
+    if (!was && st.on) { videoExportBusy = false; videoExportResult = null; }
+    renderMeetingVideo();
     if (was && !st.on && !(st.lines || []).length && !(st.meeting && st.meeting.record)) { view = "setup"; render(); }   // встреча без единой реплики — итога не будет
     else if (!(was && !st.on)) render();                                            // закончилась — ждём итог (событие summary)
     return;
@@ -652,6 +681,7 @@ core.on("prompter", (e) => {
     if (view === "live") renderHint();
   } else if (e.kind === "sheet") { st.sheet = e.sheet; renderSheet(); }
   else if (e.kind === "summary") renderSum(e);
+  else if (e.kind === "video") { videoExportBusy = false; videoExportResult = e; renderMeetingVideo(); }
   else if (e.kind === "voice") { voiceShow(e); if (e.step === "done") { st.voice = Object.assign(st.voice || {}, { has: true }); renderPlace(); } }
 });
 render();

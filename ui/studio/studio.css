@@ -972,6 +972,9 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .pr-it:hover { background: var(--panel2); }
 .pr-it span { color: var(--muted); font-size: 13px; }
 .pr-row { display: flex; gap: 6px; align-items: stretch; } .pr-row .pr-it { flex: 1; min-width: 0; }
+.pr-play { width: 46px; flex: none; border: 0; border-radius: 14px; background: var(--glass); color: var(--accent); cursor: pointer; display: grid; place-items: center; font-size: 17px; }
+.pr-play:hover { background: var(--panel2); color: var(--ink); }
+.pr-play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pr-del { width: 46px; flex: none; border: 0; border-radius: 14px; background: var(--glass); color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 .pr-del:hover { background: rgba(255,107,138,.16); color: var(--bad); }
 .pr-del:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

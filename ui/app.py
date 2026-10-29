@@ -246,7 +246,7 @@ def pad_rects(side, w, h, gap, clips, radius):
     out = [(x + x0, y, ww, hh) for x, y, ww, hh in _shape_rects("pad", w, h, radius, exact=True)]
     cx = w if side == "left" else 0
     return out + [(cx, int(y), gap, int(ch)) for y, ch in clips]
-PROMPTER_TITLE = "Dewiar — суфлёр"
+PROMPTER_TITLE = "Dewiar — встречи"
 PROMPTER_RADIUS = 24
 PROMPTER_BAR, PROMPTER_BTNS = 56, 180   # заголовок суфлёра (prompter.html, header): высота и место под кнопки справа
 STUDIO_TITLE = "Dewiar — студия"

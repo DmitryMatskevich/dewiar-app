@@ -238,7 +238,7 @@ class AnswerMixin:
         if not raw and not quiet and not via and not images and re.match(
                 r"^(?:\w+,\s*)?(?:включи|запусти|открой|начни|позови)\s+(?:режим\s+)?суфл[её]р\w*|^(?:\w+,\s*)?режим\s+суфл[её]ра", text.strip(), re.I):
             self.emit("prompter", kind="open")             # суфлёр — окно ui/prompter.html (core/prompter.py)
-            self._say_quick("Открываю суфлёр. На встрече я молчу и подсказываю на экране.", text)
+            self._say_quick("Открываю режим встречи. Я молчу и подсказываю на экране.", text)
             return
         if not raw and not quiet and not via and not images and self._window_cmd(text):
             return

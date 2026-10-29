@@ -74,7 +74,7 @@
   <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
   <button data-p="ref" title="Приглашённые друзья: созвездие, ссылка, награды">Рефералы</button>
   <button data-p="tasks">Задачи</button>
-  <button data-p="prompter" title="Молчаливые подсказки на встречах и переговорах">Суфлёр</button>
+  <button data-p="prompter" title="Запись встреч, аудио, экрана и протоколы">Встречи</button>
   <div class="ng">Знания</div>
   <button data-p="memory">Память</button>
   <button data-p="diary" title="Дневник, душа, конституция и что ассистент знает о вас">Душа</button>
@@ -92,7 +92,7 @@
   <button data-p="sound">Звук и поведение</button>
   <button data-p="hands">Руки</button>
   <button data-p="skills">Плагины</button>
-  <button data-p="features" title="Что показывать: игры, встречи, радар, суфлёр — включайте только нужное">Возможности</button>
+  <button data-p="features" title="Что показывать: игры, встречи, радар — включайте только нужное">Возможности</button>
   <div class="ng">Связи и данные</div>
   <button data-p="dw" id="nav-dw">Dewiar.pro<i class="ndot" id="dw-dot"></i></button>
   <button data-p="connect">Подключение</button>
@@ -360,8 +360,8 @@
   </section>
 
   <section id="p-prompter">
-    <h1>Суфлёр</h1>
-    <p class="lead">Подсказки на встрече — молча, на экране. Суфлёр слушает собеседника и вас — онлайн (звук компьютера) или вживую
+    <h1>Встречи</h1>
+    <p class="lead">Запись встреч, аудио и экрана. Dewiar слушает собеседника и вас — онлайн (звук компьютера) или вживую
       (один микрофон, вас узнаёт по голосу), — а когда собеседник спрашивает или возражает, показывает короткую подсказку: что
       ответить, цифры из ваших материалов, встречный вопрос. Замешкались с ответом — выделит, с чего начать. Голосом в это
       время ассистент не отвечает и на имя не откликается.</p>
@@ -377,12 +377,19 @@
           <option value="gigaam-v3-e2e-rnnt">v3 e2e RNNT — точнее</option><option value="gigaam-v3-e2e-ctc">v3 e2e CTC — быстрее</option><option value="gigaam-v3-rnnt">v3 RNNT — без пунктуации</option>
         </select><span class="hint" id="pr-stt-status">Около 250 МБ, скачивается один раз.</span></label>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Источник аудиозаписи<select data-k="prompter.audio_source" id="pr-audio-source">
+          <option value="system">Системный звук (BlackHole / Loopback)</option>
+          <option value="microphone">Микрофон MacBook или выбранный в «Звук»</option>
+        </select><span class="hint">Локальный WAV используется для полной транскрибации и сборки видео.</span></label>
+        <div class="switch"><div>Предлагать запись аудио по умолчанию<span>Переключатель «Записать аудио» будет включён в новом окне встречи. Перед записью предупредите участников.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_audio_default"><i></i></label></div>
+      </div>
       <div class="actions" style="margin-top:10px"><button class="btn small" id="pr-stt-download">Скачать выбранную модель</button><span class="res" id="pr-stt-result"></span></div>
       <div class="row" style="margin-top:14px">
         <label class="f">Источник кадров<select data-k="prompter.capture_source" id="pr-capture-source">
           <option value="screen">Весь экран (по умолчанию)</option><option value="region">Часть экрана по координатам</option><option value="application">Окно приложения</option>
         </select></label>
-        <label class="f">Кнопка снимка<input type="text" data-k="prompter.capture_hotkey" placeholder="Ctrl+Shift+S" title="Сочетание действует в окне суфлёра; например Ctrl+Alt+S"></label>
+        <label class="f">Кнопка снимка<input type="text" data-k="prompter.capture_hotkey" placeholder="Ctrl+Shift+S" title="Сочетание действует в окне встречи; например Ctrl+Alt+S"></label>
       </div>
       <div class="row" style="margin-top:10px">
         <label class="f">Частота автокадров<select data-k="prompter.frame_interval" id="pr-frame-interval" title="Как часто проверять экран во время фоновой записи">
@@ -404,17 +411,17 @@
       <h3 style="font-size:15px;margin-bottom:6px">Фоновая запись по времени</h3>
       <p class="hint">Dewiar запустит запись без открытого окна и остановит её в указанное время. Разрешения микрофона, звука и экрана должны быть выданы заранее.</p>
       <div class="row"><label class="f">Название<input type="text" id="pr-s-title" placeholder="Планёрка команды"></label><label class="f">Начать<input type="datetime-local" id="pr-s-start"></label><label class="f">Закончить (необязательно)<input type="datetime-local" id="pr-s-end" title="Оставьте пустым, чтобы остановить запись вручную из верхнего меню Dewiar"></label></div>
-      <div class="switch" style="margin-top:8px"><div>Согласие участников<span>Подтверждаю, что участники предупреждены о записи.</span></div><label class="tg"><input type="checkbox" id="pr-s-consent"><i></i></label></div>
+      <div class="switch" style="margin-top:8px"><div>Согласие участников<span>Подтверждаю, что участники предупреждены о записи.</span></div><label class="tg"><input type="checkbox" id="pr-s-consent" checked><i></i></label></div>
       <div class="actions" style="margin-top:10px"><button class="btn primary" id="pr-s-add">Запланировать</button><span class="res" id="pr-s-result"></span></div>
       <div id="pr-s-list" class="hint" style="margin-top:10px">Загрузка расписания…</div>
     </div>
     <div class="prof on pr-hero">
       <div class="pr-demo" aria-hidden="true"><i></i><div><span>«А если у нас пятьдесят мест?»</span><b>Цена за место падает до 140 — скидка 12%</b>
         <em>годовой договор — ещё минус 10%</em><em>внедрение за две недели</em></div></div>
-      <div class="pr-how"><p>Перед встречей положите в окно суфлёра прайс, договор или план и напишите цель — он заранее соберёт
+      <div class="pr-how"><p>Перед встречей положите в окно встречи прайс, договор или план и напишите цель — он заранее соберёт
         шпаргалку вероятных вопросов. После встречи — итог: о чём договорились и кто что делает, файлом в папку «Встречи».</p>
-        <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="pr-open">Открыть суфлёр</button></div>
-        <p class="hint" style="margin-top:10px">Ещё: «Лира, включи суфлёр». Во время созвона виджет предложит его сам.</p></div>
+        <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="pr-open">Открыть окно встречи</button></div>
+        <p class="hint" style="margin-top:10px">Ещё: «Лира, включи режим встречи». Во время созвона виджет предложит его сам.</p></div>
     </div>
     <h3 style="font-size:15px;margin:20px 0 8px">Прошлые встречи</h3>
     <div id="pr-list" class="pr-list"></div>
@@ -1361,7 +1368,7 @@
     <div class="switch"><div>Досуг — милые игры<span>Двадцать две игры на пару минут: сказки «Огонёк», «Хутор Одуванчик» и «Кто боится темноты», «Каляка» — дорисуй мостик ручкой, «Колючая почта», «Выше облаков» — прыжки до луны, «Найди пару» на память, «Пять в ряд» против Лиры, головоломки (Тетрис, Конфетки, Слияние, Судоку, Пятнашки), слова (Кроссворд, «Пять букв»), рисованные Крестики-нолики и Реверси против Лиры, аркады. Кнопка с джойстиком у виджета, в блокноте или фраза «Лира, давай поиграем». Управление — клавиатурой, мышью или геймпадом.</span></div><label class="tg"><input type="checkbox" data-k="features.games"><i></i></label></div>
     <div class="switch"><div>Рядом<span>«Близкие» → «Рядом»: на карте видно, кто из близких где, если они сами делятся местом.</span></div><label class="tg"><input type="checkbox" data-k="features.near"><i></i></label></div>
     <div class="switch"><div>Встречи<span>«Близкие» → «Встречи»: знакомства с людьми, которые сейчас рядом с вашим телефоном.</span></div><label class="tg"><input type="checkbox" data-k="features.meet"><i></i></label></div>
-    <div class="switch"><div>Суфлёр<span>Молчаливые подсказки на встречах и созвонах; на созвоне виджет сам предложит его включить.</span></div><label class="tg"><input type="checkbox" data-k="features.prompter"><i></i></label></div>
+    <div class="switch"><div>Встречи<span>Запись аудио, экрана, расшифровка и протокол переговоров; окно можно закрыть — фоновая запись продолжится.</span></div><label class="tg"><input type="checkbox" data-k="features.prompter"><i></i></label></div>
     <p class="hint">На телефоне — свои переключатели: «Настройки» → «Ещё» → «Возможности».</p>
   </section>
 
