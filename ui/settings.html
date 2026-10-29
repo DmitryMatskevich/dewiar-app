@@ -450,12 +450,16 @@
     <h1>Папка</h1>
     <p class="lead">Всё, что ассистент делает для вас, — обычные файлы: заметки, дневник, лаборатория со скриптами и
       его память о вас. Их можно открывать, править и удалять.</p>
-    <div class="actions" style="margin:0 0 16px">
-      <span class="fpath" id="f-root"></span>
-      <button class="btn primary" id="f-open">Открыть в файлах</button>
-      <button class="btn" id="f-reload">Обновить</button>
+    <div class="actions f-folder-actions" style="margin:0 0 16px">
+      <div class="fcurrent" role="status" aria-live="polite">
+        <span class="fcurrent-label">Настроено на папку</span>
+        <code class="fpath" id="f-root">Загружаю…</code>
+      </div>
+      <button class="btn primary" id="f-change" title="Выбрать другую рабочую папку Dewiar через системное окно macOS. Старая папка останется на месте.">Изменить папку</button>
+      <button class="btn" id="f-open" title="Открыть текущую рабочую папку в Finder.">Открыть в файлах</button>
+      <button class="btn" id="f-reload" title="Обновить дерево файлов и сведения о текущей папке.">Обновить</button>
     </div>
-    <p class="hint" id="f-folder-note">Рабочая папка — это источник файлов Dewiar. Смена папки не удаляет прежние файлы: новая папка становится текущей, её «Знания» переиндексируются в фоне, а дополнительные папки «Знаний» остаются подключёнными отдельно.</p>
+    <p class="hint" id="f-folder-note">Рабочая папка — это источник файлов Dewiar. «Изменить папку» открывает системный выбор каталога macOS. Старая папка не удаляется и остаётся на месте; новая папка становится текущей, её «Знания» переиндексируются в фоне, а дополнительные папки «Знаний» остаются подключёнными отдельно.</p>
     <div class="fsync" id="f-sync"></div>
     <div class="fbox">
       <div class="ftree" id="f-tree"></div>

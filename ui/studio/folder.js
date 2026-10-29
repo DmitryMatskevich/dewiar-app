@@ -190,6 +190,26 @@ async function loadFolder() {
     if (!fCur) { const readme = t.items.find(n => n.name === "README.md"); if (readme) openFile(readme.path); }
   } catch (e) { toast(e.message); }
 }
+async function changeWorkspaceFolder() {
+  const a = window.api && window.api();
+  if (!a || typeof a.pick_folder !== "function") return toast("Выбор папки доступен в приложении Dewiar", 5000);
+  const b = $("#f-change");
+  const oldText = $("#f-root").textContent;
+  if (b) { b.disabled = true; b.textContent = "Выбираю…"; }
+  try {
+    const path = await a.pick_folder();
+    if (!path || path === oldText) return;
+    const root = await core.call("ws_set_path", { path });
+    $("#f-root").textContent = root || path;
+    toast("Рабочая папка изменена — «Знания» переиндексируются в фоне", 5500);
+    await loadFolder();
+  } catch (e) {
+    toast(e.message || "Не удалось изменить рабочую папку", 6000);
+  } finally {
+    if (b) { b.disabled = false; b.textContent = "Изменить папку"; }
+  }
+}
+$("#f-change").onclick = changeWorkspaceFolder;
 async function openFile(path) {
   if (fEdit && fEdit.path !== path && fEdit.text !== fEdit.original) {
     const choice = await ask("В текущем файле есть несохранённые изменения. Открыть другой файл без сохранения?");

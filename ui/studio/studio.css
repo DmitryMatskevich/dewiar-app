@@ -113,6 +113,10 @@ nav .ndot.on { display: inline-block; }
 @media (prefers-reduced-motion: reduce) { .dw-more > summary svg { transition: none; } }
 section.wide > .lead { max-width: 860px; }
 .fpath { flex: 1; min-width: 200px; font-size: 13px; color: var(--muted); font-family: ui-monospace, "Ubuntu Mono", monospace; }
+.f-folder-actions { align-items: stretch; }
+.fcurrent { display: flex; flex: 1 1 320px; min-width: 240px; flex-direction: column; justify-content: center; gap: 3px; padding: 4px 0; }
+.fcurrent-label { color: var(--muted); font-size: 12px; font-weight: 600; }
+.fcurrent .fpath { display: block; min-width: 0; overflow-wrap: anywhere; line-height: 1.35; }
 .fbox { display: grid; grid-template-columns: minmax(230px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .fbox > * { min-width: 0; }
 /* дневник: читать как книгу */

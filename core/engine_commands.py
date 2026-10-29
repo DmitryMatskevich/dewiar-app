@@ -1444,8 +1444,20 @@ class CommandsMixin:
             return {"path": str(out), "name": out.name, "dir": str(out.parent)}
         if cmd == "ws_set_path":
             path = (a.get("path") or "").strip()
-            self.s.update({"workspace": {"path": path}})
-            self.workspace.ensure()
+            if not path:
+                raise ValueError("Выберите папку рабочей папки Dewiar")
+            candidate = Path(os.path.expanduser(path)).resolve()
+            if not candidate.is_dir():
+                raise ValueError(f"Папка не найдена: {candidate}")
+            if not os.access(candidate, os.W_OK):
+                raise ValueError(f"Нет разрешения на запись в папку: {candidate}. Выберите доступный каталог или разрешите доступ macOS.")
+            old_path = self.s.get("workspace", "path") or ""
+            self.s.update({"workspace": {"path": str(candidate)}})
+            try:
+                self.workspace.ensure()
+            except Exception as e:  # noqa: BLE001 — откатываем настройку, если macOS/TCC не разрешила запись
+                self.s.update({"workspace": {"path": old_path}})
+                raise ValueError(f"Не удалось использовать папку «{candidate}»: {e}") from e
             self.skills.set_folder(self.workspace.root / "Навыки")
             self.workspace.sync_reminders(self.reminders.items)
             # Индекс «Знаний» хранит относительные пути текущего рабочего корня.
