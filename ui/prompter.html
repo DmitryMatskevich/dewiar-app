@@ -82,6 +82,10 @@
   .frame-settings { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 4px 0; }
   .frame-settings label { display: flex; flex-direction: column; gap: 4px; color: var(--faint); font-size: 12px; font-weight: 600; }
   .frame-settings select { width: 100%; color: var(--ink); background: var(--glass2); border: 0; border-radius: 10px; padding: 8px 9px; font: inherit; }
+  #capture-live { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  #capture-live > span { flex: 1 1 100%; color: var(--muted); font-size: 12px; }
+  #capture-live select { color: var(--ink); background: var(--glass2); border: 0; border-radius: 9px; padding: 7px 8px; font: inherit; }
+  #capture-live button { padding: 7px 10px; font-size: 12px; }
   .opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
   .opt small { display: block; color: var(--faint); font-size: 12.5px; font-weight: 500; }
   .sw { position: relative; width: 38px; height: 22px; flex: none; }
@@ -305,6 +309,13 @@
   <!-- встреча -->
   <main id="live" class="hidden">
     <p id="hear"></p>
+    <div id="capture-live" class="blk" title="Настройки автоматических кадров можно менять прямо во время фоновой записи">
+      <span id="capture-live-status">Автокадры выключены</span>
+      <select id="live-frame-interval" title="Частота проверки экрана"><option value="0.5">0,5 с</option><option value="1" selected>1 с</option><option value="2">2 с</option><option value="5">5 с</option></select>
+      <select id="live-frame-quality" title="Качество JPEG"><option value="60">60%</option><option value="75">75%</option><option value="85" selected>85%</option><option value="95">95%</option></select>
+      <button class="ghost blk" id="capture-live-apply" title="Применить частоту и качество автоматических кадров">Включить автокадры</button>
+      <button class="ghost blk hidden" id="capture-live-stop" title="Остановить автоматические кадры, не останавливая встречу">Остановить кадры</button>
+    </div>
     <div id="initial" class="blk"><b>Предварительное summary</b><span id="initial-text"></span></div>
     <section id="card" class="blk" aria-live="polite">
       <div id="cue"><i></i></div>
@@ -533,6 +544,19 @@ function renderSheet() {
   $("#sheet-lead").textContent = sh.length ? "Вероятные вопросы собеседника и что ответить — по цели и материалам."
     : (st && st.meeting && (st.meeting.goal || (st.files || []).length) ? "Готовлю — обычно это меньше минуты." : "Шпаргалка готовится, когда есть цель встречи или материалы.");
 }
+function renderCaptureLive() {
+  const rec = (st && st.recording) || {}, active = !!(st && st.on), frames = !!(active && st.meeting && st.meeting.auto_frames);
+  const interval = String(rec.frame_interval || 1), quality = String(rec.frame_quality || 85);
+  if ([...$("#live-frame-interval").options].some(o => o.value === interval)) $("#live-frame-interval").value = interval;
+  if ([...$("#live-frame-quality").options].some(o => o.value === quality)) $("#live-frame-quality").value = quality;
+  $("#capture-live-status").textContent = frames
+    ? `Автокадры включены · ${interval} с · JPEG ${quality}% · сохранено ${rec.video_frames || rec.screenshots || 0}`
+    : (active ? "Автокадры выключены — встреча продолжается без записи экрана" : "");
+  $("#capture-live-apply").textContent = frames ? "Применить" : "Включить автокадры";
+  $("#capture-live-stop").classList.toggle("hidden", !frames);
+  $("#capture-live-apply").disabled = !active;
+  $("#capture-live-stop").disabled = !active;
+}
 function render() {
   if (!st) return;
   $("#nobrain").classList.toggle("hidden", !!st.brain);
@@ -544,7 +568,7 @@ function render() {
     $("#hear").classList.toggle("bad", /не слышу|не слушаю/.test(st.status || "") || st.paused);
     $("#b-pause").title = st.paused ? "Продолжить" : "Пауза — не слушать";
     $("#b-pause").innerHTML = st.paused ? '<svg viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></svg>';
-    renderInitial(); renderHint(); renderTalk(); renderSheet();
+    renderInitial(); renderHint(); renderTalk(); renderSheet(); renderCaptureLive();
   } else if (view === "live" || view === "sum") {
     clearInterval(clockT); $("#title").textContent = "Итог встречи"; show("sum");
   } else { $("#title").textContent = "Суфлёр"; show("setup"); }
@@ -564,6 +588,12 @@ function renderSum(e) {
   if ($("#done")) $("#done").onclick = closeWin;
 }
 $("#ask").onclick = () => { follow = true; core.call("prompter_hint", {}).catch(e => { $("#err").textContent = e.message; }); };
+$("#capture-live-apply").onclick = async () => {
+  try {
+    await core.call("prompter_frames", { action: "start", interval: Number($("#live-frame-interval").value), quality: Number($("#live-frame-quality").value), video: false });
+  } catch (e) { $("#err").textContent = e.message; }
+};
+$("#capture-live-stop").onclick = () => core.call("prompter_frames", { action: "stop" }).catch(e => { $("#err").textContent = e.message; });
 $("#b-shot").onclick = () => core.call("prompter_screenshot", { ocr: true }).catch(e => { $("#err").textContent = e.message; });
 $("#b-pause").onclick = () => core.call("prompter_pause", { on: !(st && st.paused) });
 $("#b-stop").onclick = () => core.call("prompter_stop", { summary: true });

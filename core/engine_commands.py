@@ -420,6 +420,14 @@ class CommandsMixin:
                 if action == "start":
                     if not pr.on:
                         raise ValueError("сначала начните встречу")
+                    try:
+                        from platform_info import MAC
+                        if MAC:
+                            from macsys import request_screen_capture_permission
+                            if not request_screen_capture_permission():
+                                raise ValueError("Разрешите Dewiar запись экрана в Системных настройках → Конфиденциальность и безопасность → Запись экрана")
+                    except ImportError:
+                        pass
                     pr._frame_interval = max(0.5, min(5.0, float(a.get("interval", 0.5) or 0.5)))
                     pr._frame_quality = max(40, min(100, int(a.get("quality", 85) or 85)))
                     pr._video_enabled = bool(a.get("video", False))

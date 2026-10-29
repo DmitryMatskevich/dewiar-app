@@ -384,6 +384,15 @@
         </select></label>
         <label class="f">Кнопка снимка<input type="text" data-k="prompter.capture_hotkey" placeholder="Ctrl+Shift+S" title="Сочетание действует в окне суфлёра; например Ctrl+Alt+S"></label>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Частота автокадров<select data-k="prompter.frame_interval" id="pr-frame-interval" title="Как часто проверять экран во время фоновой записи">
+          <option value="0.5">каждые 0,5 секунды</option><option value="1" selected>каждую 1 секунду</option><option value="2">каждые 2 секунды</option><option value="5">каждые 5 секунд</option>
+        </select><span class="hint">Меньше интервал — больше кадров и нагрузка.</span></label>
+        <label class="f">Качество JPEG<select data-k="prompter.frame_quality" id="pr-frame-quality" title="Качество сохраняемых кадров экрана">
+          <option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option>
+        </select><span class="hint">Выше качество — крупнее файлы.</span></label>
+      </div>
+      <div class="switch" style="margin-top:8px"><div>Собрать видео из кадров<span>После остановки встречи собрать локальный MP4-таймлапс из всех сохранённых кадров.</span></div><label class="tg"><input type="checkbox" data-k="prompter.frame_video" id="pr-frame-video"><i></i></label></div>
       <div class="row" style="margin-top:10px" id="pr-region-fields">
         <label class="f">X<input type="number" data-k="prompter.capture_region.x" min="0"></label><label class="f">Y<input type="number" data-k="prompter.capture_region.y" min="0"></label>
         <label class="f">Ширина<input type="number" data-k="prompter.capture_region.width" min="2"></label><label class="f">Высота<input type="number" data-k="prompter.capture_region.height" min="2"></label>
@@ -394,7 +403,7 @@
     <div class="prof on" style="padding:16px 18px;margin-bottom:18px" id="pr-schedule-settings">
       <h3 style="font-size:15px;margin-bottom:6px">Фоновая запись по времени</h3>
       <p class="hint">Dewiar запустит запись без открытого окна и остановит её в указанное время. Разрешения микрофона, звука и экрана должны быть выданы заранее.</p>
-      <div class="row"><label class="f">Название<input type="text" id="pr-s-title" placeholder="Планёрка команды"></label><label class="f">Начать<input type="datetime-local" id="pr-s-start"></label><label class="f">Закончить<input type="datetime-local" id="pr-s-end"></label></div>
+      <div class="row"><label class="f">Название<input type="text" id="pr-s-title" placeholder="Планёрка команды"></label><label class="f">Начать<input type="datetime-local" id="pr-s-start"></label><label class="f">Закончить (необязательно)<input type="datetime-local" id="pr-s-end" title="Оставьте пустым, чтобы остановить запись вручную из верхнего меню Dewiar"></label></div>
       <div class="switch" style="margin-top:8px"><div>Согласие участников<span>Подтверждаю, что участники предупреждены о записи.</span></div><label class="tg"><input type="checkbox" id="pr-s-consent"><i></i></label></div>
       <div class="actions" style="margin-top:10px"><button class="btn primary" id="pr-s-add">Запланировать</button><span class="res" id="pr-s-result"></span></div>
       <div id="pr-s-list" class="hint" style="margin-top:10px">Загрузка расписания…</div>

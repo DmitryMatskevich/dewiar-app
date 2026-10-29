@@ -32,15 +32,17 @@
   }
   $("#pr-s-add")?.addEventListener("click", async () => {
     const start = $("#pr-s-start").value, end = $("#pr-s-end").value, out = $("#pr-s-result");
-    if (!start || !end) { out.className = "res bad"; out.textContent = "Укажите начало и окончание."; return; }
+    if (!start) { out.className = "res bad"; out.textContent = "Укажите начало."; return; }
     if (!$("#pr-s-consent").checked) { out.className = "res bad"; out.textContent = "Подтвердите согласие участников."; return; }
     try {
       await core.call("prompter_schedule", { title: $("#pr-s-title").value || "Встреча по расписанию",
-        start_at: new Date(start).toISOString(), end_at: new Date(end).toISOString(),
+        start_at: new Date(start).toISOString(), end_at: end ? new Date(end).toISOString() : null,
         options: { record: true, deferred: true, consent: true, auto_first_frame: !!get("prompter.auto_first_frame"),
           capture_source: get("prompter.capture_source") || "screen", capture_region: get("prompter.capture_region") || {}, capture_application: get("prompter.capture_application") || "",
-          auto_frames: true, auto_interval: 1, frame_quality: 85, frame_video: false, them: true, me: false, place: "online" } });
-      out.className = "res ok"; out.textContent = "Запись запланирована. Ядро запустит её в фоне."; loadSchedules();
+          auto_frames: true, auto_interval: Number(get("prompter.frame_interval") || 1),
+          frame_quality: Number(get("prompter.frame_quality") || 85), frame_video: !!get("prompter.frame_video"),
+          them: true, me: false, place: "online" } });
+      out.className = "res ok"; out.textContent = end ? "Запись запланирована. Ядро остановит её в указанное время." : "Запись запланирована без ограничения по времени — остановите её из верхнего меню Dewiar."; loadSchedules();
     } catch (e) { out.className = "res bad"; out.textContent = e.message; }
   });
   const oldRefresh = window.refreshStatic;

@@ -34,6 +34,127 @@ def free_core_port():
         return listener.getsockname()[1]
 
 
+def _core_request(token, cmd, args=None, timeout=3):
+    """Send one authenticated command to the local core (used by native Mac menus)."""
+    from websockets.sync.client import connect
+    with connect(f"ws://127.0.0.1:{WS_PORT}", open_timeout=timeout, close_timeout=1, proxy=None) as ws:
+        ws.send(json.dumps({"cmd": "hello", "token": token}))
+        hello = json.loads(ws.recv(timeout=timeout))
+        if hello.get("type") != "hello":
+            raise RuntimeError("ядро Dewiar не подтвердило подключение")
+        ws.send(json.dumps({"id": 1, "cmd": cmd, "args": dict(args or {})}))
+        reply = json.loads(ws.recv(timeout=timeout))
+        if reply.get("error"):
+            raise RuntimeError(str(reply["error"]))
+        return reply.get("data")
+
+
+def install_meeting_status(api):
+    """Install a small native status-bar controller for meetings running in background.
+
+    This is deliberately kept outside pywebview: the prompter window may be hidden or
+    closed while the core continues recording.  The item remains visible as Dewiar and
+    changes to a recording timer while a meeting is active.
+    """
+    try:
+        import objc
+        from AppKit import NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength
+        from Foundation import NSObject, NSTimer
+    except Exception:  # pragma: no cover - only available in a packaged Cocoa build
+        return None
+
+    class MeetingStatusTarget(NSObject):
+        def initWithApi_(self, owner):
+            self = objc.super(MeetingStatusTarget, self).init()
+            if self is not None:
+                self.owner = owner
+                self.state = {}
+                self.status = None
+                self.item = None
+                self.header = None
+                self.pause_item = None
+                self.stop_item = None
+            return self
+
+        def _run(self, command, args=None):
+            def work():
+                try:
+                    _core_request(self.owner.token, command, args)
+                except Exception:
+                    pass
+                self.refresh_(None)
+            threading.Thread(target=work, name="dewiar-menu-command", daemon=True).start()
+
+        def open_(self, _sender):
+            self.owner.open_prompter()
+
+        def frames_(self, _sender):
+            self.owner.open_prompter()
+
+        def pause_(self, _sender):
+            self._run("prompter_pause", {"on": not bool(self.state.get("paused"))})
+
+        def stop_(self, _sender):
+            self._run("prompter_stop", {"summary": True})
+
+        def refresh_(self, _timer):
+            try:
+                state = _core_request(self.owner.token, "prompter_state", timeout=1.5) or {}
+            except Exception:
+                state = {}
+            self.state = state
+            on = bool(state.get("on"))
+            meeting = state.get("meeting") or {}
+            recording = bool(on and meeting.get("record"))
+            title = str(meeting.get("title") or "Встреча")
+            if recording:
+                started = float(meeting.get("started") or time.time())
+                elapsed = max(0, int(time.time() - started))
+                label = f"● Запись {elapsed // 60}:{elapsed % 60:02d}"
+                self.item.button().setTitle_(label)
+                self.item.button().setToolTip_(f"Идёт запись: {title}. Нажмите для управления.")
+                self.header.setTitle_(f"Записывается: {title}")
+            elif on:
+                self.item.button().setTitle_("Dewiar")
+                self.item.button().setToolTip_(f"Суфлёр работает: {title}")
+                self.header.setTitle_(f"Суфлёр работает: {title}")
+            else:
+                self.item.button().setTitle_("Dewiar")
+                self.item.button().setToolTip_("Открыть Dewiar")
+                self.header.setTitle_("Запись встречи не активна")
+            active = bool(on)
+            self.pause_item.setEnabled_(active)
+            self.stop_item.setEnabled_(active)
+            if active:
+                self.pause_item.setTitle_("Продолжить" if state.get("paused") else "Пауза")
+            else:
+                self.pause_item.setTitle_("Пауза")
+
+    target = MeetingStatusTarget.alloc().initWithApi_(api)
+    item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
+    menu = NSMenu.alloc().init()
+    header = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Запись встречи не активна", None, "")
+    header.setEnabled_(False)
+    menu.addItem_(header)
+    menu.addItem_(NSMenuItem.separatorItem())
+    open_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Открыть окно встречи", "open:", "")
+    open_item.setTarget_(target); menu.addItem_(open_item)
+    pause_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Пауза", "pause:", "")
+    pause_item.setTarget_(target); menu.addItem_(pause_item)
+    stop_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Завершить запись и сохранить итог", "stop:", "")
+    stop_item.setTarget_(target); menu.addItem_(stop_item)
+    menu.addItem_(NSMenuItem.separatorItem())
+    frame_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Настройки кадров…", "frames:", "")
+    frame_item.setTarget_(target); menu.addItem_(frame_item)
+    target.item, target.header, target.pause_item, target.stop_item = item, header, pause_item, stop_item
+    item.setMenu_(menu)
+    api._meeting_status = target
+    target.refresh_(None)
+    # Polling is intentional: it also works for schedules started with no window open.
+    target.timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(1.0, target, "refresh:", None, True)
+    return target
+
+
 def make_macos_menu(api):
     """Return pywebview's persistent native menu for every Dewiar window."""
     from webview.menu import Menu, MenuAction, MenuSeparator
@@ -466,6 +587,9 @@ def main_mac(args, extra, app):
         api.open_settings("sound" if getattr(args, "request_microphone", False) else "", extra)
 
     def ready():
+        # Native status item stays available when the prompter window is hidden or closed.
+        if not getattr(api, "_meeting_status", None):
+            install_meeting_status(api)
         report = os.environ.get("DEWIAR_MAC_SMOKE_REPORT")
         if not report and wanted_voice and api.microphone_permission().get("granted"):
             app._core_call(token, "audio_enable", timeout=15)

@@ -203,8 +203,11 @@ class Prompter:
 
     def schedule(self, start_at, end_at=None, title="Встреча по расписанию", options=None):
         start = self._schedule_ts(start_at)
-        end = self._schedule_ts(end_at) if end_at else start + 3600
-        if end <= start:
+        # An empty end time means "until I stop it".  This is useful for a
+        # background meeting whose duration is not known in advance; the menu
+        # bar/controller can always finish it explicitly.
+        end = self._schedule_ts(end_at) if end_at else None
+        if end is not None and end <= start:
             raise ValueError("время окончания должно быть позже начала")
         if start < time.time() - 2:
             raise ValueError("время начала уже прошло")
@@ -248,7 +251,7 @@ class Prompter:
                         raise ValueError("другая встреча уже идёт")
                     opts = dict(item.get("options") or {})
                     opts.pop("title", None)
-                    opts["scheduled_end"] = float(item.get("end_at") or 0)
+                    opts["scheduled_end"] = float(item.get("end_at") or 0) or None
                     self.start(title=item.get("title", "Встреча по расписанию"), **opts)
                     item["state"] = "running"
                     item["started"] = time.time()
