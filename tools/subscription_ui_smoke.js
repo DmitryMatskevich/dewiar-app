@@ -311,7 +311,7 @@
     await reportSend.onclick({currentTarget:reportSend});
     check(!document.querySelector('#rep-res').classList.contains('ok') && document.querySelector('#rep-res').textContent.includes('локально'), 'Queued report presented as sent');
     await document.querySelector('[data-report-retry]').onclick();
-    check(reportRetries === 1 && document.querySelector('#rep-res').textContent.includes('dmatskevich@gmail.com') && document.querySelector('#rep-res').textContent.includes('Ошибка обработки персональный агент'), 'Email retry result missing recipient/subject');
+    check(reportRetries === 1 && document.querySelector('#rep-res').textContent.includes('domatskevich@gmail.com') && document.querySelector('#rep-res').textContent.includes('Ошибка обработки персональный агент'), 'Email retry result missing recipient/subject');
     check(!document.querySelector('[data-report-retry]'), 'Sent report still offers retry');
     reportMode='server'; document.querySelector('#rep-note').value='Синтетическая проверка сервера';
     await reportSend.onclick({currentTarget:reportSend});

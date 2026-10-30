@@ -384,7 +384,7 @@ class HealthMixin:
                 if r.get('delivery')=='queued':
                     msg='Отчёт сохранён локально, но ещё не отправлен. '+r.get('reason','')
                 elif r.get('delivery')=='email':
-                    msg='Отчёт отправлен на dmatskevich@gmail.com с темой «Ошибка обработки персональный агент».'
+                    msg='Отчёт отправлен на domatskevich@gmail.com с темой «Ошибка обработки персональный агент».'
                 else:
                     msg = f"Передал разработчику — жалоба №{r['id']}. Спасибо, что помогаете!"
             except Exception as e:  # noqa: BLE001

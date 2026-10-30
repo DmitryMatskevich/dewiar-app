@@ -83,7 +83,7 @@ async def main():
                 assert sent['delivery']=='email',sent
                 assert len(SMTP.messages)==1
                 msg=SMTP.messages[0]
-                assert str(msg['To'])=='dmatskevich@gmail.com' and str(msg['Subject'])=='Ошибка обработки персональный агент'
+                assert str(msg['To'])=='domatskevich@gmail.com' and str(msg['Subject'])=='Ошибка обработки персональный агент'
                 files={p.get_filename():p for p in msg.iter_attachments()}
                 assert set(files)=={'report.txt','screenshot.jpg'}
                 assert 'Синтетическая ошибка: проверка почты' in files['report.txt'].get_content()

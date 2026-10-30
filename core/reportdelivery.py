@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import httpx
 import egress
 
-EMAIL = 'dmatskevich@gmail.com'
+EMAIL = 'domatskevich@gmail.com'
 SUBJECT = 'Ошибка обработки персональный агент'
 _lock = threading.RLock()
 

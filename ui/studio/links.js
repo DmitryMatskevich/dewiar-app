@@ -497,7 +497,7 @@ function bugFocus(preview) {                                       // из ви�
 const BUG_ST = { new: "получена сервером", email:"отправлена по почте", queued:"ожидает отправки", seen: "прочитана", work: "в работе", fixed: "исправлено", no: "не ошибка" };
 function reportResult(x) {
   return x.delivery === 'queued' ? 'Отчёт сохранён локально и ожидает отправки. '+(x.reason || '')
-    : x.delivery === 'email' ? 'Отчёт отправлен на dmatskevich@gmail.com, тема «Ошибка обработки персональный агент».'
+    : x.delivery === 'email' ? 'Отчёт отправлен на domatskevich@gmail.com, тема «Ошибка обработки персональный агент».'
     : `Отчёт №${x.id} получен сервером обработки.`;
 }
 async function loadReportDelivery() {
