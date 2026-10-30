@@ -29,9 +29,15 @@
       box.innerHTML = rows.length ? rows.map(x => {
         const pf = x.preflight || {}, checks = pf.state === "ok" ? " · проверка пройдена" : pf.state === "checking" ? " · проверяю за 5 минут до начала" : "";
         const error = x.error || (pf.state === "error" ? pf.message : "");
-        return `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at)} — ${fmt(x.end_at)} · ${esc(x.state || "")}${checks}${error ? ` · ${esc(error)}` : ""}</small></span>${x.state === "scheduled" ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}">Отменить</button>` : ""}${x.state === "error" ? `<button class="btn small" data-retry-schedule="${esc(x.id)}">Проверить снова</button>` : ""}</div>`;
+        const canCancel = ["scheduled", "starting", "running"].includes(x.state);
+        const cancelTitle = x.state === "running" ? "Остановить текущую фоновую запись и сохранить её итог" : "Отменить запланированную запись";
+        return `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at)} — ${fmt(x.end_at)} · ${esc(x.state || "")}${checks}${error ? ` · ${esc(error)}` : ""}</small></span>${canCancel ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}" data-schedule-state="${esc(x.state)}" title="${cancelTitle}">Отменить</button>` : ""}${x.state === "error" ? `<button class="btn small" data-retry-schedule="${esc(x.id)}">Проверить снова</button>` : ""}</div>`;
       }).join("") : "Записей в расписании пока нет.";
-      $$('[data-cancel-schedule]').forEach(b => b.onclick = async () => { await core.call("prompter_schedule_cancel", { id: b.dataset.cancelSchedule }); loadSchedules(); });
+      $$('[data-cancel-schedule]').forEach(b => b.onclick = async () => {
+        if (b.dataset.scheduleState === "running" && !await ask("Запись уже идёт. Остановить её и сохранить текущий итог встречи?")) return;
+        try { await core.call("prompter_schedule_cancel", { id: b.dataset.cancelSchedule }); loadSchedules(); }
+        catch (e) { toast(e.message, 5000); }
+      });
       $$('[data-retry-schedule]').forEach(b => b.onclick = async () => { await core.call("prompter_schedule_retry", { id: b.dataset.retrySchedule }); loadSchedules(); });
     } catch (e) { box.textContent = e.message; }
   }

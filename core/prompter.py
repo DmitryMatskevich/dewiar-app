@@ -234,14 +234,25 @@ class Prompter:
         return item
 
     def cancel_schedule(self, sid):
+        stop_running = False
         with self._schedules_lock:
+            item = next((x for x in self._schedules if x.get("id") == sid), None)
+            if item is None:
+                raise ValueError("запись в расписании не найдена")
+            # A running scheduled meeting must be stopped, not merely removed
+            # from the list. The schedule id is attached to the active meeting
+            # so a manual meeting can never be stopped by mistake.
+            stop_running = bool(item.get("state") == "running" and self.on
+                                and self.meeting.get("schedule_id") == sid)
             before = len(self._schedules)
             self._schedules = [x for x in self._schedules if x.get("id") != sid]
             if len(self._schedules) == before:
                 raise ValueError("запись в расписании не найдена")
             self._save_schedules()
+        if stop_running:
+            self.stop(summary=True)
         self._emit("schedule", schedules=self.schedules())
-        return {"cancelled": sid}
+        return {"cancelled": sid, "stopped": stop_running}
 
     def retry_schedule(self, sid):
         """Вернуть ошибочную встречу в расписание после исправления доступа."""
@@ -300,7 +311,7 @@ class Prompter:
                     opts = dict(item.get("options") or {})
                     opts.pop("title", None)
                     opts["scheduled_end"] = float(item.get("end_at") or 0) or None
-                    self.start(title=item.get("title", "Встреча по расписанию"), **opts)
+                    self.start(title=item.get("title", "Встреча по расписанию"), schedule_id=item.get("id"), **opts)
                     item["state"] = "running"
                     item["started"] = time.time()
                     log.info("🎬 Запланированная встреча началась: %s", item.get("title"))
@@ -702,7 +713,8 @@ class Prompter:
     def start(self, title="", goal="", mode="auto", them=True, me=True, knowledge=False, keep_text=False, place="online", nudge=True,
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
               auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
-              capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None):
+              capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None,
+              schedule_id=None):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
         if self._video_export_busy:
@@ -779,6 +791,8 @@ class Prompter:
                             "source": (source or "system")[:40], "auto_frames": bool(auto_frames), "started": time.time()}
             if scheduled_end:
                 self.meeting["scheduled_end"] = float(scheduled_end)
+            if schedule_id:
+                self.meeting["schedule_id"] = str(schedule_id)
             self.lines, self.hints, self.sheet, self.summary, self.paused = [], [], [], "", False
             self._summary_path = ""
             self.on = True

@@ -40,6 +40,14 @@ with tempfile.TemporaryDirectory() as td:
     assert item["state"] == "scheduled"
     assert pr.schedules()[0]["title"] == "Демо"
     assert pr.cancel_schedule(item["id"])["cancelled"] == item["id"]
+    running = pr.schedule(start + 60, start + 660, "Уже идёт", {"consent": True, "record": True})
+    pr._schedules[0]["state"] = "running"
+    pr.on = True
+    pr.meeting = {"schedule_id": running["id"]}
+    stopped = []
+    pr.stop = lambda summary=True: stopped.append(summary)
+    result = pr.cancel_schedule(running["id"])
+    assert result["stopped"] and stopped == [True]
     try:
         pr.schedule(start, start + 10, "Без согласия", {})
     except ValueError as exc:
