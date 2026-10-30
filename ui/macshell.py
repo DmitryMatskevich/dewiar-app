@@ -35,6 +35,58 @@ def free_core_port():
         return listener.getsockname()[1]
 
 
+def source_checkout_update(root, timeout=120):
+    """Safely update a Dewiar checkout and return a small, UI-safe result.
+
+    This is intentionally an allow-listed operation: the UI never accepts a shell
+    command or a script path.  A dirty checkout is left untouched because an
+    automatic pull must never overwrite a user's local work.
+    """
+    root = Path(root).resolve()
+    if not (root / ".git").exists() or not (root / "tools" / "run_macos.sh").is_file():
+        return {"ok": False, "reason": "not_source", "error": "исходная папка Dewiar не найдена"}
+
+    def run(args, limit=timeout):
+        env = os.environ.copy()
+        # A GUI update must fail clearly instead of waiting for a hidden password
+        # or GitHub credential prompt in the background.
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        try:
+            return subprocess.run(["git", *args], cwd=str(root), env=env, text=True,
+                                  capture_output=True, timeout=limit, check=False)
+        except FileNotFoundError:
+            return None
+        except subprocess.TimeoutExpired as exc:
+            return subprocess.CompletedProcess(["git", *args], 124, "", f"тайм-аут через {limit} с: {exc}")
+
+    status = run(["status", "--porcelain"], limit=min(timeout, 20))
+    if status is None:
+        return {"ok": False, "reason": "git_missing", "error": "Git не установлен. Установите Xcode Command Line Tools."}
+    if status.returncode != 0:
+        return {"ok": False, "reason": "git_error", "error": (status.stderr or status.stdout).strip()[-500:] or "не удалось проверить репозиторий"}
+    dirty = status.stdout.strip()
+    if dirty:
+        return {"ok": False, "reason": "dirty", "error": "есть незакоммиченные изменения — сначала сохраните или закоммитьте их", "files": dirty.splitlines()[:20]}
+
+    before = run(["rev-parse", "HEAD"], limit=min(timeout, 20))
+    branch = run(["branch", "--show-current"], limit=min(timeout, 20))
+    if before is None or before.returncode != 0:
+        return {"ok": False, "reason": "git_error", "error": "не удалось определить текущую версию"}
+    before_sha = before.stdout.strip()
+    branch_name = (branch.stdout.strip() if branch and branch.returncode == 0 else "") or "текущая ветка"
+    pulled = run(["pull", "--ff-only"], limit=timeout)
+    if pulled is None or pulled.returncode != 0:
+        text = ((pulled.stderr if pulled else "") or (pulled.stdout if pulled else "")).strip()
+        return {"ok": False, "reason": "pull_failed", "branch": branch_name,
+                "error": text[-700:] or "git pull --ff-only завершился ошибкой"}
+    after = run(["rev-parse", "HEAD"], limit=min(timeout, 20))
+    version = run(["log", "-1", "--oneline"], limit=min(timeout, 20))
+    after_sha = after.stdout.strip() if after and after.returncode == 0 else before_sha
+    return {"ok": True, "changed": after_sha != before_sha, "branch": branch_name,
+            "version": (version.stdout.strip() if version and version.returncode == 0 else after_sha)[:180],
+            "output": pulled.stdout.strip()[-500:]}
+
+
 def _core_request(token, cmd, args=None, timeout=3):
     """Send one authenticated command to the local core (used by native Mac menus)."""
     from websockets.sync.client import connect
@@ -99,6 +151,9 @@ def install_meeting_status(api):
 
         def meetings_(self, _sender):
             self.owner.open_settings("prompter")
+
+        def update_(self, _sender):
+            self.owner.update_from_source()
 
         def pause_(self, _sender):
             self.runCommand_args_("prompter_pause", {"on": not bool(self.state.get("paused"))})
@@ -187,6 +242,10 @@ def install_meeting_status(api):
     frame_item.setTarget_(target); menu.addItem_(frame_item)
     meetings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Открыть настройки встреч…", "meetings:", "")
     meetings_item.setTarget_(target); menu.addItem_(meetings_item)
+    menu.addItem_(NSMenuItem.separatorItem())
+    update_title = "Обновить и перезапустить Dewiar" if not getattr(sys, "frozen", False) else "Проверить обновления Dewiar"
+    update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(update_title, "update:", "")
+    update_item.setTarget_(target); menu.addItem_(update_item)
     target.item, target.header, target.pause_item, target.stop_item, target.meetings_item, target.audio_item = item, header, pause_item, stop_item, meetings_item, audio_item
     item.setMenu_(menu)
     api._meeting_status = target
@@ -200,11 +259,13 @@ def make_macos_menu(api):
     """Return pywebview's persistent native menu for every Dewiar window."""
     from webview.menu import Menu, MenuAction, MenuSeparator
 
+    update_title = "Обновить и перезапустить Dewiar" if not getattr(sys, "frozen", False) else "Проверить обновления Dewiar"
     actions = [
         MenuSeparator(),
         MenuAction("Показать агента", lambda: api.from_tray()),
         MenuAction("Открыть настройки", lambda: api.open_settings()),
         MenuAction("Модели", lambda: api.open_settings("brain")),
+        MenuAction(update_title, lambda: api.update_from_source()),
     ]
     # ``__app__`` inserts actions into the standard macOS application menu;
     # the explicit top-level menu remains easy to find even if macOS localizes
@@ -532,6 +593,60 @@ def make_api(app):
         def studio_close(self):
             if self._studio:
                 self._studio.destroy()
+
+        def _source_notice(self, text, error=False):
+            """Show a transient status in the agent window and keep a terminal log."""
+            print(f"Dewiar update: {text}", file=sys.stderr, flush=True)
+            code = "(window.showCap && (showCap(null, " + json.dumps(str(text), ensure_ascii=False) + ", " + ("true" if error else "false") + "), window.hideCapLater && hideCapLater(9000)))"
+            self._js(code)
+
+        def source_update_status(self):
+            state = getattr(self, "_source_update", None)
+            if state is None:
+                return {"running": False, "source": not bool(getattr(sys, "frozen", False))}
+            return dict(state)
+
+        def update_from_source(self):
+            """Pull the current source branch and restart only after a fast-forward.
+
+            Packaged builds deliberately do not run Git; their normal signed updater
+            remains in the «Обновления» section.  Source builds use the same command
+            that was previously typed in Terminal, but only this fixed action is
+            exposed to the UI.
+            """
+            if getattr(sys, "frozen", False):
+                result = {"ok": False, "source": False, "error": "Это установленная сборка. Откройте раздел «Обновления» и используйте официальный обновлятор."}
+                self._source_update = {"running": False, **result}
+                self._source_notice(result["error"], error=True)
+                return result
+            current = getattr(self, "_source_update", None) or {}
+            if current.get("running"):
+                return dict(current)
+            root = Path(app.ROOT).resolve()
+            self._source_update = {"running": True, "stage": "checking", "root": str(root), "started": time.time()}
+            self._source_notice("Проверяю исходники Dewiar…")
+
+            def work():
+                result = source_checkout_update(root)
+                if not result.get("ok"):
+                    self._source_update = {"running": False, "stage": "error", **result}
+                    if result.get("reason") == "dirty":
+                        detail = "Сначала сохраните изменения в Git, затем повторите обновление."
+                    else:
+                        detail = result.get("error") or "обновление не выполнено"
+                    self._source_notice("Обновление не выполнено: " + detail, error=True)
+                    return
+                self._source_update = {"running": False, "stage": "ready", **result}
+                if not result.get("changed"):
+                    self._source_notice("Уже установлена последняя версия Dewiar (" + result.get("version", "") + ").")
+                    return
+                self._source_update = {"running": True, "stage": "restarting", **result}
+                self._source_notice("Dewiar обновлён. Перезапускаю приложение…")
+                time.sleep(0.6)
+                self.restart("Dewiar обновлён из GitHub.")
+
+            threading.Thread(target=work, name="dewiar-source-update", daemon=True).start()
+            return {"ok": True, "started": True, "source": True}
 
         def install_update(self, *args):
             return {"ok": False, "error": "Обновление Mac-прототипа пока выполняется вручную"}

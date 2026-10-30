@@ -134,6 +134,10 @@ function dwRender() {
   if (u) {
     $("#dw-upd-text").textContent = u.available ? `Доступна версия ${u.available.version} — уже скачана.` : `Dewiar ${u.current}` + (u.error ? ` · не проверилось: ${u.error}` : u.checked ? " — последняя версия." : "");
     $("#dw-upd-open").style.display = u.available ? "" : "none";
+    const sourceApi = window.api && window.api();
+    const sourceMode = !!(sourceApi && typeof sourceApi.update_from_source === "function");
+    $("#dw-upd-source").style.display = sourceMode ? "" : "none";
+    $("#dw-upd-source-hint").style.display = sourceMode ? "" : "none";
     dwSet("upd", u.available ? "warn" : u.error ? "bad" : "ok", u.available ? "есть новая" : u.error ? "ошибка" : "последняя");
   }
   // свёрнутый блок «Компьютер, сеть, антивирус и обновления»: в заголовке — их метки; что-то не так — раскрывается сам
@@ -276,6 +280,17 @@ $("#dw-av-ex").onclick = async () => { const r = $("#dw-av-res");
   r.className = x && x.ok ? "res ok" : "res bad"; r.textContent = x && x.ok ? "Открыла настройки Защитника. «Исключения» → «Добавить исключение» → «Папка» → Ctrl+V (путь уже скопирован)." : (x && x.error) || "Не получилось открыть настройки Защитника — Пуск → «Безопасность Windows»."; };
 $("#dw-upd-go").onclick = () => { dwSet("upd", "run", "проверяю…"); core.call("update_check").then(u => { DW.upd = u; dwRender(); }).catch(e => toast(e.message)); };
 $("#dw-upd-open").onclick = () => $('nav button[data-p="about"]').click();
+$("#dw-upd-source").onclick = async () => {
+  const button = $("#dw-upd-source"), result = $("#dw-upd-text"), a = window.api && window.api();
+  if (!a || typeof a.update_from_source !== "function") return toast("Обновление исходников доступно только в режиме разработки");
+  button.disabled = true; dwSet("upd", "run", "обновляю…"); result.textContent = "Проверяю изменения, затем выполню git pull --ff-only…";
+  try {
+    const r = await a.update_from_source();
+    if (r && r.error) { result.textContent = r.error; dwSet("upd", "bad", "не обновлено"); button.disabled = false; return; }
+    result.textContent = "Обновление запущено. Dewiar покажет статус в окне агента и перезапустится после fast-forward.";
+    dwSet("upd", "run", "перезапуск…");
+  } catch (e) { result.textContent = e.message || "не удалось запустить обновление"; dwSet("upd", "bad", "ошибка"); button.disabled = false; }
+};
 async function dwQr() {
   try { const c = await core.call("phone_config"); $("#dw-qr").innerHTML = qrSvg(c.apk); } catch (e) { $("#dwc-phone").style.display = "none"; }
 }
