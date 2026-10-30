@@ -31,6 +31,7 @@ import subprocess
 import threading
 import time
 import wave
+from urllib.parse import quote
 import hashlib
 import json
 import uuid
@@ -125,6 +126,7 @@ class Prompter:
         self.hints = []          # [{id, q, text, done, instant, src, ts, why}]
         self.sheet = []
         self.summary = ""
+        self._summary_path = ""
         self.status = ""         # что слушаем / почему не слышим собеседника
         self._lock = threading.RLock()
         self._q = None
@@ -460,6 +462,7 @@ class Prompter:
             return {"on": self.on, "paused": self.paused, "meeting": m, "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
+                    "summary_path": self._summary_path,
                     "summary_preview": preview, "recording": rec, "schedules": self.schedules(),
                     "brain": bool(self.eng.s.active_llm()), "loopback": True, "voice": self.voice_info()}
 
@@ -777,6 +780,7 @@ class Prompter:
             if scheduled_end:
                 self.meeting["scheduled_end"] = float(scheduled_end)
             self.lines, self.hints, self.sheet, self.summary, self.paused = [], [], [], "", False
+            self._summary_path = ""
             self.on = True
         self._transcript_open(self.meeting["title"])
         # Первый кадр — полезная точка отсчёта протокола. По умолчанию он
@@ -1512,6 +1516,24 @@ class Prompter:
             log.info("🎬 Итог встречи не получился: %s", e)
         started = datetime.fromtimestamp(m.get("started") or time.time())
         mins = max(1, round(((lines[-1]["t"] if lines else 60)) / 60))
+        meeting_root = (self.eng.workspace.ensure() / "Встречи").resolve()
+
+        def meeting_link(value, label=None, relative_to=None):
+            """Create a safe relative link into this meeting's folder."""
+            path = Path(value)
+            if not path.is_absolute():
+                path = (Path(relative_to) / path) if relative_to else (meeting_root / path)
+            try:
+                rel = path.resolve().relative_to(meeting_root)
+            except ValueError:
+                return str(label or path.name)
+            shown = str(label or rel).replace("\\", "/")
+            target = quote(str(rel).replace("\\", "/"), safe="/._-")
+            return f"[{shown}](dwr-file:{target})"
+
+        transcript_root = Path(self._transcript_path).parent if self._transcript_path else meeting_root
+        record_link = meeting_link(record_path, f"Аудио/{Path(record_path).name}") if record_path else ""
+        transcript_link = meeting_link(self._transcript_path, f"Расшифровки/{Path(self._transcript_path).name}") if self._transcript_path else ""
         decisions = "будут определены после расшифровки"
         found = re.search(r"(?ims)^##\s*Договорились\s*\n(.*?)(?=^##\s|\Z)", text or "")
         if found:
@@ -1525,9 +1547,9 @@ class Prompter:
                 f"- Что решили: {preview['decisions']}\n\n"
                 f"*{started:%d.%m.%Y %H:%M} · {mins} мин · Встречи Dewiar*\n\n"
                 + (f"**Цель:** {m['goal']}\n\n" if m.get("goal") else "")
-                + (f"**Аудиозапись:** `Аудио/{Path(record_path).name}`\n\n" if record_path else "")
+                + (f"**Аудиозапись:** {record_link}\n\n" if record_link else "")
                 + (f"**Статус аудиозаписи:** {self._record_error}\n\n" if self._record_error else "")
-                + (f"**Расшифровка:** `Расшифровки/{Path(self._transcript_path).name}`\n\n" if self._transcript_path else "")
+                + (f"**Расшифровка:** {transcript_link}\n\n" if transcript_link else "")
                 + (text or "_Итог не получился — модель не ответила._")
                 + ("\n\n## Материалы\n" + "\n".join(f"- {f['name']}" for f in self.files) if self.files else "")
                 + ("\n\n## Расшифровка\n" + "\n".join(
@@ -1536,9 +1558,9 @@ class Prompter:
                    if m.get("keep_text") else ""))
         if self._screenshots:
             body += "\n\n## Кадры экрана\n" + "\n".join(
-                f"- `{x['path']}`" + (f" — {x['ocr']}" if x.get("ocr") else "") for x in self._screenshots)
+                f"- {meeting_link(x['path'], relative_to=transcript_root)}" + (f" — {x['ocr']}" if x.get("ocr") else "") for x in self._screenshots)
         if self._video_path:
-            body += f"\n\n## Видео из кадров\n- `{Path(self._video_path).name}` — таймлапс, кадр каждые {self._frame_interval:g} с"
+            body += f"\n\n## Видео из кадров\n- {meeting_link(self._video_path, Path(self._video_path).name)} — таймлапс, кадр каждые {self._frame_interval:g} с"
         path = ""
         try:
             d = self.eng.workspace.ensure() / "Встречи"
@@ -1550,6 +1572,7 @@ class Prompter:
         except OSError as e:
             log.warning("🎬 Итог встречи не сохранён: %s", e)
         self.summary = body
+        self._summary_path = path
         log.info("🎬 Итог встречи: %s", path or "(не сохранён)")
         self._emit("summary", summary=body, path=path, busy=False)
 

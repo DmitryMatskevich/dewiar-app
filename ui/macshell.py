@@ -560,6 +560,21 @@ def make_api(app):
             open_target(url)
             return True
 
+        def open_meeting_file(self, relative, summary_path):
+            """Open a meeting artifact, but never an arbitrary path from the page."""
+            rel = str(relative or "").replace("\\", "/")
+            if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+                raise ValueError("недопустимая ссылка на файл встречи")
+            summary = Path(str(summary_path or "")).expanduser().resolve()
+            meeting_root = summary.parent
+            if summary.suffix.lower() != ".md" or meeting_root.name != "Встречи":
+                raise ValueError("ссылка не относится к итогам встречи")
+            target = (meeting_root / rel).resolve()
+            if meeting_root not in target.parents or not target.is_file():
+                raise ValueError("файл встречи не найден")
+            open_target(target)
+            return True
+
         def open_settings(self, page="", query=""):
             if self._studio is not None:
                 if query:

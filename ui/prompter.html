@@ -684,12 +684,22 @@ function render() {
   } else { $("#title").textContent = "Встречи"; show("setup"); }
 }
 function md(t) {
-  return esc(t).replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  return esc(t).replace(/\[([^\]]+)\]\(dwr-file:([^)]+)\)/g, '<a href="#" class="meeting-file" data-file="$2">$1</a>')
+    .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/^\*(.*)\*$/gm, "<em>$1</em>").replace(/^_(.*)_$/gm, "<em>$1</em>")
     .replace(/(?:^- .*(?:\n|$))+/gm, m => "<ul>" + m.trim().split("\n").map(l => `<li>${l.slice(2)}</li>`).join("") + "</ul>")
     .replace(/^(?!<h|<ul|<li|<em)(.+)$/gm, "<p>$1</p>").replace(/\n+/g, "");
 }
-let videoExportBusy = false, videoExportResult = null;
+let meetingSummaryPath = "", videoExportBusy = false, videoExportResult = null;
+function bindMeetingFiles(root) {
+  root.querySelectorAll("a.meeting-file").forEach(a => a.onclick = async (event) => {
+    event.preventDefault();
+    const apiObject = api();
+    if (!apiObject || !apiObject.open_meeting_file) return;
+    try { await apiObject.open_meeting_file(decodeURIComponent(a.dataset.file || ""), meetingSummaryPath); }
+    catch (e) { const out = $("#meeting-video-result"); if (out) out.textContent = e.message || "Файл встречи не открылся"; }
+  });
+}
 function renderMeetingVideo() {
   const button = $("#create-meeting-video"), result = $("#meeting-video-result");
   if (!button) return;
@@ -707,9 +717,11 @@ async function createMeetingVideo() {
 }
 function renderSum(e) {
   show("sum"); $("#title").textContent = "Итог встречи";
+  meetingSummaryPath = e.path || e.summary_path || meetingSummaryPath || "";
   $("#sum").innerHTML = e.busy ? `<div class="wait"><span class="spin"></span>${e.phase === "transcribe" ? "Расшифровываю запись разговора…" : "Подвожу итог встречи…"}</div>`
     : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
       + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
+  bindMeetingFiles($("#sum"));
   $("#sum").insertAdjacentHTML("beforeend", '<div class="row" style="margin-top:12px"><button class="ghost blk" type="button" id="create-meeting-video">Создать видео встречи</button></div><p class="saved" id="meeting-video-result" role="status" style="overflow-wrap:anywhere"></p>');
   $("#create-meeting-video").onclick = createMeetingVideo;
   renderMeetingVideo();
@@ -772,7 +784,7 @@ core.on("hello", (e) => {
   if ($("#m-record-source") && cfg.audio_source) $("#m-record-source").value = cfg.audio_source;
   if ($("#m-record") && cfg.record_audio_default != null) $("#m-record").checked = !!cfg.record_audio_default;
   renderRecord();
-  core.call("prompter_state").then(s => { st = s; render(); if (!s.on && s.summary && view === "sum") renderSum({ summary: s.summary }); }).catch(() => {});
+  core.call("prompter_state").then(s => { st = s; render(); if (!s.on && s.summary && view === "sum") renderSum({ summary: s.summary, path: s.summary_path }); }).catch(() => {});
 });
 core.on("settings", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || prompterHotkey; });
 core.on("prompter", (e) => {
