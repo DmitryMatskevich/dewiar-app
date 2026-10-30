@@ -709,13 +709,13 @@ class Prompter:
             raise ValueError("для записи переговоров подтвердите согласие участников")
         if live and self.speaker.owner is None:
             raise ValueError("для очной встречи сначала запомните свой голос — «Запомнить мой голос»")
-        if auto_frames:
+        if auto_frames or auto_first_frame:
             try:
                 from platform_info import MAC
                 if MAC:
                     from macsys import request_screen_capture_permission
                     if not request_screen_capture_permission():
-                        raise ValueError("Разрешите Dewiar запись экрана в Системных настройках → Конфиденциальность и безопасность → Запись экрана, затем повторите запуск автоматических кадров")
+                        raise ValueError("Нужен доступ к записи экрана macOS")
             except ImportError:
                 pass
         if self.enrolling is not None:

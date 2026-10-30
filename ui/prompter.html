@@ -87,6 +87,7 @@
   #capture-live select { color: var(--ink); background: var(--glass2); border: 0; border-radius: 9px; padding: 7px 8px; font: inherit; }
   #capture-live button { padding: 7px 10px; font-size: 12px; }
   #capture-live-audio { color: var(--calm); }
+  .capture-live-error { flex: 1 1 100%; color: var(--bad); font-size: 12px; line-height: 1.35; }
   .opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
   .opt small { display: block; color: var(--faint); font-size: 12.5px; font-weight: 500; }
   .sw { position: relative; width: 38px; height: 22px; flex: none; }
@@ -290,6 +291,7 @@
         <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option></select></label>
         <label style="grid-column:1/-1"><span style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;font-weight:500"><input type="checkbox" id="m-frame-video" title="Собрать видео из всех кадров" style="width:16px;height:16px"> Собрать видео из кадров (таймлапс)</span></label>
       </div>
+      <p class="hint hidden" id="m-frame-help">Автокадры и первый снимок используют «Запись экрана» macOS. Перед началом встречи Dewiar проверит доступ; если его нет, появится кнопка открытия настроек.</p>
       <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent" checked><i></i></span></label>
     </div>
     <div id="vbox" class="blk hidden">
@@ -317,7 +319,9 @@
       <span id="capture-live-status">Автокадры выключены</span>
       <select id="live-frame-interval" title="Частота проверки экрана"><option value="0.5">0,5 с</option><option value="1" selected>1 с</option><option value="2">2 с</option><option value="5">5 с</option></select>
       <select id="live-frame-quality" title="Качество JPEG"><option value="60">60%</option><option value="75">75%</option><option value="85" selected>85%</option><option value="95">95%</option></select>
-      <button class="ghost blk" id="capture-live-apply" title="Применить частоту и качество автоматических кадров">Включить автокадры</button>
+      <button class="ghost blk" id="capture-live-apply" title="Включить автоматические снимки экрана с выбранной частотой и качеством. Нужен доступ macOS к записи экрана.">Включить автокадры</button>
+      <button class="ghost blk hidden" id="capture-live-settings" title="Открыть настройки macOS → Конфиденциальность и безопасность → Запись экрана">Открыть настройки записи экрана</button>
+      <span class="capture-live-error hidden" id="capture-live-error"></span>
       <button class="ghost blk hidden" id="capture-live-stop" title="Остановить автоматические кадры, не останавливая встречу">Остановить кадры</button>
       <button class="ghost blk hidden" id="capture-live-audio" title="Временно прекратить запись звука, не останавливая встречу">Поставить звук на паузу</button>
     </div>
@@ -403,9 +407,15 @@ function renderRecord() {
   $("#start").disabled = on && !$("#m-consent").checked;
 }
 $("#m-record").onchange = renderRecord;
-$("#m-auto-shot").onchange = () => { $("#m-frame-settings").classList.toggle("hidden", !$("#m-auto-shot").checked); };
+function renderFrameHelp() {
+  $("#m-frame-settings").classList.toggle("hidden", !$("#m-auto-shot").checked);
+  $("#m-frame-help").classList.toggle("hidden", !$("#m-auto-shot").checked && !$("#m-first-shot").checked);
+}
+$("#m-auto-shot").onchange = renderFrameHelp;
+$("#m-first-shot").onchange = renderFrameHelp;
 $("#m-consent").onchange = renderRecord;
 renderRecord();
+renderFrameHelp();
 
 /* ---------- голос владельца ---------- */
 const VBARS = 22;
@@ -619,6 +629,18 @@ function renderCaptureLive() {
     : "Временно прекратить запись звука, не останавливая встречу";
   $("#capture-live-apply").disabled = !active;
   $("#capture-live-stop").disabled = !active;
+  $("#capture-live-apply").title = "Включить автоматические снимки экрана с выбранной частотой и качеством. Нужен доступ macOS к записи экрана.";
+  if (active && /первый снимок не сделан|автокадры недоступны/i.test(st.status || "")) showCaptureError(st.status);
+}
+function showCaptureError(message) {
+  const text = String(message || "");
+  const badScreen = /запись экрана|screen capture/i.test(text);
+  const error = $("#capture-live-error"), settings = $("#capture-live-settings");
+  error.textContent = badScreen ? "Для автокадров нужен доступ к записи экрана macOS." : text;
+  error.classList.toggle("hidden", !text);
+  settings.classList.toggle("hidden", !badScreen);
+  const a = api();
+  settings.onclick = () => a && a.open_screen_settings && a.open_screen_settings();
 }
 function renderScheduleAlert() {
   const box = $("#schedule-alert"); if (!box) return;
@@ -698,7 +720,8 @@ $("#ask").onclick = () => { follow = true; core.call("prompter_hint", {}).catch(
 $("#capture-live-apply").onclick = async () => {
   try {
     await core.call("prompter_frames", { action: "start", interval: Number($("#live-frame-interval").value), quality: Number($("#live-frame-quality").value), video: false });
-  } catch (e) { $("#err").textContent = e.message; }
+    showCaptureError("");
+  } catch (e) { showCaptureError(e.message); }
 };
 $("#capture-live-stop").onclick = () => core.call("prompter_frames", { action: "stop" }).catch(e => { $("#err").textContent = e.message; });
 $("#capture-live-audio").onclick = () => core.call("prompter_audio_pause", { on: !(st && st.recording && st.recording.audio_paused) }).catch(e => { $("#err").textContent = e.message; });
