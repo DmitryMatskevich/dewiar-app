@@ -801,7 +801,7 @@ class ToolsMixin:
             self.alarm = a
         from when import describe_repeat
         kind = item.get("kind") or "reminder"
-        title = {"alarm": "Будильник", "timer": "Таймер"}.get(kind, "Напоминание")
+        title = {"alarm": "Будильник", "timer": "Таймер", "event": "Событие"}.get(kind, "Напоминание")
         rel = self._reminder_note(item) if item.get("note") or item.get("note_id") else ""
         att = self.workspace.note_atts(rel) if rel else []
         pics = sum(1 for f in att if f["kind"] == "image")
@@ -1283,7 +1283,7 @@ class ToolsMixin:
                     lines.append(f"{head}: ничего не запланировано")
                 continue
             for x in items:
-                kind = {"event": "встреча" + (f" ({x['cal']})" if x.get("cal") else ""), "task": "задача"}.get(x["type"]) or \
+                kind = {"event": ("событие" if x.get("kind") == "event" and not x.get("cal") else "встреча") + (f" ({x['cal']})" if x.get("cal") else ""), "task": "задача"}.get(x["type"]) or \
                     ("дело по расписанию (выполнится само)" if x.get("kind") in ("job", "brief") else "напоминание")
                 tm = (x.get("time") or "") + (f"–{x['end']}" if x.get("end") else "")
                 past = d == today and (x.get("done") or (x.get("time") and x["time"] < now_hm))
@@ -1313,7 +1313,7 @@ class ToolsMixin:
             n = 0
             while at <= last and n < 400:                        # предел — чтобы частый повтор не раздул месяц и не зациклил
                 if at >= first:
-                    put(at.date().isoformat(), {"type": "reminder", "id": r["id"], "time": at.strftime("%H:%M"),
+                    put(at.date().isoformat(), {"type": "event" if r.get("kind") == "event" else "reminder", "id": r["id"], "time": at.strftime("%H:%M"),
                                                 "title": r["text"], "kind": r.get("kind") or "reminder",
                                                 "repeat": bool(r.get("repeat")), "paused": bool(r.get("paused"))})
                 if not r.get("repeat"):

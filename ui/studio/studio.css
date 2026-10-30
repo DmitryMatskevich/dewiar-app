@@ -683,6 +683,12 @@ input[type=radio]:checked::after { content: ""; width: 8px; height: 8px; border-
 .ritem .ract button:hover { background: rgba(255,255,255,.16); }
 .ritem .ract svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .ritem input { width: 100%; padding: 7px 10px; font-size: 14px; }
+.ritem select { min-width: 150px; padding: 7px 30px 7px 10px; font-size: 14px; }
+.redit-row { display: flex; gap: 6px; margin-top: 6px; }
+.redit-row select { flex: 1; min-width: 0; }
+.redit-row input[type="time"] { flex: 0 0 104px; }
+.ritem .redit-free { margin-top: 6px; }
+.ritem .ract .btn { white-space: nowrap; font-size: 12px; }
 .rempty { padding: 26px; text-align: center; color: var(--muted); background: var(--frost); border-radius: 16px; }
 .rem { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
 .status { display: grid; grid-template-columns: 170px 1fr; gap: 8px 16px; font-size: 13.5px; }

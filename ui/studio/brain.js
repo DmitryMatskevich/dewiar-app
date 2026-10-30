@@ -546,7 +546,7 @@ function renderReminders(items) {
     groups[g].forEach(x => {
       const el = document.createElement("div"); el.className = "ritem" + (x.paused ? " paused" : "");
       const kind = x.kind === "job" ? (x.brief ? "утренняя сводка" : "дело по расписанию") + ({ telegram: " · в Telegram", max: " · в MAX" }[x.deliver] || " · голосом")
-                   : { alarm: "будильник", timer: "таймер" }[x.kind];
+                   : { alarm: "будильник", timer: "таймер", event: "событие" }[x.kind];
       el.innerHTML = `<div class="rtime"></div><div class="rbody"><div class="rtext"></div><div class="rmeta"></div></div><div class="ract"></div>`;
       $(".rtime", el).textContent = x.at_hm; $(".rtext", el).textContent = x.text;
       const meta = $(".rmeta", el); const w = document.createElement("span"); w.textContent = x.paused ? "на паузе" : x.when; meta.appendChild(w);
@@ -569,13 +569,68 @@ function renderReminders(items) {
 }
 function editReminder(el, x) {
   const body = $(".rbody", el); body.innerHTML = "";
+  let selectedKind = x.kind === "event" ? "event" : "reminder";
   const t = document.createElement("input"); t.value = x.text; t.placeholder = "о чём напомнить";
-  const w = document.createElement("input"); w.placeholder = "когда: «завтра в 10», «каждый день в 8» — пусто, чтобы не менять"; w.style.marginTop = "6px";
-  body.appendChild(t); body.appendChild(w); t.focus();
-  const save = () => { const patch = { text: t.value.trim() || x.text }; if (w.value.trim()) patch.when = w.value.trim();
-    core.call("reminder_update", { id: x.id, patch }).then(() => { toast("Сохранено"); loadReminders(); }).catch(e => toast(e.message)); };
-  [t, w].forEach(i => i.onkeydown = (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") loadReminders(); });
-  const act = $(".ract", el); act.innerHTML = ""; const ok = document.createElement("button"); ok.className = "btn primary"; ok.style.width = "auto"; ok.style.padding = "0 12px"; ok.textContent = "Сохранить"; ok.onclick = save; act.appendChild(ok);
+  const row = document.createElement("div"); row.className = "redit-row";
+  const repeat = document.createElement("select"); repeat.title = "Повторять напоминание или событие";
+  repeat.innerHTML = '<option value="none">Не повторять</option><option value="daily">Каждый день</option><option value="weekdays">По будням</option><option value="weekly">Каждую неделю</option><option value="monthly">Каждый месяц</option><option value="yearly">Каждый год</option><option value="custom">Своё правило</option>';
+  const rk = x.repeat && x.repeat.kind;
+  repeat.value = rk === "daily" ? "daily" : rk === "weekly" && JSON.stringify(x.repeat.days || []) === JSON.stringify([0, 1, 2, 3, 4]) ? "weekdays" : rk === "weekly" ? "weekly" : rk === "monthly" ? "monthly" : rk === "yearly" ? "yearly" : rk ? "custom" : "none";
+  const tm = document.createElement("input"); tm.type = "time"; tm.value = x.repeat && x.repeat.time || x.at_hm || "09:00"; tm.title = "Время повторения";
+  row.append(repeat, tm);
+  const w = document.createElement("input"); w.className = "redit-free"; w.placeholder = "Дата или своё правило: «завтра в 10», «каждые 2 часа»";
+  body.appendChild(t); body.appendChild(row); body.appendChild(w); t.focus();
+
+  // Парсер ядра остаётся единым для голоса, текста и этого редактора.
+  const repeatPhrase = (mode) => {
+    const time = tm.value || "09:00";
+    if (mode === "daily") return `каждый день в ${time}`;
+    if (mode === "weekdays") return `по будням в ${time}`;
+    if (mode === "monthly") {
+      const d = new Date(x.at); return `каждый месяц ${d.getDate()} числа в ${time}`;
+    }
+    if (mode === "yearly") {
+      const d = new Date(x.at); return `каждый год ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} в ${time}`;
+    }
+    if (mode === "weekly") {
+      const days = x.repeat && x.repeat.kind === "weekly" && x.repeat.days && x.repeat.days.length ? x.repeat.days : [(new Date(x.at).getDay() + 6) % 7];
+      const names = ["понедельник", "вторник", "среду", "четверг", "пятницу", "субботу", "воскресенье"];
+      if (days.length === 1) return `каждый ${names[days[0]]} в ${time}`;
+      return `по ${days.map(d => names[d]).join(" и ")} в ${time}`;
+    }
+    return "";
+  };
+  const localAt = (hm) => {
+    const d = new Date(x.at), [h, m] = (hm || "09:00").split(":");
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(h)}:${pad(m)}:00`;
+  };
+  const save = () => {
+    const patch = { text: t.value.trim() || x.text };
+    if (selectedKind !== (x.kind || "reminder")) patch.kind = selectedKind;
+    const free = w.value.trim(), mode = repeat.value;
+    if (free) patch.when = free;
+    else if (mode === "none") {
+      patch.repeat = null;
+      if (tm.value && tm.value !== x.at_hm) patch.at = localAt(tm.value);
+    } else if (mode !== "custom") patch.when = repeatPhrase(mode);
+    core.call("reminder_update", { id: x.id, patch }).then(() => { toast("Сохранено"); loadReminders(); }).catch(e => toast(e.message));
+  };
+  let type = null;
+  const setKind = () => {
+    selectedKind = selectedKind === "event" ? "reminder" : "event";
+    type.textContent = selectedKind === "event" ? "Событие" : "Напоминание";
+    type.title = selectedKind === "event" ? "Сохранить как событие и показать в календаре" : "Сохранить обратно как напоминание";
+  };
+  [t, w].forEach(i => i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); save(); } if (e.key === "Escape") loadReminders(); });
+  const act = $(".ract", el); act.innerHTML = "";
+  const canConvert = !x.kind || x.kind === "reminder" || x.kind === "event";
+  if (canConvert) {
+    type = document.createElement("button"); type.className = "btn"; type.style.width = "auto"; type.style.padding = "0 10px";
+    type.title = x.kind === "event" ? "Превратить событие обратно в напоминание" : "Добавить в календарь как событие";
+    type.textContent = x.kind === "event" ? "Напоминание" : "Событие"; type.onclick = setKind; act.appendChild(type);
+  }
+  const ok = document.createElement("button"); ok.className = "btn primary"; ok.style.width = "auto"; ok.style.padding = "0 12px"; ok.textContent = "Сохранить"; ok.onclick = save; act.appendChild(ok);
 }
 /* ---------- готовые дела по расписанию ---------- */
 const J_DAYS = { daily: "каждый день", weekdays: "по будням", fri: "по пятницам", sun: "по воскресеньям" };

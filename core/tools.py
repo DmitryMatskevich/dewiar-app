@@ -1329,7 +1329,9 @@ def t_create_skill(a, ctx):
 class Reminders:
     """Напоминания, будильники, таймеры и дела по расписанию (kind="job", см. jobs.py): разовые и с повтором
     (when.next_time). Файл reminders.json в STATE_DIR; поток _loop раз в секунду вызывает on_fire для наступивших.
-    on_change — после каждой записи (синхронизация с телефоном и сервером, sync.py). Изменения — под _lock: зовут из разных потоков."""
+    on_change — после каждой записи (синхронизация с телефоном и сервером, sync.py). kind может быть reminder, event,
+    alarm, timer или job; event — локальное событие календаря с тем же расписанием и уведомлением. Изменения — под _lock:
+    зовут из разных потоков."""
 
     def __init__(self, on_fire):
         self.path = STATE_DIR / "reminders.json"

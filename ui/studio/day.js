@@ -73,13 +73,13 @@ function renderCal() {
 function itemRow(it, withDate) {
   const el = document.createElement("div"); el.className = "cit";
   const sub = it.type === "money" ? it.category : it.type === "reminder" ? (it.done ? "прозвенело" : (it.repeat ? "повторяется" : "напоминание")) + (it.time ? " · " + it.time : "")
-    : it.type === "event" ? (it.time ? `${it.time}–${it.end}` : "весь день") + " · " + (it.cal || "календарь") + (it.place ? " · " + it.place : "")
+    : it.type === "event" ? (it.time ? (it.end ? `${it.time}–${it.end}` : it.time) : "весь день") + " · " + (it.kind === "event" ? (it.repeat ? "событие · повторяется" : "событие") : (it.cal || "календарь")) + (it.place ? " · " + it.place : "")
     : it.type === "note" ? "заметка" : it.type === "diary" ? "дневник ассистента" : "задача" + (it.status ? " · " + it.status.toLowerCase() : "");
   el.innerHTML = `<i style="background:${itemColor(it)}"></i><div class="t"><span></span><small></small></div>`;
   $(".t span", el).textContent = it.type === "money" ? (it.title || it.category) : it.title || "";
   $(".t small", el).textContent = (withDate ? parseD(withDate).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) + " · " : "") + sub;
   if (it.type === "money") el.insertAdjacentHTML("beforeend", `<span class="amt ${it.kind === "income" ? "inc" : "exp"}">${it.kind === "income" ? "+" : "−"}${escH(fmtMoney(it.amount, it.currency))}</span>`);
-  if ((it.type === "money" || (it.type === "reminder" && !it.done && !it.repeat)) && it.id) {
+  if ((it.type === "money" || (it.type === "reminder" && !it.done && !it.repeat) || (it.type === "event" && it.kind === "event")) && it.id) {
     const x = document.createElement("button"); x.className = "x"; x.title = "Удалить"; x.textContent = "✕";
     x.onclick = async (ev) => { ev.stopPropagation();
       try { await core.call(it.type === "money" ? "money_delete" : "reminder_cancel", { id: it.id }); loadCalendar(); } catch (e) { toast(e.message); } };
