@@ -384,7 +384,7 @@ class Prompter:
                     if not allowed:
                         return self._preflight_result(
                             "error", checks,
-                            "macOS не разрешила запись экрана; добавьте Dewiar в «Конфиденциальность и безопасность → Запись экрана» и повторите расписание")
+                            "Нужен доступ к записи экрана macOS")
             except ImportError:
                 checks.append({"name": "запись экрана", "ok": True, "detail": "проверка недоступна на этой системе"})
             except Exception as exc:  # noqa: BLE001

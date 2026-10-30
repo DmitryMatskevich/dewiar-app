@@ -430,7 +430,7 @@ class CommandsMixin:
                         if MAC:
                             from macsys import request_screen_capture_permission
                             if not request_screen_capture_permission():
-                                raise ValueError("Разрешите Dewiar запись экрана в Системных настройках → Конфиденциальность и безопасность → Запись экрана")
+                                raise ValueError("Нужен доступ к записи экрана macOS")
                     except ImportError:
                         pass
                     pr._frame_interval = max(0.5, min(5.0, float(a.get("interval", 0.5) or 0.5)))

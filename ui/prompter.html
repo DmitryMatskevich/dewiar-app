@@ -108,6 +108,7 @@
   .go:disabled { opacity: .45; filter: saturate(.6); cursor: default; box-shadow: none; }
   .warn { font-size: 13px; color: var(--cue); line-height: 1.45; }
   .warn button { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+  .warn .mini { text-decoration: none; margin: 8px 6px 0 0; }
   /* где встреча: две плитки */
   .place { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .place button { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 13px 14px 14px; border-radius: 18px;
@@ -476,27 +477,33 @@ drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDef
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => e.preventDefault());
 $("#to-brain").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
+function appendScreenPermissionActions(box, retry) {
+  const a = api();
+  if (!a) return;
+  if (a.open_screen_settings) {
+    const open = document.createElement("button"); open.className = "mini"; open.textContent = "Открыть настройки macOS";
+    open.title = "Открыть Конфиденциальность и безопасность → Запись экрана";
+    open.onclick = () => a.open_screen_settings(); box.appendChild(open);
+  }
+  if (retry) {
+    const again = document.createElement("button"); again.className = "mini"; again.textContent = retry.text || "Повторить";
+    again.title = retry.title || "Повторить после изменения доступа";
+    again.onclick = retry.onclick; box.appendChild(again);
+  }
+}
 async function showStartError(message) {
   const box = $("#nobrain"); box.innerHTML = "";
   const text = document.createElement("span"); text.textContent = message; box.appendChild(text);
   if (/запись экрана/i.test(message)) {
+    text.textContent = "Для автоматических кадров нужен доступ к записи экрана macOS.";
     const a = api();
     if (a && a.screen_capture_permission) {
       try {
         const status = await a.screen_capture_permission();
-        if (status && status.granted) {
-          text.textContent = "Доступ к экрану уже виден Dewiar, но ядро ещё не обновило разрешение. Перезапустите Dewiar и повторите запуск кадров.";
-        }
+        if (status && status.granted) text.textContent = "Доступ уже разрешён, но Dewiar ещё не обновил его. Перезапустите приложение и повторите запуск.";
       } catch (_) { /* кнопка настроек всё равно доступна */ }
     }
-    if (a && a.open_screen_settings) {
-      const open = document.createElement("button"); open.className = "mini"; open.textContent = "Открыть настройки macOS";
-      open.title = "Открыть Конфиденциальность и безопасность → Запись экрана";
-      open.onclick = () => a.open_screen_settings(); box.appendChild(open);
-    }
-    const retry = document.createElement("button"); retry.className = "mini"; retry.textContent = "Повторить запуск";
-    retry.title = "Повторить после изменения доступа или перезапуска Dewiar";
-    retry.onclick = () => { box.classList.add("hidden"); $("#start").click(); }; box.appendChild(retry);
+    appendScreenPermissionActions(box, {text: "Повторить запуск", title: "Повторить после изменения доступа или перезапуска Dewiar", onclick: () => { box.classList.add("hidden"); $("#start").click(); }});
   }
   box.classList.remove("hidden");
 }
@@ -596,7 +603,17 @@ function renderScheduleAlert() {
   const rows = (st && st.schedules) || [];
   const bad = rows.find(x => x.state === "error");
   const next = rows.filter(x => x.state === "scheduled").sort((a,b) => Number(a.start_at || 0) - Number(b.start_at || 0))[0];
-  if (bad) { box.textContent = `Запись «${bad.title || "Встреча"}» не готова: ${bad.error || (bad.preflight || {}).message || "проверка не пройдена"}`; box.classList.remove("hidden"); return; }
+  if (bad) {
+    box.innerHTML = "";
+    const text = document.createElement("span"); text.textContent = `Запись «${bad.title || "Встреча"}» не готова: ${bad.error || (bad.preflight || {}).message || "проверка не пройдена"}`; box.appendChild(text);
+    if (/запись экрана/i.test(text.textContent)) {
+      text.textContent = "Для запланированной записи нужен доступ к записи экрана macOS.";
+      appendScreenPermissionActions(box, {text: "Повторить проверку", title: "Проверить доступ и подготовить запись заново", onclick: async () => {
+      try { await core.call("prompter_schedule_retry", {id: bad.id}); box.classList.add("hidden"); } catch (e) { text.textContent = e.message; }
+      }});
+    }
+    box.classList.remove("hidden"); return;
+  }
   if (next && next.preflight?.state === "ok") { box.textContent = `Запись «${next.title || "Встреча"}» проверена и запланирована.`; box.classList.remove("hidden"); return; }
   box.classList.add("hidden"); box.textContent = "";
 }
