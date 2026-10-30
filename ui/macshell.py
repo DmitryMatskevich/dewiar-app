@@ -360,6 +360,10 @@ def make_api(app):
             open_target("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
             return True
 
+        def open_sound_settings(self):
+            open_target("x-apple.systempreferences:com.apple.preference.sound")
+            return True
+
         def screen_capture_permission(self):
             """Return the Screen Recording status for this running Dewiar process."""
             try:

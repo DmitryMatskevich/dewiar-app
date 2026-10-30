@@ -635,6 +635,20 @@ class Prompter:
                 except OSError:
                     pass
 
+    def _probe_record_source(self, source):
+        """Open and close the selected input before changing the meeting state."""
+        from audio_io import Capture, LoopbackCapture
+        if source == "system":
+            cap = LoopbackCapture()
+        else:
+            cfg = self.eng.s.get("audio") if hasattr(self.eng.s, "get") else {}
+            device = cfg.get("input", "") if isinstance(cfg, dict) else ""
+            cap = Capture(device=device or "", strict_device=bool(device))
+        try:
+            return cap.open()
+        finally:
+            cap.close()
+
     def _suspend_engine_mic(self, on):
         """Запись системного микса не должна конкурировать с Zoom/Meet за микрофон."""
         flag = getattr(self.eng, "audio_suspended", None)
@@ -746,6 +760,11 @@ class Prompter:
         record_source = str((cfg.get("audio_source") if record_source is None else record_source) or "system").lower()
         if record_source not in ("system", "microphone"):
             record_source = "system"
+        if record:
+            try:
+                self._probe_record_source(record_source)
+            except Exception as exc:
+                raise ValueError(f"запись не началась: {exc}") from exc
         with self._lock:
             self.meeting = {"title": (title or "").strip()[:120] or "Встреча", "goal": (goal or "").strip()[:2000],
                             "mode": "manual" if mode == "manual" else "auto", "them": bool(them) and not live, "me": bool(me) or live,
@@ -967,6 +986,10 @@ class Prompter:
             self.status = (f"запись не началась: {e}" if self.meeting.get("record")
                            else f"звук компьютера не слышу ({e}) — подсказки по кнопке и на ваши фразы")
             log.warning("🎬 Суфлёр: %s", self.status)
+            if self.meeting.get("record"):
+                self.stop(summary=False)
+                threading.Thread(target=self._summarize, name="prompter-summary-error", daemon=True).start()
+                return
             self._state()
             return
         if self.meeting.get("record"):

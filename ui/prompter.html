@@ -491,6 +491,25 @@ function appendScreenPermissionActions(box, retry) {
     again.onclick = retry.onclick; box.appendChild(again);
   }
 }
+function appendAudioActions(box, retry) {
+  const a = api();
+  if (!a) return;
+  if (a.open_sound_settings) {
+    const open = document.createElement("button"); open.className = "mini"; open.textContent = "Открыть настройки звука";
+    open.title = "Открыть настройки звука macOS";
+    open.onclick = () => a.open_sound_settings(); box.appendChild(open);
+  }
+  if (a.open_settings) {
+    const own = document.createElement("button"); own.className = "mini"; own.textContent = "Настройки Dewiar";
+    own.title = "Выбрать источник записи в разделе «Встречи»";
+    own.onclick = () => a.open_settings("prompter"); box.appendChild(own);
+  }
+  if (retry) {
+    const again = document.createElement("button"); again.className = "mini"; again.textContent = retry.text || "Повторить";
+    again.title = retry.title || "Повторить после изменения источника";
+    again.onclick = retry.onclick; box.appendChild(again);
+  }
+}
 async function showStartError(message) {
   const box = $("#nobrain"); box.innerHTML = "";
   const text = document.createElement("span"); text.textContent = message; box.appendChild(text);
@@ -504,6 +523,9 @@ async function showStartError(message) {
       } catch (_) { /* кнопка настроек всё равно доступна */ }
     }
     appendScreenPermissionActions(box, {text: "Повторить запуск", title: "Повторить после изменения доступа или перезапуска Dewiar", onclick: () => { box.classList.add("hidden"); $("#start").click(); }});
+  } else if (/виртуальн|BlackHole|Loopback|источник аудио/i.test(message)) {
+    text.textContent = "Для записи системного звука нужен BlackHole 2ch или Loopback. Можно выбрать запись с микрофона в настройках Dewiar.";
+    appendAudioActions(box, {text: "Повторить запуск", title: "Повторить после установки или выбора источника", onclick: () => { box.classList.add("hidden"); $("#start").click(); }});
   }
   box.classList.remove("hidden");
 }
@@ -610,6 +632,11 @@ function renderScheduleAlert() {
       text.textContent = "Для запланированной записи нужен доступ к записи экрана macOS.";
       appendScreenPermissionActions(box, {text: "Повторить проверку", title: "Проверить доступ и подготовить запись заново", onclick: async () => {
       try { await core.call("prompter_schedule_retry", {id: bad.id}); box.classList.add("hidden"); } catch (e) { text.textContent = e.message; }
+      }});
+    } else if (/виртуальн|BlackHole|Loopback|источник аудио/i.test(text.textContent)) {
+      text.textContent = "Для запланированной записи нужен BlackHole 2ch или Loopback либо выбранный микрофон.";
+      appendAudioActions(box, {text: "Повторить проверку", title: "Проверить источник аудио заново", onclick: async () => {
+        try { await core.call("prompter_schedule_retry", {id: bad.id}); box.classList.add("hidden"); } catch (e) { text.textContent = e.message; }
       }});
     }
     box.classList.remove("hidden"); return;
