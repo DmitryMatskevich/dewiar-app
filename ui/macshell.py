@@ -261,6 +261,19 @@ def make_api(app):
             open_target("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
             return True
 
+        def screen_capture_permission(self):
+            """Return the Screen Recording status for this running Dewiar process."""
+            try:
+                from Quartz import CGPreflightScreenCaptureAccess
+                granted = bool(CGPreflightScreenCaptureAccess())
+            except Exception as e:  # noqa: BLE001 — older macOS/PyObjC
+                return {"state": "unknown", "granted": False, "error": str(e)}
+            return {"state": "authorized" if granted else "denied", "granted": granted}
+
+        def open_screen_settings(self):
+            open_target("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            return True
+
         def get_pos(self, mode="card"):
             return [self._hud.x, self._hud.y] if self._hud else [0, 0]
 
