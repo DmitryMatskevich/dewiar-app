@@ -17,6 +17,13 @@ for package in ("onnxruntime", "onnx_asr", "huggingface_hub", "vosk", "piper", "
     hidden += imports
 for distribution in ("onnx-asr", "huggingface-hub"):
     datas += copy_metadata(distribution)
+# Звук приложений для записи встреч без BlackHole (Core Audio Process Tap, macOS 14.2+).
+# Собирается заранее: tools/build_audio_tap.sh; если бинарника нет — встречи пишутся через BlackHole.
+audio_tap = root / "native/macos/bin/dewiar-audio-tap"
+if audio_tap.is_file():
+    binaries += [(str(audio_tap), "native")]
+else:
+    print("WARNING: native/macos/bin/dewiar-audio-tap не собран — запись звука встреч только через BlackHole/Loopback")
 
 a = Analysis([str(root / "tools/macos_entry.py")], pathex=[str(root / "core"), str(root / "ui")],
              binaries=binaries, datas=datas, hiddenimports=hidden,
@@ -47,6 +54,7 @@ app = BUNDLE(coll, name="Dewiar.app", bundle_identifier="pro.dewiar.macos",
                          "NSContactsUsageDescription": "Импорт выбранных контактов в Dewiar и создание новых карточек по вашему подтверждению",
                          "NSMicrophoneUsageDescription": "Голосовое общение с помощником Dewiar",
                          "NSScreenCaptureUsageDescription": "Снимки экрана и OCR во время встречи по запросу пользователя",
+                         "NSAudioCaptureUsageDescription": "Запись звука приложения звонка для локальной расшифровки встречи по вашему запросу",
                          "NSCameraUsageDescription": "Получение изображения по запросу пользователя",
                          "NSAppleEventsUsageDescription": "Управление выбранными пользователем приложениями",
                          "NSHighResolutionCapable": True})

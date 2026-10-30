@@ -139,12 +139,21 @@ REPEAT_RX = re.compile(r"^\W*(?:\w+,\s*)?(?:ну\s+)?(?:а\s+)?(?:теперь|�
 class AnswerMixin:
     # ---------- ответ ----------
 
-    def _conversation_model_role(self):
-        """Роль маршрутизации модели для текущего персонажа."""
+    def _conversation_model_role(self, text=""):
+        """Роль маршрутизации модели для персонажа и типа свободной просьбы."""
         pid = self.s.get("persona")
         p = self.personas.get(pid) or {}
         if pid == "agent" or str(p.get("role", "")).lower().find("програм") >= 0 or str(p.get("name", "")).lower() == "кодер":
             return "coding"
+        # Явные планы остаются в очереди планирования; документы, поручения и длинные
+        # разборы идут в отдельную аналитическую очередь. Это не меняет маршрутизацию
+        # фоновых задач и совета моделей, которые вызывают active_llm("planning") напрямую.
+        from llm import ANALYTICS_ASK, wants_analysis
+        if re.search(r"(?:составь|сделай|разработай|распиши|подготовь|утвердим)\s+(?:подробн\w*\s+)?план|"
+                     r"план\s+(?:проекта|работы|развития|действий)|спланируй", str(text or ""), re.I):
+            return "planning"
+        if wants_analysis(text) or ANALYTICS_ASK.search(str(text or "")):
+            return "analytics"
         return "communication"
 
     def _slow_local(self, prof, sec):
@@ -1326,7 +1335,8 @@ class AnswerMixin:
         модель не справилась с инструментами — без них; не приняла картинку — без неё (модель запоминается в _blind).
         В конце: ответ в мессенджер (turn.via["done"]), история, «продолжение разговора», возврат к главному
         персонажу после специалиста и передача слова, если её попросил инструмент. Отменённый ход в историю не идёт."""
-        prof = self.s.active_llm(self._conversation_model_role())
+        role = self._conversation_model_role(text)
+        prof = self.s.active_llm(role)
         self._turn_text = text                       # read_webpage: длинная страница — куски по словам вопроса
         sentences = queue.Queue()
         silent = bool(turn.via) and not turn.via.get("speak")
@@ -1340,7 +1350,7 @@ class AnswerMixin:
             if not prof and (self.account.logged_in() or self.s.get("cloud", "key")):
                 try:                                   # модели нет, а вход dewiar.pro (или ключ) есть — подключаем модели Dewiar сами
                     self._cloud_use()
-                    prof = self.s.active_llm(self._conversation_model_role())
+                    prof = self.s.active_llm(role)
                 except Exception as e:  # noqa: BLE001
                     log.info("🧠 Модели Dewiar сами не подключились: %s", e)
             if not prof:
@@ -1348,14 +1358,18 @@ class AnswerMixin:
                                + (": войдите в аккаунт dewiar.pro — модели Dewiar подключатся сами" if not self.account.logged_in() else ""))
             msgs = self._messages(text, images, prof)
             from llm import wants_think
-            if prof.get("think") not in ("on", "off") and self.s.get("llm", "think_auto") is not False and wants_think(text):
+            if role == "analytics" and prof.get("think") != "off":
+                # Аналитическая очередь по умолчанию использует reasoning-модель/режим.
+                # Явное think=off в профиле сохраняет выбор пользователя.
+                prof = dict(prof, think="on")
+                log.info("🧠 Аналитическая просьба — включено рассуждение")
+            elif prof.get("think") not in ("on", "off") and self.s.get("llm", "think_auto") is not False and wants_think(text):
                 # сложная просьба — модель думает (дольше, но стих с рифмой, а расчёт со смыслом); лимит — с запасом на размышления
                 prof = dict(prof, think="on", max_tokens=max(6144, int(prof.get("max_tokens") or 0)))
                 log.info("🧠 Сложная просьба — модель подумает перед ответом")
             # Автоматическое рассуждение не должно обходить ограничение выбранной
-            # очереди: для общения лимит остаётся 1024, для планирования и кода
-            # применяется их отдельное значение.
-            prof = self.s.apply_llm_role_limit(prof)
+            # очереди: у общения, планирования, кода и аналитики свои лимиты.
+            prof = self.s.apply_llm_role_limit(prof, role)
             from llm import creative_temp
             ask0 = text.split("\n\nВложения:")[0]
             temp = creative_temp(ask0, prof.get("temperature", 0.7))
@@ -1525,7 +1539,7 @@ class AnswerMixin:
                                 if not getattr(self, "_ctx_noted", False):
                                     self._ctx_noted = True
                                     self.note("У модели маленькое окно контекста — отвечаю без действий и почти без памяти "
-                                              "разговора. В LM Studio или Ollama поставьте длину контекста 8192 или больше.")
+                                              "разговора. В LM Studio или Ollama поставьте длину контекста 32768 или больше.")
                             specs = []
                             system = self._system(False) + ("\n\nСейчас действия (музыка, скриншоты, программы) "
                                                             "недоступны: эта модель не умеет вызывать инструменты. Если "

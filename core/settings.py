@@ -99,6 +99,7 @@ ROLE_MAX_TOKENS_DEFAULT = {
     "communication": 1024,
     "planning": 16384,
     "coding": 8192,
+    "analytics": 32768,
 }
 
 
@@ -160,6 +161,7 @@ DEFAULTS = {
     # Отдельные параметры записи встреч: модель можно выбрать независимо от
     # коротких голосовых команд, а параметры кадра используются и планировщиком.
     "prompter": {
+        "system_audio": "auto", "tap_target": "all", "record_me": True,
         "stt_engine": "inherit",       # inherit | gigaam | vosk | remote
         "stt_model": "gigaam-v3-e2e-rnnt",
         "audio_source": "system",      # system (BlackHole/Loopback) | microphone

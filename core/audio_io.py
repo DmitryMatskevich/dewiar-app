@@ -278,8 +278,11 @@ class Capture:
     """Поток кадров int16 по 512 сэмплов 16 кГц. Источник — libpulse напрямую, запасные —
     parec и sounddevice, для тестов — WAV-файл."""
 
-    def __init__(self, device="", wav_path=None, realtime=True, strict_device=False):
+    def __init__(self, device="", wav_path=None, realtime=True, strict_device=False, channels=1):
         self.device, self.wav_path, self.realtime, self.strict_device = device, wav_path, realtime, strict_device
+        self.channels = channels
+        self.overflows = 0
+        self.dropped_frames = 0
         self.proc = None
         self.stream = None
         self._sd_q = None
@@ -314,12 +317,18 @@ class Capture:
         import sounddevice as sd
         self._sd_q = queue.Queue(maxsize=200)
 
-        def cb(data, *_):
+        def cb(data, frames, timing, status):
+            if status:
+                self.overflows += 1
+            raw = bytes(data)
+            if self.channels > 1:
+                samples = np.frombuffer(raw, dtype=np.int16).reshape(-1, self.channels)
+                raw = samples.astype(np.int32).mean(axis=1).astype(np.int16).tobytes()
             try:
-                self._sd_q.put_nowait(bytes(data))
+                self._sd_q.put_nowait(raw)
             except queue.Full:                  # ядро не успевает — старый кадр не нужен
-                pass
-        mk = lambda i: sd.RawInputStream(samplerate=RATE, blocksize=FRAME, channels=1, dtype="int16", callback=cb, device=i)
+                self.dropped_frames += 1
+        mk = lambda i: sd.RawInputStream(samplerate=RATE, blocksize=FRAME, channels=self.channels, dtype="int16", callback=cb, device=i)
         label = self.device or "микрофон по умолчанию"
         with _SD_LOCK:
             try:
@@ -398,6 +407,165 @@ class Capture:
                 _sd_open(-1)
 
 
+def audio_tap_path():
+    """Путь к native-хелперу dewiar-audio-tap (Core Audio Process Tap) или "" если его нет.
+
+    Порядок: DEWIAR_AUDIO_TAP → внутри собранного .app → native/macos/bin в исходниках.
+    """
+    from pathlib import Path
+    candidates = []
+    if os.environ.get("DEWIAR_AUDIO_TAP"):
+        candidates.append(Path(os.environ["DEWIAR_AUDIO_TAP"]))
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        candidates += [base / "native" / "dewiar-audio-tap", Path(sys.executable).parent / "dewiar-audio-tap"]
+    candidates.append(Path(__file__).resolve().parent.parent / "native" / "macos" / "bin" / "dewiar-audio-tap")
+    for p in candidates:
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return ""
+
+
+def _macos_at_least(major, minor):
+    import platform
+    try:
+        parts = [int(x) for x in (platform.mac_ver()[0] or "0").split(".")[:2]] + [0]
+        return (parts[0], parts[1]) >= (major, minor)
+    except ValueError:
+        return False
+
+
+def audio_tap_supported():
+    """Можно ли записывать звук приложений без BlackHole (macOS 14.2+ и собранный хелпер)."""
+    if os.environ.get("DEWIAR_AUDIO_TAP"):
+        return bool(audio_tap_path())             # явный хелпер (в том числе тестовый) — без проверки версии
+    return MAC and _macos_at_least(14, 2) and bool(audio_tap_path())
+
+
+def list_audio_apps(timeout=5):
+    """Приложения, подключённые к звуку: [{bundle, name, playing, pids}] — для выбора «чей звук писать»."""
+    import json
+    exe = audio_tap_path()
+    if not exe:
+        return []
+    try:
+        r = subprocess.run([exe, "--list"], capture_output=True, text=True, timeout=timeout)
+        rows = json.loads(r.stdout or "[]")
+        return rows if isinstance(rows, list) else []
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        log.info("Список приложений со звуком не получен: %s", e)
+        return []
+
+
+class TapCapture:
+    """Звук приложений macOS через dewiar-audio-tap: те же кадры, что у Capture (512 сэмплов 16 кГц int16).
+
+    Хелпер отдаёт поток строго по часам (тишина — нулями), сам пересоздаёт tap при смене
+    наушников/колонок и процессов звонка и пишет состояние JSON-строками в stderr.
+    target: "all" — весь звук системы, кроме Dewiar; иначе bundle id через запятую.
+    """
+
+    def __init__(self, target="all", exe=None, exclude_pids=None):
+        import collections
+        self.target = str(target or "all")
+        self.exe = exe or audio_tap_path()
+        self.exclude_pids = list(exclude_pids or [os.getpid()])
+        self.proc = None
+        self.state = ""
+        self.status = ""
+        self.warning = ""
+        self.error = ""
+        self.events = collections.deque(maxlen=50)
+        self._ready = threading.Event()
+
+    def _stderr(self, proc):
+        import json
+        for raw in iter(proc.stderr.readline, b""):
+            line = raw.decode("utf-8", "replace").strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except ValueError:
+                ev = {"ev": "log", "text": line}
+            self.events.append(ev)
+            kind = ev.get("ev")
+            if kind == "ready":
+                self._ready.set()
+            elif kind == "status":
+                self.status, self.state = str(ev.get("text") or ""), str(ev.get("state") or "")
+            elif kind == "warning":
+                self.warning = str(ev.get("text") or "")
+            elif kind == "error":
+                self.error = str(ev.get("text") or "")
+            log.info("audio-tap: %s", ev.get("text") or ev)
+
+    def open(self):
+        if not self.exe:
+            raise RuntimeError("нет хелпера dewiar-audio-tap — соберите его: tools/build_audio_tap.sh")
+        cmd = [self.exe, "--capture", self.target]
+        for pid in self.exclude_pids:
+            cmd += ["--exclude-pid", str(pid)]
+        env = dict(os.environ)
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     bufsize=0, env=env, start_new_session=True)
+        self._ready.clear()
+        threading.Thread(target=self._stderr, args=(self.proc,), name="audio-tap-log", daemon=True).start()
+        # Первый запуск может ждать ответа в системном окне. Не уничтожать
+        # helper через пять секунд, пока пользователь ещё читает запрос macOS.
+        deadline = time.monotonic() + 60
+        while not self._ready.wait(0.05):
+            proc = self.proc
+            if proc is None:
+                raise RuntimeError("Подключение источника записи остановлено")
+            if proc.poll() is not None or time.monotonic() > deadline:
+                code = proc.poll()
+                self.close()
+                raise RuntimeError(self.error or f"хелпер записи звука не запустился (код {code})")
+        what = "звук системы (кроме Dewiar)" if self.target == "all" else "звук приложения " + self.target
+        return what + " через Core Audio"
+
+    def read(self) -> bytes:
+        proc = self.proc
+        if proc is None or proc.stdout is None:
+            return b""
+        need, buf = FRAME * 2, b""
+        import select
+        deadline = time.monotonic() + 2
+        while len(buf) < need:
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not select.select([proc.stdout], [], [], remaining)[0]:
+                    return b""
+                chunk = os.read(proc.stdout.fileno(), need - len(buf))
+            except (OSError, ValueError):
+                return b""
+            if not chunk:
+                return b""
+            buf += chunk
+        return buf
+
+    def close(self):
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        import signal
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=2)
+        except OSError:
+            pass
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                if stream:
+                    stream.close()
+            except OSError:
+                pass
+
+
 class LoopbackCapture:
     """Звук компьютера — то, что играет в колонках или наушниках (голос собеседника в онлайн-встрече), для суфлёра
     (core/prompter.py). Те же кадры, что у Capture: 512 сэмплов 16 кГц int16. Linux — монитор устройства вывода по
@@ -405,27 +573,78 @@ class LoopbackCapture:
     macOS — установленный виртуальный вход BlackHole/Loopback/Soundflower; для проверок — WAV-файл (wav_path).
     open() -> что слушаем; нет способа — RuntimeError с понятным текстом."""
 
-    def __init__(self, wav_path=None):
+    def __init__(self, wav_path=None, backend="auto", tap_target="all"):
         self.wav_path = wav_path
+        self.backend = str(backend or "auto").lower()      # auto | tap | blackhole
+        self.tap_target = tap_target or "all"
+        self.kind = ""                                     # tap | blackhole | monitor | wasapi | file
         self._cap = None
         self._rec = None
         self._ctx = None
 
+    @property
+    def warning(self):
+        """Предупреждение хелпера tap (например, нули из-за отсутствия разрешения)."""
+        return getattr(self._cap, "warning", "") if self.kind == "tap" else ""
+
+    def _use_tap(self):
+        if self.backend not in ("auto", "tap"):
+            return False
+        return audio_tap_supported() and (MAC or bool(os.environ.get("DEWIAR_AUDIO_TAP")))
+
+    def probe(self):
+        """Проверить источник без записи: для tap — хелпер на месте и отвечает (без запроса разрешения),
+        для BlackHole — открыть и закрыть вход."""
+        if self.wav_path:
+            return "файл " + str(self.wav_path)
+        if self.backend == "tap" and not self._use_tap():
+            raise RuntimeError("Core Audio недоступен: нужен Mac с поддерживаемой macOS и собранный хелпер записи")
+        if self._use_tap():
+            exe = audio_tap_path()
+            try:
+                subprocess.run([exe, "--list"], capture_output=True, timeout=5, check=True)
+            except (OSError, subprocess.SubprocessError) as e:
+                if self.backend == "tap":
+                    raise RuntimeError(f"хелпер записи звука не отвечает: {e}") from e
+            else:
+                return "звук приложений через Core Audio (без BlackHole)"
+        try:
+            return self.open()
+        finally:
+            self.close()
+
     def open(self):
+        if self.backend == "tap" and not self._use_tap():
+            raise RuntimeError("Core Audio недоступен: соберите хелпер записи или выберите автоматический способ")
         if self.wav_path:
             self._cap = Capture(device="", wav_path=self.wav_path)
+            self.kind = "file"
             got = self._cap.open()
             return got
+        if self._use_tap():
+            cap = TapCapture(self.tap_target)
+            try:
+                desc = cap.open()
+                self._cap, self.kind = cap, "tap"
+                return desc
+            except Exception as e:  # noqa: BLE001 — запасной путь BlackHole
+                if self.backend == "tap":
+                    raise
+                log.warning("Core Audio tap не запустился (%s) — пробую BlackHole/Loopback", e)
         if MAC:
             _, name = _sd_loopback_index()
             if not name:
-                raise RuntimeError("на Mac нет виртуального входа для системного звука — установите BlackHole 2ch или Loopback")
-            self._cap = Capture(device=name, strict_device=True)
+                hint = "" if audio_tap_path() else (
+                    " (или на macOS 14.2+ соберите хелпер tools/build_audio_tap.sh — тогда BlackHole не нужен)")
+                raise RuntimeError("на Mac нет виртуального входа для системного звука — установите BlackHole 2ch или Loopback" + hint)
+            self._cap = Capture(device=name, strict_device=True, channels=2)
             self._cap.open()
+            self.kind = "blackhole"
             return "системный звук через " + name
         if os.name != "nt":
             self._cap = Capture(device="@DEFAULT_MONITOR@")
             self._cap.open()
+            self.kind = "monitor"
             return "звук компьютера"
         try:
             import soundcard as sc
@@ -435,6 +654,7 @@ class LoopbackCapture:
         mic = sc.get_microphone(id=str(spk.name), include_loopback=True)
         self._ctx = mic.recorder(samplerate=RATE, channels=1, blocksize=FRAME)
         self._rec = self._ctx.__enter__()
+        self.kind = "wasapi"
         return "звук компьютера: " + spk.name
 
     def read(self) -> bytes:

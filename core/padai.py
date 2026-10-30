@@ -128,7 +128,17 @@ class PadAI:
         self._lock = threading.Lock()
 
     def start(self, a):
-        prof = self.eng.s.active_llm()
+        # Правка и разбор документа относятся к очереди «Аналитика». Старые
+        # адаптеры/тестовые хосты без аргумента role сохраняют совместимость.
+        try:
+            prof = self.eng.s.active_llm("analytics")
+        except TypeError:
+            prof = self.eng.s.active_llm()
+        if not prof:
+            try:
+                prof = self.eng.s.active_llm()
+            except TypeError:
+                prof = None
         if not prof:
             raise ValueError("мозг не подключён — студия → «Модели»")
         system, user, temp, mx = prompt(a.get("act", ""), a.get("text", ""), a.get("doc", ""), a.get("lang", "en"),
@@ -140,6 +150,8 @@ class PadAI:
             rid, cancel = f"ai{self._n}", threading.Event()
             self._cur = (rid, cancel)
         prof = dict(prof, temperature=temp, max_tokens=mx)
+        if prof.get("think") != "off":
+            prof["think"] = "on"
         threading.Thread(target=self._run, args=(rid, cancel, a.get("act", ""), prof, system, user), name="padai", daemon=True).start()
         return {"id": rid}
 

@@ -3,6 +3,7 @@ dist/
 .venv/
 work/
 build/
+native/macos/bin/
 __pycache__/
 *.pyc
 android/build/

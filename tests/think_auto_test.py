@@ -15,7 +15,7 @@ def ok(c, m):
         fails.append(m)
 
 
-from llm import stream_events, wants_think  # noqa: E402
+from llm import stream_events, wants_think, wants_analysis  # noqa: E402
 
 hard = ["Напиши стих про Милу", "Сочини поздравление в стихах для мамы", "Реши задачу: поезд вышел из А в 9 утра",
         "Сравни iPhone и Samsung", "Как бы ты торговала на криптобирже?", "Составь план тренировок на неделю",
@@ -25,6 +25,9 @@ easy = ["Почему небо голубое?", "Сколько будет дв
 ok(all(wants_think(t) for t in hard), f"сложное — думать: {[t[:30] for t in hard if not wants_think(t)] or 'все'}")
 ok(not any(wants_think(t) for t in easy), f"простое — сразу: {[t for t in easy if wants_think(t)] or 'все'}")
 ok(wants_think("привет", "on") and not wants_think("Напиши стих", "off"), "явное on/off профиля важнее догадки")
+ok(all(wants_analysis(t) for t in ["Проанализируй договор и выдели риски", "Сравни эти два отчёта", "Вложения: отчёт.pdf\nЧто важно?"])
+   and wants_analysis("x" * 900) and not wants_analysis("Привет, как дела?"),
+   "аналитика: документы, сравнение и длинные запросы распознаются отдельно")
 
 # что уходит модели: с размышлениями — без enable_thinking:false и с большим лимитом
 seen = []

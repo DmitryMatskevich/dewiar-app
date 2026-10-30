@@ -2,6 +2,23 @@
    пользовательская кнопка снимка и фоновые записи по расписанию. */
 (function () {
   const esc = (t) => escH(t);
+  async function loadAudioApps() {
+    const select = $("#pr-tap-target"), button = $("#pr-audio-apps-refresh"), out = $("#pr-audio-apps-result");
+    if (!select) return;
+    const selected = select.value || get("prompter.tap_target") || "all";
+    button.disabled = true; out.textContent = "Проверяю приложения…";
+    try {
+      const result = await core.call("prompter_audio_apps");
+      const apps = Array.isArray(result.apps) ? result.apps : [];
+      select.replaceChildren(new Option("Весь системный звук", "all"));
+      apps.forEach(app => select.add(new Option(`${app.name || app.bundle}${app.playing ? " · воспроизводит звук" : ""}`, app.bundle)));
+      if (selected !== "all" && !apps.some(app => app.bundle === selected)) select.add(new Option(selected + " · сейчас не запущено", selected));
+      select.value = selected;
+      out.textContent = result.supported ? `Core Audio доступен · приложений: ${apps.length}` : "Core Audio не собран или недоступен. Автоматический режим использует установленный BlackHole/Loopback.";
+    } catch (e) { out.textContent = e.message; }
+    finally { button.disabled = false; }
+  }
+  $("#pr-audio-apps-refresh")?.addEventListener("click", loadAudioApps);
   function renderCaptureFields() {
     const source = $("#pr-capture-source")?.value || "screen";
     $("#pr-region-fields")?.classList.toggle("hidden", source !== "region");
@@ -60,6 +77,6 @@
   const oldRefresh = window.refreshStatic;
   window.refreshStatic = function () { oldRefresh(); renderCaptureFields(); };
   $("#pr-stt-model")?.addEventListener("change", loadMeetingModel);
-  core.on("hello", () => { renderCaptureFields(); loadSchedules(); loadMeetingModel(); });
+  core.on("hello", () => { renderCaptureFields(); loadSchedules(); loadMeetingModel(); loadAudioApps(); });
   core.on("prompter", e => { if (e.kind === "schedule") loadSchedules(); });
 })();

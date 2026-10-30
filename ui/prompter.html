@@ -141,6 +141,9 @@
   #initial b { display: block; color: var(--ink); margin-bottom: 3px; }
   #initial span { display: block; color: var(--muted); }
   #hear.bad { color: var(--cue); }
+  #recording-levels { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 6px 0 10px; font-size: 12px; color: var(--soft); }
+  #recording-levels label { display: flex; align-items: center; gap: 6px; }
+  #recording-levels meter { width: 90px; height: 12px; }
   #card { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 18px 18px 14px 26px; border-radius: 20px; overflow: hidden;
           transition: box-shadow .4s; }
   #cue { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: rgba(255,122,198,.16); }
@@ -283,7 +286,7 @@
       <label class="opt"><div>Собеседника<small>звук компьютера</small></div><span class="sw"><input type="checkbox" id="m-them" checked><i></i></span></label>
       <label class="opt"><div>Меня<small>микрофон</small></div><span class="sw"><input type="checkbox" id="m-me" checked><i></i></span></label>
       <label class="opt"><div>Записать аудиофайл<small>WAV останется на Mac и будет расшифрован после встречи</small></div><span class="sw"><input type="checkbox" id="m-record" title="Записать аудио встречи и после окончания сделать расшифровку"><i></i></span></label>
-      <label class="opt hidden" id="m-record-source-wrap"><div>Источник аудио<small>для системного звука нужен BlackHole или Loopback</small></div><span><select id="m-record-source" title="Источник WAV для записи встречи"><option value="system">Системный звук</option><option value="microphone">Микрофон</option></select></span></label>
+      <label class="opt hidden" id="m-record-source-wrap"><div>Источник аудио<small>Core Audio или настроенный BlackHole/Loopback</small></div><span><select id="m-record-source" title="Источник WAV для записи встречи; способ захвата и приложение выбираются в настройках «Встречи»"><option value="system">Звук приложений</option><option value="microphone">Микрофон</option></select></span></label>
       <label class="opt"><div>Расшифровать после окончания<small>экономит ресурсы во время переговоров</small></div><span class="sw"><input type="checkbox" id="m-deferred" checked title="Сделать полную транскрибацию WAV после остановки встречи"><i></i></span></label>
       <label class="opt"><div>Автоматические кадры<small>проверка экрана каждые 0,5 секунды; неизменившаяся сцена не дублируется</small></div><span class="sw"><input type="checkbox" id="m-auto-shot" title="Сохранять изменившиеся кадры экрана с локальным OCR"><i></i></span></label>
       <label class="opt"><div>Снимок при начале записи<small>первый кадр фиксирует, что было на экране в момент старта; можно отменить</small></div><span class="sw"><input type="checkbox" id="m-first-shot" checked title="Сделать первый снимок при запуске записи"><i></i></span></label>
@@ -316,6 +319,11 @@
   <!-- встреча -->
   <main id="live" class="hidden">
     <p id="hear"></p>
+    <div id="recording-levels" class="hidden" aria-label="Уровни записываемых дорожек">
+      <label id="track-them-label">Собеседник <meter id="track-them" min="0" max="32768" value="0" aria-label="Уровень собеседника"></meter></label>
+      <label id="track-me-label">Вы <meter id="track-me" min="0" max="32768" value="0" aria-label="Уровень микрофона"></meter></label>
+      <span id="recording-diagnostics" role="status"></span>
+    </div>
     <div id="capture-live" class="blk" title="Настройки автоматических кадров можно менять прямо во время фоновой записи">
       <span id="capture-live-status">Автокадры выключены</span>
       <select id="live-frame-interval" title="Частота проверки экрана"><option value="0.5">0,5 с</option><option value="1" selected>1 с</option><option value="2">2 с</option><option value="5">5 с</option></select>
@@ -614,6 +622,13 @@ function renderSheet() {
 }
 function renderCaptureLive() {
   const rec = (st && st.recording) || {}, active = !!(st && st.on), frames = !!(active && st.meeting && st.meeting.auto_frames);
+  $("#recording-levels").classList.toggle("hidden", !active || !rec.enabled);
+  for (const who of ["them", "me"]) {
+    const level = rec.levels?.[who];
+    $("#track-" + who).value = level?.peak || 0;
+    $("#track-" + who + "-label").classList.toggle("hidden", who === "me" && !st?.meeting?.dual);
+  }
+  $("#recording-diagnostics").textContent = rec.microphone_error || (rec.underruns ? `Пропусков микрофона: ${rec.underruns}` : "");
   const interval = String(rec.frame_interval || 1), quality = String(rec.frame_quality || 85);
   if ([...$("#live-frame-interval").options].some(o => o.value === interval)) $("#live-frame-interval").value = interval;
   if ([...$("#live-frame-quality").options].some(o => o.value === quality)) $("#live-frame-quality").value = quality;
@@ -739,7 +754,8 @@ async function createMeetingVideo() {
 function renderSum(e) {
   show("sum"); $("#title").textContent = "Итог встречи";
   meetingSummaryPath = e.path || e.summary_path || meetingSummaryPath || "";
-  $("#sum").innerHTML = e.busy ? `<div class="wait"><span class="spin"></span>${e.phase === "transcribe" ? "Расшифровываю запись разговора…" : "Подвожу итог встречи…"}</div>`
+  const progress = e.phase === "stopping" ? "Завершаю запись и сохраняю файлы…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : "Подвожу итог встречи…";
+  $("#sum").innerHTML = e.busy ? `<div class="wait" role="status"><span class="spin"></span>${progress}</div>`
     : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
       + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
   bindMeetingFiles($("#sum"));

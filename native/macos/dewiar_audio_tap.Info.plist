@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>pro.dewiar.audio-tap</string>
+  <key>CFBundleName</key><string>Dewiar — звук встречи</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Dewiar записывает звук выбранного приложения звонка, чтобы локально расшифровать встречу на этом Mac.</string>
+</dict></plist>

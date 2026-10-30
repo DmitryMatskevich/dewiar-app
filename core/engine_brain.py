@@ -792,7 +792,15 @@ class BrainMixin:
         a = np.frombuffer(r.stdout, dtype=np.int16)
         sr, n = 16000, len(a)
         win = int(0.03 * sr)
-        energy = np.sqrt(np.convolve(a.astype(np.float32) ** 2, np.ones(win) / win, mode="same")) if n else np.array([])
+        # Скользящее среднее через накопленную сумму: O(n) вместо O(n·win) у np.convolve.
+        # Для часовой записи (57 млн отсчётов × 480) convolve считал минуты до начала распознавания.
+        if n:
+            sq = np.concatenate(([0.0], np.cumsum(a.astype(np.float64) ** 2)))
+            idx = np.arange(n)
+            lo_i, hi_i = np.clip(idx - win // 2, 0, n), np.clip(idx - win // 2 + win, 0, n)
+            energy = np.sqrt(np.maximum((sq[hi_i] - sq[lo_i]) / win, 0.0)).astype(np.float32)
+        else:
+            energy = np.array([])
         out, start = [], 0
         while start < n:
             if cancel is not None and cancel.is_set():

@@ -10,7 +10,7 @@
    любая правка профиля шлёт весь словарь S.llm.profiles. */
 let openProf = null, profSig = "";
 let activeModelRole = "communication";
-const ROLE_MAX_TOKENS_DEFAULT = {communication: 1024, planning: 16384, coding: 8192};
+const ROLE_MAX_TOKENS_DEFAULT = {communication: 1024, planning: 16384, coding: 8192, analytics: 32768};
 const MODEL_ROLE_DEFS = {
   communication: {
     label: "Общение",
@@ -23,6 +23,10 @@ const MODEL_ROLE_DEFS = {
   coding: {
     label: "Программирование",
     description: "Разработка программ, работа с проектом, тесты, исправления и ревью кода."
+  },
+  analytics: {
+    label: "Аналитика",
+    description: "Глубокий разбор документов, поручений, данных и длинных запросов с включённым рассуждением."
   }
 };
 const profileModelLists = new Map();
@@ -220,7 +224,7 @@ function renderProfiles() {
     <div class="body"><div class="row" style="margin-top:12px">
       <label class="f">Название<input type="text" data-f="name"></label>
       <label class="f">Приоритет (1 — наивысший)<input type="number" data-f="priority" min="1" max="9" step="1"></label>
-      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><span class="hint">Кодер использует только модели с отметкой «Программирование».</span></fieldset>
+      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><label><input type="checkbox" data-role="analytics"> Аналитика</label><span class="hint">Кодер использует только «Программирование», а длинные разборы — «Аналитика».</span></fieldset>
       <label class="f"><span><input type="checkbox" data-f="routing_enabled"> Участвует в автовыборе</span></label>
       <label class="f"><span><input type="checkbox" data-f="schedule_enabled"> Ограничить часы работы</span></label>
       <label class="f">Работает с<input type="time" data-f="schedule_start"></label>

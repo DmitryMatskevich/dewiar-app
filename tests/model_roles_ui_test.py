@@ -1,4 +1,4 @@
-"""The Models screen exposes independent communication/planning/coding queues."""
+"""The Models screen exposes independent communication/planning/coding/analytics queues."""
 import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -39,7 +39,7 @@ def main():
           }}, ui:{}, privacy:{}, tools:{}}; renderProfiles(); }
         """)
         assert not errors, errors
-        assert page.locator("[data-model-role]").count() == 3
+        assert page.locator("[data-model-role]").count() == 4
         assert page.locator("[data-model-role='communication']").get_attribute("aria-selected") == "true"
         assert page.locator("#profiles .prof").count() == 2
         assert "Чат" in page.locator("#profiles").inner_text()
@@ -61,6 +61,11 @@ def main():
         assert "Код" in page.locator("#profiles").inner_text()
         assert page.locator("#model-role-description").inner_text().startswith("Разработка программ")
 
+        page.locator("[data-model-role='analytics']").click()
+        assert page.locator("#model-role-title").inner_text() == "Аналитика"
+        assert page.locator("#model-role-description").inner_text().startswith("Глубокий разбор")
+        assert page.locator("#model-role-max-tokens").input_value() == "32768"
+
         page.locator("[data-model-role='planning']").click()
         page.locator("#model-role-add-select").select_option("spare")
         page.locator("#model-role-add-button").click()
@@ -74,4 +79,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    print("OK: three model role tabs filter profiles and assign existing models")
+    print("OK: four model role tabs filter profiles and assign existing models")

@@ -13,7 +13,7 @@ _quotas = {}
 _selected = None
 _loaded = False
 
-MODEL_ROLES = ("communication", "coding", "planning")
+MODEL_ROLES = ("communication", "coding", "planning", "analytics")
 
 
 def roles(p):

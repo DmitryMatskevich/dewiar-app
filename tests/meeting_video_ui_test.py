@@ -34,6 +34,15 @@ setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
         page.locator("#m-record").check()
         assert not page.locator("#m-consent").is_checked(), "User's opt-out was overwritten"
         assert page.locator("#start").is_disabled()
+        page.evaluate("""() => {STATE.on=true;STATE.meeting={record:true,dual:true,started:Date.now()/1000,title:'Тест записи'};
+          STATE.recording={...STATE.recording,enabled:true,levels:{me:{peak:8000},them:{peak:12000}},underruns:2};
+          core._on.prompter.forEach(f=>f({kind:'state',state:STATE}));}""")
+        assert page.locator("#recording-levels").is_visible()
+        assert page.locator("#track-me").evaluate("e=>e.value") == 8000
+        assert page.locator("#track-them").evaluate("e=>e.value") == 12000
+        assert "2" in page.locator("#recording-diagnostics").inner_text()
+        page.screenshot(path=str(Path(tempfile.gettempdir()) / "dewiar-meeting-tracks.png"))
+        page.evaluate("STATE.on=false;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
         page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',summary:'**Аудиозапись:** [Аудио/test.wav](dwr-file:Аудио/test.wav)\\n\\n**Видео:** [Видео/test.mp4](dwr-file:Видео/test.mp4)',busy:false}))")
         media = page.locator("#sum .meeting-media-actions button")
         assert media.count() == 2

@@ -35,6 +35,7 @@ import wave
 from urllib.parse import quote
 import hashlib
 import json
+import queue
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +81,12 @@ SUMMARY_SYSTEM = (
     "## Участники — список только явно названных имён; не угадывай имена по контексту.\n"
     "## Коротко — 2–3 предложения.\n## Договорились — пункты.\n## Кто что делает — пункты (сроки, если звучали).\n"
     "## Открытые вопросы — пункты.\nТолько то, что было сказано. Раздела нет по сути — напиши «нет».")
+
+NOTES_SYSTEM = (
+    "Это часть расшифровки длинной деловой встречи (реплики с таймкодами «Собеседник», «Вы», «Экран»). "
+    "Выпиши кратко, без вступлений, только сказанное в ЭТОЙ части: темы; договорённости; задачи (кто, что, срок); "
+    "цифры, цены и сроки; открытые вопросы; явно названные имена участников. Указывай таймкод [мм:сс] у договорённостей "
+    "и задач. Нет пункта — не пиши его.")
 
 MAX_FILE = 30 * 1024 * 1024
 TEXT_EXTS = {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".odt", ".csv"}
@@ -148,7 +155,49 @@ def parse_sheet(text):
     return out[:14]
 
 
+class _Segmenter:
+    """Нарезка потока кадров 32 мс на фразы по вероятности речи VAD.
+
+    Начало — 2 кадра речи подряд (плюс 10 кадров предыстории), конец — end_frames
+    кадров тишины или 20 с фразы; хвост тишины обрезается до 0,3 с. Общая для
+    дорожек «Собеседник» и «Вы», чтобы обе резались одинаково.
+    """
+
+    def __init__(self, end_frames, max_s=20.0, min_s=0.5):
+        self.end_frames, self.max_s, self.min_s = end_frames, max_s, min_s
+        self.pre, self.utt, self.in_speech, self.starts, self.silence = [], [], False, 0, 0
+
+    def feed(self, frame, p):
+        if not self.in_speech:
+            self.pre = (self.pre + [frame])[-10:]
+            self.starts = self.starts + 1 if p > 0.5 else 0
+            if self.starts >= 2:
+                self.in_speech, self.utt, self.silence = True, list(self.pre), 0
+            return None
+        self.utt.append(frame)
+        self.silence = self.silence + 1 if p < 0.35 else 0
+        if self.silence >= self.end_frames or len(self.utt) * FRAME_S > self.max_s:
+            self.in_speech, self.starts = False, 0
+            pcm = b"".join(self.utt[:len(self.utt) - max(0, self.silence - 10)])
+            self.utt = []
+            if len(pcm) / 2 / 16000 >= self.min_s:
+                return pcm
+        return None
+
+    def flush(self):
+        """Выдать последнюю фразу, когда запись остановили раньше паузы VAD."""
+        pcm = b"".join(self.utt) if self.in_speech else b""
+        self.pre, self.utt, self.in_speech, self.starts, self.silence = [], [], False, 0, 0
+        return pcm if len(pcm) / 32000 >= self.min_s else None
+
+
 class Prompter:
+    SCHEDULE_GRACE_S = 15 * 60       # без времени окончания: опоздание больше 15 минут — встреча пропущена
+    SILENCE_PEAK = 24                # int16: ниже — цифровая тишина (BlackHole без маршрута звука)
+    SILENCE_WARN_S = 20.0            # столько секунд тишины на дорожке собеседника — предупреждение
+    MIC_MAX_LAG = 12                 # кадров по 32 мс: дальше расхождение часов микрофона и BlackHole обрезаем
+    SUMMARY_PART = 18000             # знаков расшифровки на один заход модели (длинные встречи — по частям)
+
     def __init__(self, eng):
         self.eng = eng
         self.on = False
@@ -185,6 +234,9 @@ class Prompter:
         self._screenshots = []
         self._frame_events = []
         self._last_frame_sig = None
+        self._fr_prev = None         # каскад автокадров: прошлый такт, сцены, с какого момента экран стоит
+        self._fr_scenes = []
+        self._fr_still_since = 0.0
         self._frame_thread = None
         self._frames_enabled = False
         self._frame_interval = 0.5
@@ -198,6 +250,27 @@ class Prompter:
         self._loop_cap = None
         self._loop_thread = None
         self._meeting_stt_obj = None
+        # Встреча — это две дорожки: «Вы» (микрофон) и «Собеседник» (звук
+        # компьютера). Они пишутся в отдельные WAV рядом с общим (смешанным)
+        # файлом, поэтому расшифровка знает, кто говорит, без угадывания.
+        self._track_waves = {}   # {"me"|"them": wave.Wave_write}
+        self._track_paths = {}   # {"me"|"them": str}
+        self._levels = {}        # {"me"|"them": {"peak": int, "signal_t": float}}
+        self._silence_warned = False
+        self._base_name = ""     # «2026-10-30 0946 Склад» — общее имя WAV/TXT/MD одной встречи
+        self._session = 0        # номер сессии: потоки прошлой встречи не пишут в новую
+        self._stt_thread = None
+        self._capture_done = threading.Event()
+        self._capture_done.set()
+        self._me_voice_t = 0.0
+        self._underruns = 0
+        self._mic_error = ""
+        self._system_kind = ""   # tap | blackhole | monitor | wasapi | file — каким способом пишем собеседника
+        self._tap_warning = ""
+        self._post_busy = False  # идёт фон после остановки (расшифровка/итог) — новую встречу не начинаем
+        self._post_thread = None
+        self._ocr_q = queue.Queue(maxsize=20)
+        self._ocr_thread = None
         # Настройки и расписание записи хранятся отдельно от общей истории:
         # закрытие окна суфлёра не отменяет фоновую встречу.
         cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
@@ -214,15 +287,43 @@ class Prompter:
     def _load_schedules(self):
         try:
             raw = json.loads(self._schedules_path.read_text(encoding="utf-8"))
-            return raw if isinstance(raw, list) else []
+            if isinstance(raw, dict):
+                if raw.get("version") != 1:
+                    log.warning("🎬 Неизвестная версия расписания; файл сохранён без изменений")
+                    return []
+                raw = raw.get("items")
+            rows = raw if isinstance(raw, list) else []
         except (OSError, ValueError, TypeError):
             return []
+        return self._recover_schedules(rows)
+
+    @staticmethod
+    def _recover_schedules(rows, now=None):
+        """Привести расписание в порядок после перезапуска/падения приложения.
+
+        Состояния checking/starting/running живут только в памяти процесса.
+        Если приложение закрылось посреди них, без этой нормализации строка
+        навсегда зависала бы в «checking» (и не стартовала) или в «running».
+        """
+        now = time.time() if now is None else now
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            if (item.get("preflight") or {}).get("state") == "checking":
+                item.pop("preflight", None)
+            state = item.get("state")
+            if state == "starting":
+                item["state"] = "scheduled"
+            elif state == "running":
+                item["state"] = "error"
+                item["error"] = "приложение было закрыто во время записи — частичный итог мог не сохраниться"
+        return [x for x in rows if isinstance(x, dict)]
 
     def _save_schedules(self):
         try:
             self._schedules_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._schedules_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self._schedules, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.write_text(json.dumps({"version": 1, "items": self._schedules}, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(self._schedules_path)
         except OSError as exc:
             log.warning("🎬 Расписание записи не сохранено: %s", exc)
@@ -316,6 +417,7 @@ class Prompter:
             now = time.time()
             checks = []
             due = []
+            missed = []
             with self._schedules_lock:
                 for item in self._schedules:
                     start = float(item.get("start_at") or 0)
@@ -329,10 +431,21 @@ class Prompter:
                     if (item.get("state") == "scheduled"
                             and (item.get("preflight") or {}).get("state") != "checking"
                             and start <= now):
+                        # Mac спал или Dewiar был закрыт: не начинать запись
+                        # через несколько часов после назначенного времени.
+                        end = float(item.get("end_at") or 0)
+                        if (end and now >= end) or (not end and now - start > self.SCHEDULE_GRACE_S):
+                            item["state"] = "missed"
+                            item["error"] = "встреча пропущена: в назначенное время Dewiar не работал или Mac спал"
+                            missed.append(dict(item))
+                            continue
                         item["state"] = "starting"
                         due.append(dict(item))
-                if checks or due:
+                if checks or due or missed:
                     self._save_schedules()
+            for item in missed:
+                log.warning("🎬 Запланированная запись пропущена: %s", item.get("title"))
+                self._emit("schedule", schedules=self.schedules())
             for item in checks:
                 result = self._schedule_preflight(item)
                 item["preflight"] = result
@@ -344,6 +457,14 @@ class Prompter:
                 self._emit("schedule", schedules=self.schedules())
                 self._notify_schedule_check(item, result)
             for item in due:
+                if self._post_busy and not self.on:
+                    # Итог прошлой встречи ещё считается: подождём, а не
+                    # отменяем — окно опоздания проверяется выше.
+                    with self._schedules_lock:
+                        for current in self._schedules:
+                            if current.get("id") == item.get("id") and current.get("state") == "starting":
+                                current["state"] = "scheduled"
+                    continue
                 try:
                     if self.on:
                         raise ValueError("другая встреча уже идёт")
@@ -368,13 +489,23 @@ class Prompter:
             if self.on:
                 end = self.meeting.get("scheduled_end")
                 if end and now >= float(end):
-                    self.stop(summary=True)
-                    with self._schedules_lock:
-                        for item in self._schedules:
-                            if item.get("state") == "running" and item.get("started"):
-                                item["state"] = "done"
-                        self._save_schedules()
-                    self._emit("schedule", schedules=self.schedules())
+                    self.stop(summary=True)        # stop() сам отметит строку расписания «done»
+
+    def _finish_schedule(self, sid):
+        """Отметить запущенную строку расписания завершённой (ручная остановка, конец по времени)."""
+        if not sid:
+            return
+        changed = False
+        with self._schedules_lock:
+            for item in self._schedules:
+                if item.get("id") == sid and item.get("state") == "running":
+                    item["state"] = "done"
+                    item["finished"] = time.time()
+                    changed = True
+            if changed:
+                self._save_schedules()
+        if changed:
+            self._emit("schedule", schedules=self.schedules())
 
     def _schedule_update(self, item):
         """Атомарно обновить одну строку расписания и сразу сохранить её."""
@@ -410,17 +541,17 @@ class Prompter:
         source = str(opts.get("record_source") or opts.get("audio_source") or "system").lower()
         if record:
             try:
-                from audio_io import Capture, LoopbackCapture
+                from audio_io import Capture
                 if source == "system":
-                    cap = LoopbackCapture()
+                    desc = self._loopback().probe()      # tap: без запуска записи и без системного запроса
                 else:
                     cfg = self.eng.s.get("audio") if hasattr(self.eng.s, "get") else {}
                     device = cfg.get("input", "") if isinstance(cfg, dict) else ""
                     cap = Capture(device=device or "", strict_device=bool(device))
-                try:
-                    desc = cap.open()
-                finally:
-                    cap.close()
+                    try:
+                        desc = cap.open()
+                    finally:
+                        cap.close()
                 checks.append({"name": "аудио", "ok": True, "detail": desc})
             except Exception as exc:  # noqa: BLE001 — причина должна попасть в карточку и уведомление
                 return self._preflight_result("error", checks + [{"name": "аудио", "ok": False, "detail": str(exc)}],
@@ -514,13 +645,19 @@ class Prompter:
                    "audio_paused": bool(self._record_paused),
                    "error": self._record_error,
                    "transcript": Path(self._transcript_path).name if self._transcript_path else "",
-                   "screenshots": len(self._screenshots)}
+                   "screenshots": len(self._screenshots),
+                   "tracks": {k: Path(v).name for k, v in self._track_paths.items()},
+                   "levels": {k: {"peak": int(v.get("peak", 0)), "silent_s": round(self._silent_for(k), 1)}
+                              for k, v in list(self._levels.items())},
+                   "underruns": self._underruns}
+            rec["system_backend"] = self._system_kind
+            rec["microphone_error"] = self._mic_error
             rec.update({"frame_interval": self._frame_interval, "frame_quality": self._frame_quality,
                         "video": bool(self._video_enabled), "video_frames": self._video_frames,
                         "video_path": Path(self._video_path).name if self._video_path else "",
                         "export_busy": self._video_export_busy,
                         "can_export": not self.on and bool(self._frame_events) and audio_ready})
-            return {"on": self.on, "paused": self.paused, "meeting": m, "status": self.status,
+            return {"on": self.on, "paused": self.paused, "processing": self._post_busy, "meeting": m, "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
                     "summary_path": self._summary_path,
@@ -678,42 +815,78 @@ class Prompter:
                 "topics": m.get("topics") or m.get("goal") or "не указаны",
                 "decisions": m.get("decisions") or "будут определены после расшифровки"}
 
-    def _record_open(self, title):
-        """Создать WAV до запуска потока: запись не теряется, если встреча закончится сразу."""
+    def _meeting_dirs(self):
+        """Каталоги одной встречи: (Встречи, Аудио, Расшифровки); при сбое рабочей папки — резервные."""
         try:
-            d = self.eng.workspace.ensure() / "Встречи" / "Аудио"
-            d.mkdir(parents=True, exist_ok=True)
+            root = self.eng.workspace.ensure() / "Встречи"
+            audio, text = root / "Аудио", root / "Расшифровки"
+            audio.mkdir(parents=True, exist_ok=True)
+            text.mkdir(parents=True, exist_ok=True)
         except Exception:  # noqa: BLE001 — протокол всё равно можно сохранить в резервный каталог
-            d = self._dir / "recordings"
-            d.mkdir(parents=True, exist_ok=True)
-        # Use the same timestamp as the Markdown summary.  Using a second
-        # datetime.now() here could cross a minute boundary and leave the
-        # audio orphaned from its meeting row.
+            root = self._dir
+            audio, text = root / "recordings", root / "transcripts"
+            audio.mkdir(parents=True, exist_ok=True)
+            text.mkdir(parents=True, exist_ok=True)
+        return root, audio, text
+
+    def _meeting_base(self, title):
+        """Одно имя на все файлы встречи: «2026-10-30 0946 Склад» или «… (2)».
+
+        Раньше WAV и MD собирались из времени до минуты без проверки на
+        занятость: две встречи с одним названием в одну минуту перезаписывали
+        аудио и протокол друг друга, а TXT получал «(2)» — ссылки расходились.
+        Теперь свободное имя ищется сразу по всем видам файлов встречи.
+        """
+        if self._base_name:
+            return self._base_name
+        root, audio, text = self._meeting_dirs()
         started = local_datetime((self.meeting or {}).get("started") or time.time())
-        safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
-        path = d / f"{started:%Y-%m-%d %H%M} {safe}.wav"
+        safe = re.sub(r'[\\/:*?"<>|]+', " ", str(title or "")).strip()[:60] or "Встреча"
+        stem, n = f"{started:%Y-%m-%d %H%M} {safe}", 2
+        base = stem
+        while ((audio / f"{base}.wav").exists() or (text / f"{base}.txt").exists()
+               or (root / f"{base}.md").exists() or (audio / base).exists()):
+            base = f"{stem} ({n})"
+            n += 1
+        self._base_name = base
+        return base
+
+    @staticmethod
+    def _new_wave(path):
+        w = wave.open(str(path), "wb")
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        return w
+
+    def _record_open(self, title, tracks=()):
+        """Создать WAV до запуска потока: запись не теряется, если встреча закончится сразу.
+
+        tracks — ("them", "me"): отдельные дорожки собеседника и ваша —
+        ``Аудио/<имя>/Собеседник.wav`` и ``Вы.wav``. Общий WAV — смесь обеих
+        (для прослушивания и видео), дорожки — для расшифровки с правильными
+        подписями «Вы»/«Собеседник» без угадывания по голосу.
+        """
+        _root, audio, _text = self._meeting_dirs()
+        base = self._meeting_base(title)
+        path = audio / f"{base}.wav"
         with self._record_lock:
             self._record_path = str(path)
-            self._record_wave = wave.open(str(path), "wb")
-            self._record_wave.setnchannels(1)
-            self._record_wave.setsampwidth(2)
-            self._record_wave.setframerate(16000)
+            self._record_wave = self._new_wave(path)
+            self._track_waves, self._track_paths = {}, {}
+            if tracks:
+                folder = audio / base
+                folder.mkdir(parents=True, exist_ok=True)
+                for key in tracks:
+                    p = folder / ("Вы.wav" if key == "me" else "Собеседник.wav")
+                    self._track_paths[key] = str(p)
+                    self._track_waves[key] = self._new_wave(p)
 
     def _transcript_open(self, title):
         """Открыть обычный UTF-8 .txt, который пополняется во время встречи."""
-        try:
-            root = self.eng.workspace.ensure() / "Встречи" / "Расшифровки"
-            root.mkdir(parents=True, exist_ok=True)
-        except Exception:  # noqa: BLE001
-            root = self._dir / "transcripts"
-            root.mkdir(parents=True, exist_ok=True)
+        _root, _audio, root = self._meeting_dirs()
         started = local_datetime((self.meeting or {}).get("started") or time.time())
-        safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
-        path = root / f"{started:%Y-%m-%d %H%M} {safe}.txt"
-        n = 2
-        while path.exists():
-            path = root / f"{started:%Y-%m-%d %H%M} {safe} ({n}).txt"
-            n += 1
+        path = root / f"{self._meeting_base(title)}.txt"
         self._transcript_path = str(path)
         path.write_text(f"# {title}\n# Начало: {started:%d.%m.%Y %H:%M}\n\n", encoding="utf-8")
 
@@ -733,6 +906,7 @@ class Prompter:
             log.info("🎬 Текст расшифровки не записан: %s", exc)
 
     def _record_write(self, pcm):
+        """Записать кадр в общий WAV (один источник, без дорожек)."""
         with self._record_lock:
             if self._record_wave is not None:
                 try:
@@ -740,20 +914,127 @@ class Prompter:
                 except (OSError, ValueError) as e:
                     log.warning("🎬 Запись встречи: %s", e)
 
+    @staticmethod
+    def _mix(a, b):
+        """Сложить два кадра int16 одинаковой длины с ограничением, без переполнения."""
+        import numpy as np
+        x = np.frombuffer(a, dtype=np.int16).astype(np.int32)
+        y = np.frombuffer(b, dtype=np.int16).astype(np.int32)
+        n = min(len(x), len(y))
+        return np.clip(x[:n] + y[:n], -32768, 32767).astype(np.int16).tobytes()
+
+    def _record_write_tracks(self, them, me=None):
+        """Один такт 32 мс: дорожки «Собеседник»/«Вы» и их смесь в общий WAV.
+
+        Все файлы получают одинаковое число отсчётов — общий WAV остаётся
+        единственными часами встречи (по ним считаются кадры и видео).
+        """
+        with self._record_lock:
+            try:
+                w = self._track_waves.get("them")
+                if w is not None:
+                    w.writeframes(them)
+                w = self._track_waves.get("me")
+                if w is not None:
+                    w.writeframes(me if me is not None else b"\0" * len(them))
+                if self._record_wave is not None:
+                    self._record_wave.writeframes(self._mix(them, me) if me is not None else them)
+            except (OSError, ValueError) as e:
+                log.warning("🎬 Запись встречи: %s", e)
+
     def _record_close(self):
         with self._record_lock:
-            w, self._record_wave = self._record_wave, None
-            if w is not None:
-                try:
-                    w.close()
-                except OSError:
-                    pass
+            waves = [self._record_wave] + list(self._track_waves.values())
+            self._record_wave, self._track_waves = None, {}
+            for w in waves:
+                if w is not None:
+                    try:
+                        w.close()
+                    except OSError:
+                        pass
+
+    # ---------- уровни и тишина ----------
+
+    def _level(self, key, frame):
+        """Пик кадра; запоминаем, когда на дорожке последний раз был настоящий сигнал."""
+        try:
+            import numpy as np
+            peak = int(np.abs(np.frombuffer(frame, dtype=np.int16).astype(np.int32)).max()) if frame else 0
+        except Exception:  # noqa: BLE001
+            return 0
+        lv = self._levels.setdefault(key, {"peak": 0, "signal_t": 0.0, "since": time.monotonic()})
+        lv["peak"] = int(lv["peak"] * 0.9) if peak < lv["peak"] else peak     # медленный спад, для индикатора
+        if peak >= self.SILENCE_PEAK:
+            lv["signal_t"] = time.monotonic()
+        return peak
+
+    def _silent_for(self, key):
+        lv = self._levels.get(key)
+        if not lv:
+            return 0.0
+        return max(0.0, time.monotonic() - (lv.get("signal_t") or lv.get("since") or time.monotonic()))
+
+    def _check_silence(self):
+        """BlackHole отдаёт нули, если звук звонка не направлен в него (не выбран Multi-Output).
+
+        Раньше такая встреча считалась успешной («WAV больше заголовка»), а
+        пользователь узнавал о пустой записи только после часа разговора.
+        """
+        if not self.meeting.get("record") or self.meeting.get("audio_source") != "system":
+            return
+        silent = self._silent_for("them")
+        if silent >= self.SILENCE_WARN_S and not self._silence_warned:
+            self._silence_warned = True
+            self.status = "звук собеседника не приходит уже %d с: %s" % (silent, self._silence_hint())
+            log.warning("🎬 %s", self.status)
+            self._emit("warning", code="system_silence", text=self.status)
+            self._state()
+        elif silent < 1.0 and self._silence_warned:
+            self._silence_warned = False
+            self.status = "звук собеседника снова идёт — записываю"
+            self._state()
+
+    def _silence_hint(self):
+        """Что делать, если на дорожке собеседника тишина — зависит от способа записи."""
+        if self._system_kind == "tap":
+            return ("приложение звонка не воспроизводит звук, либо Dewiar не разрешена «Запись системного звука» "
+                    "(Конфиденциальность и безопасность → Запись экрана и системного звука)")
+        return ("в «Системных настройках → Звук → Выход» выберите Multi-Output Device с BlackHole "
+                "(или источник в Loopback), иначе собеседник не запишется")
+
+    @staticmethod
+    def _wav_is_silent(path, peak=None):
+        """Весь файл — цифровая тишина? (проверка кусками, без чтения всего WAV в память)."""
+        import numpy as np
+        peak = Prompter.SILENCE_PEAK if peak is None else peak
+        try:
+            with wave.open(str(path), "rb") as w:
+                while True:
+                    data = w.readframes(16000 * 30)
+                    if not data:
+                        return True
+                    if int(np.abs(np.frombuffer(data, dtype=np.int16).astype(np.int32)).max()) >= peak:
+                        return False
+        except (OSError, EOFError, wave.Error):
+            return False
+
+    def _loopback(self, wav_path=None):
+        """Источник звука компьютера по настройкам встречи.
+
+        prompter.system_audio: auto (Core Audio tap, если есть хелпер и macOS 14.2+, иначе BlackHole),
+        tap или blackhole; prompter.tap_target: all (всё, кроме Dewiar) или bundle id приложений звонка.
+        """
+        from audio_io import LoopbackCapture
+        cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
+        cfg = cfg if isinstance(cfg, dict) else {}
+        return LoopbackCapture(wav_path=wav_path, backend=str(cfg.get("system_audio") or "auto"),
+                               tap_target=str(cfg.get("tap_target") or "all"))
 
     def _probe_record_source(self, source):
         """Open and close the selected input before changing the meeting state."""
-        from audio_io import Capture, LoopbackCapture
+        from audio_io import Capture
         if source == "system":
-            cap = LoopbackCapture()
+            return self._loopback().probe()
         else:
             cfg = self.eng.s.get("audio") if hasattr(self.eng.s, "get") else {}
             device = cfg.get("input", "") if isinstance(cfg, dict) else ""
@@ -814,11 +1095,21 @@ class Prompter:
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
               auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
               capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None,
-              schedule_id=None):
+              schedule_id=None, record_me=None):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
+        if self.on:
+            raise ValueError("Встреча уже идёт — сначала завершите её.")
         if self._video_export_busy:
             raise ValueError("Дождитесь создания видео встречи.")
+        if self._post_busy:
+            workers = (self._post_thread, self._stt_thread, self._loop_thread, self._frame_thread, self._ocr_thread)
+            if self._post_thread is not None and not any(t and t.is_alive() for t in workers):
+                self._post_busy = False  # поздно завершившийся I/O больше не удерживает приложение
+        if self._post_busy:
+            # Отложенная расшифровка/итог прошлой встречи ещё читает её файлы и
+            # поля; новая встреча подменила бы их посреди обработки.
+            raise ValueError("Дождитесь итога предыдущей встречи — расшифровка ещё идёт.")
         live = place == "live"
         if record and not consent:
             raise ValueError("для записи переговоров подтвердите согласие участников")
@@ -844,16 +1135,22 @@ class Prompter:
                 pass
         if self.enrolling is not None:
             self.enroll_stop(save=False)
-        if self.on:
-            self.stop(summary=False)
         self._record_path = ""
         self._record_error = ""
         self._record_paused = False
+        self._track_waves, self._track_paths, self._levels = {}, {}, {}
+        self._silence_warned = False
+        self._base_name = ""
+        self._underruns = 0
+        self._mic_error = ""
+        self._system_kind = ""
+        self._tap_warning = ""
         self._transcript_path = ""
         self._session_dir = None
         self._screenshots = []
         self._frame_events = []
         self._last_frame_sig = None
+        self._fr_prev, self._fr_scenes, self._fr_still_since = None, [], 0.0
         try:
             self._frame_interval = max(0.5, min(5.0, float(auto_interval or 0.5)))
         except (TypeError, ValueError):
@@ -884,6 +1181,13 @@ class Prompter:
         record_source = str((cfg.get("audio_source") if record_source is None else record_source) or "system").lower()
         if record_source not in ("system", "microphone"):
             record_source = "system"
+        # Онлайн-встреча с записью звука компьютера: собеседник — BlackHole,
+        # вы — микрофон. Раньше микрофон в этом режиме выключался совсем, и в
+        # WAV/протоколе были только реплики собеседника. Теперь обе дорожки
+        # пишутся одновременно (record_me=False — прежнее поведение).
+        if record_me is None:
+            record_me = cfg.get("record_me", True)
+        dual = bool(record and record_source == "system" and record_me)
         if record:
             try:
                 self._probe_record_source(record_source)
@@ -896,7 +1200,7 @@ class Prompter:
                             "knowledge": bool(knowledge), "keep_text": bool(keep_text) or record,
                             "participants": self._meta_list(participants), "topics": self._meta_list(topics),
                             "record": record, "deferred": bool(deferred) if record else False,
-                            "audio_source": record_source,
+                            "audio_source": record_source, "dual": dual,
                             "source": (source or "system")[:40], "auto_frames": bool(auto_frames), "started": time.time()}
             if scheduled_end:
                 self.meeting["scheduled_end"] = float(scheduled_end)
@@ -904,6 +1208,12 @@ class Prompter:
                 self.meeting["schedule_id"] = str(schedule_id)
             self.lines, self.hints, self.sheet, self.summary, self.paused = [], [], [], "", False
             self._summary_path = ""
+            # Новая сессия: потоки прошлой встречи (если join не дождался их)
+            # видят чужой номер и ничего не пишут в эту встречу.
+            self._session += 1
+            session = self._session
+            stop_ev = threading.Event()
+            self._stop = stop_ev
             self.on = True
         self._transcript_open(self.meeting["title"])
         # Первый кадр — полезная точка отсчёта протокола. По умолчанию он
@@ -917,33 +1227,43 @@ class Prompter:
                 log.info("🎬 Первый кадр не сохранён: %s", exc)
         if record:
             try:
-                self._record_open(self.meeting["title"])
-                # Both sources are opened by the meeting worker. Pause the
-                # normal assistant capture so the WAV is not corrupted by a
-                # second PortAudio stream.
+                self._record_open(self.meeting["title"], tracks=("them", "me") if dual else ())
+                # Оба источника открывает поток встречи; обычный захват
+                # ассистента на это время отдаём ему, чтобы ассистент не
+                # отвечал на реплики разговора.
                 self._suspend_engine_mic(True)
             except Exception:
                 self.on = False
-                self._stop.set()
+                stop_ev.set()
                 self._record_close()
                 self._suspend_engine_mic(False)
                 raise
-            # The meeting worker owns the selected input while recording.
+            # Поток встречи сам слушает выбранные входы (и микрофон в dual).
             self.meeting["me"] = False
-        self._stop = threading.Event()
         self._await, self._pause_hint_t, self._them_voice_t, self._t0 = None, 0.0, 0.0, time.monotonic()
+        self._me_voice_t = 0.0
         self._diar = self.speaker.diarizer() if self.speaker.owner is not None else None
         import queue
-        self._q = queue.Queue(maxsize=40)
-        threading.Thread(target=self._stt_loop, name="prompter-stt", daemon=True).start()
-        threading.Thread(target=self._watch, name="prompter-watch", daemon=True).start()
+        q = queue.Queue(maxsize=200)
+        self._q = q
+        self._capture_done.set()
+        if not live and self.meeting["them"]:
+            self._capture_done.clear()
+        self._stt_thread = threading.Thread(target=self._stt_loop, args=(stop_ev, q, session), name="prompter-stt", daemon=True)
+        self._stt_thread.start()
+        threading.Thread(target=self._watch, args=(stop_ev,), name="prompter-watch", daemon=True).start()
         if auto_frames:
-            self._frame_thread = threading.Thread(target=self._frame_loop, name="prompter-frames", daemon=True)
+            self._frame_thread = threading.Thread(target=self._frame_loop, args=(stop_ev,), name="prompter-frames", daemon=True)
             self._frame_thread.start()
+        if not self.meeting["deferred"]:
+            # Модель записи (GigaAM) грузится заранее: иначе первые фразы
+            # ждали загрузки в очереди и могли потеряться.
+            threading.Thread(target=self._preload_stt, name="prompter-stt-load", daemon=True).start()
         if live:
             self.status = "слушаю микрофон — вас и собеседника различаю по голосу"
         elif self.meeting["them"]:
-            self._loop_thread = threading.Thread(target=self._them_loop, name="prompter-them", daemon=True)
+            self._loop_thread = threading.Thread(target=self._them_loop, args=(stop_ev, q, session),
+                                                 name="prompter-them", daemon=True)
             self._loop_thread.start()
         else:
             self.status = "собеседника не слушаю — подсказки по кнопке и на ваши фразы"
@@ -951,14 +1271,23 @@ class Prompter:
             self.status = screen_warning
         if self.meeting["goal"] or self.files:
             threading.Thread(target=self._prepare_sheet, name="prompter-sheet", daemon=True).start()
-        source_name = "системный звук" if record_source == "system" else "микрофон"
+        source_name = ("системный звук + ваш микрофон" if dual else
+                       "системный звук" if record_source == "system" else "микрофон")
         log.info("🎬 Суфлёр включён: «%s» (%s, %s; собеседник: %s, я: %s; запись: %s)", self.meeting["title"], "вживую" if live else "онлайн",
                  "подсказки на вопросы" if self.meeting["mode"] == "auto" else "по кнопке",
-                 "по голосу" if live else ("да" if self.meeting["them"] else "нет"), "да" if self.meeting["me"] else "нет",
+                 "по голосу" if live else ("да" if self.meeting["them"] else "нет"), "да" if self.meeting["me"] or dual else "нет",
                  source_name if record else "нет")
         self.eng.set_state("idle")
         self._state()
         return self.public()
+
+    def _preload_stt(self):
+        try:
+            self._meeting_stt()
+        except Exception as exc:  # noqa: BLE001 — причина видна в статусе, встреча продолжается
+            self.status = f"модель расшифровки не готова: {exc}"[:240]
+            log.warning("🎬 %s", self.status)
+            self._state()
 
     def pause(self, on=True):
         self.paused = bool(on)
@@ -966,7 +1295,11 @@ class Prompter:
         return self.public()
 
     def pause_recording_audio(self, on=True):
-        """Приостановить только запись WAV, не останавливая встречу и кадры."""
+        """Приостановить только запись WAV, не останавливая встречу и кадры.
+
+        На паузе в файл идёт тишина, а не пропуск: длина WAV остаётся равной
+        времени встречи, поэтому кадры, реплики и видео не съезжают по времени.
+        """
         if not self.on or not self.meeting.get("record"):
             raise ValueError("аудиозапись сейчас не включена")
         self._record_paused = bool(on)
@@ -975,12 +1308,55 @@ class Prompter:
         return self.public()
 
     def stop(self, summary=True):
-        """Закончить встречу; summary — подвести итог (в фоне, событие summary)."""
-        if not self.on:
-            return self.public()
-        self.on = False
+        """Закончить встречу; summary — подвести итог (в фоне, событие summary).
+
+        Сам вызов быстрый: потоки захвата останавливаются, файлы закрываются,
+        а дочитывание очереди распознавания, сборка видео, отложенная
+        расшифровка и итог идут в фоне. Раньше видео собиралось прямо здесь,
+        и кнопка «Завершить» в меню macOS и поток расписания ждали ffmpeg.
+        """
+        with self._lock:
+            if not self.on:
+                return self.public()
+            self.on = False
+            self._post_busy = True
         self._frames_enabled = False
-        self._stop.set()
+        stop_ev = self._stop
+        stop_ev.set()
+        self.meeting["ended"] = time.time()
+        self._finish_schedule(self.meeting.get("schedule_id"))
+        self._emit("summary", summary="", busy=True, phase="stopping")
+        self._post_thread = threading.Thread(target=self._after_stop, args=(self._stt_thread, bool(summary and self.meeting)),
+                                             name="prompter-after-stop", daemon=True)
+        self._post_thread.start()
+        self._state()
+        return self.public()
+
+    def _after_stop(self, stt_thread, summary):
+        """Освободить захват и дождаться хвоста до обработки файлов; UI не ждёт I/O."""
+        try:
+            self._finish_capture()
+            if stt_thread is not None and stt_thread is not threading.current_thread() and stt_thread.is_alive():
+                stt_thread.join(timeout=60)
+                if stt_thread.is_alive():
+                    raise RuntimeError("Распознавание ещё занято; запись сохранена. Дождитесь завершения перед новой встречей.")
+            if self._video_enabled:
+                self._finalize_frame_video()
+            if summary:
+                if self.meeting.get("record") and self.meeting.get("deferred") and self._record_path:
+                    self._post_transcribe()
+                else:
+                    self._summarize()
+        except Exception as exc:  # ошибка не должна оставлять пустой экран итога
+            self.status = str(exc)
+            log.exception("🎬 Обработка после встречи")
+            self._emit("summary", summary="Запись сохранена. Обработка не завершена: " + str(exc), busy=False)
+        finally:
+            # Старый STT не должен продолжать писать в новую встречу.
+            self._post_busy = any(t and t.is_alive() for t in (stt_thread, self._loop_thread, self._frame_thread, self._ocr_thread))
+            self._state()
+
+    def _finish_capture(self):
         cap = self._loop_cap
         if cap is not None:
             try:
@@ -989,29 +1365,24 @@ class Prompter:
                 pass
         t = self._loop_thread
         if t is not None and t is not threading.current_thread() and t.is_alive():
-            t.join(timeout=2.0)
+            t.join(timeout=2.5)
         ft = self._frame_thread
         if ft is not None and ft is not threading.current_thread() and ft.is_alive():
             ft.join(timeout=max(1.0, self._frame_interval + 0.2))
+        # OCR не тормозит захват кадров, но итог должен дождаться уже принятых кадров.
+        if self._ocr_thread is not None:
+            self._ocr_thread.join(timeout=30)
         self._record_close()
         if self.meeting.get("record"):
             self._suspend_engine_mic(False)
         if self._hint_cancel:
             self._hint_cancel.set()
-        self._frame_thread = None
-        if self._video_enabled:
-            self._finalize_frame_video()
+        if ft is None or not ft.is_alive():
+            self._frame_thread = None
         log.info("🎬 Суфлёр выключен: реплик %d, подсказок %d", len(self.lines), len(self.hints))
         # Даже тихая встреча должна оставить карточку в «Встречах»: иначе
         # пользователь не узнаёт, что запись стартовала, и не видит ошибку
         # источника звука.
-        if summary and self.meeting:
-            if self.meeting.get("record") and self.meeting.get("deferred") and self._record_path:
-                threading.Thread(target=self._post_transcribe, name="prompter-transcribe", daemon=True).start()
-            else:
-                threading.Thread(target=self._summarize, name="prompter-summary", daemon=True).start()
-        self._state()
-        return self.public()
 
     def feed_me(self, pcm):
         """Фраза с микрофона (Engine._on_utterance) — пока суфлёр включён или записывается голос."""
@@ -1093,98 +1464,275 @@ class Prompter:
 
     # ---------- звук собеседника ----------
 
-    def _them_loop(self):
-        """Поток prompter-them: звук компьютера → фразы по VAD (как в _listen: начало — 2 кадра речи, конец — 0,6 с
-        тишины, не длиннее 20 с) → очередь распознавания."""
+    def _open_meeting_mic(self):
+        """Ваш микрофон для второй дорожки онлайн-записи (тот же, что выбран в «Звуке»)."""
+        from audio_io import Capture
+        device = self.eng.s.get("audio", "input") if hasattr(self.eng.s, "get") else ""
+        if isinstance(device, dict):
+            device = device.get("input", "")
+        mic = Capture(device=device or "", strict_device=bool(device))
+        desc = mic.open()
+        return mic, desc
+
+    def _them_loop(self, stop_ev=None, q=None, session=None):
+        """Поток prompter-them: звук компьютера (и в dual — ваш микрофон) → WAV-дорожки и фразы по VAD
+        (начало — 2 кадра речи, конец — 0,6 с тишины, не длиннее 20 с) → очередь распознавания.
+
+        Часы встречи — поток BlackHole: на каждый его кадр 32 мс берётся ровно
+        один кадр микрофона (нет — тишина, накопилось больше MIC_MAX_LAG —
+        лишние отбрасываются). Так дорожки не расходятся из-за разных часов
+        устройств, а общий WAV совпадает со временем встречи.
+        """
+        import collections
         import os
-        from audio_io import Capture, LoopbackCapture
+        import queue
+        from audio_io import Capture
         from listen import SileroVAD
+        stop_ev = stop_ev or self._stop
+        q = q if q is not None else self._q
+        session = self._session if session is None else session
+        if stop_ev.is_set() or session != self._session:
+            self._capture_done.set()
+            return
         wav_path = os.environ.get("DEWIAR_PROMPTER_WAV") or None
+        record = bool(self.meeting.get("record"))
+        deferred = bool(self.meeting.get("deferred"))
         if wav_path:
-            cap = LoopbackCapture(wav_path=wav_path)
+            cap = self._loopback(wav_path=wav_path)
         elif self.meeting.get("audio_source") == "microphone":
             device = self.eng.s.get("audio", "input") if hasattr(self.eng.s, "get") else ""
             cap = Capture(device=device or "", strict_device=bool(device))
         else:
-            cap = LoopbackCapture()
+            cap = self._loopback()
         self._loop_cap = cap
         try:
+            self.status = "Подключаю источник звука; если macOS запросит доступ, разрешите запись."
+            self._state()
             self.status = "слушаю: " + cap.open()
+            self._system_kind = getattr(cap, "kind", "") or ""
         except Exception as e:  # noqa: BLE001
-            self._record_error = str(e)[:240] if self.meeting.get("record") else ""
-            self.status = (f"запись не началась: {e}" if self.meeting.get("record")
+            self._capture_done.set()
+            cap.close()
+            self._record_error = str(e)[:240] if record else ""
+            self.status = (f"запись не началась: {e}" if record
                            else f"звук компьютера не слышу ({e}) — подсказки по кнопке и на ваши фразы")
             log.warning("🎬 Суфлёр: %s", self.status)
-            if self.meeting.get("record"):
-                self.stop(summary=False)
-                threading.Thread(target=self._summarize, name="prompter-summary-error", daemon=True).start()
+            if record and session == self._session:
+                self.stop(summary=True)           # итог с причиной ошибки — через обычный путь stop()
                 return
             self._state()
             return
-        if self.meeting.get("record"):
-            self.status = ("записываю микрофон в WAV; микрофон Dewiar не используется" if self.meeting.get("audio_source") == "microphone"
-                           else "записываю системный звук; микрофон Dewiar не используется")
+        mic, mic_buf, mic_thread = None, collections.deque(maxlen=400), None
+        if self.meeting.get("dual") and not wav_path:
+            try:
+                mic, desc = self._open_meeting_mic()
+                log.info("🎬 Вторая дорожка записи: %s", desc)
+            except Exception as e:  # noqa: BLE001 — без микрофона запись собеседника всё равно идёт
+                mic = None
+                self._mic_error = f"ваш микрофон не открылся ({e}) — записываю только собеседника"[:240]
+                log.warning("🎬 %s", self._mic_error)
+        if mic is not None:
+            def mic_reader():
+                misses = 0
+                while not stop_ev.is_set():
+                    f = mic.read()
+                    if f:
+                        misses = 0
+                        mic_buf.append(f)
+                        continue
+                    misses += 1
+                    if misses >= 3 and not stop_ev.is_set():   # микрофон пропал (сон, отключили гарнитуру)
+                        misses = 0
+                        try:
+                            mic.close()
+                            log.warning("🎬 Переподключаю микрофон встречи: %s", mic.open())
+                        except Exception as e:  # noqa: BLE001
+                            log.warning("🎬 Микрофон встречи не переподключился: %s", e)
+                    time.sleep(0.05)
+            mic_thread = threading.Thread(target=mic_reader, name="prompter-mic", daemon=True)
+            mic_thread.start()
+        if record:
+            self.status = ("записываю системный звук и ваш микрофон (две дорожки)" if mic is not None else
+                           "записываю микрофон в WAV; микрофон Dewiar не используется"
+                           if self.meeting.get("audio_source") == "microphone" else
+                           "записываю системный звук; микрофон Dewiar не используется")
+            if self._mic_error:
+                self.status += "; " + self._mic_error
         self._state()
-        vad = SileroVAD(DATA_DIR / "silero_vad.onnx")
-        end_frames = int(0.6 / FRAME_S)
-        pre, utt, in_speech, starts, silence = [], [], False, 0, 0
         try:
-            while not self._stop.is_set():
+            vad = SileroVAD(DATA_DIR / "silero_vad.onnx") if not deferred else None
+            vad_me = SileroVAD(DATA_DIR / "silero_vad.onnx") if (mic is not None and not deferred) else None
+        except Exception as exc:
+            self._record_error = "Не удалось загрузить VAD: " + str(exc)
+            self._capture_done.set()
+            stop_ev.set()
+            cap.close()
+            if mic is not None:
+                mic.close()
+            self.stop(summary=True)
+            return
+        seg = _Segmenter(int(0.6 / FRAME_S))
+        seg_me = _Segmenter(int(0.6 / FRAME_S)) if vad_me is not None else None
+        empty, n = 0, 0
+        try:
+            while not stop_ev.is_set():
                 frame = cap.read()
                 if not frame:
-                    if os.environ.get("DEWIAR_PROMPTER_WAV"):
+                    if wav_path:
                         break
+                    empty += 1
+                    # Сон Mac, смена устройства вывода, отключённые наушники:
+                    # поток перестаёт отдавать кадры. Раньше цикл молча ждал
+                    # вечно; теперь источник переоткрывается.
+                    if empty >= 3 and not stop_ev.is_set():
+                        empty = 0
+                        try:
+                            cap.close()
+                            self.status = "переподключаю звук: " + cap.open()
+                            log.warning("🎬 %s", self.status)
+                        except Exception as e:  # noqa: BLE001
+                            self.status = f"звук пропал ({e}) — пробую снова"[:240]
+                        self._state()
                     time.sleep(0.2)
                     continue
+                empty = 0
+                if session != self._session:
+                    break                              # встреча уже другая — этот поток устарел
+                me_frame = None
+                if mic is not None:
+                    while len(mic_buf) > self.MIC_MAX_LAG:
+                        mic_buf.popleft()
+                    if mic_buf:
+                        me_frame = mic_buf.popleft()
+                    else:
+                        self._underruns += 1
+                    if me_frame is None or len(me_frame) != len(frame):
+                        me_frame = b"\0" * len(frame)
+                    self._level("me", me_frame)
+                self._level("them", frame)
+                n += 1
+                if n % 31 == 0:                        # ≈ раз в секунду
+                    self._check_silence()
+                    warn = getattr(cap, "warning", "") or ""
+                    if warn and warn != self._tap_warning:
+                        self._tap_warning = warn       # например, нули из-за отсутствия разрешения
+                        self.status = warn
+                        self._emit("warning", code="tap", text=warn)
+                        self._state()
+                    self._state()                      # уровни дорожек и диагностика в живом окне
+                if record:
+                    silent = b"\0" * len(frame)
+                    muted = self.paused or self._record_paused
+                    if mic is not None or self._track_waves:
+                        self._record_write_tracks(silent if muted else frame,
+                                                  (silent if muted else me_frame) if mic is not None else None)
+                    else:
+                        self._record_write(silent if muted else frame)
                 if self.paused:
                     continue
-                if self.meeting.get("record"):
-                    if not self._record_paused:
-                        self._record_write(frame)
-                    if self.meeting.get("deferred"):
-                        continue
+                if record and deferred:
+                    continue
                 p = vad.prob(frame)
                 if p > 0.5:
                     self._them_voice_t = time.monotonic()
-                if not in_speech:
-                    pre = (pre + [frame])[-10:]
-                    starts = starts + 1 if p > 0.5 else 0
-                    if starts >= 2:
-                        in_speech, utt, silence = True, list(pre), 0
-                    continue
-                utt.append(frame)
-                silence = silence + 1 if p < 0.35 else 0
-                if silence >= end_frames or len(utt) * FRAME_S > 20:
-                    in_speech, starts = False, 0
-                    pcm = b"".join(utt[:len(utt) - max(0, silence - 10)])  # хвост слова тихий — оставляем 0,3 с
-                    if len(pcm) / 2 / 16000 >= 0.5:
+                pcm = seg.feed(frame, p)
+                if pcm:
+                    # Время фразы — по номеру отсчёта в потоке (= позиция в WAV), а не по
+                    # моменту распознавания: очередь STT не сдвигает реплики во времени.
+                    t_start = max(0.0, n * FRAME_S - len(pcm) / 32000.0 - 0.3)
+                    try:
+                        q.put_nowait(("them", pcm, session, t_start))
+                    except Exception:  # noqa: BLE001
+                        log.warning("🎬 Очередь распознавания полна — фраза собеседника пропущена")
+                if seg_me is not None:
+                    pm = vad_me.prob(me_frame)
+                    if pm > 0.5:
+                        self._me_voice_t = time.monotonic()
+                    pcm = seg_me.feed(me_frame, pm)
+                    if pcm:
+                        t_start = max(0.0, n * FRAME_S - len(pcm) / 32000.0 - 0.3)
                         try:
-                            self._q.put_nowait(("them", pcm))
+                            q.put_nowait(("me", pcm, session, t_start))
                         except Exception:  # noqa: BLE001
-                            pass
-                    utt = []
+                            log.warning("🎬 Очередь распознавания полна — ваша фраза пропущена")
         finally:
+            if not deferred and not self.paused and session == self._session and q is not None:
+                for who, segment in (("them", seg), ("me", seg_me)):
+                    pcm = segment.flush() if segment is not None else None
+                    if pcm:
+                        try:
+                            q.put_nowait((who, pcm, session, max(0.0, n * FRAME_S - len(pcm) / 32000)))
+                        except queue.Full:
+                            log.warning("🎬 Последняя фраза не поместилась в очередь; исходное аудио сохранено")
+            self._capture_done.set()
             cap.close()
+            if mic is not None:
+                try:
+                    mic.close()
+                except Exception:  # noqa: BLE001
+                    pass
             if self._loop_cap is cap:
                 self._loop_cap = None
             if self._loop_thread is threading.current_thread():
                 self._loop_thread = None
 
+    @staticmethod
+    def _is_echo(text, t, them_lines, window=4.0, ratio=0.6):
+        """Реплика микрофона — эхо собеседника из колонок? (почти тот же текст в пределах window секунд)."""
+        import difflib
+        norm = lambda v: " ".join(re.findall(r"[а-яёa-z0-9]+", str(v or "").lower()))
+        mine = norm(text)
+        if len(mine) < 6:
+            return False
+        for x in them_lines:
+            if abs(float(x.get("t") or 0) - float(t or 0)) <= window:
+                theirs = norm(x.get("text"))
+                if theirs and (mine in theirs or difflib.SequenceMatcher(None, mine, theirs).ratio() >= ratio):
+                    return True
+        return False
+
+    def _transcribe_wav(self, path):
+        if hasattr(self.eng, "current_stt"):
+            return self.eng.transcribe_file(path, stt=self._meeting_stt())
+        return self.eng.transcribe_file(path)  # компактные тестовые/внешние движки используют старую сигнатуру
+
     def _post_transcribe(self):
-        """После встречи: закрытая запись -> транскрипция -> обычный итоговый протокол."""
+        """После встречи: закрытая запись -> транскрипция (по дорожкам, если они есть) -> итоговый протокол."""
         path = self._record_path
         self._emit("summary", summary="", busy=True, phase="transcribe", recording=Path(path).name if path else "")
         try:
             if not path or not Path(path).is_file() or Path(path).stat().st_size <= 44:
                 raise RuntimeError(self._record_error or "аудиофайл пустой — проверьте источник записи и разрешение микрофона/звука")
-            if hasattr(self.eng, "current_stt"):
-                segments = self.eng.transcribe_file(path, stt=self._meeting_stt())
-            else:  # компактные тестовые/внешние движки используют старую сигнатуру
-                segments = self.eng.transcribe_file(path)
-            lines = [{"who": "them", "text": text, "t": round(float(start), 1)}
-                     for start, _end, text in segments if str(text or "").strip()]
+            tracks = {k: v for k, v in self._track_paths.items() if Path(v).is_file() and Path(v).stat().st_size > 44}
+            notes = []
+            lines = []
+            if tracks:
+                for who in ("them", "me"):
+                    p = tracks.get(who)
+                    if not p:
+                        continue
+                    if self._wav_is_silent(p):
+                        notes.append("звук собеседника не записан (тишина): " + self._silence_hint() if who == "them" else
+                                     "ваш микрофон записал тишину — проверьте разрешение «Микрофон» для Dewiar")
+                        continue
+                    lines += [{"who": who, "text": text, "t": round(float(start), 1)}
+                              for start, _end, text in self._transcribe_wav(p) if str(text or "").strip()]
+                # Без наушников микрофон слышит собеседника из колонок: такие
+                # «ваши» реплики повторяют дорожку собеседника — убираем эхо.
+                them_lines = [x for x in lines if x["who"] == "them"]
+                lines = [x for x in lines if x["who"] != "me" or not self._is_echo(x["text"], x["t"], them_lines)]
+                lines.sort(key=lambda x: (x["t"], 0 if x["who"] == "them" else 1))
+            else:
+                if self.meeting.get("audio_source") == "system" and self._wav_is_silent(path):
+                    notes.append("звук собеседника не записан (тишина): " + self._silence_hint())
+                else:
+                    lines = [{"who": "them", "text": text, "t": round(float(start), 1)}
+                             for start, _end, text in self._transcribe_wav(path) if str(text or "").strip()]
+            if notes:
+                self._record_error = "; ".join(filter(None, [self._record_error] + notes))[:600]
             with self._lock:
-                self.lines = lines[-400:]
+                screens = [x for x in self.lines if x.get("who") == "screen"]
+                self.lines = sorted(lines + screens, key=lambda x: float(x.get("t") or 0))
             # Отложенная расшифровка создаёт тот же живой .txt, который был бы
             # заполнен в реальном времени.
             try:
@@ -1194,19 +1742,35 @@ class Prompter:
                 pass
             for line in self.lines:
                 self._transcript_write(line)
-                self._emit("line", line=line)
-            self.status = f"расшифровано фраз: {len(self.lines)}"
+                if line.get("who") != "screen":
+                    self._emit("line", line=line)
+            self.status = f"расшифровано фраз: {len(lines)}" + (f"; {'; '.join(notes)}" if notes else "")
         except Exception as e:  # noqa: BLE001 — протокол всё равно будет создан с сообщением об ошибке
             self.status = "расшифровка не получилась: " + str(e)[:180]
             log.warning("🎬 Расшифровка записи: %s", e)
         self._summarize()
 
-    def _stt_loop(self):
-        while not self._stop.is_set():
+    def _stt_loop(self, stop_ev=None, q=None, session=None):
+        """Распознавание фраз встречи. После остановки очередь дочитывается (до 45 с), а не бросается:
+        иначе последние реплики разговора не попадали в протокол."""
+        stop_ev = stop_ev or self._stop
+        q = q if q is not None else self._q
+        session = self._session if session is None else session
+        deadline = None
+        while True:
+            if stop_ev.is_set():
+                if deadline is None:
+                    deadline = time.monotonic() + 45
+                if (q.empty() and self._capture_done.is_set()) or time.monotonic() > deadline or session != self._session:
+                    break
             try:
-                who, pcm = self._q.get(timeout=0.5)
+                item = q.get(timeout=0.5)
             except Exception:  # noqa: BLE001 — пусто
                 continue
+            who, pcm = item[0], item[1]
+            if len(item) > 2 and item[2] != session:
+                continue
+            t_start = item[3] if len(item) > 3 else None
             if who == "mic":
                 who = self._whose(pcm)
                 if who is None:
@@ -1217,7 +1781,7 @@ class Prompter:
                 log.info("🎬 Суфлёр: не распознал фразу: %s", e)
                 continue
             if text:
-                self.add_line(who, text)
+                self.add_line(who, text, session=session, t=t_start)
 
     def _whose(self, pcm):
         """Фраза микрофона: чья? Очная встреча — по голосу; онлайн — ваша, а явно чужой голос (собеседник из колонок
@@ -1244,11 +1808,23 @@ class Prompter:
 
     # ---------- расшифровка и поводы ----------
 
-    def add_line(self, who, text):
-        line = {"who": who, "text": text, "t": round(time.time() - self.meeting.get("started", time.time()), 1)}
+    MAX_LINES = 20000   # вся встреча целиком: протокол строится по всей расшифровке, а не по хвосту
+
+    def add_line(self, who, text, session=None, t=None):
+        if session is not None and session != self._session:
+            return                                     # фраза прошлой встречи, дочитанная после старта новой
+        if t is None:
+            t = time.time() - self.meeting.get("started", time.time())
+        line = {"who": who, "text": text, "t": round(float(t), 1)}
+        if who == "me" and self.meeting.get("dual"):
+            with self._lock:
+                recent = [x for x in self.lines[-8:] if x.get("who") == "them"]
+            if self._is_echo(text, line["t"], recent, window=6.0):
+                log.info("🎬 Суфлёр: эхо собеседника в микрофоне — пропускаю")
+                return
         with self._lock:
             self.lines.append(line)
-            self.lines = self.lines[-400:]
+            self.lines = self.lines[-self.MAX_LINES:]
         self._emit("line", line=line)
         self._transcript_write(line)
         log.info("🎬 %s: %s", "Собеседник" if who == "them" else "Я", text[:120])
@@ -1270,18 +1846,19 @@ class Prompter:
 
     def _voice_t(self):
         """Когда последний раз кто-то говорил (monotonic): звук компьютера, микрофон."""
-        return max(self._them_voice_t, getattr(self.eng, "mic_voice_t", 0.0) or 0.0)
+        return max(self._them_voice_t, self._me_voice_t, getattr(self.eng, "mic_voice_t", 0.0) or 0.0)
 
-    def _watch(self):
+    def _watch(self, stop_ev=None):
         """Поток prompter-watch: «замешкались» после вопроса и долгая пауза в разговоре."""
-        while not self._stop.wait(0.5):
+        stop_ev = stop_ev or self._stop
+        while not stop_ev.wait(0.5):
             m = self.meeting
             if self.paused or m.get("mode") != "auto" or not m.get("nudge", True):
                 continue
             now = time.monotonic()
             a = self._await
             if a:
-                mic = getattr(self.eng, "mic_voice_t", 0.0) or 0.0
+                mic = max(getattr(self.eng, "mic_voice_t", 0.0) or 0.0, self._me_voice_t)
                 if mic > a["t"] + 0.3:
                     self._await = None                     # микрофон слышит речь — человек отвечает
                 elif now - a["t"] > STUCK_S:
@@ -1425,15 +2002,74 @@ class Prompter:
         self._emit("hint", hint=dict(h))
         log.info("🎬 Подсказка №%d за %.1f с%s", h["id"], time.monotonic() - t0, " (пусто)" if h.get("empty") else "")
 
+    # Каскад автокадров (идея из raliev/audiotranscripts, autoframes.py): дешёвое сравнение
+    # пикселей уменьшенного кадра решает почти всё. Кадр-кандидат — только когда экран
+    # постоял неподвижно FRAME_STABLE_S после изменения: переходы слайдов, прокрутка и набор
+    # текста в протокол не попадают. Новая сцена — если кандидат заметно отличается от
+    # текущей; возврат к одному из недавних слайдов — повтор, а не новый кадр.
+    FRAME_W, FRAME_H = 96, 54
+    FRAME_PIX = 18            # 0..255: насколько должен измениться пиксель, чтобы считаться изменённым
+    FRAME_STILL = 0.004       # доля изменённых пикселей между тактами, ниже которой экран «стоит»
+    FRAME_STABLE_S = 1.5
+    FRAME_SCENE = 0.03        # доля изменённых пикселей против текущей сцены → новая сцена
+    FRAME_SPARSE = 0.5        # …или изменилось больше половины «содержимого» редкого слайда
+    FRAME_SPARSE_MIN = 0.004
+    FRAME_REVISIT = 12        # сколько недавних сцен проверять на «вернулись к прошлому слайду»
+
     @staticmethod
     def _frame_signature(data):
-        """Небольшая серая матрица для отбрасывания мигания интерфейса в автокадрах."""
+        """Уменьшенный серый кадр (numpy uint8) для сравнения сцен; None — кадр не читается."""
         try:
-            from PIL import Image
-            im = Image.open(io.BytesIO(data)).convert("L").resize((32, 18))
-            return list(im.getdata())
+            import numpy as np
+            from PIL import Image, ImageFilter
+            im = Image.open(io.BytesIO(data)).convert("L").resize((Prompter.FRAME_W, Prompter.FRAME_H), Image.BOX)
+            return np.asarray(im.filter(ImageFilter.BoxBlur(1)), dtype=np.int16)
         except Exception:  # noqa: BLE001 — плохой кадр всё равно можно сохранить вручную
             return None
+
+    @classmethod
+    def _changed(cls, a, b):
+        import numpy as np
+        if a is None or b is None or a.shape != b.shape:
+            return 1.0
+        return float(np.mean(np.abs(a - b) > cls.FRAME_PIX))
+
+    @classmethod
+    def _new_scene(cls, scene, sig):
+        """Кандидат — новая сцена относительно scene? Учитывает «редкие» слайды (тёмный фон, мало текста)."""
+        import numpy as np
+        moved = cls._changed(scene, sig)
+        if moved >= cls.FRAME_SCENE:
+            return True
+        if moved < cls.FRAME_SPARSE_MIN:
+            return False
+        bg = np.median(scene)
+        content = float(np.mean(np.abs(scene - bg) > cls.FRAME_PIX))
+        return content > 0 and moved / content > cls.FRAME_SPARSE
+
+    def _frame_triage(self, sig):
+        """-> ("new", None) | ("skip", причина) | ("revisit", путь к уже сохранённой сцене)."""
+        now = time.monotonic()
+        prev, self._fr_prev = self._fr_prev, sig
+        if not self._fr_scenes:
+            self._fr_still_since = now
+            return "new", None
+        if prev is None or self._changed(prev, sig) > self.FRAME_STILL:
+            self._fr_still_since = now                 # экран ещё меняется — ждём, пока успокоится
+            return "skip", "экран меняется"
+        if now - self._fr_still_since < max(self.FRAME_STABLE_S, self._frame_interval) - 0.05:
+            return "skip", "жду, пока экран постоит"
+        if not self._new_scene(self._fr_scenes[-1][0], sig):
+            return "skip", "экран почти не изменился"
+        for old, path in reversed(self._fr_scenes[-self.FRAME_REVISIT:-1]):
+            if not self._new_scene(old, sig):
+                return "revisit", path
+        return "new", None
+
+    def _remember_scene(self, sig, path):
+        if sig is not None:
+            self._fr_scenes.append((sig, path))
+            self._fr_scenes = self._fr_scenes[-64:]
 
     def capture_frame(self, data=None, ocr=True, auto=False, quality=None):
         """Сохранить текущий экран и вставить его с OCR в расшифровку встречи.
@@ -1457,9 +2093,9 @@ class Prompter:
         with self._record_lock:
             audio_time = self._record_wave.tell() / 16000 if self._record_wave else 0.0
         stamp = frame_stamp(captured, elapsed, audio_time if self.meeting.get("record") else elapsed)
-        # При включённой сборке видео сохраняем каждый такт отдельно, даже
-        # если кадр не изменился: сцены в расшифровке по-прежнему дедуплицируются.
-        if auto and self._video_enabled:
+        # С аудиодорожкой видео строится по событиям сцен. Отдельные JPEG
+        # каждого такта там не используются и занимали гигабайты в час.
+        if auto and self._video_enabled and not self.meeting.get("record"):
             if self._video_dir is None:
                 root = Path(self._transcript_path).parent if self._transcript_path else self._dir
                 self._video_dir = root / (Path(self._transcript_path).stem if self._transcript_path else "Встреча") / "Видео-кадры"
@@ -1471,13 +2107,18 @@ class Prompter:
             except Exception as exc:  # noqa: BLE001 — кадр сцены всё равно можно сохранить ниже
                 log.info("🎬 Кадр для видео не сохранён: %s", exc)
         sig = self._frame_signature(data)
-        if auto and sig is not None and self._last_frame_sig is not None:
-            delta = sum(abs(a - b) for a, b in zip(sig, self._last_frame_sig)) / (255 * len(sig))
-            if delta < 0.012:
-                return {"skipped": True, "reason": "экран почти не изменился"}
-        if sig is not None:
-            self._last_frame_sig = sig
-        digest = hashlib.sha1(data).hexdigest()[:12]
+        if auto and sig is not None:
+            verdict, info = self._frame_triage(sig)
+            if verdict == "skip":
+                return {"skipped": True, "reason": info}
+            if verdict == "revisit":
+                # Вернулись к прошлому слайду: новый файл не нужен, но в шкалу времени
+                # (и в видео) сцена возвращается в текущий момент.
+                self._remember_frame(info, stamp)
+                self._remember_scene(sig, info)
+                existing = next((x for x in self._screenshots if x.get("path") == info), {"path": info})
+                return dict(existing, revisit=True)
+        digest = hashlib.sha1(data).hexdigest()
         if any(x.get("sha1") == digest for x in self._screenshots):
             existing = next(x for x in self._screenshots if x.get("sha1") == digest)
             self._remember_frame(existing["path"], stamp)
@@ -1489,29 +2130,59 @@ class Prompter:
         frames.mkdir(parents=True, exist_ok=True)
         n = len(self._screenshots) + 1
         suffix = ".jpg" if auto else ".png"
-        path = frames / f"{n:04d}-{digest}{suffix}"
+        path = frames / f"{n:04d}-{digest[:12]}{suffix}"
         write_frame(path, data, stamp, max(40, min(100, int(quality or self._frame_quality))) if auto else None)
         text = ""
-        if ocr:
+        if ocr and not auto:
             try:
                 from ocr import recognize
                 text = recognize(data)
             except Exception as exc:  # noqa: BLE001
                 log.info("🎬 OCR кадра не выполнился: %s", exc)
-        t = round(elapsed, 1)
+        # Время строки — по часам записи (как у реплик), иначе по часам встречи.
+        t = round(audio_time if self.meeting.get("record") and self._record_path else elapsed, 1)
         rel = str(path.relative_to(Path(self._transcript_path).parent)) if self._transcript_path else str(path)
         line = {"who": "screen", "kind": "screen", "text": text or "Снимок экрана", "t": t,
                 "path": rel, "ocr": text}
         entry = {"path": rel, "ocr": text, "sha1": digest, "t": t, **stamp}
         self._screenshots.append(entry)
+        self._remember_scene(sig, rel)
         self._remember_frame(rel, stamp)
         with self._lock:
             self.lines.append(line)
-            self.lines = self.lines[-400:]
+            self.lines = self.lines[-self.MAX_LINES:]
         self._transcript_write(line)
         self._emit("line", line=line)
+        if ocr and auto:
+            try:
+                self._ocr_q.put_nowait((data, entry, line, self._session))
+                if self._ocr_thread is None or not self._ocr_thread.is_alive():
+                    self._ocr_thread = threading.Thread(target=self._ocr_loop, args=(self._stop,), name="meeting-ocr", daemon=True)
+                    self._ocr_thread.start()
+            except queue.Full:
+                log.warning("🎬 OCR не успевает: кадр сохранён без текста")
         self._state()
         return dict(entry)
+
+    def _ocr_loop(self, stop_ev):
+        while not stop_ev.is_set() or not self._ocr_q.empty():
+            try:
+                data, entry, line, session = self._ocr_q.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                from ocr import recognize
+                text = recognize(data)
+                if text and session == self._session:
+                    with self._lock:
+                        entry["ocr"] = text
+                        line.update(text=text, ocr=text)
+                    self._transcript_write(dict(line, text="OCR: " + text))
+                    self._state()
+            except Exception as exc:
+                log.info("🎬 OCR кадра не выполнился: %s", exc)
+            finally:
+                self._ocr_q.task_done()
 
     def _remember_frame(self, path, stamp):
         # Reappearing scenes must return to their current audio time.
@@ -1553,10 +2224,11 @@ class Prompter:
         threading.Thread(target=build, name="meeting-video", daemon=True).start()
         return {"busy": True}
 
-    def _frame_loop(self):
+    def _frame_loop(self, stop_ev=None):
         """Проверять экран с заданным интервалом; неизменившиеся сцены отбрасывать."""
+        stop_ev = stop_ev or self._stop
         failures = 0
-        while self.on and self._frames_enabled and not self._stop.wait(self._frame_interval):
+        while self.on and self._frames_enabled and not stop_ev.wait(self._frame_interval):
             try:
                 self.capture_frame(auto=True)
                 failures = 0
@@ -1568,10 +2240,10 @@ class Prompter:
 
     def _finalize_frame_video(self):
         """Собрать MP4 из кадров; при записи встречи добавить исходный WAV."""
-        if not self._video_dir or not self._frame_events:
+        if not self._frame_events or not self._session_dir:
             return ""
         try:
-            root = Path(self._video_dir).parent
+            root = Path(self._session_dir)
             out = root / "Видео" / (Path(self._transcript_path).stem if self._transcript_path else "Встреча")
             out.parent.mkdir(parents=True, exist_ok=True)
             from eyes import ffmpeg_path
@@ -1585,7 +2257,7 @@ class Prompter:
                     self._frame_events, audio, Path(self._transcript_path).parent,
                     out.with_name("Видео встречи.mp4"), ff)
                 return self._video_path
-            if self._video_frames < 2:
+            if not self._video_dir or self._video_frames < 2:
                 return ""
             result = subprocess.run([ff, "-y", "-framerate", str(round(1.0 / self._frame_interval, 4)),
                                      "-i", str(self._video_dir / "frame_%06d.jpg"), "-c:v", "libx264",
@@ -1624,14 +2296,101 @@ class Prompter:
         log.info("🎬 Шпаргалка готова: %d вопросов", len(sheet))
         self._emit("sheet", sheet=sheet)
 
+    @staticmethod
+    def _talk_lines(lines):
+        """Реплики для модели с таймкодами: «[12:05] Собеседник: …» — по ним в протоколе видно, когда договорились."""
+        out = []
+        for x in lines:
+            sec = max(0, int(float(x.get("t") or 0)))
+            who = "Собеседник" if x["who"] == "them" else "Вы" if x["who"] == "me" else "Экран (OCR)"
+            out.append(f"[{sec // 60:02d}:{sec % 60:02d}] {who}: {x['text']}")
+        return out
+
+    def _screen_reference(self, budget=4000):
+        """Текст с экрана (OCR кадров) — справочник для модели: как пишутся имена, термины, цифры."""
+        seen, out, size = set(), [], 0
+        for x in self._screenshots:
+            text = re.sub(r"\s+", " ", str(x.get("ocr") or "")).strip()
+            if len(text) < 8 or text in seen:
+                continue
+            seen.add(text)
+            sec = max(0, int(float(x.get("t") or 0)))
+            row = f"[{sec // 60:02d}:{sec % 60:02d}] {text[:800]}"
+            if size + len(row) > budget:
+                break
+            out.append(row)
+            size += len(row) + 1
+        return "\n".join(out)
+
+    @classmethod
+    def _split_parts(cls, lines, talk):
+        """Разбить расшифровку на части не длиннее SUMMARY_PART по самой длинной паузе в конце части
+        (а не посреди обмена репликами): вопрос и ответ на него оказываются в одной части."""
+        parts, cur, size = [], [], 0
+        for x, ln in zip(lines, talk):
+            ln = ln[: cls.SUMMARY_PART]
+            if cur and size + len(ln) + 1 > cls.SUMMARY_PART:
+                lo = max(1, int(len(cur) * 0.75))
+                gaps = [(float(cur[i][0].get("t") or 0) - float(cur[i - 1][0].get("t") or 0), i)
+                        for i in range(lo, len(cur))]
+                cut = max(gaps)[1] if gaps else len(cur)
+                parts.append([c[1] for c in cur[:cut]])
+                cur = cur[cut:]
+                size = sum(len(c[1]) + 1 for c in cur)
+            cur.append((x, ln))
+            size += len(ln) + 1
+        if cur:
+            parts.append([c[1] for c in cur])
+        return parts
+
+    def _summary_text(self, m, lines):
+        """Итог по ВСЕЙ встрече. Короткая — одним запросом; длинная — по частям (заметки по каждой части),
+        затем общий протокол по заметкам. Раньше в модель шли только последние 24 000 знаков, и у часовой
+        встречи начало (а с ним договорённости первых 40 минут) в протокол не попадало.
+        Текст с экрана идёт отдельным справочником: модель исправляет по нему имена и термины, которые
+        распознавание речи пишет с ошибками (идея «Beautify» из raliev/audiotranscripts)."""
+        head = f"ВСТРЕЧА: {m.get('title', '')}\nЦЕЛЬ: {m.get('goal') or '—'}\n"
+        if m.get("participants"):
+            head += f"УЧАСТНИКИ (указаны заранее): {m['participants']}\n"
+        ref = self._screen_reference()
+        if ref:
+            head += ("\nТЕКСТ С ЭКРАНА (OCR; справочник для написания имён, терминов и цифр — "
+                     "это не реплики участников):\n" + ref + "\n")
+        speech = [x for x in lines if x.get("who") != "screen"]
+        talk = self._talk_lines(speech)
+        if sum(len(x) + 1 for x in talk) <= self.SUMMARY_PART:
+            return self._ask_model(SUMMARY_SYSTEM, head + "\nРАСШИФРОВКА:\n" + "\n".join(talk), max_tokens=1200)
+        parts = self._split_parts(speech, talk)
+        notes = []
+        for i, part in enumerate(parts, 1):
+            self._emit("summary", summary="", busy=True, phase="summary_part", part=i, parts=len(parts))
+            note = self._ask_model(NOTES_SYSTEM, head + f"\nЧАСТЬ {i} ИЗ {len(parts)}:\n" + "\n".join(part), max_tokens=900)
+            notes.append(f"### Часть {i} ({part[0][1:6]}–{part[-1][1:6]})\n{note or '(модель не ответила)'}")
+        return self._ask_model(SUMMARY_SYSTEM, head + "\nВстреча длинная, расшифровка разбита на части. ЗАМЕТКИ ПО ЧАСТЯМ "
+                               "(используй их как расшифровку):\n\n" + "\n\n".join(notes), max_tokens=1500)
+
+    def _save_raw_lines(self, lines):
+        """Сырые реплики рядом с .txt: итог можно пересобрать другой моделью без повторной расшифровки."""
+        if not self._transcript_path:
+            return ""
+        try:
+            p = Path(self._transcript_path).with_suffix(".lines.json")
+            meta = {k: self.meeting.get(k) for k in ("title", "goal", "participants", "topics", "started", "ended",
+                                                      "audio_source", "dual", "place")}
+            p.write_text(json.dumps({"version": 1, "meeting": meta, "tracks": dict(self._track_paths),
+                                     "system_audio": self._system_kind, "lines": lines},
+                                    ensure_ascii=False, indent=1), encoding="utf-8")
+            return str(p)
+        except (OSError, TypeError, ValueError) as exc:
+            log.info("🎬 Сырые реплики не сохранены: %s", exc)
+            return ""
+
     def _summarize(self):
         m = dict(self.meeting)
         record_path = self._record_path
         with self._lock:
             lines = list(self.lines)
-        talk = "\n".join(
-            ("Собеседник: " if x["who"] == "them" else "Вы: " if x["who"] == "me" else "Экран (OCR): ") + x["text"]
-            for x in lines)
+        self._save_raw_lines(lines)
         # A manually entered list always wins.  Otherwise infer only names
         # explicitly used in the transcript; the model gets a second chance
         # below for natural phrases that do not match the comma pattern.
@@ -1643,8 +2402,7 @@ class Prompter:
                     self.meeting["participants"] = inferred
         self._emit("summary", summary="", busy=True)
         try:
-            text = self._ask_model(SUMMARY_SYSTEM, f"ВСТРЕЧА: {m.get('title', '')}\nЦЕЛЬ: {m.get('goal') or '—'}\n\nРАСШИФРОВКА:\n{talk[-24000:]}",
-                                   max_tokens=1200)
+            text = self._summary_text(m, lines)
         except Exception as e:  # noqa: BLE001
             text = ""
             log.info("🎬 Итог встречи не получился: %s", e)
@@ -1655,7 +2413,16 @@ class Prompter:
                 with self._lock:
                     self.meeting["participants"] = inferred
         started = local_datetime(m.get("started") or time.time())
-        mins = max(1, round(((lines[-1]["t"] if lines else 60)) / 60))
+        # Длительность — по часам встречи, а не по времени последней реплики
+        # (тихий хвост или отложенная расшифровка без речи давали «1 мин»).
+        duration = float(m.get("ended") or time.time()) - float(m.get("started") or time.time())
+        if record_path and Path(record_path).is_file():
+            try:
+                from meeting_video import audio_duration
+                duration = max(duration if m.get("ended") else 0.0, audio_duration(record_path))
+            except Exception:  # noqa: BLE001
+                pass
+        mins = max(1, round(duration / 60))
         meeting_root = (self.eng.workspace.ensure() / "Встречи").resolve()
 
         def meeting_link(value, label=None, relative_to=None):
@@ -1673,6 +2440,10 @@ class Prompter:
 
         transcript_root = Path(self._transcript_path).parent if self._transcript_path else meeting_root
         record_link = meeting_link(record_path, f"Аудио/{Path(record_path).name}") if record_path else ""
+        track_links = ", ".join(
+            meeting_link(v, "Вы" if k == "me" else "Собеседник")
+            for k, v in sorted(self._track_paths.items(), key=lambda kv: kv[0] != "me")
+            if Path(v).is_file() and Path(v).stat().st_size > 44)
         transcript_link = meeting_link(self._transcript_path, f"Расшифровки/{Path(self._transcript_path).name}") if self._transcript_path else ""
         decisions = "будут определены после расшифровки"
         found = re.search(r"(?ims)^##\s*Договорились\s*\n(.*?)(?=^##\s|\Z)", text or "")
@@ -1688,7 +2459,9 @@ class Prompter:
                 f"*{started:%d.%m.%Y %H:%M} · {mins} мин · Встречи Dewiar*\n\n"
                 + (f"**Цель:** {m['goal']}\n\n" if m.get("goal") else "")
                 + (f"**Аудиозапись:** {record_link}\n\n" if record_link else "")
+                + (f"**Дорожки:** {track_links}\n\n" if track_links else "")
                 + (f"**Статус аудиозаписи:** {self._record_error}\n\n" if self._record_error else "")
+                + (f"**Микрофон:** {self._mic_error}\n\n" if self._mic_error else "")
                 + (f"**Расшифровка:** {transcript_link}\n\n" if transcript_link else "")
                 + (text or "_Итог не получился — модель не ответила._")
                 + ("\n\n## Материалы\n" + "\n".join(f"- {f['name']}" for f in self.files) if self.files else "")
@@ -1705,8 +2478,7 @@ class Prompter:
         try:
             d = self.eng.workspace.ensure() / "Встречи"
             d.mkdir(parents=True, exist_ok=True)
-            safe = re.sub(r'[\\/:*?"<>|]+', " ", m.get("title", "Встреча")).strip()[:60] or "Встреча"
-            f = d / f"{started:%Y-%m-%d %H%M} {safe}.md"
+            f = d / f"{self._meeting_base(m.get('title', 'Встреча'))}.md"
             f.write_text(body, encoding="utf-8")
             path = str(f)
         except OSError as e:

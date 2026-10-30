@@ -38,6 +38,13 @@ def main():
         assert 'а не математическая гарантия' in page.locator('#help-body').inner_text()
         page.evaluate("showHelp('home')")
         assert 'Показать агента' in page.locator('#help-body').inner_text()
+        page.evaluate("showHelp('brain')")
+        brain_help = page.locator('#help-body').inner_text()
+        assert all(text in brain_help for text in [
+            'Окно контекста', '32 768', 'Context Length', 'OLLAMA_CONTEXT_LENGTH',
+            'меньше 24 000', 'меньше 12 000', 'около 8 000',
+            '«Общение» — 1 024', '«Планирование» — 16 384', '«Программирование» — 8 192', '«Аналитика» — 32 768'
+        ])
         before=page.evaluate('window.__helpCalls.length')
         for key in keys:
             page.evaluate('(key)=>showHelp(key)',key)
@@ -82,7 +89,7 @@ def main():
         assert page.locator('#help-results button').count()==len(keys)
         page.locator('#help-current').click()
         assert page.locator('#help-heading').inner_text()=='Модели'
-        assert all(word in page.locator('#help-body').inner_text() for word in ['Общение', 'Планирование', 'Программирование'])
+        assert all(word in page.locator('#help-body').inner_text() for word in ['Общение', 'Планирование', 'Программирование', 'Аналитика'])
         page.locator('#help-x').click()
         # Late model cards and team controls get titles after rerender without duplicate help actions.
         page.evaluate("""() => {openProf='fixture';renderProfiles();document.querySelector('#t-new-team').innerHTML=taskTeamEditor('fixture',{});}""")

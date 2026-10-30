@@ -395,7 +395,10 @@ class CommandsMixin:
                                 a.get("auto_interval", 0.5), a.get("frame_quality", 85), a.get("frame_video", False),
                                 a.get("auto_first_frame", True), a.get("capture_source", "screen"),
                                 a.get("capture_region"), a.get("capture_application", ""), a.get("scheduled_end"),
-                                a.get("record_source"))
+                                a.get("record_source"), record_me=a.get("record_me"))
+            if cmd == "prompter_audio_apps":
+                from audio_io import audio_tap_supported, list_audio_apps
+                return {"supported": audio_tap_supported(), "apps": list_audio_apps()}
             if cmd == "prompter_voice":                    # голос владельца: start — записать, stop — сохранить, forget
                 act = a.get("action", "start")
                 if act == "start":

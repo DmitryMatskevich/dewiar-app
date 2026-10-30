@@ -367,7 +367,7 @@
       время ассистент не отвечает и на имя не откликается.</p>
     <div class="prof on" style="padding:16px 18px;margin-bottom:18px" id="pr-record-settings">
       <h3 style="font-size:15px;margin-bottom:6px">Запись встреч</h3>
-      <p class="hint" style="margin-bottom:12px">Эти параметры применяются к расшифровке переговоров и автоматическим кадрам. Весь звук и снимки остаются на этом Mac.</p>
+      <p class="hint" style="margin-bottom:12px">Аудиофайлы и кадры сохраняются на Mac. Локальные GigaAM/Vosk распознают здесь; при выборе сервера звук отправляется ему, а внешний профиль модели получает текст для итога.</p>
       <div class="row">
         <label class="f">Модель записи<select data-k="prompter.stt_engine" id="pr-stt-engine">
           <option value="inherit">Как в разделе «Слух»</option><option value="gigaam">GigaAM — точная локальная модель</option>
@@ -379,11 +379,19 @@
       </div>
       <div class="row" style="margin-top:10px">
         <label class="f">Источник аудиозаписи<select data-k="prompter.audio_source" id="pr-audio-source">
-          <option value="system">Системный звук (BlackHole / Loopback)</option>
+          <option value="system">Звук звонка и приложений</option>
           <option value="microphone">Микрофон MacBook или выбранный в «Звук»</option>
         </select><span class="hint">Локальный WAV используется для полной транскрибации и сборки видео.</span></label>
         <div class="switch"><div>Предлагать запись аудио по умолчанию<span>Переключатель «Записать аудио» будет включён в новом окне встречи. Перед записью предупредите участников.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_audio_default"><i></i></label></div>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Способ записи звука приложений<select data-k="prompter.system_audio" id="pr-system-audio" title="Автоматически: нативная запись Core Audio, при ошибке — установленный BlackHole/Loopback. Принудительный Core Audio не подменяется другим источником.">
+          <option value="auto">Автоматически (Core Audio → BlackHole)</option><option value="tap">Core Audio — без виртуального драйвера</option><option value="blackhole">BlackHole / Loopback</option>
+        </select></label>
+        <label class="f">Приложение звонка<select data-k="prompter.tap_target" id="pr-tap-target" title="При Core Audio записывать весь звук или только выбранное приложение. Выбор относится к звуку, а не к кадрам экрана."><option value="all">Весь системный звук</option></select></label>
+      </div>
+      <div class="actions" style="margin-top:8px"><button class="btn small" id="pr-audio-apps-refresh" title="Обновить приложения, подключённые к системному звуку. Эта проверка не начинает запись.">Обновить приложения со звуком</button><span class="res" id="pr-audio-apps-result" role="status"></span></div>
+      <div class="switch" style="margin-top:8px"><div>Записывать и мой микрофон<span>Для системного звука сохраняются «Вы», «Собеседник» и общий WAV. Выключите, если ваш голос уже включён в общий микс.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_me" title="Добавить отдельную дорожку выбранного микрофона при записи звука приложений"><i></i></label></div>
       <div class="actions" style="margin-top:10px"><button class="btn small" id="pr-stt-download">Скачать выбранную модель</button><span class="res" id="pr-stt-result"></span></div>
       <div class="row" style="margin-top:14px">
         <label class="f">Источник кадров<select data-k="prompter.capture_source" id="pr-capture-source">
@@ -1010,13 +1018,14 @@
         <button class="model-role-tab on" type="button" role="tab" aria-selected="true" aria-controls="model-role-panel" data-model-role="communication" title="Модели для обычного общения, вопросов и всех задач без отдельного назначения">Общение</button>
         <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="planning" title="Модели для планирования, обсуждения и совета участников">Планирование</button>
         <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="coding" title="Модели для программирования, проекта, тестов и ревью кода">Программирование</button>
+        <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="analytics" title="Модели для глубокого анализа документов, поручений, данных и длинных запросов">Аналитика</button>
       </div>
       <div id="model-role-panel" role="tabpanel" aria-live="polite">
         <h2 id="model-role-title">Общение</h2>
-        <p class="hint" id="model-role-description">Обычные ответы, вопросы и задачи, которым не назначено планирование или программирование.</p>
+        <p class="hint" id="model-role-description">Обычные ответы, вопросы и задачи, которым не назначено планирование, программирование или аналитика.</p>
         <label class="f role-token-limit" title="Верхний предел длины ответа для всех моделей этой очереди. Если у отдельного профиля задан меньший лимит, используется меньшее значение.">Максимум токенов в ответе для этой очереди
-          <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Максимум токенов ответа для текущей очереди" title="Ограничивает длину ответа выбранной очереди: Общение, Планирование или Программирование. Это не лимит средств и не размер контекста.">
-          <span class="hint">Это верхняя граница ответа, а не остаток средств. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192. Можно указать до 32768.</span>
+          <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Максимум токенов ответа для текущей очереди" title="Ограничивает длину ответа выбранной очереди: Общение, Планирование, Программирование или Аналитика. Это не лимит средств и не размер контекста.">
+          <span class="hint">Это верхняя граница ответа, а не остаток средств. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192, Аналитика — 32768. Можно указать до 32768.</span>
         </label>
         <div class="model-role-add actions" id="model-role-add" hidden>
           <label class="f">Добавить уже подключённую модель в эту очередь<select id="model-role-add-select" aria-label="Выбор подключённой модели для очереди"></select></label>
@@ -1631,7 +1640,7 @@
         <div class="bugtxt">
           <textarea id="rep-note" rows="4" maxlength="2000" placeholder="Что случилось? Например: «спросил погоду — молчит» или «в машине не слышит меня». Снимок из буфера — Ctrl+V"></textarea>
           <input type="text" id="bug-who" maxlength="40" placeholder="Как подписать вас в «Помощниках проекта» — необязательно">
-          <p class="hint">Отчёт отправляется на ваш сервер обработки. Если сервер не задан или недоступен — на <b>dmatskevich@gmail.com</b>, тема <b>Ошибка обработки персональный агент</b>, через подключённую почту. Выбранный снимок и технический журнал прилагаются. Без почты отчёт останется локально до повторной отправки.</p>
+          <p class="hint">Отчёт отправляется на ваш сервер обработки. Если сервер не задан или недоступен — на <b>domatskevich@gmail.com</b>, тема <b>Ошибка обработки персональный агент</b>, через подключённую почту. Выбранный снимок и технический журнал прилагаются. Без почты отчёт останется локально до повторной отправки.</p>
           <label class="f">Адрес сервера обработки ошибок<input type="url" data-k="report.server_url" placeholder="https://ваш-сервер/api/reports"></label>
           <label class="f">Ключ сервера, если требуется<input type="password" data-k="report.server_key" autocomplete="off"></label>
           <div id="report-delivery" class="hint" role="status"></div>
