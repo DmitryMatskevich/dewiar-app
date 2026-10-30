@@ -13,7 +13,7 @@ try:
 window.CALLS = [];
 window.api = () => ({});
 window.STATE = {on:false, brain:true, meeting:{}, files:[], lines:[], hints:[], voice:{},
- recording:{can_export:true, export_busy:false}};
+ recording:{can_export:true, export_busy:false, screenshots:1, video_frames:1}};
 window.core={_on:{},on(k,f){(this._on[k] ||= []).push(f);},async call(cmd,a){
  CALLS.push([cmd,a]); if(cmd==='prompter_state') return STATE; return {busy:true};
 }};
@@ -45,6 +45,8 @@ setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
         assert "Видео встречи.mp4" in page.locator("#meeting-video-result").inner_text()
         page.evaluate("core._on.prompter.forEach(f=>f({kind:'video',busy:false,error:'Нет аудиозаписи'}))")
         assert "Нет аудиозаписи" in page.locator("#meeting-video-result").inner_text()
+        page.evaluate("STATE.recording.screenshots=0; STATE.recording.video_frames=0; core._on.prompter.forEach(f=>f({kind:'summary',summary:'Без кадров',busy:false}))")
+        assert not page.locator("#create-meeting-video").is_visible(), "Кнопка не должна быть без сохранённых кадров"
         assert not errors, errors
         browser.close()
     print("OK: default consent, preserved opt-out, export button and success/error UI")

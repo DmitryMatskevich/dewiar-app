@@ -722,8 +722,12 @@ function renderSum(e) {
     : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
       + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
   bindMeetingFiles($("#sum"));
-  $("#sum").insertAdjacentHTML("beforeend", '<div class="row" style="margin-top:12px"><button class="ghost blk" type="button" id="create-meeting-video">Создать видео встречи</button></div><p class="saved" id="meeting-video-result" role="status" style="overflow-wrap:anywhere"></p>');
-  $("#create-meeting-video").onclick = createMeetingVideo;
+  const rec = st?.recording || {};
+  const hasSavedFrames = Number(rec.screenshots || 0) > 0 || Number(rec.video_frames || 0) > 0;
+  if (hasSavedFrames) {
+    $("#sum").insertAdjacentHTML("beforeend", '<div class="row" style="margin-top:12px"><button class="ghost blk" type="button" id="create-meeting-video">Создать видео встречи</button></div><p class="saved" id="meeting-video-result" role="status" style="overflow-wrap:anywhere"></p>');
+    $("#create-meeting-video").onclick = createMeetingVideo;
+  }
   renderMeetingVideo();
   if ($("#again")) $("#again").onclick = () => { show("setup"); $("#title").textContent = "Встречи"; };
   if ($("#done")) $("#done").onclick = closeWin;
