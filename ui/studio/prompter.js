@@ -21,7 +21,7 @@
     try { const x = await core.call("prompter_models", { model: $("#pr-stt-model").value }); out.textContent = x.installed ? `Скачана · ${x.mb} МБ` : `Не скачана · около ${x.mb} МБ`; }
     catch (_) { /* ядро могло быть ещё занято запуском */ }
   }
-  function fmt(ts) { if (!ts) return "до ручной остановки"; try { return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (_) { return "—"; } }
+  function fmt(ts, local) { if (local) return local; if (!ts) return "до ручной остановки"; try { return new Date(Number(ts) * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }); } catch (_) { return "—"; } }
   async function loadSchedules() {
     const box = $("#pr-s-list"); if (!box) return;
     try {
@@ -31,7 +31,7 @@
         const error = x.error || (pf.state === "error" ? pf.message : "");
         const canCancel = ["scheduled", "starting", "running"].includes(x.state);
         const cancelTitle = x.state === "running" ? "Остановить текущую фоновую запись и сохранить её итог" : "Отменить запланированную запись";
-        return `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at)} — ${fmt(x.end_at)} · ${esc(x.state || "")}${checks}${error ? ` · ${esc(error)}` : ""}</small></span>${canCancel ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}" data-schedule-state="${esc(x.state)}" title="${cancelTitle}">Отменить</button>` : ""}${x.state === "error" ? `<button class="btn small" data-retry-schedule="${esc(x.id)}">Проверить снова</button>` : ""}</div>`;
+        return `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at, x.start_local)} — ${fmt(x.end_at, x.end_local)} · ${esc(x.state || "")}${checks}${error ? ` · ${esc(error)}` : ""}</small></span>${canCancel ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}" data-schedule-state="${esc(x.state)}" title="${cancelTitle}">Отменить</button>` : ""}${x.state === "error" ? `<button class="btn small" data-retry-schedule="${esc(x.id)}">Проверить снова</button>` : ""}</div>`;
       }).join("") : "Записей в расписании пока нет.";
       $$('[data-cancel-schedule]').forEach(b => b.onclick = async () => {
         if (b.dataset.scheduleState === "running" && !await ask("Запись уже идёт. Остановить её и сохранить текущий итог встречи?")) return;

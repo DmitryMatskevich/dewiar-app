@@ -25,6 +25,7 @@
 Событие окну одно — «prompter» {kind: state | line | hint | sheet | summary | open | note, …}."""
 import math
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -37,6 +38,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from engine_base import DATA_DIR, FRAME_S, STATE_DIR, log
 
@@ -79,6 +81,35 @@ SUMMARY_SYSTEM = (
 
 MAX_FILE = 30 * 1024 * 1024
 TEXT_EXTS = {".md", ".txt", ".html", ".htm", ".pdf", ".docx", ".odt", ".csv"}
+
+
+def system_timezone():
+    """Часовой пояс из системных настроек, независимо от переменной TZ."""
+    names = []
+    for raw in (os.path.realpath("/etc/localtime"), os.path.realpath("/var/db/timezone/zoneinfo/local")):
+        marker = "/zoneinfo/"
+        if marker in raw:
+            names.append(raw.split(marker, 1)[1])
+    try:
+        value = Path("/etc/timezone").read_text(encoding="utf-8").strip()
+        if value:
+            names.append(value)
+    except OSError:
+        pass
+    for name in names:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 — неизвестная зона: используем системный fallback
+            pass
+    return datetime.now().astimezone().tzinfo
+
+
+def local_datetime(timestamp):
+    return datetime.fromtimestamp(float(timestamp), tz=system_timezone())
+
+
+def local_text(timestamp):
+    return local_datetime(timestamp).strftime("%d.%m.%Y %H:%M")
 
 
 def wants_hint(text, who="them"):
@@ -204,11 +235,17 @@ class Prompter:
         dt = datetime.fromisoformat(text)
         if dt.tzinfo is not None:
             return dt.timestamp()
-        return dt.timestamp()
+        return dt.replace(tzinfo=system_timezone()).timestamp()
 
     def schedules(self):
         with self._schedules_lock:
-            return [dict(x) for x in self._schedules]
+            rows = [dict(x) for x in self._schedules]
+        for row in rows:
+            if row.get("start_at"):
+                row["start_local"] = local_text(row["start_at"])
+            if row.get("end_at"):
+                row["end_local"] = local_text(row["end_at"])
+        return rows
 
     def schedule(self, start_at, end_at=None, title="Встреча по расписанию", options=None):
         start = self._schedule_ts(start_at)
@@ -572,7 +609,7 @@ class Prompter:
 
     @staticmethod
     def _summary_preview(m):
-        started = datetime.fromtimestamp(m.get("started") or time.time())
+        started = local_datetime(m.get("started") or time.time())
         return {"when": started.strftime("%d.%m.%Y %H:%M"),
                 "participants": m.get("participants") or "не указаны",
                 "topics": m.get("topics") or m.get("goal") or "не указаны",
@@ -589,7 +626,7 @@ class Prompter:
         # Use the same timestamp as the Markdown summary.  Using a second
         # datetime.now() here could cross a minute boundary and leave the
         # audio orphaned from its meeting row.
-        started = datetime.fromtimestamp((self.meeting or {}).get("started") or time.time())
+        started = local_datetime((self.meeting or {}).get("started") or time.time())
         safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
         path = d / f"{started:%Y-%m-%d %H%M} {safe}.wav"
         with self._record_lock:
@@ -607,7 +644,7 @@ class Prompter:
         except Exception:  # noqa: BLE001
             root = self._dir / "transcripts"
             root.mkdir(parents=True, exist_ok=True)
-        started = datetime.fromtimestamp((self.meeting or {}).get("started") or time.time())
+        started = local_datetime((self.meeting or {}).get("started") or time.time())
         safe = re.sub(r'[\\/:*?"<>|]+', " ", title).strip()[:60] or "Встреча"
         path = root / f"{started:%Y-%m-%d %H%M} {safe}.txt"
         n = 2
@@ -1528,7 +1565,7 @@ class Prompter:
         except Exception as e:  # noqa: BLE001
             text = ""
             log.info("🎬 Итог встречи не получился: %s", e)
-        started = datetime.fromtimestamp(m.get("started") or time.time())
+        started = local_datetime(m.get("started") or time.time())
         mins = max(1, round(((lines[-1]["t"] if lines else 60)) / 60))
         meeting_root = (self.eng.workspace.ensure() / "Встречи").resolve()
 

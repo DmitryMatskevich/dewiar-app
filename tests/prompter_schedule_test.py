@@ -39,6 +39,7 @@ with tempfile.TemporaryDirectory() as td:
     item = pr.schedule(start, start + 600, "Демо", {"consent": True, "record": True})
     assert item["state"] == "scheduled"
     assert pr.schedules()[0]["title"] == "Демо"
+    assert pr.schedules()[0]["start_local"] and len(pr.schedules()[0]["start_local"]) == 16
     assert pr.cancel_schedule(item["id"])["cancelled"] == item["id"]
     running = pr.schedule(start + 60, start + 660, "Уже идёт", {"consent": True, "record": True})
     pr._schedules[0]["state"] = "running"
