@@ -245,6 +245,7 @@
   #sum li::marker { color: var(--accent); }
   #sum em { color: var(--muted); font-style: normal; font-size: 13px; }
   #sum .saved { margin-top: 14px; font-size: 13px; color: var(--muted); }
+  #sum .meeting-media-actions { margin-top: 12px; flex-wrap: wrap; }
   #sum .wait { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 30px 0; }
   .spin { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--glass3); border-top-color: var(--cue); animation: rot .9s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }
@@ -685,6 +686,7 @@ function render() {
 }
 function md(t) {
   return esc(t).replace(/\[([^\]]+)\]\(dwr-file:([^)]+)\)/g, '<a href="#" class="meeting-file" data-file="$2">$1</a>')
+    .replace(/`((?:Аудио|Расшифровки)\/[^`]+)`/g, (_, p) => `<a href="#" class="meeting-file" data-file="${encodeURIComponent(p)}">${p}</a>`)
     .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/^\*(.*)\*$/gm, "<em>$1</em>").replace(/^_(.*)_$/gm, "<em>$1</em>")
     .replace(/(?:^- .*(?:\n|$))+/gm, m => "<ul>" + m.trim().split("\n").map(l => `<li>${l.slice(2)}</li>`).join("") + "</ul>")
@@ -699,6 +701,21 @@ function bindMeetingFiles(root) {
     try { await apiObject.open_meeting_file(decodeURIComponent(a.dataset.file || ""), meetingSummaryPath); }
     catch (e) { const out = $("#meeting-video-result"); if (out) out.textContent = e.message || "Файл встречи не открылся"; }
   });
+}
+function renderMeetingMedia(root) {
+  const links = [...root.querySelectorAll("a.meeting-file")].filter(a => /\.(?:wav|mp3|m4a|ogg|flac|opus|aac|mp4|webm|mov|m4v|ogv)$/i.test(decodeURIComponent(a.dataset.file || "")));
+  if (!links.length) return;
+  const row = document.createElement("div"); row.className = "row meeting-media-actions";
+  links.forEach(a => {
+    const rel = decodeURIComponent(a.dataset.file || "");
+    const isVideo = /\.(?:mp4|webm|mov|m4v|ogv)$/i.test(rel);
+    const b = document.createElement("button"); b.type = "button"; b.className = "ghost blk";
+    b.textContent = `▶ ${isVideo ? "Видео" : "Аудио"}`;
+    b.title = isVideo ? "Открыть видео встречи с управлением воспроизведением" : "Открыть аудиозапись встречи с управлением воспроизведением";
+    b.onclick = () => core.call("ws_open", { path: "Встречи/" + rel }).catch(e => { const out = $("#meeting-video-result"); if (out) out.textContent = e.message; });
+    row.appendChild(b);
+  });
+  root.appendChild(row);
 }
 function renderMeetingVideo() {
   const button = $("#create-meeting-video"), result = $("#meeting-video-result");
@@ -722,6 +739,7 @@ function renderSum(e) {
     : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : "")
       + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
   bindMeetingFiles($("#sum"));
+  renderMeetingMedia($("#sum"));
   const rec = st?.recording || {};
   const hasSavedFrames = Number(rec.screenshots || 0) > 0 || Number(rec.video_frames || 0) > 0;
   if (hasSavedFrames) {

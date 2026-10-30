@@ -500,9 +500,13 @@ class CommandsMixin:
                             videos.append(candidate)
                     if not videos:
                         videos = [x for x in d.rglob("*.mp4") if x.is_file() and (stem in x.name or stem in str(x.parent))]
+                    transcript = d / "Расшифровки" / f"{stem}.txt"
+                    transcript_ready = transcript.is_file() and transcript.stat().st_size > 0
                     row = {"name": stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size,
                            "audio": f"Встречи/Аудио/{audio.name}" if audio_ready else "",
                            "audio_size": audio.stat().st_size if audio_ready else 0,
+                           "transcript": f"Встречи/Расшифровки/{transcript.name}" if transcript_ready else "",
+                           "transcript_size": transcript.stat().st_size if transcript_ready else 0,
                            "video": f"Встречи/{videos[0].relative_to(d).as_posix()}" if videos else "",
                            "video_size": videos[0].stat().st_size if videos else 0}
                     rows.append(row)

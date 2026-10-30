@@ -34,7 +34,11 @@ setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
         page.locator("#m-record").check()
         assert not page.locator("#m-consent").is_checked(), "User's opt-out was overwritten"
         assert page.locator("#start").is_disabled()
-        page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',summary:'Встреча завершена',busy:false}))")
+        page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',summary:'**Аудиозапись:** [Аудио/test.wav](dwr-file:Аудио/test.wav)\\n\\n**Видео:** [Видео/test.mp4](dwr-file:Видео/test.mp4)',busy:false}))")
+        media = page.locator("#sum .meeting-media-actions button")
+        assert media.count() == 2
+        media.nth(0).click()
+        assert page.evaluate("CALLS.some(x=>x[0]==='ws_open' && x[1].path==='Встречи/Аудио/test.wav')")
         button = page.locator("#create-meeting-video")
         assert button.is_visible() and button.is_enabled()
         button.click()

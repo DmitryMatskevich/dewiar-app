@@ -585,9 +585,10 @@ $("#pr-open").onclick = () => { const a = api(); if (a && a.open_prompter) a.ope
 function loadMeetings() {
   core.call("prompter_meetings").then(l => {
     const nm = (m) => m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — ");
-    $("#pr-list").innerHTML = l.length ? l.map(m => `<div class="pr-row"><button class="pr-it" data-p="${escH(m.path)}"><b>${escH(nm(m))}</b><span>Открыть итог${m.audio ? " · аудио" : ""}${m.video ? " · видео" : ""}</span></button>
+    $("#pr-list").innerHTML = l.length ? l.map(m => `<div class="pr-row"><button class="pr-it" data-p="${escH(m.path)}"><b>${escH(nm(m))}</b><span>Открыть итог${m.audio ? " · аудио" : ""}${m.video ? " · видео" : ""}${m.transcript ? " · расшифровка" : ""}</span></button>
         ${m.video ? `<button class="pr-play" data-media="${escH(m.video)}" title="Просмотреть видео встречи" aria-label="Просмотреть видео встречи">▶</button>` : ""}
         ${m.audio ? `<button class="pr-play" data-media="${escH(m.audio)}" title="Прослушать аудиозапись встречи" aria-label="Прослушать аудиозапись встречи">🔊</button>` : ""}
+        ${m.transcript ? `<button class="pr-play" data-media="${escH(m.transcript)}" title="Открыть расшифровку встречи" aria-label="Открыть расшифровку встречи">▤</button>` : ""}
         <button class="pr-del" data-p="${escH(m.path)}" data-n="${escH(nm(m))}" title="Удалить итог встречи" aria-label="Удалить итог встречи ${escH(nm(m))}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button></div>`).join("")
       : `<p class="hint">Пока встреч не было. Итог каждой появится здесь.</p>`;
     $$("#pr-list .pr-it").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.p }).catch(e => toast(e.message)));
