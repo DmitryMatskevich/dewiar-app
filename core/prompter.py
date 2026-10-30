@@ -76,6 +76,8 @@ SHEET_SYSTEM = (
     "В: вопрос собеседника\nО: что ответить, до 25 слов\nЦифры — только из материалов. Без вступлений и заключений.")
 SUMMARY_SYSTEM = (
     "Ты пишешь итог деловой встречи по расшифровке (реплики «Собеседник» и «Вы»). Markdown, без вступлений. "
+    "Если в расшифровке человек обращается к собеседнику по имени или участник прямо представляется, добавь "
+    "## Участники — список только явно названных имён; не угадывай имена по контексту.\n"
     "## Коротко — 2–3 предложения.\n## Договорились — пункты.\n## Кто что делает — пункты (сроки, если звучали).\n"
     "## Открытые вопросы — пункты.\nТолько то, что было сказано. Раздела нет по сути — напиши «нет».")
 
@@ -617,6 +619,56 @@ class Prompter:
     @staticmethod
     def _meta_list(value):
         return ", ".join(x.strip() for x in re.split(r"[,;\n]+", str(value or "")) if x.strip())[:2000]
+
+    @staticmethod
+    def _extract_participants(lines, summary=""):
+        """Найти явно названных участников, когда поле не заполнили заранее.
+
+        Основной сигнал — обращение с запятой: «Иван, пришлите договор» или
+        «Спасибо, Анна». Дополнительно учитываем «меня зовут ...» и раздел
+        ``Участники`` из итогового ответа модели, но принимаем из него только
+        имена, которые действительно встречаются в расшифровке. Это не
+        пытается определить человека по голосу и не заменяет введённый вручную
+        список.
+        """
+        source = "\n".join(str(x.get("text") or "") for x in lines if x.get("who") != "screen")
+        if not source.strip():
+            return ""
+        stop = {"вы", "я", "мы", "он", "она", "они", "коллега", "коллеги", "команда", "ребята",
+                "друзья", "уважаемые", "давайте", "скажите", "слушайте", "извините", "спасибо",
+                "пожалуйста", "хорошо", "добрый день", "добрый вечер", "доброе утро", "хороший вопрос"}
+        found = []
+
+        def add(value):
+            value = re.sub(r"\s+", " ", str(value or "")).strip(" \t,.:;!?—–-«»\"")
+            if not value or value.casefold() in stop or len(value) > 80:
+                return
+            # A direct address must look like a person name, not a sentence.
+            if not re.fullmatch(r"[А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?", value):
+                return
+            if value.casefold() not in {x.casefold() for x in found}:
+                found.append(value)
+
+        # «Иван, продолжайте» / «Иван Петров, добрый день».
+        for match in re.finditer(r"(?<![\wА-ЯЁ])([А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?)(?=\s*[,!:])", source):
+            add(match.group(1))
+        # «Спасибо, Анна» / «..., Анна?».
+        for match in re.finditer(r",\s*([А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?)(?=\s*[.!?])", source):
+            add(match.group(1))
+        # «Меня зовут Дмитрий» and «Это Анна, ...».
+        for match in re.finditer(r"(?i)(?:меня\s+зовут|это|с\s+вами)\s+([А-ЯЁ][а-яё]{2,}(?:\s+[А-ЯЁ][а-яё]{2,})?)", source):
+            add(match.group(1))
+
+        # The model may recognize a name in a less regular phrase.  Trust it
+        # only when the exact name is present in the transcript, to prevent
+        # hallucinated participants from appearing in the protocol header.
+        section = re.search(r"(?ims)^##\s*Участники\s*\n(.*?)(?=^##\s|\Z)", str(summary or ""))
+        if section:
+            for line in section.group(1).splitlines():
+                candidate = re.sub(r"^\s*[-•*]\s*", "", line).split("—", 1)[0].split("–", 1)[0].strip()
+                if candidate and re.search(rf"(?<![А-ЯЁа-яё]){re.escape(candidate)}(?![А-ЯЁа-яё])", source, re.I):
+                    add(candidate)
+        return ", ".join(found)[:1000]
 
     @staticmethod
     def _summary_preview(m):
@@ -1580,6 +1632,15 @@ class Prompter:
         talk = "\n".join(
             ("Собеседник: " if x["who"] == "them" else "Вы: " if x["who"] == "me" else "Экран (OCR): ") + x["text"]
             for x in lines)
+        # A manually entered list always wins.  Otherwise infer only names
+        # explicitly used in the transcript; the model gets a second chance
+        # below for natural phrases that do not match the comma pattern.
+        if not m.get("participants"):
+            inferred = self._extract_participants(lines)
+            if inferred:
+                m["participants"] = inferred
+                with self._lock:
+                    self.meeting["participants"] = inferred
         self._emit("summary", summary="", busy=True)
         try:
             text = self._ask_model(SUMMARY_SYSTEM, f"ВСТРЕЧА: {m.get('title', '')}\nЦЕЛЬ: {m.get('goal') or '—'}\n\nРАСШИФРОВКА:\n{talk[-24000:]}",
@@ -1587,6 +1648,12 @@ class Prompter:
         except Exception as e:  # noqa: BLE001
             text = ""
             log.info("🎬 Итог встречи не получился: %s", e)
+        if not m.get("participants"):
+            inferred = self._extract_participants(lines, text)
+            if inferred:
+                m["participants"] = inferred
+                with self._lock:
+                    self.meeting["participants"] = inferred
         started = local_datetime(m.get("started") or time.time())
         mins = max(1, round(((lines[-1]["t"] if lines else 60)) / 60))
         meeting_root = (self.eng.workspace.ensure() / "Встречи").resolve()

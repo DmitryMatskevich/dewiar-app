@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     p = Prompter(FakeEngine(root))
     p.meeting = {"title": "Склад", "goal": "обсудить", "started": 1, "keep_text": True}
-    p.lines = [{"who": "them", "text": "готово", "t": 60}]
+    p.lines = [{"who": "them", "text": "Дмитрий, всё готово", "t": 60}]
     p._record_path = str(audio)
     p._transcript_path = str(transcript)
     p._screenshots = [{"path": str(frame), "ocr": "кадр"}]
@@ -41,6 +41,8 @@ with tempfile.TemporaryDirectory() as tmp:
     p._ask_model = lambda *args, **kwargs: "## Договорились\n- готово"
     p._summarize()
 
+    assert "- Участники: Дмитрий" in p.summary
+    assert p.public()["meeting"]["participants"] == "Дмитрий"
     assert "[Аудио/запись.wav](dwr-file:" in p.summary
     assert "[Расшифровки/текст.txt](dwr-file:" in p.summary
     assert "[Расшифровки/Кадры/0001.jpg](dwr-file:" in p.summary

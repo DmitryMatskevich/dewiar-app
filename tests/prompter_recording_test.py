@@ -36,6 +36,13 @@ p = Prompter(FakeEngine(root))
 assert p._meta_list("Иван, Анна\nКоманда") == "Иван, Анна, Команда"
 preview = p._summary_preview({"started": 1, "participants": "Иван", "topics": "сроки"})
 assert preview["participants"] == "Иван" and preview["topics"] == "сроки" and "будут определены" in preview["decisions"]
+inferred = p._extract_participants([
+    {"who": "them", "text": "Дмитрий, пришлите договор к пятнице."},
+    {"who": "me", "text": "Анна, я подтвержу сроки сегодня."},
+    {"who": "them", "text": "Спасибо, Анна."},
+])
+assert inferred == "Дмитрий, Анна", inferred
+assert p._extract_participants([{"who": "them", "text": "Коллеги, начнём обсуждение."}]) == ""
 p._suspend_engine_mic(True)
 assert p.eng.audio_suspended.is_set()
 p._suspend_engine_mic(False)
