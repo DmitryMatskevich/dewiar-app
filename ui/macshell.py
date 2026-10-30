@@ -591,8 +591,19 @@ def main_mac(args, extra, app):
 
     def ready():
         # Native status item stays available when the prompter window is hidden or closed.
-        if not getattr(api, "_meeting_status", None):
-            install_meeting_status(api)
+        # pywebview calls its ready callback from a worker thread, while AppKit
+        # requires NSStatusItem/NSMenu creation on the Cocoa main thread.
+        if not getattr(api, "_meeting_status", None) and not getattr(api, "_meeting_status_pending", False):
+            api._meeting_status_pending = True
+            from PyObjCTools import AppHelper
+            def install_status_on_main():
+                try:
+                    api._meeting_status = install_meeting_status(api)
+                except Exception as e:  # noqa: BLE001 — status bar must not stop the assistant
+                    print(f"Статус встречи не установлен: {e}", file=sys.stderr)
+                finally:
+                    api._meeting_status_pending = False
+            AppHelper.callAfter(install_status_on_main)
         report = os.environ.get("DEWIAR_MAC_SMOKE_REPORT")
         if not report and wanted_voice and api.microphone_permission().get("granted"):
             app._core_call(token, "audio_enable", timeout=15)
