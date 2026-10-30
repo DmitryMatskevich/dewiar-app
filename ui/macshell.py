@@ -76,7 +76,10 @@ def install_meeting_status(api):
                 self.stop_item = None
             return self
 
-        def _run(self, command, args=None):
+        # A leading-underscore method is treated by PyObjC as a selector with
+        # zero arguments.  Use explicit selector naming here because this
+        # callback receives both the command and its JSON arguments.
+        def runCommand_args_(self, command, args):
             def work():
                 try:
                     _core_request(self.owner.token, command, args)
@@ -92,10 +95,10 @@ def install_meeting_status(api):
             self.owner.open_prompter()
 
         def pause_(self, _sender):
-            self._run("prompter_pause", {"on": not bool(self.state.get("paused"))})
+            self.runCommand_args_("prompter_pause", {"on": not bool(self.state.get("paused"))})
 
         def stop_(self, _sender):
-            self._run("prompter_stop", {"summary": True})
+            self.runCommand_args_("prompter_stop", {"summary": True})
 
         def refresh_(self, _timer):
             try:
