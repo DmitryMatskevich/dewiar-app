@@ -86,6 +86,7 @@
   #capture-live > span { flex: 1 1 100%; color: var(--muted); font-size: 12px; }
   #capture-live select { color: var(--ink); background: var(--glass2); border: 0; border-radius: 9px; padding: 7px 8px; font: inherit; }
   #capture-live button { padding: 7px 10px; font-size: 12px; }
+  #capture-live-audio { color: var(--calm); }
   .opt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; font-weight: 500; color: var(--ink); cursor: pointer; }
   .opt small { display: block; color: var(--faint); font-size: 12.5px; font-weight: 500; }
   .sw { position: relative; width: 38px; height: 22px; flex: none; }
@@ -304,6 +305,7 @@
       <label class="opt"><div>Сохранить расшифровку<small>текст разговора добавится в протокол</small></div><span class="sw"><input type="checkbox" id="m-keep"><i></i></span></label>
     </div>
     <p class="warn hidden" id="nobrain">Чтобы подсказывать, нужен «Модели». <button id="to-brain">Выбрать модель</button></p>
+    <p class="warn hidden" id="schedule-alert" role="status"></p>
     <button class="go" id="start">Начать встречу</button>
   </main>
 
@@ -316,6 +318,7 @@
       <select id="live-frame-quality" title="Качество JPEG"><option value="60">60%</option><option value="75">75%</option><option value="85" selected>85%</option><option value="95">95%</option></select>
       <button class="ghost blk" id="capture-live-apply" title="Применить частоту и качество автоматических кадров">Включить автокадры</button>
       <button class="ghost blk hidden" id="capture-live-stop" title="Остановить автоматические кадры, не останавливая встречу">Остановить кадры</button>
+      <button class="ghost blk hidden" id="capture-live-audio" title="Временно прекратить запись звука, не останавливая встречу">Поставить звук на паузу</button>
     </div>
     <div id="initial" class="blk"><b>Предварительное summary</b><span id="initial-text"></span></div>
     <section id="card" class="blk" aria-live="polite">
@@ -579,12 +582,28 @@ function renderCaptureLive() {
     : (active ? "Автокадры выключены — встреча продолжается без записи экрана" : "");
   $("#capture-live-apply").textContent = frames ? "Применить" : "Включить автокадры";
   $("#capture-live-stop").classList.toggle("hidden", !frames);
+  const audio = !!(active && rec.enabled);
+  $("#capture-live-audio").classList.toggle("hidden", !audio);
+  $("#capture-live-audio").textContent = rec.audio_paused ? "Продолжить запись звука" : "Поставить звук на паузу";
+  $("#capture-live-audio").title = rec.audio_paused
+    ? "Продолжить запись звука встречи"
+    : "Временно прекратить запись звука, не останавливая встречу";
   $("#capture-live-apply").disabled = !active;
   $("#capture-live-stop").disabled = !active;
+}
+function renderScheduleAlert() {
+  const box = $("#schedule-alert"); if (!box) return;
+  const rows = (st && st.schedules) || [];
+  const bad = rows.find(x => x.state === "error");
+  const next = rows.filter(x => x.state === "scheduled").sort((a,b) => Number(a.start_at || 0) - Number(b.start_at || 0))[0];
+  if (bad) { box.textContent = `Запись «${bad.title || "Встреча"}» не готова: ${bad.error || (bad.preflight || {}).message || "проверка не пройдена"}`; box.classList.remove("hidden"); return; }
+  if (next && next.preflight?.state === "ok") { box.textContent = `Запись «${next.title || "Встреча"}» проверена и запланирована.`; box.classList.remove("hidden"); return; }
+  box.classList.add("hidden"); box.textContent = "";
 }
 function render() {
   if (!st) return;
   $("#nobrain").classList.toggle("hidden", !!st.brain);
+  renderScheduleAlert();
   renderFiles(st.files); renderPlace();
   if (st.on) {
     show("live"); tick();
@@ -638,6 +657,7 @@ $("#capture-live-apply").onclick = async () => {
   } catch (e) { $("#err").textContent = e.message; }
 };
 $("#capture-live-stop").onclick = () => core.call("prompter_frames", { action: "stop" }).catch(e => { $("#err").textContent = e.message; });
+$("#capture-live-audio").onclick = () => core.call("prompter_audio_pause", { on: !(st && st.recording && st.recording.audio_paused) }).catch(e => { $("#err").textContent = e.message; });
 $("#b-shot").onclick = () => core.call("prompter_screenshot", { ocr: true }).catch(e => { $("#err").textContent = e.message; });
 $("#b-pause").onclick = () => core.call("prompter_pause", { on: !(st && st.paused) });
 $("#b-stop").onclick = () => core.call("prompter_stop", { summary: true });
@@ -695,6 +715,20 @@ core.on("prompter", (e) => {
     renderMeetingVideo();
     if (was && !st.on && !(st.lines || []).length && !(st.meeting && st.meeting.record)) { view = "setup"; render(); }   // встреча без единой реплики — итога не будет
     else if (!(was && !st.on)) render();                                            // закончилась — ждём итог (событие summary)
+    return;
+  }
+  if (e.kind === "schedule" || e.kind === "schedule_check") {
+    if (!st) st = { schedules: [] };
+    if (e.schedules) st.schedules = e.schedules;
+    if (e.schedule) {
+      st.schedules = (st.schedules || []).map(x => x.id === e.schedule.id ? e.schedule : x);
+      if (e.result?.state === "error") {
+        const box = $("#schedule-alert");
+        box.textContent = `Запись «${e.schedule.title || "Встреча"}» не готова: ${e.result.message || "проверка не пройдена"}`;
+        box.classList.remove("hidden");
+      }
+    }
+    renderScheduleAlert();
     return;
   }
   if (!st) return;

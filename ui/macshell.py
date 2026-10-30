@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -74,6 +75,8 @@ def install_meeting_status(api):
                 self.header = None
                 self.pause_item = None
                 self.stop_item = None
+                self.meetings_item = None
+                self.audio_item = None
             return self
 
         # A leading-underscore method is treated by PyObjC as a selector with
@@ -94,11 +97,18 @@ def install_meeting_status(api):
         def frames_(self, _sender):
             self.owner.open_prompter()
 
+        def meetings_(self, _sender):
+            self.owner.open_settings("prompter")
+
         def pause_(self, _sender):
             self.runCommand_args_("prompter_pause", {"on": not bool(self.state.get("paused"))})
 
         def stop_(self, _sender):
             self.runCommand_args_("prompter_stop", {"summary": True})
+
+        def audio_(self, _sender):
+            recording = self.state.get("recording") or {}
+            self.runCommand_args_("prompter_audio_pause", {"on": not bool(recording.get("audio_paused"))})
 
         def refresh_(self, _timer):
             try:
@@ -109,6 +119,10 @@ def install_meeting_status(api):
             on = bool(state.get("on"))
             meeting = state.get("meeting") or {}
             recording = bool(on and meeting.get("record"))
+            schedules = state.get("schedules") or []
+            upcoming = sorted((x for x in schedules if x.get("state") in ("scheduled", "starting", "error")),
+                              key=lambda x: float(x.get("start_at") or 0))
+            next_item = upcoming[0] if upcoming else None
             title = str(meeting.get("title") or "Встреча")
             if recording:
                 started = float(meeting.get("started") or time.time())
@@ -121,6 +135,23 @@ def install_meeting_status(api):
                 self.item.button().setTitle_("Dewiar")
                 self.item.button().setToolTip_(f"Режим встречи работает: {title}")
                 self.header.setTitle_(f"Режим встречи работает: {title}")
+            elif next_item and next_item.get("state") == "error":
+                reason = str(next_item.get("error") or (next_item.get("preflight") or {}).get("message") or "проверка не пройдена")
+                self.item.button().setTitle_("⚠ Запись не готова")
+                self.item.button().setToolTip_(f"{next_item.get('title', 'Встреча')}: {reason}")
+                self.header.setTitle_(f"⚠ Запись не началась: {next_item.get('title', 'Встреча')}")
+            elif next_item and next_item.get("state") == "starting":
+                self.item.button().setTitle_("Запуск записи…")
+                self.item.button().setToolTip_("Dewiar запускает запланированную запись")
+                self.header.setTitle_(f"Запуск записи: {next_item.get('title', 'Встреча')}")
+            elif next_item:
+                ts = float(next_item.get("start_at") or 0)
+                when = datetime.fromtimestamp(ts).strftime("%H:%M") if ts else "—"
+                self.item.button().setTitle_(f"Запись в {when}")
+                pre = next_item.get("preflight") or {}
+                suffix = " · проверка пройдена" if pre.get("state") == "ok" else " · проверка через 5 минут"
+                self.item.button().setToolTip_(f"{next_item.get('title', 'Встреча')} начнётся в {when}{suffix}")
+                self.header.setTitle_(f"Следующая запись: {next_item.get('title', 'Встреча')} · {when}")
             else:
                 self.item.button().setTitle_("Dewiar")
                 self.item.button().setToolTip_("Открыть Dewiar")
@@ -128,6 +159,9 @@ def install_meeting_status(api):
             active = bool(on)
             self.pause_item.setEnabled_(active)
             self.stop_item.setEnabled_(active)
+            audio_enabled = bool(recording)
+            self.audio_item.setEnabled_(audio_enabled)
+            self.audio_item.setTitle_("Продолжить запись звука" if (state.get("recording") or {}).get("audio_paused") else "Пауза записи звука")
             if active:
                 self.pause_item.setTitle_("Продолжить" if state.get("paused") else "Пауза")
             else:
@@ -146,10 +180,14 @@ def install_meeting_status(api):
     pause_item.setTarget_(target); menu.addItem_(pause_item)
     stop_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Завершить запись и сохранить итог", "stop:", "")
     stop_item.setTarget_(target); menu.addItem_(stop_item)
+    audio_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Пауза записи звука", "audio:", "")
+    audio_item.setTarget_(target); menu.addItem_(audio_item)
     menu.addItem_(NSMenuItem.separatorItem())
     frame_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Настройки кадров…", "frames:", "")
     frame_item.setTarget_(target); menu.addItem_(frame_item)
-    target.item, target.header, target.pause_item, target.stop_item = item, header, pause_item, stop_item
+    meetings_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Открыть настройки встреч…", "meetings:", "")
+    meetings_item.setTarget_(target); menu.addItem_(meetings_item)
+    target.item, target.header, target.pause_item, target.stop_item, target.meetings_item, target.audio_item = item, header, pause_item, stop_item, meetings_item, audio_item
     item.setMenu_(menu)
     api._meeting_status = target
     target.refresh_(None)

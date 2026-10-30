@@ -26,8 +26,13 @@
     const box = $("#pr-s-list"); if (!box) return;
     try {
       const rows = await core.call("prompter_schedules");
-      box.innerHTML = rows.length ? rows.map(x => `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at)} — ${fmt(x.end_at)} · ${esc(x.state || "")}${x.error ? ` · ${esc(x.error)}` : ""}</small></span>${x.state === "scheduled" ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}">Отменить</button>` : ""}</div>`).join("") : "Записей в расписании пока нет.";
+      box.innerHTML = rows.length ? rows.map(x => {
+        const pf = x.preflight || {}, checks = pf.state === "ok" ? " · проверка пройдена" : pf.state === "checking" ? " · проверяю за 5 минут до начала" : "";
+        const error = x.error || (pf.state === "error" ? pf.message : "");
+        return `<div class="prof" style="padding:8px 10px;margin-top:6px;display:flex;gap:8px;align-items:center"><span style="flex:1"><b>${esc(x.title || "Встреча")}</b><br><small>${fmt(x.start_at)} — ${fmt(x.end_at)} · ${esc(x.state || "")}${checks}${error ? ` · ${esc(error)}` : ""}</small></span>${x.state === "scheduled" ? `<button class="btn small" data-cancel-schedule="${esc(x.id)}">Отменить</button>` : ""}${x.state === "error" ? `<button class="btn small" data-retry-schedule="${esc(x.id)}">Проверить снова</button>` : ""}</div>`;
+      }).join("") : "Записей в расписании пока нет.";
       $$('[data-cancel-schedule]').forEach(b => b.onclick = async () => { await core.call("prompter_schedule_cancel", { id: b.dataset.cancelSchedule }); loadSchedules(); });
+      $$('[data-retry-schedule]').forEach(b => b.onclick = async () => { await core.call("prompter_schedule_retry", { id: b.dataset.retrySchedule }); loadSchedules(); });
     } catch (e) { box.textContent = e.message; }
   }
   $("#pr-s-add")?.addEventListener("click", async () => {

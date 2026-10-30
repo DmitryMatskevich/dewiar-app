@@ -22,6 +22,7 @@ window.CALLS = []; window.CLOSED = 0;
 window.pywebview = { api: { close_prompter() { window.CLOSED++; }, open_settings() {} } };
 window.api = () => window.pywebview.api;
 const ST = { on: true, brain: true, paused: false, status: 'слушаю микрофон', meeting: { title: 'Встреча', started: Date.now() / 1000 - 240 },
+  recording: { enabled: true, audio_paused: false, audio_source: 'system' },
   hints: [{ title: 'Уточните детали: дату, время и ключевые пункты повестки.', points: ['Спросите: «Какие конкретные вопросы мы обсуждаем?»'] }],
   lines: [{ who: 'me', text: 'Ну, я не знаю, не помню точно.' }], files: [], sheet: [] };
 window.core = { _on: {}, on(k, f) { (this._on[k] = this._on[k] || []).push(f); },
@@ -35,6 +36,9 @@ with sync_playwright() as p:
     pg.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
     pg.goto((tmp / "prompter.html").as_uri()); pg.wait_for_timeout(600)
     ok(pg.evaluate("view") == "live", "встреча идёт — экран встречи")
+    ok(pg.is_visible("#capture-live-audio"), "во время записи видна отдельная кнопка паузы звука")
+    pg.click("#capture-live-audio"); pg.wait_for_timeout(100)
+    ok("prompter_audio_pause" in pg.evaluate("CALLS.map(c => c[0])"), "пауза звука не останавливает встречу")
     pg.click("#b-close"); pg.wait_for_timeout(300)
     box = pg.evaluate("(() => { const r = document.querySelector('#endask .card').getBoundingClientRect(); return [r.left, r.right, r.top, r.bottom, innerWidth, innerHeight]; })()")
     ok(not dialogs and pg.is_visible("#endask") and box[0] >= 0 and box[1] <= box[4] and box[3] <= box[5],

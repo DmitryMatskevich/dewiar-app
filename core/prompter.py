@@ -141,6 +141,10 @@ class Prompter:
         self._record_wave = None
         self._record_path = ""
         self._record_error = ""
+        # Ставится отдельно от общей паузы встречи: пользователь может
+        # временно убрать звук из WAV, продолжая получать расшифровку и
+        # автокадры.
+        self._record_paused = False
         self._transcript_path = ""
         self._session_dir = None
         self._screenshots = []
@@ -237,17 +241,56 @@ class Prompter:
         self._emit("schedule", schedules=self.schedules())
         return {"cancelled": sid}
 
+    def retry_schedule(self, sid):
+        """Вернуть ошибочную встречу в расписание после исправления доступа."""
+        with self._schedules_lock:
+            item = next((x for x in self._schedules if x.get("id") == sid), None)
+            if item is None:
+                raise ValueError("запись в расписании не найдена")
+            if item.get("state") not in ("error", "done"):
+                raise ValueError("повторная проверка доступна только для завершённой или ошибочной записи")
+            if float(item.get("start_at") or 0) <= time.time() + 2:
+                raise ValueError("время начала уже прошло — создайте новую запись")
+            item["state"] = "scheduled"
+            item.pop("error", None)
+            item.pop("preflight", None)
+            self._save_schedules()
+            result = dict(item)
+        self._emit("schedule", schedules=self.schedules())
+        return result
+
     def _schedule_loop(self):
         while not getattr(self.eng, "stopping", threading.Event()).wait(0.5):
             now = time.time()
+            checks = []
             due = []
             with self._schedules_lock:
                 for item in self._schedules:
-                    if item.get("state") == "scheduled" and float(item.get("start_at") or 0) <= now:
+                    start = float(item.get("start_at") or 0)
+                    # Проверяем запись заранее, но не просим macOS разрешения
+                    # автоматически. Так ошибка видна за пять минут, а не в
+                    # момент, когда встреча уже должна была начаться.
+                    if (item.get("state") == "scheduled" and 0 < start - now <= 300
+                            and not (item.get("preflight") or {}).get("checked_at")):
+                        item["preflight"] = {"state": "checking", "started_at": now}
+                        checks.append(dict(item))
+                    if (item.get("state") == "scheduled"
+                            and (item.get("preflight") or {}).get("state") != "checking"
+                            and start <= now):
                         item["state"] = "starting"
                         due.append(dict(item))
-                if due:
+                if checks or due:
                     self._save_schedules()
+            for item in checks:
+                result = self._schedule_preflight(item)
+                item["preflight"] = result
+                if result.get("state") == "error":
+                    item["state"] = "error"
+                    item["error"] = result.get("message", "предварительная проверка не пройдена")[:240]
+                self._schedule_update(item)
+                self._emit("schedule_check", schedule=item, result=result)
+                self._emit("schedule", schedules=self.schedules())
+                self._notify_schedule_check(item, result)
             for item in due:
                 try:
                     if self.on:
@@ -262,11 +305,13 @@ class Prompter:
                 except Exception as exc:  # расписание не должно останавливать ядро
                     item["state"], item["error"] = "error", str(exc)[:240]
                     log.warning("🎬 Запланированная запись не началась: %s", exc)
-                with self._schedules_lock:
-                    for current in self._schedules:
-                        if current.get("id") == item.get("id"):
-                            current.update(item)
-                    self._save_schedules()
+                    try:
+                        self.eng.push("Ошибка обработки персональный агент",
+                                      f"Запись «{item.get('title', 'Встреча')}» не началась: {item['error']}",
+                                      critical=True, telegram=False)
+                    except Exception:
+                        pass
+                self._schedule_update(item)
                 self._emit("schedule", schedules=self.schedules())
             if self.on:
                 end = self.meeting.get("scheduled_end")
@@ -278,6 +323,105 @@ class Prompter:
                                 item["state"] = "done"
                         self._save_schedules()
                     self._emit("schedule", schedules=self.schedules())
+
+    def _schedule_update(self, item):
+        """Атомарно обновить одну строку расписания и сразу сохранить её."""
+        with self._schedules_lock:
+            for current in self._schedules:
+                if current.get("id") == item.get("id"):
+                    current.update(item)
+                    break
+            self._save_schedules()
+
+    @staticmethod
+    def _preflight_result(state, checks, message=""):
+        return {"state": state, "checked_at": time.time(), "checks": checks,
+                "message": str(message or "")[:400]}
+
+    def _schedule_preflight(self, item):
+        """Проверить обязательные ресурсы фоновой записи за пять минут до старта.
+
+        Проверка открывает и тут же закрывает выбранный аудиовход, поэтому
+        ошибка BlackHole/микрофона обнаруживается заранее. Системные доступы
+        только читаются: неожиданный системный запрос в фоне был бы хуже,
+        чем понятное уведомление с причиной.
+        """
+        opts = dict(item.get("options") or {})
+        checks = []
+        if not opts.get("consent"):
+            return self._preflight_result("error", [{"name": "согласие", "ok": False}],
+                                          "не подтверждено согласие участников")
+        if self.on:
+            return self._preflight_result("error", [{"name": "ядро", "ok": False}],
+                                          "другая встреча уже идёт")
+        record = bool(opts.get("record", True))
+        source = str(opts.get("record_source") or opts.get("audio_source") or "system").lower()
+        if record:
+            try:
+                from audio_io import Capture, LoopbackCapture
+                if source == "system":
+                    cap = LoopbackCapture()
+                else:
+                    cfg = self.eng.s.get("audio") if hasattr(self.eng.s, "get") else {}
+                    device = cfg.get("input", "") if isinstance(cfg, dict) else ""
+                    cap = Capture(device=device or "", strict_device=bool(device))
+                try:
+                    desc = cap.open()
+                finally:
+                    cap.close()
+                checks.append({"name": "аудио", "ok": True, "detail": desc})
+            except Exception as exc:  # noqa: BLE001 — причина должна попасть в карточку и уведомление
+                return self._preflight_result("error", checks + [{"name": "аудио", "ok": False, "detail": str(exc)}],
+                                              f"источник аудио недоступен: {exc}")
+        needs_screen = bool(opts.get("auto_frames") or opts.get("auto_first_frame"))
+        if needs_screen:
+            try:
+                from platform_info import MAC
+                if MAC:
+                    from Quartz import CGPreflightScreenCaptureAccess
+                    allowed = bool(CGPreflightScreenCaptureAccess())
+                    checks.append({"name": "запись экрана", "ok": allowed})
+                    if not allowed:
+                        return self._preflight_result(
+                            "error", checks,
+                            "macOS не разрешила запись экрана; добавьте Dewiar в «Конфиденциальность и безопасность → Запись экрана» и повторите расписание")
+            except ImportError:
+                checks.append({"name": "запись экрана", "ok": True, "detail": "проверка недоступна на этой системе"})
+            except Exception as exc:  # noqa: BLE001
+                return self._preflight_result("error", checks + [{"name": "запись экрана", "ok": False}], str(exc))
+        checks.append({"name": "согласие", "ok": True})
+        cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
+        cfg = cfg or {}
+        stt_engine = str(cfg.get("stt_engine") or "inherit").lower() if isinstance(cfg, dict) else "inherit"
+        if stt_engine == "gigaam":
+            model = str(cfg.get("stt_model") or "gigaam-v3-e2e-rnnt")
+            try:
+                from engine_audio import GigaAMSTT
+                cached = bool(GigaAMSTT(model).cached())
+            except Exception as exc:  # noqa: BLE001
+                cached = False
+                log.info("🎬 Предпроверка модели записи: %s", exc)
+            checks.append({"name": "модель расшифровки", "ok": cached, "detail": model})
+            if not cached:
+                return self._preflight_result("error", checks, f"модель записи «{model}» не скачана — скачайте её в настройках «Встречи»")
+        else:
+            checks.append({"name": "модель расшифровки", "ok": True,
+                           "detail": "будет использована активная модель Dewiar"})
+        return self._preflight_result("ok", checks, "Проверка пройдена; Dewiar запустит запись в назначенное время")
+
+    def _notify_schedule_check(self, item, result):
+        title = "Проверка записи встречи"
+        name = item.get("title", "Встреча")
+        if result.get("state") == "ok":
+            text = f"«{name}»: всё готово. Запись начнётся в назначенное время."
+            critical = False
+        else:
+            text = f"«{name}» не будет запущена без исправления: {result.get('message', 'проверьте настройки')}"
+            critical = True
+        try:
+            self.eng.push(title, text, critical=critical, telegram=False)
+        except Exception:  # тестовый/внешний движок может не иметь push
+            log.info("🎬 %s: %s", title, text)
 
     @property
     def speaker(self):
@@ -304,6 +448,7 @@ class Prompter:
                    "ready": audio_ready,
                    "bytes": audio_bytes,
                    "audio_source": m.get("audio_source") or "system",
+                   "audio_paused": bool(self._record_paused),
                    "error": self._record_error,
                    "transcript": Path(self._transcript_path).name if self._transcript_path else "",
                    "screenshots": len(self._screenshots)}
@@ -315,7 +460,7 @@ class Prompter:
             return {"on": self.on, "paused": self.paused, "meeting": m, "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
-                    "summary_preview": preview, "recording": rec,
+                    "summary_preview": preview, "recording": rec, "schedules": self.schedules(),
                     "brain": bool(self.eng.s.active_llm()), "loopback": True, "voice": self.voice_info()}
 
     def _emit(self, kind, **kw):
@@ -565,6 +710,7 @@ class Prompter:
             self.stop(summary=False)
         self._record_path = ""
         self._record_error = ""
+        self._record_paused = False
         self._transcript_path = ""
         self._session_dir = None
         self._screenshots = []
@@ -668,6 +814,15 @@ class Prompter:
 
     def pause(self, on=True):
         self.paused = bool(on)
+        self._state()
+        return self.public()
+
+    def pause_recording_audio(self, on=True):
+        """Приостановить только запись WAV, не останавливая встречу и кадры."""
+        if not self.on or not self.meeting.get("record"):
+            raise ValueError("аудиозапись сейчас не включена")
+        self._record_paused = bool(on)
+        self.status = "аудиозапись на паузе" if self._record_paused else "аудиозапись продолжается"
         self._state()
         return self.public()
 
@@ -832,7 +987,8 @@ class Prompter:
                 if self.paused:
                     continue
                 if self.meeting.get("record"):
-                    self._record_write(frame)
+                    if not self._record_paused:
+                        self._record_write(frame)
                     if self.meeting.get("deferred"):
                         continue
                 p = vad.prob(frame)

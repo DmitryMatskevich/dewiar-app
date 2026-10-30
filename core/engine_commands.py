@@ -409,6 +409,8 @@ class CommandsMixin:
                 return pr.export_meeting_video()
             if cmd == "prompter_pause":
                 return pr.pause(a.get("on", True))
+            if cmd in ("prompter_audio_pause", "prompter_record_audio"):
+                return pr.pause_recording_audio(a.get("on", True))
             if cmd == "prompter_hint":
                 return pr.hint(a.get("q", ""), "button")
             if cmd == "prompter_screenshot":
@@ -465,6 +467,8 @@ class CommandsMixin:
                 return pr.schedule(a.get("start_at"), a.get("end_at"), a.get("title"), a.get("options") or {})
             if cmd == "prompter_schedule_cancel":
                 return pr.cancel_schedule(a.get("id"))
+            if cmd == "prompter_schedule_retry":
+                return pr.retry_schedule(a.get("id"))
             if cmd == "prompter_file":
                 import base64
                 raw = a.get("data") or ""

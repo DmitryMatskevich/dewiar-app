@@ -51,6 +51,18 @@ p._post_transcribe()
 assert [x["text"] for x in p.lines] == ["Обсудили сроки", "Договорились прислать договор"]
 assert any(e[0] == ("summarized",) for e in p.eng.events)
 
+# Во время записи можно временно убрать только звук: встреча и кадры при этом
+# продолжаются, а состояние явно видно в public().
+p.on = True
+p.meeting = {"record": True, "audio_source": "system"}
+assert p.pause_recording_audio(True)["recording"]["audio_paused"] is True
+assert p.pause_recording_audio(False)["recording"]["audio_paused"] is False
+p.on = False
+
+# Предварительная проверка не должна разрешать запись без согласия.
+check = p._schedule_preflight({"options": {"record": True, "consent": False}})
+assert check["state"] == "error" and "согласие" in check["message"]
+
 # На macOS виртуальный источник должен быть выбран, а обычный микрофон — никогда.
 old_mac, old_sd = audio_io.MAC, sys.modules.get("sounddevice")
 audio_io.MAC = True
