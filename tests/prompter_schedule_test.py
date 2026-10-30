@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +33,25 @@ class FakeEngine:
 
 eng = FakeEngine()
 pr = Prompter(eng)
+# Screen Recording is optional: a scheduled audio meeting remains ready even
+# when macOS has not granted the permission for frames/video.
+import platform_info
+old_mac = platform_info.MAC
+platform_info.MAC = True
+try:
+    try:
+        import Quartz  # noqa: F401
+    except ImportError:
+        pass  # Linux CI has no macOS screen-capture framework.
+    else:
+        with patch("Quartz.CGPreflightScreenCaptureAccess", return_value=False):
+            check = pr._schedule_preflight({"options": {"consent": True, "record": False, "auto_frames": True}})
+        assert check["state"] == "ok"
+        screen = next(x for x in check["checks"] if x["name"] == "запись экрана")
+        assert screen["optional"] and "без кадров" in screen["detail"]
+finally:
+    platform_info.MAC = old_mac
+
 with tempfile.TemporaryDirectory() as td:
     pr._schedules_path = Path(td) / "schedules.json"
     pr._schedules = []

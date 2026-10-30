@@ -423,22 +423,30 @@ class Prompter:
             except Exception as exc:  # noqa: BLE001 — причина должна попасть в карточку и уведомление
                 return self._preflight_result("error", checks + [{"name": "аудио", "ok": False, "detail": str(exc)}],
                                               f"источник аудио недоступен: {exc}")
-        needs_screen = bool(opts.get("auto_frames") or opts.get("auto_first_frame"))
+        # Screen Recording is an optional part of a meeting.  Audio and the
+        # transcript must still start when macOS has not granted this access;
+        # only automatic frames/video are unavailable until the user enables it.
+        needs_screen = bool(opts.get("auto_frames") or (opts.get("auto_first_frame") and record))
+        screen_unavailable = False
         if needs_screen:
             try:
                 from platform_info import MAC
                 if MAC:
                     from Quartz import CGPreflightScreenCaptureAccess
                     allowed = bool(CGPreflightScreenCaptureAccess())
-                    checks.append({"name": "запись экрана", "ok": allowed})
-                    if not allowed:
-                        return self._preflight_result(
-                            "error", checks,
-                            "Нужен доступ к записи экрана macOS")
+                    checks.append({"name": "запись экрана", "ok": True,
+                                   "optional": True,
+                                   "detail": "доступ разрешён" if allowed else
+                                            "нет доступа — звук и расшифровка продолжатся без кадров"})
+                    screen_unavailable = not allowed
             except ImportError:
-                checks.append({"name": "запись экрана", "ok": True, "detail": "проверка недоступна на этой системе"})
+                checks.append({"name": "запись экрана", "ok": True, "optional": True,
+                               "detail": "проверка недоступна — встреча продолжится без кадров при необходимости"})
+                screen_unavailable = True
             except Exception as exc:  # noqa: BLE001
-                return self._preflight_result("error", checks + [{"name": "запись экрана", "ok": False}], str(exc))
+                checks.append({"name": "запись экрана", "ok": True, "optional": True,
+                               "detail": f"не проверен ({exc}); встреча продолжится без кадров"})
+                screen_unavailable = True
         checks.append({"name": "согласие", "ok": True})
         cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
         cfg = cfg or {}
@@ -457,7 +465,10 @@ class Prompter:
         else:
             checks.append({"name": "модель расшифровки", "ok": True,
                            "detail": "будет использована активная модель Dewiar"})
-        return self._preflight_result("ok", checks, "Проверка пройдена; Dewiar запустит запись в назначенное время")
+        message = "Проверка пройдена; Dewiar запустит запись в назначенное время"
+        if screen_unavailable:
+            message += ". Запись экрана недоступна — звук и расшифровка продолжатся без кадров"
+        return self._preflight_result("ok", checks, message)
 
     def _notify_schedule_check(self, item, result):
         title = "Проверка записи встречи"
@@ -761,13 +772,22 @@ class Prompter:
             raise ValueError("для записи переговоров подтвердите согласие участников")
         if live and self.speaker.owner is None:
             raise ValueError("для очной встречи сначала запомните свой голос — «Запомнить мой голос»")
-        if auto_frames or auto_first_frame:
+        screen_warning = ""
+        # Screen capture is deliberately checked without requesting access.
+        # A denied permission must never prevent an audio-only meeting from
+        # starting.  If frames were requested, disable just that optional
+        # part and explain the state in the live meeting window.
+        if auto_frames or (auto_first_frame and record):
             try:
                 from platform_info import MAC
                 if MAC:
-                    from macsys import request_screen_capture_permission
-                    if not request_screen_capture_permission():
-                        raise ValueError("Нужен доступ к записи экрана macOS")
+                    from Quartz import CGPreflightScreenCaptureAccess
+                    if not bool(CGPreflightScreenCaptureAccess()):
+                        if auto_frames:
+                            auto_frames = False
+                            frame_video = False
+                        screen_warning = ("Встреча началась без записи экрана: разрешение macOS не дано. "
+                                          "Аудио и расшифровка продолжаются; кадры можно включить после разрешения.")
             except ImportError:
                 pass
         if self.enrolling is not None:
@@ -837,7 +857,7 @@ class Prompter:
         # Первый кадр — полезная точка отсчёта протокола. По умолчанию он
         # делается только для записываемой встречи или при включённых кадрах;
         # отказ в разрешении не отменяет саму запись.
-        if auto_first_frame and (record or auto_frames):
+        if auto_first_frame and (record or auto_frames) and not screen_warning:
             try:
                 self.capture_frame(auto=False, ocr=True)
             except Exception as exc:  # noqa: BLE001
@@ -875,6 +895,8 @@ class Prompter:
             self._loop_thread.start()
         else:
             self.status = "собеседника не слушаю — подсказки по кнопке и на ваши фразы"
+        if screen_warning:
+            self.status = screen_warning
         if self.meeting["goal"] or self.files:
             threading.Thread(target=self._prepare_sheet, name="prompter-sheet", daemon=True).start()
         source_name = "системный звук" if record_source == "system" else "микрофон"

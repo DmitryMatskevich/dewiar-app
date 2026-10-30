@@ -292,7 +292,7 @@
         <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option></select></label>
         <label style="grid-column:1/-1"><span style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;font-weight:500"><input type="checkbox" id="m-frame-video" title="Собрать видео из всех кадров" style="width:16px;height:16px"> Собрать видео из кадров (таймлапс)</span></label>
       </div>
-      <p class="hint hidden" id="m-frame-help">Автокадры и первый снимок используют «Запись экрана» macOS. Перед началом встречи Dewiar проверит доступ; если его нет, появится кнопка открытия настроек.</p>
+      <p class="hint hidden" id="m-frame-help">Автокадры и первый снимок используют «Запись экрана» macOS. Если доступа нет, встреча всё равно начнётся: звук и расшифровка продолжатся, а кадры можно включить после разрешения в настройках.</p>
       <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent" checked><i></i></span></label>
     </div>
     <div id="vbox" class="blk hidden">
@@ -401,7 +401,7 @@ function renderRecord() {
   if (on) $("#m-me").checked = false;
   $("#m-them").disabled = false;
   $("#m-record").title = on
-    ? "Dewiar сохраняет выбранный источник в WAV и использует его для полной расшифровки и видео. Для системного звука нужен BlackHole/Loopback."
+    ? "Dewiar сохраняет выбранный источник в WAV и делает полную расшифровку. Видео из кадров — дополнительная функция и требует доступа macOS к записи экрана. Для системного звука нужен BlackHole/Loopback."
     : "Запись выключена. Включите только после согласия участников.";
   $("#m-consent-wrap").classList.toggle("hidden", !on);
   $("#m-record-source-wrap").classList.toggle("hidden", !on);
@@ -664,7 +664,11 @@ function renderScheduleAlert() {
     }
     box.classList.remove("hidden"); return;
   }
-  if (next && next.preflight?.state === "ok") { box.textContent = `Запись «${next.title || "Встреча"}» проверена и запланирована.`; box.classList.remove("hidden"); return; }
+  if (next && next.preflight?.state === "ok") {
+    const note = next.preflight.message || "Проверка пройдена; запись запланирована";
+    box.textContent = `«${next.title || "Встреча"}»: ${note}.`;
+    box.classList.remove("hidden"); return;
+  }
   box.classList.add("hidden"); box.textContent = "";
 }
 function render() {
