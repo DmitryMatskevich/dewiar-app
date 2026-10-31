@@ -310,7 +310,7 @@
   #ask.running #a-stop { display: grid; }
   #ask.running #a-send { display: none; }
   #a-mic, #a-mic-pick { border-radius: 10px; }
-  #a-mic.recording { color: #ff6e91; background: rgba(255,104,144,.13); }
+  #a-mic.recording { border-radius: 50%; color: var(--ink); background: rgba(255,104,144,.13); }
   #a-mic-pick { width: 25px; min-width: 25px; margin-left: -8px; }
   #a-mic-pick svg { width: 13px; height: 13px; }
   /* Уровень диктовки находится слева от микрофона и появляется только во время записи. */
@@ -542,7 +542,7 @@
           <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
-          <button class="ab" id="a-mic" title="Диктовка в поле: говорите, пауза завершит фразу" aria-label="Начать диктовку"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+          <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
           <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <button class="ab send" id="a-send" title="Отправить сообщение (Ctrl+Enter)" aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -1284,7 +1284,12 @@ async function enableMacVoice() {
 function dictationUi(on) {
   dictating = !!on;
   $("a-mic").classList.toggle("recording", dictating);
-  $("a-mic").title = dictating ? "Диктовка идёт — пауза завершит фразу" : "Диктовка в поле: говорите, пауза завершит фразу";
+  $("a-mic").innerHTML = dictating
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+  $("a-mic").title = dictating ? "Остановить голосовой ввод — текст останется в поле" : "Начать голосовой ввод";
+  $("a-mic").setAttribute("aria-pressed", String(dictating));
+  $("a-mic").disabled = false;
   $("a-mic").setAttribute("aria-label", $("a-mic").title);
   $("dict-level").classList.toggle("on", dictating);
   $("dict-level").setAttribute("aria-hidden", dictating ? "false" : "true");
@@ -1293,9 +1298,20 @@ function dictationUi(on) {
 core.on("dictation", e => {
   if (e.state === "recording") { openAsk(); dictationUi(true); return; }
   if (e.state === "cancelled") { dictationUi(false); return; }
+  if (e.state === "finishing") {
+    $("dict-level").classList.toggle("on", false);
+    $("dict-level").setAttribute("aria-hidden", "true");
+    $("a-mic").disabled = true;
+    $("a-mic").title = "Завершаю распознавание записанной речи…";
+    $("a-mic").setAttribute("aria-label", $("a-mic").title);
+    return;
+  }
+  if (e.state === "partial" && e.text) {
+    const t = $("askin"); t.value = (t.value ? t.value.replace(/\s*$/, "") + " " : "") + e.text.trim(); fitAsk(); t.focus();
+  }
   if (e.state === "done") {
     dictationUi(false);
-    if (e.text) { const t = $("askin"); t.value = (t.value ? t.value.replace(/\s*$/, "") + " " : "") + e.text.trim(); fitAsk(); t.focus(); }
+    if (e.submit) sendAsk();
   }
 });
 async function startDictation() {
@@ -1304,7 +1320,9 @@ async function startDictation() {
   await core.call("dictation_start");
   dictationUi(true); openAsk(); $("askin").focus();
 }
-$("a-mic").onclick = guard($("a-mic"), () => startDictation().catch(showErr), () => "Включаю диктовку в поле сообщения…");
+$("a-mic").onclick = guard($("a-mic"), () => (dictating
+  ? core.call("dictation_finish", { submit: false }) : startDictation()).catch(showErr),
+  () => dictating ? "Завершаю голосовой ввод…" : "Включаю диктовку в поле сообщения…");
 async function showMicMenu() {
   const menu = $("mic-menu"), list = $("mic-list");
   if (menu.classList.contains("on")) { menu.classList.remove("on"); return; }
@@ -1684,6 +1702,10 @@ document.addEventListener("keydown", (e) => {          // Ctrl+V мимо пол
       && !/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || "")) { e.preventDefault(); pasteImage(true); }
 });
 function sendAsk() {
+  if (dictating) {
+    core.call("dictation_finish", { submit: true }).catch(showErr);
+    return;
+  }
   const q = $("askin").value.trim();
   if (!q && !atts.length) return;
   const images = atts.filter(a => a.kind === "image").map(a => a.url);

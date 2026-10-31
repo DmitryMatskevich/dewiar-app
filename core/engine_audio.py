@@ -541,11 +541,21 @@ class AudioMixin:
         echo = collections.deque(maxlen=90)             # громкость остаточного эха своего голоса (~3 с)
         half_echo = collections.deque(maxlen=100)       # полудуплекс: громкость своего голоса в микрофоне (~3 с)
         zst = {"since": None, "told": False, "all": True}      # поток идёт, а в нём нули или почти нули (_mic_zero_step)
+        dictation_session = None
         while not self.stopping.is_set() and not self.restart_audio.is_set():
             frame = self.capture.read()
             if not frame:
                 return
             now = time.monotonic()
+            current_session = (getattr(self, "_dictation_session", 0), getattr(self, "dictation_active", False))
+            if current_session != dictation_session and (current_session[1] or (dictation_session and dictation_session[1])):
+                in_speech, utt, silence, starts, speech_frames = False, [], 0, 0, 0
+                preroll.clear()
+                self.vad.reset()
+                self.spotter.rec.Reset()
+            dictation_session = current_session
+            if getattr(self, "dictation_active", False) and self._dictation_closed:
+                continue                           # запись закрыта, очередь распознавания ещё завершается
             self._mic_ring.append(frame)                # 0,4 с в памяти — удержание не теряет начало фразы (не распознаётся)
             if self.muted and self.hold is None and not self._mute_pass:
                 continue                                 # микрофон выключен: слушаем только удержание и одну фразу по нажатию
@@ -597,6 +607,12 @@ class AudioMixin:
 
             barge = self.s.get("audio", "barge_in")
             for kind, phrase in self.spotter.feed(frame):
+                if getattr(self, "dictation_active", False):
+                    # В диктовке имя — явная отправка, а «стоп» и другие слова остаются частью текста.
+                    aliases = self.aliases.get(self.s.get("persona"), [])
+                    if kind == "wake" and phrase.casefold() in {a.casefold() for a in aliases}:
+                        self.dictation_finish(submit=True)
+                    continue
                 if kind == "wake" and self.state == "idle" and now < self._quiet_until:
                     # только что остановили кнопкой ответ, начатый по голосу, — это было ложное срабатывание (видео, ТВ):
                     # минуту не откликаемся на голос, нажатие на лицо работает как обычно (отзыв 14.10)
@@ -648,6 +664,12 @@ class AudioMixin:
                     self.stop_time, self._stop_sleep = now, self.stop_utt
                     self.interrupt(phrase, follow=False)
                     self.follow_up_until = now + 3.0             # «стоп, лучше расскажи…» — договорить успеете
+
+            if getattr(self, "dictation_active", False) and self.dictation_finish_requested:
+                self._dictation_flush(b"".join(utt[:len(utt) - max(0, silence - 6)] + [frame]) if in_speech else b"")
+                in_speech, utt, silence, starts = False, [], 0, 0
+                preroll.clear()
+                continue
 
             fin = getattr(self.spotter, "last_final", None)
             if fin is not None:
@@ -722,9 +744,11 @@ class AudioMixin:
                         self.player.gain, ducked = 1.0, False
                     self._on_utterance(b"".join(utt[:len(utt) - max(0, silence - 6)]), t0, now)   # хвост тишины — не больше 6 кадров
                     utt = []
+                    if getattr(self, "dictation_active", False):
+                        preroll.clear()  # после принудительного разреза 25 с не повторять начало старой фразы
 
             # ждали вопрос, окно истекло, а фразы нет — засыпаем и пишем в журнал, почему могли не услышать
-            if (self.state == "listening" and now > self.follow_up_until and not in_speech
+            if (not getattr(self, "dictation_active", False) and self.state == "listening" and now > self.follow_up_until and not in_speech
                     and now - self.wake_time > 4 and self.stt_q.empty()):
                 if self._listen_peak >= 500 and self._listen_vad >= 0.6:
                     log.info("🎤 Ждал вопрос — звук был (громкость %.0f, «это речь» %.2f), но фраза не сложилась: "
@@ -757,8 +781,9 @@ class AudioMixin:
         # в отправленный вопрос.
         if getattr(self, "dictation_active", False):
             log.info("🎙 Фраза диктовки %.1f с → распознаю для поля чата", dur)
-            self.set_state("thinking")
-            self.stt_q.put((pcm, False, False, None, "dictation"))
+            with self._dictation_lock:
+                if self.dictation_active and not self._dictation_closed:
+                    self.stt_q.put((pcm, False, False, None, "dictation", self._dictation_session))
             return
         pr = getattr(self, "prompter", None)
         if pr is not None and (pr.on or pr.enrolling is not None):   # суфлёр: фразы — во встречу или в запись голоса
@@ -824,7 +849,7 @@ class AudioMixin:
 
     def _pause_apply(self):
         """Сколько кадров тишины — конец фразы: end_silence_ms плюс выученная добавка (если подстройка включена)."""
-        ms = int(self.s.get("audio", "end_silence_ms") or 650)
+        ms = int(self.s.get("audio", "end_silence_ms") or 5000)
         if self.s.get("audio", "end_silence_auto") is not False:
             ms += min(PAUSE_EXTRA_MAX, int(self.s.get("audio", "end_silence_extra") or 0))   # выученное раньше +900 — тоже до потолка
         self._end_frames = max(8, int(ms / 1000 / FRAME_S))
@@ -834,7 +859,7 @@ class AudioMixin:
         """Началась речь. Если прошлую фразу сочли законченной меньше 0,8 с назад, а ответа ещё нет (модель думает), —
         человек не договорил: ждать паузу дольше (+150 мс, до +600) и склеить обе части (_on_utterance).
         №226 (24.10): «после нескольких „перебил“ добавка дошла до 900 мс и сама не уменьшается — ассистент всё медленнее»:
-        потолок +600 (вся пауза ~1,25 с), а тает она вдвое быстрее (_pause_ok); в студии — «вернуть обычную»."""
+        потолок добавки +600 мс, а тает она вдвое быстрее (_pause_ok); в студии — «вернуть обычную»."""
         lf = getattr(self, "_last_final", None)
         if not lf or lf.get("cut") or self.state != "thinking" or t0 - lf["t"] > 0.8 or t0 < lf["t"] - 0.5:
             return
@@ -903,41 +928,87 @@ class AudioMixin:
         return {"ok": True, "sec": sec}
 
     def dictation_start(self):
-        """Включить диктовку в поле чата. VAD закончит фразу после тишины; текст придёт событием ``dictation``."""
+        """Непрерывная диктовка: пауза отправляет фрагмент в STT, но не выключает запись."""
         if getattr(self, "server", False):
             raise ValueError("Голосовой ввод недоступен в текстовом режиме")
         if getattr(self, "hold", None) is not None:
             self.hold_end(cancel=True)
-        if getattr(self, "muted", False):
-            self.muted = False
-            self.emit("mute", on=False)
-        self.dictation_active = True
-        self.dictation_finish_requested = False
-        self.wake_time = time.monotonic()
-        self.follow_up_until = 0.0
-        if self.state in ("speaking", "thinking"):
-            self.interrupt("диктовка", follow=False)
-        self.set_state("listening")
-        self.emit("dictation", state="recording")
-        log.info("🎙 Диктовка в поле чата включена")
+        with self._dictation_lock:
+            if self.dictation_active:
+                return {"ok": True, "state": "finishing" if self._dictation_closed else "recording"}
+            if getattr(self, "muted", False):
+                self.muted = False
+                self.emit("mute", on=False)
+            if self.state in ("speaking", "thinking"):
+                self.interrupt("диктовка", follow=False)
+            self._dictation_session += 1
+            self._dictation_closed = self._dictation_submit = False
+            self.dictation_active = True
+            self.dictation_finish_requested = False
+            self.stop_utt = False
+            self._wake_tone_due = 0.0
+            self.wake_time = time.monotonic()
+            self.follow_up_until = 0.0
+            self.set_state("listening")
+            self.emit("dictation", state="recording")
         return {"ok": True, "state": "recording"}
 
     def dictation_cancel(self):
-        """Отменить текущую диктовку и очистить её очередь."""
-        was = bool(getattr(self, "dictation_active", False))
-        self.dictation_active = False
-        self.dictation_finish_requested = False
-        self.set_state("idle")
-        self.emit("dictation", state="cancelled")
+        """Закрыть сессию; запоздавшие результаты не попадут в следующую диктовку."""
+        with self._dictation_lock:
+            was = self.dictation_active
+            self.dictation_active = False
+            self.dictation_finish_requested = False
+            self._dictation_session += 1
+            self.set_state("idle")
+            self.emit("dictation", state="cancelled")
         return {"ok": was, "state": "cancelled"}
 
-    def dictation_finish(self):
-        """Завершить диктовку после текущей фразы. Если VAD уже ждёт речь, следующий результат будет последним."""
-        if not getattr(self, "dictation_active", False):
-            return {"ok": False, "state": "idle"}
-        self.dictation_finish_requested = True
-        self.emit("dictation", state="finishing")
+    def dictation_finish(self, submit=False):
+        """Остановить захват сейчас; отправка ждёт все уже записанные фрагменты."""
+        with self._dictation_lock:
+            if not self.dictation_active:
+                return {"ok": False, "state": "idle"}
+            self._dictation_submit = self._dictation_submit or submit
+            if not self.dictation_finish_requested:
+                self.dictation_finish_requested = True
+                self.emit("dictation", state="finishing")
         return {"ok": True, "state": "finishing"}
+
+    def _dictation_flush(self, pcm):
+        """Вызывается потоком захвата: последний звук, затем барьер в той же FIFO-очереди STT."""
+        with self._dictation_lock:
+            if not self.dictation_active or self._dictation_closed:
+                return
+            self._dictation_closed = True
+            sid = self._dictation_session
+            if len(pcm) >= int(RATE * 2 * .1):
+                self.stt_q.put((pcm, False, False, None, "dictation", sid))
+            self.stt_q.put((b"", False, False, None, "dictation_end", sid))
+
+    def _dictation_result(self, text, by, sid):
+        """Фрагменты возвращаются в черновик по порядку. Имя в конце — резерв для имён без Vosk."""
+        with self._dictation_lock:
+            if not self.dictation_active or sid != self._dictation_session:
+                return
+            aliases = self.aliases.get(self.s.get("persona"), [])
+            names = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
+            match = re.search(r"(?<!\w)(?:" + names + r")[\s,.!?;:—-]*$", text, re.I) if names else None
+            if match:
+                text = text[:match.start()].rstrip(" ,;:—-")
+            if text:
+                self.emit("dictation", state="partial", text=text, by=by)
+            if match:
+                self.dictation_finish(submit=True)
+
+    def _dictation_done(self, sid):
+        with self._dictation_lock:
+            if not self.dictation_active or sid != self._dictation_session:
+                return
+            self.dictation_active = False
+            self.dictation_finish_requested = False
+            self.set_state("idle")
+            self.emit("dictation", state="done", submit=self._dictation_submit)
 
     def _transcribe_long(self, stt, pcm):
         """Длинная запись (диктовка удержанием): распознаватели рассчитаны на фразы до ~20 с — режем по самым тихим
@@ -982,6 +1053,12 @@ class AudioMixin:
             forced = item[3] if len(item) > 3 else None
             held = len(item) > 4 and item[4] == "hold"
             dictated = len(item) > 4 and item[4] == "dictation"
+            if len(item) > 4 and item[4] in ("dictation", "dictation_end"):
+                if not self.dictation_active or item[5] != self._dictation_session:
+                    continue
+                if item[4] == "dictation_end":
+                    self._dictation_done(item[5])
+                    continue
             stt = self.current_stt()
             t0 = time.monotonic()
             if held:
@@ -1003,14 +1080,7 @@ class AudioMixin:
             if held:
                 self.handle_held(text)
             elif dictated:
-                # Отмена может прийти, пока STT ещё работает; такой результат не возвращаем в новое поле.
-                if getattr(self, "dictation_active", False):
-                    self.dictation_active = False
-                    self.dictation_finish_requested = False
-                    self.set_state("idle")
-                    self.emit("dictation", state="done", text=text, by=stt.name)
-                else:
-                    log.info("🎙 Результат отменённой диктовки отброшен")
+                self._dictation_result(text, stt.name, item[5])
             else:
                 self.handle_text(text, by_wake, follow, forced, dur=len(pcm) / 2 / RATE)
 

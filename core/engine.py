@@ -76,9 +76,13 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.barge_speech = -1                # какую фразу перебили просто речью
         self.barge_done = {}                  # фраза закончилась раньше проверки: id -> звук
         self.hold = None                      # диктовка удержанием (hold_start … hold_end): {"pcm": [кадры], "t0", "max"}
-        # Диктовка в поле чата: VAD сам завершает фразу после паузы и возвращает текст UI-событием,
-        # не отправляя его модели. Отдельный флаг не смешиваем с удержанием, которое остаётся быстрым способом
+        # Диктовка в поле чата: VAD делит речь по паузам, STT возвращает фрагменты UI-событиями,
+        # запись продолжается до «Стоп» или отправки. Не смешиваем с удержанием, которое остаётся быстрым способом
         # сразу задать вопрос ассистенту.
+        self._dictation_lock = threading.RLock()
+        self._dictation_session = 0
+        self._dictation_closed = False
+        self._dictation_submit = False
         self.dictation_active = False
         self.dictation_finish_requested = False
         self._mic_ring = collections.deque(maxlen=40)   # последние ~1,2 с микрофона: удержание начинается с самого нажатия

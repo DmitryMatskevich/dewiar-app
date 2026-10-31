@@ -192,7 +192,7 @@ DEFAULTS = {
         "barge_in": "smart",        # smart (речью ~0,8 с, сначала приглушает) | any_speech | wakeword | off
         "barge_v2": False,          # метка разового перевода barge_in с wakeword на smart (engine.py)
         "follow_up_seconds": 8,     # после ответа можно говорить без имени
-        "end_silence_ms": 650,      # столько тишины — конец фразы
+        "end_silence_ms": 5000,      # столько тишины — конец фразы
         # подстройка под манеру речи (engine_audio._pause_*): человек продолжил сразу после того, как фразу сочли законченной, —
         # ждать дольше (+150 мс, до +600); обычные разговоры понемногу возвращают к end_silence_ms
         "end_silence_auto": True, "end_silence_extra": 0,

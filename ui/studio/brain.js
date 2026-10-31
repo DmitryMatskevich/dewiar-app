@@ -408,7 +408,7 @@ function refreshStatic() {
   if (pl) {
     const pxx = Math.min(600, px);                        // выше +600 ядро не ждёт (№226), даже если выучено раньше
     pl.textContent = "Если вы продолжаете говорить сразу после того, как ассистент решил, что фраза закончена, — он начнёт ждать дольше; со временем вернётся к обычной паузе."
-      + (pxx > 0 && get("audio.end_silence_auto") !== false ? ` Сейчас жду ${(+get("audio.end_silence_ms") || 650) + pxx} мс (+${pxx} под вашу речь). ` : "");
+      + (pxx > 0 && get("audio.end_silence_auto") !== false ? ` Сейчас жду ${(+get("audio.end_silence_ms") || 5000) + pxx} мс (+${pxx} под вашу речь). ` : "");
     if (pxx > 0 && get("audio.end_silence_auto") !== false) {   // №226: «добавка сама не уменьшается» — вернуть сразу
       const r = document.createElement("a"); r.href = "#"; r.id = "pause-reset"; r.textContent = "Вернуть обычную";
       r.onclick = (e) => { e.preventDefault(); e.stopPropagation(); save({ audio: { end_silence_extra: 0 } }); };

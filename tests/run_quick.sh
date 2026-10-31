@@ -81,6 +81,10 @@ run "телефон: голос сервера не ответил — гово�
 run "телефон: календарь — что у меня завтра, запись после «да»" $PY "$T/android_calendar_test.py"
 run "лицо говорит губами только под звук: голос с сервера ещё не пришёл — рот закрыт" $PY "$T/lipsync_test.py"
 run "диктовка удержанием на компьютере: держите облик или пробел — сколько угодно, отпустили — ушло" $PY "$T/hold_dictation_test.py"
+run "непрерывная диктовка: пауза, стоп, имя" $PY "$T/dictation_engine_test.py"
+if command -v node >/dev/null; then
+  run "диктовка: кнопка стоп и отправка черновика" node "$T/hud_dictation_test.js"
+fi
 run "телефон: первая фраза ответа — в голос по запятой, раньше" $PY "$T/android_first_phrase_test.py"
 run "студия: «Чат» — вся переписка, писать текстом; в виджете вместо «Памяти»" $PY "$T/studio_chat_test.py"
 run "телефон: микрофон Bluetooth-наушников (SCO) на время слушания" $PY "$T/android_btmic_test.py"
