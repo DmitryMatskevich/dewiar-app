@@ -1473,6 +1473,8 @@ const EMOJI = (() => { try { return new RegExp("\\p{Extended_Pictographic}", "gu
 /* Текст для голоса — как speakable в core/llm.py: без кода, ссылок, путей к файлам и расширений; сокращения — словами */
 const FILE_EXT = "(?:html?|pdf|pptx?|docx?|xlsx?|csv|json|md|txt|py|js|css|zip|png|jpe?g|svg|mp3|wav|mp4)";
 const SPEAK_RULES = [[/(?:https?:\/\/|www\.)\S+/gi, ""],
+  [/[«»“”„‟‹›]/g, '"'], [/['‘’‚‛]/g, "'"],
+  [/\s*[→⇒➜➔➝]\s*/g, ", затем "],
   [/(^|[^\wА-Яа-яЁё])(?:[A-Za-z]:\\|\\\\)[^\s`]+/g, "$1"],
   [/\\+(?:r\\+n|[nrtbfv])/g, " "],
   [/\\+u([0-9a-fA-F]{4})/g, (_, code) => { const n = parseInt(code, 16); return n >= 0xD800 && n <= 0xDFFF ? "" : String.fromCharCode(n); }],

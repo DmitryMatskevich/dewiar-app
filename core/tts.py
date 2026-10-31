@@ -483,6 +483,8 @@ class EspeakTTS:
         if sys.platform == "darwin":
             import tempfile
             import wave
+            from response_text import speech_punctuation
+            text = speech_punctuation(text)
             with tempfile.TemporaryDirectory(prefix="dewiar-say-") as tmp:
                 path = str(Path(tmp) / "speech.wav")
                 subprocess.run(["/usr/bin/say", "-v", "Milena", "-r", str(int(165 * speed)),

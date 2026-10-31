@@ -1839,7 +1839,7 @@ _MD = [(re.compile(r"```.*?```", re.S), " "), (re.compile(r"`([^`]*)`"), r"\1"),
 
 def speakable(text):
     """Текст для голоса: без разметки Markdown, кода, эмодзи, ссылок и путей к файлам; сокращения — полными словами."""
-    from response_text import clean_response
+    from response_text import clean_response, speech_punctuation
     text = clean_response(text)
     # Paths are visible on screen, but their separators should not become spoken commands.
     text = re.sub(r"(?<!\w)(?:[A-Za-z]:\\|\\\\)[^\s`]+", "", text)
@@ -1850,4 +1850,4 @@ def speakable(text):
         text = rx.sub(rep, text)
     text = re.sub(r"\\+", " обратная черта ", text)
     text = re.sub(r"\b(?:back[ -]*slash|б[эе]к[ -]*сл[эе][шж])\b", "обратная черта", text, flags=re.I)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", speech_punctuation(text)).strip()

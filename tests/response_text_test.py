@@ -3,6 +3,7 @@ import sys
 import json
 import subprocess
 import threading
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -37,6 +38,8 @@ for raw, want in cases.items():
     assert ''.join(f.feed(ch) for ch in raw) + f.flush() == want
 
 voice_cases = {
+    'В настройках «Безопасность» → «Модель».': 'В настройках "Безопасность", затем "Модель".',
+    'Раздел “Модели” и ‘Голос’.': 'Раздел "Модели" и \'Голос\'.',
     r'Первая.\nВторая.\tДальше.': 'Первая. Вторая. Дальше.',
     r'\*Важно\*': 'Важно',
     r'Это backslash, бэкслэш, бек слеж и бэк-слеш.': 'Это обратная черта, обратная черта, обратная черта и обратная черта.',
@@ -80,6 +83,21 @@ with patch.object(llm, '_stream_events_raw', side_effect=broken_source):
         pass
     else:
         raise AssertionError('The original transport error must propagate')
+
+# Guard the native say input as well: quick announcements can bypass speakable().
+import tts
+say_inputs = []
+def fake_say(command, **kwargs):
+    assert command[0] == '/usr/bin/say'
+    say_inputs.append(kwargs['input'])
+    filename = command[command.index('-o') + 1]
+    with wave.open(filename, 'wb') as wav:
+        wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(22050)
+        wav.writeframes(b'\0\0' * 32)
+with patch.object(sys, 'platform', 'darwin'), patch.object(tts.subprocess, 'run', side_effect=fake_say):
+    rate, pcm = next(tts.EspeakTTS().synth('Откройте «Безопасность» → “Модель”.', {}))
+assert say_inputs == ['Откройте "Безопасность", затем "Модель".']
+assert rate == 22050 and len(pcm) == 64
 
 print('✅ Prose escapes cleaned across chunk boundaries; code/paths/tools preserved; Russian symbol names in speech')
 print('OK')

@@ -82,3 +82,14 @@ class ResponseTextFilter:
 def clean_response(text):
     f = ResponseTextFilter()
     return f.feed(text) + f.flush()
+
+
+def speech_punctuation(text):
+    """Milena (macOS say) verbalises typographic quotes as 'backslash'.
+
+    Keep rich punctuation on screen; send ASCII quotes to speech engines.
+    Menu arrows are spoken as navigation, rather than silently skipped.
+    """
+    text = text.translate(str.maketrans({**dict.fromkeys('«»“”„‟‹›', '"'),
+                                       **dict.fromkeys("‘’‚‛", "'")}))
+    return re.sub(r"\s*[→⇒➜➔➝]\s*", ", затем ", text)
