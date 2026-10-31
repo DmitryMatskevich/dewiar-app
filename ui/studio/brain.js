@@ -490,8 +490,10 @@ let lastStatus = {};
 function renderStatus(st) {
   lastStatus = st || lastStatus; st = lastStatus;
   if (typeof studioTight === "function" && st) studioTight(!!st.tight);   // мало памяти — облики студии почти неподвижны
+  const warm = st.model_warmup, warmBox = $('#local-model-warmup');
+  if (warmBox) warmBox.textContent = warm ? (warm.state === 'loading' ? 'Загружаю и прогреваю: ' : warm.state === 'ready' ? 'Готова отвечать: ' : warm.message + ' · ') + warm.model : '';
   const rows = [["Связь с ядром", core.connected ? "есть" : "нет"], ["Эхоподавление", st.headphones ? "не нужно — наушники" : st.aec ? "работает" : "выключено — полудуплекс"], ["Микрофон", st.input || "—"],
-    ["Распознавание", `${st.stt || "—"}${st.stt_ready === false ? " (загружается, пока Vosk)" : ""}`], ["Голос", st.tts || "—"], ["Модель", st.llm || "не выбрана"], ["Сейчас", [st.note, ...Object.values(st.loading || {}).map(x => "готовлю: " + x.t.toLowerCase()
+    ["Распознавание", `${st.stt || "—"}${st.stt_ready === false ? " (загружается, пока Vosk)" : ""}`], ["Голос", st.tts || "—"], ["Модель", st.llm || "не выбрана"], ["Готовность модели", st.model_warmup ? ({loading:"Загружаю и прогреваю",ready:"Прогрета · готова отвечать",error:st.model_warmup.message}[st.model_warmup.state] || "—") + " · " + st.model_warmup.model : "—"], ["Сейчас", [st.note, ...Object.values(st.loading || {}).map(x => "готовлю: " + x.t.toLowerCase()
       + (x.f != null && x.f < 1 ? ` ${Math.round(x.f * 100)}%` : "…"))].filter(Boolean).join(" · ") || "всё спокойно"]];
   $("#status").innerHTML = rows.map(([a, b]) => `<dt>${a}</dt><dd></dd>`).join("");
   $$("#status dd").forEach((d, i) => d.textContent = rows[i][1]);

@@ -1030,6 +1030,7 @@ class AnswerMixin:
     def probe_tools_bg(self, force=False):
         """Узнать в фоне (поток probe-tools), умеет ли активная модель вызывать инструменты и как: native, prompt
         или none. Один раз на «адрес|модель»; force — проверить заново."""
+        if 'llm_warmup' in getattr(self, 'status', {}).get('loading', {}):return
         prof = self.s.active_llm()
         if not prof:
             return

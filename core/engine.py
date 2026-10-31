@@ -267,6 +267,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.health_begin()                                    # «Здоровье»: время запуска, нагрузка, пульс (core/health.py)
         self._auto_provision()
         self._device_check()
+        if not self.wav_input:
+            from model_warmup import ModelWarmup
+            self.model_warmup = ModelWarmup(self)
+            threading.Thread(target=self.model_warmup.run, name='model-warmup', daemon=True).start()
         if not self.wav_input and not getattr(self, "server", False):
             threading.Thread(target=self._memory_watch, name="memory", daemon=True).start()
         self.mcp.reconcile()
