@@ -1473,6 +1473,13 @@ const EMOJI = (() => { try { return new RegExp("\\p{Extended_Pictographic}", "gu
 /* Текст для голоса — как speakable в core/llm.py: без кода, ссылок, путей к файлам и расширений; сокращения — словами */
 const FILE_EXT = "(?:html?|pdf|pptx?|docx?|xlsx?|csv|json|md|txt|py|js|css|zip|png|jpe?g|svg|mp3|wav|mp4)";
 const SPEAK_RULES = [[/(?:https?:\/\/|www\.)\S+/gi, ""],
+  [/(^|[^\wА-Яа-яЁё])(?:[A-Za-z]:\\|\\\\)[^\s`]+/g, "$1"],
+  [/\\+(?:r\\+n|[nrtbfv])/g, " "],
+  [/\\+u([0-9a-fA-F]{4})/g, (_, code) => { const n = parseInt(code, 16); return n >= 0xD800 && n <= 0xDFFF ? "" : String.fromCharCode(n); }],
+  [/\\([*_#>|~`!\[\]{}().+-])/g, "$1"],
+  [/\\["/]/g, m => m.slice(1)],
+  [/\\+/g, " обратная черта "],
+  [/\bback[ -]*slash\b|(^|[^А-Яа-яЁё])б[эе]к[ -]*сл[эе][шж](?=$|[^А-Яа-яЁё])/gi, (m, lead) => (lead || "") + "обратная черта"],
   [new RegExp("(^|[^\\wА-Яа-яЁё.])(?:[~/]?[\\wА-Яа-яЁё.-]+/)+[\\wА-Яа-яЁё-]+\\." + FILE_EXT + "(?![\\w])", "gi"), "$1"],
   [/(^|[^\w.])(?:\/?[A-Za-z0-9_.~-]+\/){2,}[A-Za-z0-9_.-]*/g, "$1"],
   [new RegExp("([\\wА-Яа-яЁё-]+)\\." + FILE_EXT + "(?![\\w])", "gi"), "$1"],
@@ -1480,7 +1487,7 @@ const SPEAK_RULES = [[/(?:https?:\/\/|www\.)\S+/gi, ""],
   [/(^|\s)и т\.\s?п\./gi, "$1и тому подобное"], [/(^|\s)т\.\s?к\./gi, "$1так как"], [/(^|\s)напр\./gi, "$1например"],
   [/:\s*[—–-]\s+/g, ": "], [/\s+(?:и|или|в|на|по|из)\s*(?=[.,;:!?]|$)/g, ""], [/\s+([:,;—–-])\s*(?=[:,;.!?—–]|$)/g, ""], [/\(\s*\)/g, ""]];
 function speechText(t) {
-  t = t.replace(/```[\s\S]*?```/g, " ");
+  t = t.replace(/```[\s\S]*?```/g, " ").replace(/`[^`]*\\[nrtbfvu][^`]*`/g, " ");
   for (const [rx, to] of SPEAK_RULES) t = t.replace(rx, to);
   return t.replace(/[*_#>`|~]+/g, " ").replace(EMOJI, "").replace(/\s+/g, " ").trim();
 }

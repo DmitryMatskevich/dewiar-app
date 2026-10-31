@@ -1121,6 +1121,35 @@ def wants_think(text, mode=None):
 
 
 def stream_events(p, system, messages, cancel=None, tools=None, _retry=0):
+    """Public response text is clean before it reaches the screen, history or TTS; tool arguments stay literal."""
+    from response_text import ResponseTextFilter
+    clean = ResponseTextFilter()
+    try:
+        for kind, value in _stream_events_raw(p, system, messages, cancel, tools, _retry):
+            if cancel is not None and cancel.is_set():
+                return
+            if kind == "text":
+                value = clean.feed(value)
+                if value:
+                    yield kind, value
+            else:
+                tail = clean.flush()
+                if tail:
+                    yield "text", tail
+                yield kind, value
+    except LLMError:
+        if not (cancel is not None and cancel.is_set()):
+            tail = clean.flush()
+            if tail:
+                yield "text", tail
+        raise
+    if not (cancel is not None and cancel.is_set()):
+        tail = clean.flush()
+        if tail:
+            yield "text", tail
+
+
+def _stream_events_raw(p, system, messages, cancel=None, tools=None, _retry=0):
     """Fail over only before exposing any text or tool call to the caller."""
     import modelrouter
     choices = p.get('_route_candidates')
@@ -1810,6 +1839,15 @@ _MD = [(re.compile(r"```.*?```", re.S), " "), (re.compile(r"`([^`]*)`"), r"\1"),
 
 def speakable(text):
     """Текст для голоса: без разметки Markdown, кода, эмодзи, ссылок и путей к файлам; сокращения — полными словами."""
+    from response_text import clean_response
+    text = clean_response(text)
+    # Paths are visible on screen, but their separators should not become spoken commands.
+    text = re.sub(r"(?<!\w)(?:[A-Za-z]:\\|\\\\)[^\s`]+", "", text)
+    # Inline escape examples are technical notation, not ordinary words to dictate.
+    text = re.sub(r"`[^`]*\\[nrtbfvu][^`]*`", " ", text)
+    text = re.sub(r"\\([*_#>|~`!\[\]{}().+-])", r"\1", text)
     for rx, rep in _MD:
         text = rx.sub(rep, text)
-    return text.strip()
+    text = re.sub(r"\\+", " обратная черта ", text)
+    text = re.sub(r"\b(?:back[ -]*slash|б[эе]к[ -]*сл[эе][шж])\b", "обратная черта", text, flags=re.I)
+    return re.sub(r"\s+", " ", text).strip()

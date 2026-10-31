@@ -49,6 +49,7 @@ run "окна: студия открывается снова"     $PY "$T/ui_st
 run "голоса в отдельном процессе"     $PY "$T/tts_proc_test.py"
 run "голос своим ключом: ElevenLabs"  $PY "$T/tts_eleven_test.py"
 run "что голос не читает вслух"      $PY "$T/speak_text_test.py"
+run "служебные символы: текст и озвучка" $PY "$T/response_text_test.py"
 run "персонажи 0.23: Агент, Кодер, Патрик" $PY "$T/personas_rename_test.py"
 run "нет устройства вывода звука"        $PY "$T/audio_out_test.py"
 run "Android: сервер отклонил запрос"   $PY "$T/android_cloud400_test.py"
