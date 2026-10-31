@@ -347,22 +347,8 @@ function addProfile(preset, extra = {}) {
   const patch = { llm: { profiles: S.llm.profiles } }; if (!S.llm.active) patch.llm.active = id;
   return save(patch).then(renderProfiles);
 }
-$("#discover").onclick = async () => {
-  const r = $("#discres"); r.className = "res"; r.textContent = "ищу… (если стоит LM Studio — включаю его сервер, до минуты)";
-  try {
-    const found = await core.call("discover");
-    if (!found.length) { r.className = "res bad"; r.textContent = "Локальные серверы не отвечают. Если программа установлена, откройте её и включите сервер."; await loadLocalModelStatus(); return; }
-    const known = Object.values(S.llm.profiles).map(p => p.base_url);
-    let added = 0;
-    for (const f of found) if (!known.includes(f.base_url)) { await addProfile(f.preset, { base_url: f.base_url, model: f.models[0] || "" }); added++; }
-    const lm = found.find(f => f.started);
-    r.className = "res ok"; r.textContent = `Найдено: ${found.map(f => f.name).join(", ")}${added ? ` — добавлено ${added}` : " — уже в списке"}.`
-      + (lm ? ` Сервер LM Studio был выключен — включила${lm.models.length ? "" : "; загрузите в LM Studio модель"}.` : "");
-    const loc = Object.entries(S.llm.profiles).find(([, p]) => p.base_url === found[0].base_url);
-    if (loc) { if (S.llm.active !== loc[0]) { await save({ llm: { active: loc[0] } }); renderProfiles(); } await wizardCheck(loc[0]); }
-  } catch (e) { r.className = "res bad"; r.textContent = e.message; }
-  await loadLocalModelStatus();
-};
+$("#discover").onclick = () => loadUnifiedModels();
+
 
 /* ---------- простые поля ---------- */
 /* Текстовые поля сохраняются через 600 мс после последней буквы, остальные — почти сразу; ползунок — без «Сохранено» */
@@ -840,8 +826,10 @@ async function useStrataProfile(profile) {
     id=Object.entries(S.llm.profiles).find(([,p])=>p.base_url===profile.base_url && p.model===profile.model)?.[0];
   }
   if (!id)throw Error('Профиль не сохранился');
-  await save({llm:{active:id}}); openProf=id;renderProfiles();
-  toast(S.llm.auto_select ? 'Профиль Strata сохранён. Автовыбор учитывает его приоритет и часы.' : 'Модель Strata подключена.');
+  await save({llm:{active:id,auto_select:false}});
+  if (S.llm.active !== id || S.llm.auto_select) throw Error('Не удалось включить выбранную модель. Повторите попытку.');
+  openProf=id;renderProfiles();
+  toast('Модель Strata активна. Включён ручной выбор.');
 }
 $('#strata-probe').onclick=async()=>{
   const button=$('#strata-probe'), result=$('#strata-api-result');button.disabled=true;$('#strata-use').disabled=true;strataApiProfile=null;

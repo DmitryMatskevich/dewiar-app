@@ -94,6 +94,8 @@ def probe(base,key=''):
     # never rewritten.
     if discovered and (not requested or requested.lower() in ('auto', 'strata://', 'http://127.0.0.1:8080/v1')):
         requested = discovered
+    if not discovered and requested.lower() in ('', 'auto', 'strata://'):
+        raise ValueError('Strata Desktop не запущена. Откройте Strata или выберите скачанную модель в общем списке.')
     p=api_profile(requested,key)
     try:ids=list_models(p,timeout=3)
     except LLMError as error:

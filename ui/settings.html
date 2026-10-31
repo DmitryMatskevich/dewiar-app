@@ -1122,7 +1122,14 @@
 
     <div class="wpanel" id="w-local">
       <h3>Модель на этом компьютере</h3>
-      <div class="actions" style="margin:0 0 12px"><button class="btn primary" id="discover">Найти Ollama или LM Studio</button><span class="res" id="discres"></span></div>
+      <div class="actions" style="margin:0 0 12px"><button class="btn primary" id="discover">Обновить список моделей</button><span class="res" id="discres"></span></div>
+      <div class="actions" style="align-items:end">
+        <label class="f" style="flex:1">Поиск моделей<input id="local-model-search" type="search" placeholder="Название модели или приложения"></label>
+        <label class="f">Показать<select id="local-model-view"><option value="local">На компьютере</option><option value="download">Каталоги для скачивания</option></select></label>
+      </div>
+      <div id="local-model-list" aria-live="polite"></div>
+      <p id="local-model-result" class="res" role="status"></p>
+      <details><summary>Приложения и дополнительные настройки</summary>
       <p id="local-model-installations" class="hint" role="status" style="white-space:pre-line">Проверяю локальные программы…</p>
       <button class="btn small" id="local-model-status-refresh" style="margin-bottom:12px">Обновить статус</button>
       <div class="prof on" style="padding:16px;margin:12px 0" id="strata-panel">
@@ -1136,6 +1143,7 @@
         <div class="actions"><button class="btn" id="strata-start">Запустить без окна Strata</button><button class="btn" id="strata-use-owned" disabled>Использовать движок Dewiar</button><button class="btn" id="strata-stop" disabled>Остановить движок Dewiar</button><button class="btn small" id="strata-refresh">Обновить</button></div>
         <p class="hint">Запуск только по кнопке, на 127.0.0.1, с отдельным ключом. При нехватке памяти Dewiar покажет приложения, которые можно закрыть вручную; сам он ничего не закрывает. При закрытии Dewiar останавливается только его движок. Этот режим — текст, без зрения и MTP.</p>
       </div>
+      </details>
       <details id="lc-how"><summary class="hint" style="cursor:pointer">Установка и запуск Ollama / LM Studio — инструкция</summary>
         <ol class="steps" id="lc-steps"></ol>
         <p class="hint">Названия моделей берутся из списка Ollama или LM Studio. В macOS переименовывать их не нужно.</p>

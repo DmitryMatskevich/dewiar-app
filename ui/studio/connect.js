@@ -245,14 +245,14 @@ $("#lc-steps").innerHTML = IS_MAC
   ? `<li>Если программа уже установлена, откройте Ollama или LM Studio из папки «Программы». Переустановка не нужна.</li>
      <li>Для первой установки Ollama скачайте версию <a href="https://ollama.com/download/mac" target="_blank">для macOS</a> и перенесите Ollama.app в «Программы».</li>
      <li>В Ollama выберите или скачайте модель. В LM Studio откройте Developer и включите Start server.</li>
-     <li>Вернитесь сюда и нажмите «Найти Ollama или LM Studio».</li>`
+     <li>Вернитесь сюда и нажмите «Обновить список моделей».</li>`
   : IS_WIN
   ? `<li>Скачайте Ollama для Windows: <a href="https://ollama.com/download/windows" target="_blank">ollama.com/download</a> — и установите, как обычную программу.</li>
      <li>Откройте «Пуск» → «Командная строка» и выполните: <code>ollama pull qwen3:4b</code> — скачается модель (≈2,5 ГБ).</li>
-     <li>Вернитесь сюда и нажмите «Найти Ollama или LM Studio».</li>`
+     <li>Вернитесь сюда и нажмите «Обновить список моделей».</li>`
   : `<li>Откройте терминал и выполните: <code>curl -fsSL https://ollama.com/install.sh | sh</code></li>
      <li>Затем скачайте модель: <code>ollama pull qwen3:4b</code> (≈2,5 ГБ).</li>
-     <li>Вернитесь сюда и нажмите «Найти Ollama или LM Studio».</li>`;
+     <li>Вернитесь сюда и нажмите «Обновить список моделей».</li>`;
 let localStatusBusy = false;
 async function loadLocalModelStatus() {
   if (!S || localStatusBusy) return;
@@ -386,3 +386,149 @@ $("#sc-go").onclick = async (ev) => {
   } catch (e) { box.innerHTML = `<div class="res bad">${escH(e.message)}</div>`; }
   ev.target.disabled = false;
 };
+
+/* Shared inventory: choosing a row never silently chooses another model. */
+let unifiedModels = [], unifiedBusy = false;
+function localModelTitle(model) {
+  return [model.name, model.parameters, model.format?.toUpperCase(), model.quantization || model.variant].filter(Boolean).join(' · ');
+}
+function renderLocalModelDetails(box, model) {
+  box.replaceChildren();
+  const fields = [
+    ['Название', model.name], ['Идентификатор для подключения', model.model],
+    ['Название в каталоге', model.catalog_id], ['Приложение', model.app], ['Автор / издатель', model.publisher],
+    ['Параметры (по локальному каталогу)', model.parameters], ['Архитектура', model.architecture],
+    ['Формат', model.format?.toUpperCase()], ['Квантизация', model.quantization || model.variant],
+    ['Максимальный контекст модели, токенов', model.context?.toLocaleString('ru-RU')],
+    ['Контекст загруженных экземпляров, токенов', model.loaded_contexts?.map(x=>x.toLocaleString('ru-RU')).join(', ')],
+    ['Изображения', typeof model.vision === 'boolean' ? (model.vision ? 'Поддерживаются' : 'Не заявлены') : null],
+    ['Вызов инструментов', typeof model.tools === 'boolean' ? (model.tools ? 'Поддерживается' : 'Не заявлен') : null],
+    ['Рассуждение', typeof model.reasoning === 'boolean' ? (model.reasoning ? 'Поддерживается' : 'Не заявлено') : null],
+    ['Описание', model.description], ['Лицензия', model.license], ['Источник сведений', model.metadata_source],
+  ];
+  const list = document.createElement('dl');
+  for (const [label, value] of fields) {
+    if (value == null || value === '') continue;
+    const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = label; dd.textContent = value; list.append(dt, dd);
+  }
+  box.append(list);
+  const note = document.createElement('p'); note.className = 'hint'; note.textContent = model.metadata_note || 'Показаны сведения, которые предоставило приложение. Максимальный контекст модели может отличаться от настроенного. Отсутствующие характеристики не определяются по названию.'; box.append(note);
+  if (model.catalog_url) {
+    try {
+      const url = new URL(model.catalog_url);
+      if (url.protocol === 'https:' && ['lmstudio.ai','ollama.com'].includes(url.hostname)) {
+        const link = document.createElement('a'); link.href = url.href; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Описание в каталоге приложения'; box.append(link);
+      }
+    } catch (_) {}
+  }
+}
+function renderUnifiedModels() {
+  const box = $('#local-model-list'), query = $('#local-model-search').value.trim().toLowerCase();
+  box.replaceChildren();
+  if ($('#local-model-view').value === 'download') {
+    const catalogs = [
+      ['LM Studio', 'Поиск и скачивание моделей в каталоге LM Studio.', 'https://lmstudio.ai/models'],
+      ['Ollama', 'Каталог моделей Ollama.', 'https://ollama.com/library'],
+      ['Strata', 'Совместимые пакеты и установка через Strata.', 'https://github.com/Niko1221/Strata']
+    ];
+    for (const [name, description, url] of catalogs.filter(x => x.join(' ').toLowerCase().includes(query))) {
+      const row = document.createElement('div'); row.className = 'prof local-model-row';
+      const text = document.createElement('span'); const title = document.createElement('b'); title.textContent = name;
+      const hint = document.createElement('small'); hint.textContent = description; text.append(title, hint);
+      const link = document.createElement('a'); link.className = 'btn'; link.href = url; link.target = '_blank'; link.rel = 'noopener'; link.textContent = 'Открыть каталог';
+      const open = document.createElement('button'); open.className = 'btn'; open.textContent = 'Открыть ' + name;
+      open.onclick = () => openLocalModelApp({source: {'LM Studio':'lmstudio','Ollama':'ollama','Strata':'strata'}[name], app:name}, open);
+      const actions = document.createElement('div'); actions.className = 'actions'; actions.append(link, open);
+      row.append(text, actions); box.append(row);
+    }
+    const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = 'Скачайте модель в приложении, затем обновите список «На компьютере». Каталоги открываются отдельно.'; box.append(hint);
+    return;
+  }
+  const groups = new Map();
+  for (const model of unifiedModels) {
+    if (!`${localModelTitle(model)} ${model.model} ${model.app} ${model.publisher || ""} ${model.catalog_id || ""}`.toLowerCase().includes(query)) continue;
+    const key = `${model.name.toLowerCase()}|${model.variant || model.model}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(model);
+  }
+  for (const models of groups.values()) {
+    const row = document.createElement('div'); row.className = 'prof local-model-row';
+    const text = document.createElement('span'), title = document.createElement('b'), detail = document.createElement('small');
+    title.textContent = localModelTitle(models[0]); text.append(title, detail);
+    const more = document.createElement('details'); more.className = 'local-model-details';
+    const summary = document.createElement('summary'); summary.textContent = 'Подробнее о модели';
+    const info = document.createElement('div'); more.append(summary, info); text.append(more);
+    let detailsFor = '';
+    more.ontoggle = async () => {
+      if (!more.open) return;
+      const m = models[+source.value], key = m.source + ':' + m.model;
+      if (detailsFor === key) return;
+      detailsFor = key; renderLocalModelDetails(info, m);
+      try {
+        const data = await core.call('local_model_details', {source:m.source, model:m.model});
+        if (detailsFor === key) renderLocalModelDetails(info, data);
+      } catch (e) { if (detailsFor === key) { detailsFor = ''; const error = document.createElement('p'); error.textContent = e.message; info.append(error); } }
+    };
+    const actions = document.createElement('div'); actions.className = 'actions';
+    const source = document.createElement('select'); source.setAttribute('aria-label', 'Приложение для ' + models[0].name);
+    models.forEach((m, i) => { const option = document.createElement('option'); option.value = i; option.textContent = m.app; source.append(option); });
+    const button = document.createElement('button'); button.className = 'btn primary';
+    const openApp = document.createElement('button'); openApp.className = 'btn';
+    openApp.onclick = () => openLocalModelApp(models[+source.value], openApp);
+    const update = () => {
+      const m = models[+source.value];
+      openApp.textContent = 'Открыть ' + m.app;
+      detail.textContent = [m.model, m.size_gib != null ? `Диск ${m.size_gib} ГБ` : '', m.ram_gib ? `ОЗУ ~${m.ram_gib} ГБ` : '',
+        m.state === 'cloud' ? 'Облачная модель · нужен интернет' : m.state === 'available' ? 'Доступна через сервер' : m.state === 'incomplete' ? 'Неполный пакет' : 'Скачана · сервер не запущен'].filter(Boolean).join(' · ');
+      button.textContent = m.source === 'strata' && !m.owned ? 'Запустить' : 'Использовать';
+      button.disabled = unifiedBusy || m.state === 'incomplete' || (m.source === 'strata' && !m.runtime);
+    };
+    source.onchange = () => { detailsFor = ''; more.open = false; update(); }; update();
+    button.onclick = () => connectUnifiedModel(models[+source.value]);
+    actions.append(source, button, openApp); row.append(text, actions); box.append(row);
+  }
+  if (!groups.size) { const hint = document.createElement('p'); hint.className = 'hint'; hint.textContent = query ? 'По вашему запросу моделей не найдено.' : 'Скачанные модели пока не найдены. Откройте каталог для скачивания или обновите список после запуска приложения.'; box.append(hint); }
+}
+async function openLocalModelApp(model, button) {
+  const label = button.textContent; button.disabled = true; button.textContent = 'Открываю…';
+  const result = $('#local-model-result');
+  try {
+    const response = await core.call('local_model_open_app', {source:model.source});
+    result.textContent = response.message || ('Открыто приложение ' + model.app);
+  } catch (e) { result.textContent = e.message; }
+  finally { button.disabled = false; button.textContent = label; }
+}
+async function loadUnifiedModels() {
+  if (unifiedBusy) return;
+  const button = $('#discover'), result = $('#discres'); button.disabled = true; result.textContent = 'Ищу скачанные модели…';
+  try {
+    const data = await core.call('local_models_inventory'); unifiedModels = data.models || []; renderUnifiedModels();
+    result.textContent = `Найдено моделей: ${unifiedModels.length}`;
+    $('#local-model-result').textContent = (data.errors || []).join(' ');
+  } catch (e) { result.textContent = 'Не удалось обновить список: ' + e.message; }
+  finally { button.disabled = false; }
+}
+async function connectUnifiedModel(model) {
+  if (unifiedBusy) return;
+  unifiedBusy = true; renderUnifiedModels(); const result = $('#local-model-result'); result.textContent = 'Подключаю ' + model.name + '…';
+  try {
+    const profile = await core.call('local_model_connect', {source:model.source, model:model.model});
+    if (profile.memory) { await openStrataMemory(profile.memory); result.textContent = 'Для запуска нужно освободить память.'; return; }
+    if (profile.loading) { result.textContent = 'Strata загружает модель. После загрузки обновите список и нажмите «Использовать».'; await loadStrataStatus(); return; }
+    if (model.source.startsWith('strata')) await useStrataProfile(profile);
+    else {
+      const existing = Object.entries(S.llm.profiles).find(([,p]) => p.base_url === profile.base_url && p.model === profile.model);
+      let id = existing?.[0];
+      if (!id) { await addProfile(model.source, profile); id = openProf; }
+      await save({llm:{active:id,auto_select:false}});
+      if (S.llm.active !== id || S.llm.auto_select) throw Error('Не удалось включить выбранную модель. Повторите попытку.');
+      openProf = id; renderProfiles();
+    }
+    result.textContent = `${model.name} · ${model.app}: активная модель. Включён ручной выбор.`;
+  } catch (e) { result.textContent = e.message; }
+  finally { unifiedBusy = false; renderUnifiedModels(); }
+}
+$('#local-model-search').oninput = renderUnifiedModels;
+$('#local-model-view').onchange = renderUnifiedModels;
+document.querySelector('[data-w="local"]')?.addEventListener('click', () => { if (document.querySelector('#w-local.on')) loadUnifiedModels(); });
+core.on('hello', () => { if (document.querySelector('#w-local.on')) loadUnifiedModels(); });

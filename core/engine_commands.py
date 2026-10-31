@@ -1373,6 +1373,16 @@ class CommandsMixin:
         if cmd == "probe_server":
             from llm import probe_server
             return probe_server(a.get("address", ""), a.get("port", ""))
+        if cmd == 'local_model_open_app':
+            from local_models import open_app
+            return open_app(a.get('source', ''))
+        if cmd in ('local_models_inventory', 'local_model_connect', 'local_model_details'):
+            from strata_local import StrataLocal
+            from local_models import inventory, connect, details
+            if not hasattr(self, 'strata'):self.strata = StrataLocal(STATE_DIR)
+            if cmd == 'local_models_inventory':return inventory(self.strata)
+            if cmd == 'local_model_details':return details(self.strata, a.get('source', ''), a.get('model', ''))
+            return connect(self.strata, a.get('source', ''), a.get('model', ''))
         if cmd == "local_models_status":
             from llm import local_installations
             return local_installations()
