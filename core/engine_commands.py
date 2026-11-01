@@ -1459,6 +1459,9 @@ class CommandsMixin:
             return self._pad_cmd(cmd, a)
         if cmd == "notes_list":                                 # «Заметки»: все заметки и поиск
             return self.workspace.notes(a.get("q", ""))
+        if cmd == "mac_files_access":
+            from mac_access import folder_access
+            return folder_access(self.workspace, a.get("target", ""), a.get("selected", ""))
         if cmd == "notes_seen":
             path = str(a.get("path") or "")
             if not path.startswith("Заметки/"):
@@ -1687,6 +1690,31 @@ class CommandsMixin:
             current = (self.personas.get(self.s.get('persona')) or {}).get('voice', {}).get('piper', '')
             options = [{'id': vid, 'label': label, 'installed': bool(self.piper.has(vid)), 'selected': vid == current} for vid, label in values]
             return {'target_language': target, 'options': options, 'default': current if any(x['id'] == current for x in options) else (options[0]['id'] if options else '')}
+        if cmd == "translation_voice_preview":
+            voice_id, text = str(a.get('voice') or ''), str(a.get('text') or '').strip()
+            if not voice_id or not text:
+                raise ValueError('Выберите голос и укажите текст для прослушивания')
+            from personas import PIPER_VOICES
+            from tts import EN_VOICES
+            allowed = set(PIPER_VOICES) | set(EN_VOICES.values())
+            if voice_id not in allowed:
+                raise ValueError('Такого голоса нет в списке Dewiar')
+            import tempfile, wave
+            self.piper.mirror = self._mirror('piper')
+            self.piper.ensure(voice_id, on_progress=lambda f: self._dl('voice', f))
+            chunks, rate = [], 22050
+            for sample_rate, pcm in self.piper.synth(text, {'piper': voice_id}, speed=float(self.s.get('tts', 'speed') or 1.0), norm=voice_id.startswith('ru_')):
+                rate, chunks = sample_rate, chunks + [pcm]
+            if not chunks:
+                raise RuntimeError('Голос не вернул аудио')
+            fd, name = tempfile.mkstemp(prefix='dewiar-voice-preview-', suffix='.wav', dir=str(self.workspace.ensure()))
+            os.close(fd)
+            path = Path(name)
+            with wave.open(str(path), 'wb') as out:
+                out.setnchannels(1); out.setsampwidth(2); out.setframerate(rate); out.writeframes(b''.join(chunks))
+            player = subprocess.Popen(['/usr/bin/afplay', str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            threading.Thread(target=lambda: (player.wait(), path.unlink(missing_ok=True)), daemon=True).start()
+            return {'playing': True, 'path': str(path), 'voice': voice_id}
         if cmd == "intro_start":                      # «Познакомиться» — знакомство голосом заново
             return self.intro_start()
         if cmd == "intro_stop":
