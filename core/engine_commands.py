@@ -1686,10 +1686,20 @@ class CommandsMixin:
             from personas import PIPER_VOICES
             from tts import EN_VOICES
             target = str(a.get('target_language') or 'ru')
-            values = list(PIPER_VOICES.items()) if target == 'ru' else [(vid, 'Женский' if gender == 'female' else 'Мужской') for gender, vid in EN_VOICES.items()]
+            profiles = ([
+                ('tatiana', 'Татьяна', 'ru_RU-irina-medium', 'Женский профиль для русской озвучки'),
+                ('dmitry', 'Дмитрий', 'ru_RU-dmitri-medium', 'Мужской профиль для русской озвучки'),
+                ('denis', 'Денис', 'ru_RU-denis-medium', 'Мужской профиль для русской озвучки'),
+                ('ruslan', 'Руслан', 'ru_RU-ruslan-medium', 'Мужской профиль для русской озвучки'),
+            ] if target == 'ru' else [
+                ('emily', 'Эмили', EN_VOICES['female'], 'Женский профиль для английской озвучки'),
+                ('ryan', 'Райан', EN_VOICES['male'], 'Мужской профиль для английской озвучки'),
+            ])
             current = (self.personas.get(self.s.get('persona')) or {}).get('voice', {}).get('piper', '')
-            options = [{'id': vid, 'label': label, 'installed': bool(self.piper.has(vid)), 'selected': vid == current} for vid, label in values]
-            return {'target_language': target, 'options': options, 'default': current if any(x['id'] == current for x in options) else (options[0]['id'] if options else '')}
+            options = [{'id': vid, 'profile': pid, 'label': name, 'model': vid, 'engine': 'Piper', 'about': about,
+                        'installed': bool(self.piper.has(vid)), 'selected': vid == current} for pid, name, vid, about in profiles]
+            return {'target_language': target, 'options': options,
+                    'default': current if any(x['id'] == current for x in options) else (options[0]['id'] if options else '')}
         if cmd == "translation_voice_preview":
             voice_id, text = str(a.get('voice') or ''), str(a.get('text') or '').strip()
             if not voice_id or not text:
