@@ -741,7 +741,7 @@ class AudioMixin:
                     log.debug("речь кончилась (фраза %d, %.1f с)", self.utt_id, len(utt) * FRAME_S)
                     in_speech, starts = False, 0
                     if ducked and self.player:                  # кашлянули, «угу» — продолжаем как было
-                        self.player.gain, ducked = 1.0, False
+                        self.player.gain, ducked = max(0.2, min(1.5, float(self.s.get("tts", "volume") or 1.0))), False
                     self._on_utterance(b"".join(utt[:len(utt) - max(0, silence - 6)]), t0, now)   # хвост тишины — не больше 6 кадров
                     utt = []
                     if getattr(self, "dictation_active", False):
@@ -1433,6 +1433,8 @@ class AudioMixin:
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
             word = _norm(re.sub(r"[^\w ]", "", rest)).strip()
             word = stop_word(word) or word if " " not in word else word      # «Лира, Ctop» → «стоп»
+            if self._voice_control_cmd(rest):
+                return
             if thanks_phrase(rest):                          # «Лира, спасибо» — «Пожалуйста!» и сон
                 self._thanks(rest)
             elif word in STOP_WORDS or is_sleep_phrase(rest):
@@ -1444,6 +1446,8 @@ class AudioMixin:
             else:
                 self.ask(rest)
         elif follow and text:
+            if self._voice_control_cmd(text):
+                return
             ws = _norm(re.sub(r"[^\w ]", " ", text)).split()
             last = stop_word(ws[-1]) if ws else None       # «…Пауза.», и ослышанное «…Ctop.»
             if last and last not in {"всё", "все", "пока", "спасибо", "спасиб", "благодарю"}:

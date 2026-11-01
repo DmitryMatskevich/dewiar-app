@@ -1176,6 +1176,72 @@ class AnswerMixin:
         log.info("🙏 «%s» — отвечаю и сплю до имени", text)
         self._say_quick(random.choice(THANKS_REPLIES), text, then=lambda: (setattr(self, "follow_up_until", 0.0), self.play_tone("sleep")))
 
+    def _voice_control_cmd(self, text, via=None):
+        """Быстрые голосовые настройки без модели: темп, громкость и движок голоса."""
+        if via or not text:
+            return False
+        raw = " ".join(str(text).casefold().replace("ё", "е").split()).strip(" .,!?")
+        pending = getattr(self, "_voice_control_pending", False)
+        speed = None
+        if re.search(r"медленн|помедленн|замедл", raw): speed = -0.1
+        elif re.search(r"быстре|побыстр|ускор", raw): speed = 0.1
+        volume = None
+        if re.search(r"(говори|голос|озвучк|звук).*(громче|погромче)", raw): volume = 0.1
+        elif re.search(r"(говори|голос|озвучк|звук).*(тише|потише)", raw): volume = -0.1
+        engine = None
+        if re.search(r"системн(?:ый|ого)\s+голос|голос\s+систем", raw): engine = "espeak"
+        elif re.search(r"голос\s+(?:vosk|воск)", raw): engine = "vosk"
+        elif re.search(r"голос\s+piper|пайпер", raw): engine = "piper"
+        elif re.search(r"голос\s+(?:dewiar|девиар|сервера)", raw): engine = "remote"
+        elif re.search(r"голос\s+eleven|эливен", raw): engine = "elevenlabs"
+        text_only = bool(re.search(r"(?:выключи|убери|без)\s+голос|только текст", raw))
+        if pending and not (speed or volume or engine or text_only):
+            self._voice_control_pending = False
+            if re.search(r"темп|скорост|медленн|быстре", raw): speed = -0.1 if re.search(r"медленн", raw) else 0.1
+            elif re.search(r"громк|тише|громче", raw): volume = -0.1 if re.search(r"тише", raw) else 0.1
+            elif re.search(r"системн", raw): engine = "espeak"
+            elif re.search(r"vosk|воск", raw): engine = "vosk"
+            elif re.search(r"piper|пайпер", raw): engine = "piper"
+            elif re.search(r"dewiar|девиар|сервер", raw): engine = "remote"
+            elif re.search(r"eleven|эливен", raw): engine = "elevenlabs"
+        ambiguous = bool(re.fullmatch(r"(?:голос|изменить голос|сменить голос|другой голос|настрой голос)", raw))
+        if ambiguous and not (speed or volume or engine):
+            self._voice_control_pending = True
+            self._say_quick("Что изменить: голос, темп или громкость? Можно сказать: системный голос, быстрее или тише.", text)
+            return True
+        if not (speed or volume or engine or text_only):
+            return False
+        patch = {"tts": {}}
+        replies = []
+        if speed:
+            old = float(self.s.get("tts", "speed") or 1.25)
+            new = round(max(0.7, min(1.4, old + speed)), 2)
+            patch["tts"]["speed"] = new
+            replies.append(f"Темп речи: {new:g}.")
+        if volume:
+            old = float(self.s.get("tts", "volume") or 1.0)
+            new = round(max(0.2, min(1.5, old + volume)), 2)
+            patch["tts"]["volume"] = new
+            replies.append(f"Громкость голоса: {round(new * 100)}%.")
+        if engine:
+            if engine == "remote" and not (self.s.get("tts", "remote", "base_url") or self.s.get("cloud", "account")):
+                self._say_quick("Серверного голоса пока нет в настройках. Выберите его в разделе «Голос».", text)
+                return True
+            if engine == "elevenlabs" and not self.s.get("tts", "eleven", "api_key"):
+                self._say_quick("Для ElevenLabs сначала добавьте ключ в разделе «Голос».", text)
+                return True
+            patch["tts"]["engine"] = engine
+            replies.append({"espeak": "системный голос", "vosk": "голос Vosk", "piper": "голос Piper", "remote": "голос Dewiar", "elevenlabs": "голос ElevenLabs"}[engine].capitalize() + ".")
+        if text_only:
+            patch["tts"]["text_only"] = True
+            replies.append("Оставляю ответы только текстом.")
+        self.s.update(patch)
+        self.apply_engines()
+        self.emit("settings", settings=self.s.snapshot())
+        self._voice_control_pending = False
+        self._say_quick(" ".join(replies), text)
+        return True
+
     def go_sleep(self, word="", media=True):
         """Замолчать и уснуть до следующего имени: без «слушаю», без продолжения разговора. Звенит будильник —
         выключить; media и слово-«стоп» — ещё и поставить музыку на паузу."""

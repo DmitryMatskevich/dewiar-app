@@ -494,6 +494,7 @@ class RemoteMixin:
             voice.update(voice_override)
         fx_name = fx_override or self._fx_name(voice)
         pitch = voicefx.pitch_of(fx_name)
+        voice_gain = max(0.2, min(1.5, float(self.s.get("tts", "volume") or 1.0)))
         ready = queue.Queue(maxsize=2)                  # готовящиеся фразы: ("say", s, text, chunks) | ("skip", s) | ("sync", ev) | None
         done = threading.Event()                        # звук закончил (отмена или конец) — синтезу больше не ждать
 
@@ -631,6 +632,7 @@ class RemoteMixin:
                         play_rate = int(round(rate * pitch))
                         if not started:
                             self.player.start(play_rate)
+                            self.player.gain = voice_gain
                             fx = voicefx.VoiceFX(fx_name, rate)
                             started = True
                             self.set_state("speaking")
@@ -638,6 +640,7 @@ class RemoteMixin:
                             flush_fx()
                             self.player.finish()
                             self.player.start(play_rate)
+                            self.player.gain = voice_gain
                             fx = voicefx.VoiceFX(fx_name, rate)
                         if not self.player.write(fx.process(pcm) if fx else pcm):
                             break
