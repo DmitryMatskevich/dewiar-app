@@ -555,6 +555,9 @@ input[type=radio]:checked::after { content: ""; width: 8px; height: 8px; border-
 .chip { border: 0; border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; background: rgba(255,255,255,.08); transition: background .2s; }
 .chip:hover { background: rgba(255,255,255,.15); }
 .chip.on { background: var(--brand); color: #fff; }
+.voice-preview-bar { display:flex; align-items:end; gap:10px; flex-wrap:wrap; margin:14px 0 6px; }
+.voice-preview-bar .f { flex:1 1 360px; }
+.voice-preview-bar .btn { flex:none; margin-bottom:1px; }
 
 .opt { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 0; border-radius: 16px; background: var(--frost); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); cursor: pointer; margin-bottom: 10px; }
 .opt.on { background: var(--frost-hi); box-shadow: 0 10px 30px -18px rgba(0,0,0,.7); }

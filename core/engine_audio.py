@@ -296,7 +296,9 @@ class AudioMixin:
                 self._vosk_retry_at = time.monotonic() + wait
                 log.warning("Vosk TTS не загрузился (%d-й раз, снова через %d мин): %s", n, wait // 60, e)
                 if n == 1:                                              # сказать один раз, не каждые полчаса
-                    self.note(f"Новые голоса не загрузились ({err[:120]}) — говорю голосами Piper, попробую позже")
+                    # Техническая причина уже записана в журнал. Не показываем ModuleNotFoundError в карточке
+                    # ассистента: пользователь продолжает слышать Piper, а подробности доступны разработчику.
+                    self.note("")
             finally:
                 self._vosk_loading = False
                 self._loaded("voices")

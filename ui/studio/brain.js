@@ -428,6 +428,17 @@ function previewDone() {
   const b = previewing; if (!b) return; previewing = null;
   b.classList.remove("pv-wait", "pv-play"); const tag = b.querySelector(".pv"); if (tag) tag.remove();
 }
+function voicePreviewSample() {
+  const own = $("#voice-preview-text")?.value.trim();
+  if (own) return own.slice(0, 600);
+  const chat = $$("#ch-msgs .cl-m:not(.ch-live)").at(-1);
+  return (chat?.innerText || "Здравствуйте! Я ваш голосовой помощник. Чем могу помочь?").replace(/\s+/g, " ").trim().slice(0, 600);
+}
+$("#voice-preview-chat")?.addEventListener("click", () => {
+  const chat = $$("#ch-msgs .cl-m:not(.ch-live)").at(-1);
+  if (chat) { $("#voice-preview-text").value = chat.innerText.replace(/\s+/g, " ").trim().slice(0, 600); toast("Взяла текст последнего сообщения из чата"); }
+  else toast("Откройте раздел «Чат» и выберите сообщение для проверки");
+});
 core.on("state", e => {
   if (!previewing) return;
   if (e.state === "speaking") { previewing.classList.remove("pv-wait"); previewing.classList.add("pv-play"); const tag = previewing.querySelector(".pv"); if (tag) tag.textContent = " · звучит"; }
@@ -439,11 +450,11 @@ async function loadVosk() {
     const r = await core.call("vosk_voices"); vkSpeakers = r.speakers || [];
     const box = $("#vk-list");
     // модель голосов Vosk скачивается один раз; пока качается — спрашиваем снова каждые 5 с
-    if (!r.ready) { box.textContent = r.error ? `Не загрузились: ${r.error}. Пока говорит Piper.` : "Голоса скачиваются (один раз) — прогресс виден под виджетом. Пока говорит Piper."; if (r.loading) setTimeout(loadVosk, 5000); return; }
-    box.innerHTML = `<p class="hint" style="margin-bottom:8px">Голоса модели — нажмите, чтобы послушать. Персонажам они раздаются по полу автоматически, поменять — в карточке персонажа.</p><div class="chips">` +
-      vkSpeakers.map(v => `<button class="chip" data-vk="${v.id}">▶ Голос ${v.id + 1} · ${v.gender === "male" ? "мужской" : "женский"}</button>`).join("") + `</div>`;
-    $$("#vk-list [data-vk]").forEach(b => b.onclick = () => previewVoice(b, { text: "Здравствуйте! Я ваш голосовой помощник. Чем могу помочь?", voice: { vosk: +b.dataset.vk, prefer: "" } }));
-  } catch (e) { $("#vk-list").textContent = e.message; }
+    if (!r.ready) { box.textContent = r.error ? "Голоса Vosk TTS недоступны — пока говорит Piper. Подробности записаны в журнале." : "Голоса скачиваются (один раз) — прогресс виден под виджетом. Пока говорит Piper."; if (r.loading) setTimeout(loadVosk, 5000); return; }
+    box.innerHTML = `<p class="hint" style="margin-bottom:8px">Нажмите ▶ у любого голоса, чтобы прослушать выбранный текст. Персонажам голоса раздаются по полу автоматически, поменять — в карточке персонажа.</p><div class="chips">` +
+      vkSpeakers.map(v => `<button class="chip" data-vk="${v.id}" title="Прослушать голос"><span aria-hidden="true">▶</span> Голос ${v.id + 1} · ${v.gender === "male" ? "мужской" : "женский"}</button>`).join("") + `</div>`;
+    $$("#vk-list [data-vk]").forEach(b => b.onclick = () => previewVoice(b, { text: voicePreviewSample(), voice: { vosk: +b.dataset.vk, prefer: "" } }));
+  } catch (e) { $("#vk-list").textContent = "Не удалось получить список голосов. Пока говорит Piper."; }
 }
 function renderFx() {
   const cur = S.tts.fx || "persona";
