@@ -11,9 +11,10 @@
     if (css) return; css = true;
     const s = document.createElement("style");
     s.textContent = `
-      .dwq-back { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 20px;
+      .dwq-back { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; box-sizing: border-box; z-index: 9999; display: grid; place-items: center; padding: 20px;
         background: rgba(10,12,20,.32); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); opacity: 0; transition: opacity .15s; }
       .dwq-back.on { opacity: 1; }
+      .dwq-back::backdrop { background: transparent; }
       .dwq { width: min(420px, 100%); border-radius: 20px; padding: 20px 20px 16px; color: var(--ink, #ECEEF4);
         background: var(--dwq-bg, #1b1c27); box-shadow: 0 24px 60px -20px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06);
         font: 14.5px/1.5 "Manrope", "Ubuntu", "Segoe UI", sans-serif; transform: translateY(6px) scale(.985); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
@@ -37,7 +38,8 @@
     if (window.DEWIAR_AUTO_ASK) return Promise.resolve(input ? (window.DEWIAR_AUTO_ASK === true ? input.value : window.DEWIAR_AUTO_ASK) : true);  // проверки (tests/)
     style();
     return new Promise((resolve) => {
-      const back = document.createElement("div"); back.className = "dwq-back";
+      // Native modal dialogs enter the top layer, above an already open RAM/Strata dialog.
+      const back = document.createElement("dialog"); back.className = "dwq-back";
       const box = document.createElement("div"); box.className = "dwq"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");
       const p = document.createElement("p"); p.textContent = text; box.appendChild(p);
       let inp = null;
@@ -49,7 +51,8 @@
       if (opts && opts.only) no.style.display = "none";
       row.append(no, yes); box.appendChild(row); back.appendChild(box); document.body.appendChild(back);
       const prev = document.activeElement;
-      const done = (v) => { back.classList.remove("on"); document.removeEventListener("keydown", key, true); setTimeout(() => back.remove(), 160);
+      let finished = false;
+      const done = (v) => { if (finished) return; finished = true; document.removeEventListener("keydown", key, true); back.close(); back.remove();
         try { prev && prev.focus && prev.focus(); } catch (e) { } resolve(v); };
       const key = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(input ? null : false); }
         else if (e.key === "Enter" && (!inp || document.activeElement === inp || document.activeElement === yes)) { e.preventDefault(); e.stopPropagation(); done(input ? inp.value : true); } };
@@ -57,16 +60,19 @@
       no.onclick = () => done(input ? null : false);
       yes.onclick = () => done(input ? inp.value : true);
       back.onmousedown = (e) => { if (e.target === back) done(input ? null : false); };
-      requestAnimationFrame(() => { back.classList.add("on"); (inp || yes).focus(); if (inp) inp.select(); });
+      back.addEventListener("cancel", e => { e.preventDefault(); done(input ? null : false); });
+      back.showModal();
+      requestAnimationFrame(() => { if (finished) return; back.classList.add("on"); (inp || yes).focus(); if (inp) inp.select(); });
     });
   }
   function messageStyle() {
     if (document.getElementById("dw-message-style")) return;
     const s = document.createElement("style"); s.id = "dw-message-style";
     s.textContent = `
-      .dwm-back { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 20px;
+      .dwm-back { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; border: 0; box-sizing: border-box; z-index: 10000; display: grid; place-items: center; padding: 20px;
         background: rgba(10,12,20,.34); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); opacity: 0; transition: opacity .16s; }
       .dwm-back.on { opacity: 1; }
+      .dwm-back::backdrop { background: transparent; }
       .dwm { width: min(680px, 100%); max-height: min(78vh, 720px); overflow: auto; border-radius: 22px; padding: 24px;
         color: var(--ink, #24324a); background: var(--panel, #f4f7fc); box-shadow: 0 24px 70px -24px rgba(0,0,0,.52), 0 0 0 1px rgba(30,50,90,.12);
         font: 15px/1.55 "Manrope", "Ubuntu", "Segoe UI", sans-serif; transform: translateY(8px) scale(.985); transition: transform .18s cubic-bezier(.2,.8,.2,1); }
@@ -103,8 +109,8 @@
     const body = String(text == null ? "" : text);
     const full = [title, body, steps.length ? "Шаги:\n" + steps.map((x, i) => `${i + 1}. ${x}`).join("\n") : ""].filter(Boolean).join("\n\n");
     return new Promise(resolve => {
-      const back = document.createElement("div"); back.className = "dwm-back";
-      const box = document.createElement("section"); box.className = "dwm"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-labelledby", "dwm-title");
+      const back = document.createElement("dialog"); back.className = "dwm-back";
+      const box = document.createElement("div"); box.className = "dwm"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-labelledby", "dwm-title");
       const heading = document.createElement("h2"); heading.id = "dwm-title"; heading.textContent = title;
       const p = document.createElement("p"); p.className = "dwm-text"; p.textContent = body;
       box.append(heading, p);
@@ -117,11 +123,13 @@
       actions.append(copy, close); box.append(status, actions); back.append(box); document.body.append(back);
       const previous = document.activeElement;
       let finished = false;
-      const done = () => { if (finished) return; finished = true; back.classList.remove("on"); document.removeEventListener("keydown", key, true); setTimeout(() => back.remove(), 160); try { previous?.focus?.(); } catch (e) {} resolve(true); };
+      const done = () => { if (finished) return; finished = true; document.removeEventListener("keydown", key, true); back.close(); back.remove(); try { previous?.focus?.(); } catch (e) {} resolve(true); };
       const key = e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(); } };
       document.addEventListener("keydown", key, true); close.onclick = done; back.onmousedown = e => { if (e.target === back) done(); };
       copy.onclick = async () => { copy.disabled = true; try { await clipboard(full); status.textContent = "Текст сообщения скопирован."; } catch (e) { status.textContent = "Не удалось скопировать. Выделите текст вручную."; } finally { copy.disabled = false; } };
-      requestAnimationFrame(() => { back.classList.add("on"); close.focus(); });
+      back.addEventListener("cancel", e => { e.preventDefault(); done(); });
+      back.showModal();
+      requestAnimationFrame(() => { if (finished) return; back.classList.add("on"); close.focus(); });
     });
   }
   window.ask = (text, opts) => open(text, opts, null);

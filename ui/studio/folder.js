@@ -254,6 +254,10 @@ async function openFile(path) {
       <button class="btn small" id="f-app">Открыть</button>${["README.md", "Память/Обо мне.md", "Напоминания.md"].includes(path) || path.startsWith("Задачи/") ? "" : '<button class="btn small" id="f-del" title="В корзину">Удалить</button>'}<button class="btn small primary" id="f-dl">${page ? "Скачать HTML" : "Скачать"}</button>
       ${printable ? '<button class="btn small primary" id="f-pdf">PDF</button>' : ""}</div></div><div id="f-body">${body}</div>`;
     $("#f-view .fhead b").textContent = name;
+    // файл встречи — полоса переходов: итог ↔ текст записи ↔ прослушать ↔ кадры ↔ папка (studio/links.js)
+    if (typeof prMeetingBar === "function" && path.startsWith("Встречи/")) prMeetingBar(path).then(bar => {
+      if (bar && req === fReq && fCur === path) $("#f-view .fhead").after(bar);
+    }).catch(() => {});
     $("#f-app").onclick = () => core.call("ws_open", { path }).catch(e => toast(e.message));
     if (canEdit) {
       $("#f-save").onclick = fSave;

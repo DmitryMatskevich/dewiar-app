@@ -6,6 +6,7 @@
 Встроено в read_webpage (tools.py): модель и так открывает ссылки им — новых инструментов и правил в подсказке нет.
 Нет yt-dlp, нет субтитров — честно говорим, что есть (название, описание), и что конспект по звуку — фоновая задача."""
 import json
+import html
 import logging
 import re
 
@@ -111,7 +112,49 @@ def transcript(url, timeout=25):
     lines = _parse(r.text, track.get("ext"))
     if not lines:
         raise NoTranscript("субтитры пустые", meta)
-    return dict(meta, lang=lang, auto=auto, lines=lines)
+    return dict(meta, lang=lang, auto=auto, lines=lines, segments=caption_segments(r.text, track.get("ext")))
+
+
+def caption_segments(body, ext):
+    """Full cues with real end times for TXT/SRT task exports (never model-sized excerpts)."""
+    cues = []
+    if ext == 'json3':
+        for event in json.loads(body).get('events') or []:
+            text = ''.join(s.get('utf8', '') for s in event.get('segs') or [])
+            start = float(event.get('tStartMs') or 0) / 1000
+            end = start + float(event.get('dDurationMs') or 3000) / 1000
+            cues.append((start, end, text))
+    elif ext == 'srv3':
+        import xml.etree.ElementTree as ET
+        for node in ET.fromstring(body).iter('p'):
+            start = float(node.get('t', 0)) / 1000
+            cues.append((start, start + float(node.get('d', 3000)) / 1000, ''.join(node.itertext())))
+    else:
+        def seconds(value):
+            parts = value.replace(',', '.').split(':')
+            return sum(float(v) * 60 ** i for i, v in enumerate(reversed(parts)))
+        for block in re.split(r'\n\s*\n', body.replace('\r\n', '\n')):
+            lines = block.splitlines()
+            for i, line in enumerate(lines):
+                match = re.match(r'\s*([\d:. ,]+?)\s*-->\s*([\d:.,]+)', line)
+                if match:
+                    cues.append((seconds(match[1].strip()), seconds(match[2]), ' '.join(lines[i+1:])))
+                    break
+    out, previous, previous_end = [], [], -1
+    for start, end, text in cues:
+        words = html.unescape(re.sub(r'<[^>]*>', '', text)).split()
+        if not words:
+            continue
+        overlap = 0
+        if start < previous_end:
+            for n in range(min(len(previous), len(words)), 0, -1):
+                if previous[-n:] == words[:n]:
+                    overlap = n
+                    break
+        if words[overlap:]:
+            out.append((start, max(start + .001, end), ' '.join(words[overlap:])))
+        previous, previous_end = words, end
+    return out
 
 
 def for_model(url, tr):

@@ -8,6 +8,17 @@
    вызываются только $/$$ из core.js; escH и md (folder.js) нужны лишь при отрисовке, когда всё уже загружено. */
 /* ---------- задачи ---------- */
 let tCur = "", tTab = "plan", tTimer = null;
+let taskLinkOpened = false;
+function openLinkedTask() {
+  const id = new URLSearchParams(location.search).get('task');
+  if (!id || !/^[a-f0-9]{8}$/.test(id) || taskLinkOpened) return;
+  taskLinkOpened = true;
+  tCur = id;
+  document.querySelector('nav button[data-p="tasks"]')?.click();
+  openTask(id);
+}
+core.on('hello', openLinkedTask);
+if (core.connected) setTimeout(openLinkedTask, 0);
 const taskTeamDrafts = new Map();
 const COUNCIL_STATES = {pending:"Ожидает обсуждения",discussing:"Модели обсуждают план",evaluating:"Оценщик проверяет закрытие замечаний",agreed:"Обсуждение завершено и план согласован",no_consensus:"Консенсус не достигнут",blocked:"Участник или оценщик недоступен",cancelled:"Обсуждение остановлено",budget_exhausted:"Время обсуждения истекло"};
 function taskTeamEditor(prefix, team = {}, locked = false) {
@@ -80,6 +91,45 @@ function renderDiff(d) {
     return c === "file" ? `<div class="file">${escH(l.replace(/^diff --git a\/(.*) b\/.*/, "$1"))}</div>` : (l.startsWith("index ") || l.startsWith("+++") || l.startsWith("---")) ? "" : `<div class="${c}">${escH(l) || " "}</div>`; }).join("")}</div>`;
 }
 let tOpenedFor = "", tOutSel = "";   // для какой задачи уже выбрана вкладка по умолчанию; выбранный файл результата
+let taskViewVersion = 0;
+const TASK_COPY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const TASK_SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
+const TASK_DELETE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V5a1.5 1.5 0 0 1 1.5-1h2a1.5 1.5 0 0 1 1.5 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>';
+function taskCopySource(button, text, truncated = false, empty = "В этой вкладке пока нет текста для копирования") {
+  if (!button?.isConnected) return;
+  button._copyText = String(text || ""); button._copyTruncated = !!truncated;
+  button.disabled = !button._copyText.trim();
+  button.title = button.disabled ? empty : "Скопировать выделенный текст этой вкладки; если ничего не выделено — весь её текст. Для Markdown и кода сохраняется исходное оформление." + (truncated ? " Файл большой: доступен только загруженный фрагмент, не весь файл." : "");
+  button.setAttribute('aria-label', button.disabled ? empty : 'Скопировать текст открытой вкладки задачи');
+}
+function wireTaskCopy(t, tab) {
+  const button = $('#t-copy'), body = $('#t-content');
+  button.hidden = tab === 'team';
+  const fields = {plan:'plan',notebook:'notebook',journal:'journal',summary:'summary',diff:'diff',discussion:'discussion',team_review:'team_review'};
+  taskCopySource(button, fields[tab] ? t[fields[tab]] : '', false, tab === 'results' ? 'Текст результата загружается; для изображений, аудио и видео используйте текстовую расшифровку' : undefined);
+  button.onpointerdown = e => e.preventDefault(); // preserve an existing text selection when clicking the icon
+  button.onclick = async () => {
+    const selection = window.getSelection();
+    const selected = selection && !selection.isCollapsed && body.contains(selection.anchorNode) && body.contains(selection.focusNode) ? selection.toString() : '';
+    const text = selected || button._copyText;
+    if (!text?.trim()) return;
+    const truncated = !selected && button._copyTruncated;
+    button.disabled = true;
+    try {
+      // The shared Studio clipboard helper is also used by chat message buttons.
+      await chatCopyText(text);
+      toast(truncated ? 'Скопирован загруженный фрагмент. Полный файл откройте в его программе.' : selected ? 'Выделенный текст скопирован' : 'Текст скопирован', truncated ? 5000 : 1800);
+    } catch (e) { toast(e.message || 'Не удалось скопировать текст', 5000, 'bad'); }
+    finally { if (button.isConnected) button.disabled = !button._copyText?.trim(); }
+  };
+}
+function taskHtmlText(html) {
+  const doc = new DOMParser().parseFromString(html || '', 'text/html');
+  doc.querySelectorAll('script,style,noscript,iframe,template').forEach(e => e.remove());
+  doc.querySelectorAll('br').forEach(e => e.replaceWith(doc.createTextNode('\n')));
+  doc.querySelectorAll('p,div,section,article,h1,h2,h3,h4,h5,h6,li,tr').forEach(e => e.append(doc.createTextNode('\n')));
+  return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+}
 /* план — живым чек-листом: сделано ✓, текущий пункт крутится, остальные ждут */
 function renderPlan(text, live, activity) {
   const lines = (text || "").split("\n"), items = [], rest = [];
@@ -100,8 +150,11 @@ function outUrl(t, rel) { const p = (t.dir + "/" + rel).replace(/\\/g, "/"); ret
    («Not allowed to load local resource») — там страницу и SVG берём текстом через ws_read, картинку покажет своя программа */
 const OUT_FILE_OK = location.protocol === "file:";
 function renderOutputs(t) {
-  const outs = t.outputs || []; if (!outs.find(o => o.path === tOutSel)) tOutSel = (outs[outs.length - 1] || {}).path || "";
-  return `<div class="outs">${outs.slice().reverse().map(o => { const ext = o.path.split(".").pop().toLowerCase();
+  const outs = t.outputs || [];
+  const preferred = t.workflow === 'media-transcription' ? (outs.slice().reverse().find(o => o.path.endsWith('/transcript.summary.md')) || outs.slice().reverse().find(o => o.path.endsWith('/transcript.clean.md')) || outs.slice().reverse().find(o => o.path.endsWith('/transcript.txt'))) : null;
+  if (!outs.find(o => o.path === tOutSel)) tOutSel = (preferred || outs[outs.length - 1] || {}).path || "";
+  const shown = t.workflow === 'media-transcription' ? outs.slice() : outs.slice().reverse();
+  return `<div class="outs">${shown.map(o => { const ext = o.path.split(".").pop().toLowerCase();
       return `<button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>`; }).join("")}</div>
     <div class="opane"><div class="obar"><span id="o-name"></span><span style="flex:1"></span>
       <button class="btn small" id="o-full">На весь экран</button><button class="btn small" id="o-open">Открыть</button><button class="btn small" id="o-dir">Папка</button>
@@ -126,18 +179,25 @@ async function wireOutputs(t) {
   $("#o-dl").onclick = () => dl(page ? "html" : "file", $("#o-dl"));
   $("#o-pdf").onclick = () => dl("pdf", $("#o-pdf"));
   $("#o-dir").onclick = () => core.call("ws_open", { path: dirRel + "/" + rel.split("/").slice(0, -1).join("/") }).catch(e => toast(e.message));
-  const ext = rel.split(".").pop().toLowerCase(), v = $("#o-view");
+  const ext = rel.split(".").pop().toLowerCase(), v = $("#o-view"), copy = $('#t-copy');
+  const copyResult = f => taskCopySource(copy, f.binary ? '' : page ? taskHtmlText(f.text) : f.text, f.truncated, 'У этого файла нет доступного текста. Для аудио и видео выберите расшифровку.');
   $("#o-full").style.display = ["html", "htm", "png", "jpg", "jpeg", "webp", "svg"].includes(ext) ? "" : "none";
   $("#o-full").onclick = () => { const el = v.firstElementChild; if (el) (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); };
   const openHint = `<p class="hint" style="padding:30px">Этот файл открывается в своей программе — нажмите «Открыть».</p>`;
   if (["html", "htm"].includes(ext)) {
-    if (OUT_FILE_OK) v.innerHTML = `<iframe src="${outUrl(t, rel)}" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>`;
+    if (OUT_FILE_OK) {
+      v.innerHTML = `<iframe src="${outUrl(t, rel)}" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>`;
+      try { copyResult(await core.call('ws_read', {path:dirRel + '/' + rel})); }
+      catch (e) { taskCopySource(copy, '', false, 'Не удалось прочитать текст результата: ' + e.message); }
+    }
     else try {
       const f = await core.call("ws_read", { path: dirRel + "/" + rel });
+      copyResult(f);
       v.innerHTML = `<iframe sandbox="allow-scripts allow-popups allow-forms"></iframe>${f.truncated ? '<p class="hint">Показано начало страницы — целиком она откроется по кнопке «Открыть».</p>' : ""}`;
       $("iframe", v).srcdoc = f.text || "";
-    } catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; }
+    } catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; taskCopySource(copy, '', false, 'Не удалось прочитать текст результата: ' + e.message); }
   } else if (["png", "jpg", "jpeg", "webp", "svg", "gif"].includes(ext)) {
+    taskCopySource(copy, '', false, 'Это изображение. Для копирования текста выберите текстовый результат задачи.');
     if (OUT_FILE_OK) v.innerHTML = `<img src="${outUrl(t, rel)}" alt="">`;
     else if (ext === "svg") try {
       const f = await core.call("ws_read", { path: dirRel + "/" + rel });
@@ -145,14 +205,23 @@ async function wireOutputs(t) {
     } catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; }
     else v.innerHTML = openHint;
   } else if (["md", "txt", "srt", "csv", "json", "py", "js", "css"].includes(ext)) {
-    try { const f = await core.call("ws_read", { path: dirRel + "/" + rel }); v.innerHTML = ext === "md" ? `<div class="md otext">${md(f.text || "")}</div>` : `<pre class="otext"></pre>`; if (ext !== "md") $("pre", v).textContent = f.text || ""; }
-    catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; }
-  } else v.innerHTML = openHint;
+    try { const f = await core.call("ws_read", { path: dirRel + "/" + rel }); copyResult(f); v.innerHTML = ext === "md" ? `<div class="md otext">${md(f.text || "")}</div>` : `<pre class="otext"></pre>`; if (ext !== "md") $("pre", v).textContent = f.text || "";
+      if (f.truncated) v.insertAdjacentHTML('beforeend', '<p class="hint">Показан и доступен для копирования только загруженный фрагмент. Полный файл откройте в его программе.</p>'); }
+    catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; taskCopySource(copy, '', false, 'Не удалось прочитать текст результата: ' + e.message); }
+  } else {
+    v.innerHTML = openHint;
+    if (['pdf','docx','odt'].includes(ext)) {
+      try { copyResult(await core.call('ws_read', {path:dirRel + '/' + rel})); }
+      catch (e) { taskCopySource(copy, '', false, 'Не удалось извлечь текст результата: ' + e.message); }
+    } else taskCopySource(copy, '', false, 'У этого файла нет доступного текста. Для аудио и видео выберите расшифровку.');
+  }
 }
 async function openTask(id) {
+  const version = ++taskViewVersion;
   tCur = id;
   try {
     const t = await core.call("task_get", { id });
+    if (version !== taskViewVersion || tCur !== id) return;
     // карточка перерисовывается целиком на каждое событие задачи — запоминаем набранный текст и фокус полей
     const keep = tOpenedFor === id ? ["t-msg", "t-ans"].map(k => [k, $("#" + k) ? $("#" + k).value : "", document.activeElement && document.activeElement.id === k]) : [];
     const outs = t.outputs || [];
@@ -169,7 +238,8 @@ async function openTask(id) {
       else acts.push(`<button class="btn primary" data-a="task_resume">Продолжить</button>`);
     }
     if (t.project && t.changes && t.changes.length && !["running", "waiting", "sleeping"].includes(t.status)) acts.push(`<button class="btn primary" data-a="task_accept">Принять изменения</button><button class="btn" data-a="task_discard">Отклонить</button>`);
-    acts.push(`<button class="btn danger" data-a="task_delete">Удалить</button>`);
+    const deleteAction = `<button class="btn small danger t-delete" data-a="task_delete" title="Удалить задачу вместе с её папкой" aria-label="Удалить задачу">${TASK_DELETE_ICON}</button>`;
+    if (t.status === "waiting") acts.push(deleteAction);
     const prog = t.progress && t.progress[1] ? ` · план ${t.progress[0]}/${t.progress[1]}` : "";
     let body = "";
     if (tTab === "plan") body = renderPlan(t.plan, ["running", "waiting"].includes(t.status), t.activity);
@@ -187,7 +257,7 @@ async function openTask(id) {
     const pr = t.status === "done" ? 1 : (t.progress && t.progress[1] ? t.progress[0] / t.progress[1] : 0);
     const mins = Math.max(0, Math.round((Date.now() - new Date(t.created)) / 60000));
     const live = ["running", "waiting"].includes(t.status);
-    $("#t-view").innerHTML = `<div class="fhead"><div class="t"><b></b><span><i class="badge ${t.status}">${t.status_ru}</i>шагов ${t.steps}${prog}${t.project ? " · " + escH(t.project) : ""}</span></div></div>
+    $("#t-view").innerHTML = `<div class="fhead"><div class="t"><b></b><span><i class="badge ${t.status}">${t.status_ru}</i>шагов ${t.steps}${prog}${t.project ? " · " + escH(t.project) : ""}</span></div><button type="button" class="btn task-copy" id="t-copy" title="Скопировать текст открытой вкладки задачи" aria-label="Скопировать текст открытой вкладки задачи">${TASK_COPY_ICON}</button></div>
       <div class="tprog${live ? " live" : ""}"><div class="bar"><b style="width:${Math.max(2, pr * 100)}%"></b></div>
         <div class="tline">${live ? `<i class="tspin"></i>` : ""}<span>${t.status === "done" ? "готово" : live ? (escH(t.activity) || "думает…") : t.status_ru}</span><em>${t.progress && t.progress[1] ? `${t.progress[0]} из ${t.progress[1]} пунктов плана · ` : ""}${live ? `идёт ${mins} мин` : ""}</em></div></div>
       ${t.error ? `<p class="res bad" style="margin-bottom:10px">${escH(t.error)}</p>` : ""}
@@ -195,16 +265,18 @@ async function openTask(id) {
       ${t.council?.judge ? `<p class="hint">Оценщик: ${escH(t.council.judge.name)} · проверок ${t.council.judge_calls || 0}${t.council.evaluation?.reason ? ' · '+escH(t.council.evaluation.reason) : ''}</p>` : ''}
       ${t.status === "sleeping" ? `<div class="twait">⏳ <b>${escH(t.status_ru)}</b>${t.wait_reason ? " — " + escH(t.wait_reason) : ""}. Напишите задаче ниже — продолжит сразу.</div>` : ""}
       ${t.status === "waiting" ? `<div class="tq"><b>Вопрос:</b> ${escH(t.question)}<div class="actions" style="margin-top:8px"><input type="text" id="t-ans" placeholder="Ваш ответ" style="flex:1"><button class="btn primary" id="t-ansgo">Ответить</button></div></div>` : ""}
-      <div class="tabs">${tabs.map(([k, n]) => `<button data-tab="${k}" class="${k === tTab ? "on" : ""}">${n}</button>`).join("")}</div>${body}
-      ${t.status !== "waiting" ? `<div class="tmsg"><input type="text" id="t-msg" placeholder="${t.status === "done" ? "Дополнить задачу: что ещё сделать…" : "Написать задаче: новые сведения, уточнение, просьба…"}"><button class="btn" id="t-msggo">Отправить</button></div>` : ""}
+      <div class="tabs">${tabs.map(([k, n]) => `<button data-tab="${k}" class="${k === tTab ? "on" : ""}">${n}</button>`).join("")}</div><div id="t-content">${body}</div>
+      ${t.status !== "waiting" ? `<div class="tmsg"><input type="text" id="t-msg" placeholder="${t.status === "done" ? "Дополнить задачу: что ещё сделать…" : "Написать задаче: новые сведения, уточнение, просьба…"}" aria-label="Команда выбранной задаче"><div class="tmsg-foot"><button class="btn small primary tmsg-send" id="t-msggo" title="Отправить команду задаче" aria-label="Отправить команду">${TASK_SEND_ICON}</button><button class="btn small tmsg-copy" id="t-msgcopy" title="Скопировать текст открытой вкладки задачи" aria-label="Скопировать текст открытой вкладки задачи">${TASK_COPY_ICON}</button><span></span>${deleteAction}</div></div>` : ""}
       <div class="actions">${acts.join("")}</div>`;
     $("#t-view .fhead b").textContent = t.title;
+    wireTaskCopy(t, tTab);
     keep.forEach(([k, v, f]) => { const el = $("#" + k); if (el && v) el.value = v; if (el && f) el.focus(); });
     if ($("#t-msggo")) {
       const send = () => { const v = $("#t-msg").value.trim(); if (!v) return;
         core.call("task_tell", { id, text: v }).then(() => { toast("Передал задаче"); loadTasks(); openTask(id); }).catch(e => toast(e.message)); };
       $("#t-msggo").onclick = send; $("#t-msg").onkeydown = (e) => { if (e.key === "Enter") send(); };
     }
+    if ($("#t-msgcopy")) $("#t-msgcopy").onclick = () => $("#t-copy")?.click();
     if (tTab === "results") wireOutputs(t);
     if (tTab === "team") {
       wireTaskTeam('edit',["running","waiting","sleeping"].includes(t.status),()=>{try {taskTeamDrafts.set(id,readTaskTeam('edit'));} catch(e) {toast(e.message);}});

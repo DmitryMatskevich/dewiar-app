@@ -705,6 +705,8 @@ function render() {
 }
 function md(t) {
   return esc(t).replace(/\[([^\]]+)\]\(dwr-file:([^)]+)\)/g, '<a href="#" class="meeting-file" data-file="$2">$1</a>')
+    // папки встречи — ссылки file:// (их же открывают внешние просмотрщики Markdown); здесь — только внутри «Встречи»
+    .replace(/\[([^\]]+)\]\(file:\/\/([^)\s]+)\)/g, '<a href="#" class="meeting-file meeting-dir" data-abs="$2">$1</a>')
     .replace(/`((?:Аудио|Расшифровки)\/[^`]+)`/g, (_, p) => `<a href="#" class="meeting-file" data-file="${encodeURIComponent(p)}">${p}</a>`)
     .replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/^\*(.*)\*$/gm, "<em>$1</em>").replace(/^_(.*)_$/gm, "<em>$1</em>")
@@ -712,12 +714,23 @@ function md(t) {
     .replace(/^(?!<h|<ul|<li|<em)(.+)$/gm, "<p>$1</p>").replace(/\n+/g, "");
 }
 let meetingSummaryPath = "", videoExportBusy = false, videoExportResult = null;
+function meetingRel(uriPath) {
+  // file:///…/Встречи/Аудио/ → «Аудио» относительно папки итога; вне «Встреч» — пусто
+  let abs = "";
+  try { abs = decodeURIComponent(uriPath).replace(/\/+$/, ""); } catch (e) { return ""; }
+  const root = String(meetingSummaryPath || "").replace(/\/[^/]*$/, "");
+  if (!root) return "";
+  if (abs === root) return ".";
+  return abs.startsWith(root + "/") ? abs.slice(root.length + 1) : "";
+}
 function bindMeetingFiles(root) {
   root.querySelectorAll("a.meeting-file").forEach(a => a.onclick = async (event) => {
     event.preventDefault();
     const apiObject = api();
     if (!apiObject || !apiObject.open_meeting_file) return;
-    try { await apiObject.open_meeting_file(decodeURIComponent(a.dataset.file || ""), meetingSummaryPath); }
+    const rel = a.dataset.abs ? meetingRel(a.dataset.abs) : decodeURIComponent(a.dataset.file || "");
+    if (!rel) { const out = $("#meeting-video-result"); if (out) out.textContent = "Папка вне «Встреч» — откройте её в Finder"; return; }
+    try { await apiObject.open_meeting_file(rel, meetingSummaryPath); }
     catch (e) { const out = $("#meeting-video-result"); if (out) out.textContent = e.message || "Файл встречи не открылся"; }
   });
 }

@@ -2,6 +2,7 @@
 show → «Результаты», transcribe (расшифровка своим слухом с метками времени, .txt и .srt), download; пути — только
 внутри папки задачи; живой статус по-русски; импортированные навыки и презентация (slides) на месте."""
 import json, os, shutil, subprocess, sys, tempfile, threading, http.server
+from types import SimpleNamespace
 from pathlib import Path
 tmp = Path(tempfile.mkdtemp())
 os.environ.update(DEWIAR_CONFIG_DIR=str(tmp / "cfg"), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_WORKSPACE_DIR=str(tmp / "ws"))
@@ -18,11 +19,14 @@ class Host:
     def __init__(self):
         self.s = Settings(tmp / "cfg/settings.json"); self.workspace = Workspace(self.s); self.events = []; self.asked = []
         self.answer = True
+        self.gigaam = SimpleNamespace(model_name='gigaam-v3-e2e-rnnt', ready=True)
     def emit(self, kind, **kw): self.events.append((kind, kw))
     def persona_name(self): return "Агент"
     def code_auto_run(self): return False
     def confirm(self, q, timeout=120): self.asked.append(q); return self.answer
-    def transcribe_file(self, p, cancel=None): return [(0.0, 2.5, "Привет, это проверка."), (2.5, 61.2, "Вторая фраза.")]
+    def transcribe_file(self, p, cancel=None, stt=None, allow_fallback=True, on_progress=None):
+        assert stt is self.gigaam and not allow_fallback
+        return [(0.0, 2.5, "Привет, это проверка."), (2.5, 61.2, "Вторая фраза.")]
 
 
 h = Host()
@@ -51,8 +55,10 @@ ok(t.data["outputs"][0] == {**t.data["outputs"][0], "path": "outputs/app.html", 
    "show → в «Результатах» и студия узнала")
 (t.dir / "downloads").mkdir(); (t.dir / "downloads/лекция.mp4").write_bytes(b"x")
 r = w("transcribe", path="downloads/лекция.mp4")
-srt = (t.dir / "outputs/лекция.srt").read_text(encoding="utf-8")
-ok("[00:00] Привет" in r and "[00:02] Вторая" in (t.dir / "outputs/лекция.txt").read_text(encoding="utf-8")
+report = json.loads((t.dir / 'outputs/transcripts/batch-results.json').read_text())
+folder = t.dir / 'outputs' / Path(report[0]['text']).parent
+srt = (folder / 'transcript.srt').read_text(encoding='utf-8')
+ok("Обработано: 1 из 1" in r and "[00:00:02] Вторая" in (folder / "transcript-timed.txt").read_text(encoding="utf-8")
    and "00:00:02,500 --> 00:01:01,200" in srt, "transcribe: текст с метками времени, .txt и .srt")
 www = tmp / "www"; www.mkdir(); (www / "doc.pdf").write_bytes(b"%PDF-1.4 test")
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=str(www), **k))

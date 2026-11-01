@@ -38,6 +38,55 @@ class ControlTest(unittest.TestCase):
         with self.assertRaises(mc.AppNotFound):mc.resolve('Safarii',[self.row])
         with self.assertRaisesRegex(ValueError,'Уточните'):mc.resolve('Safari',[self.row,self.row])
 
+    def test_application_command_variants(self):
+        cases={
+            'open':['Открыть приложение Safari', 'Запустить программу Safari', 'Отрыть приложение Safari',
+                    'Пожалуйста, открой Safari', 'Можешь запустить программу «Safari», пожалуйста'],
+            'quit':['Закрыть программу Safari', 'Отключи приложение Safari', 'Отключить программу Safari',
+                    'Выключи программу Safari', 'Заверши Safari'],
+            'minimize':['Свернуть приложение Safari', 'Сверни программу Safari', 'Свернуть программы Safari'],
+            'focus':['Фокус на программу Safari', 'Фокус приложение Safari', 'Активная на программу Safari',
+                     'Активируй приложение Safari', 'Переключись на программу Safari',
+                     'Сделай программу Safari активной', 'Сделай активным приложение Safari',
+                     'Переведи фокус на приложение Safari'],
+        }
+        for action,texts in cases.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    self.assertEqual(mc.parse(text),{'action':action,'application':'Safari'})
+        for text in ['Не закрывай Safari', 'Как свернуть программу Safari?', 'Сверни все программы',
+                     'Закрыть приложение', 'Фокус на программу', 'Сверни вкладку Safari',
+                     'Отключи доступ к файлам', 'Сделай Safari активной и закрой Telegram']:
+            with self.subTest(text=text):self.assertIsNone(mc.parse(text))
+
+    def test_minimize_windows_and_verify_without_quitting(self):
+        state={'one':False,'two':True}
+        def get(element,name):return state[element] if name=='AXMinimized' else False
+        def setval(element,name,value):state[element]=value
+        with patch.object(mc,'running',return_value=[self.row]), \
+             patch.object(mc,'permission',return_value={'granted':True}), \
+             patch.object(mc,'windows',return_value=('root',[{'_element':w} for w in state])), \
+             patch.object(mc,'_get',side_effect=get),patch.object(mc,'_set',side_effect=setval) as setter:
+            result=mc.execute({'action':'minimize','application':'Safari'})
+        self.assertEqual(result['windows'],2)
+        setter.assert_called_once_with('one','AXMinimized',True)
+        self.app.terminate.assert_not_called();self.app.forceTerminate.assert_not_called()
+
+    def test_minimize_permission_fullscreen_and_failed_verification(self):
+        with patch.object(mc,'running',return_value=[self.row]), \
+             patch.object(mc,'permission',return_value={'granted':False}),patch.object(mc,'windows') as windows:
+            with self.assertRaises(PermissionError):mc.execute({'action':'minimize','application':'Safari'})
+            windows.assert_not_called()
+        with patch.object(mc,'running',return_value=[self.row]), \
+             patch.object(mc,'permission',return_value={'granted':True}), \
+             patch.object(mc,'windows',return_value=('root',[{'_element':'w'}])),patch.object(mc,'_set') as setter:
+            with patch.object(mc,'_get',return_value=True):
+                with self.assertRaisesRegex(ValueError,'полноэкранного'):mc.execute({'action':'minimize','application':'Safari'})
+                setter.assert_not_called()
+            with patch.object(mc,'_get',return_value=False):
+                with self.assertRaisesRegex(ValueError,'не подтвердило'):mc.execute({'action':'minimize','application':'Safari'})
+            with self.assertRaisesRegex(ValueError,'номер окна'):mc.execute({'action':'minimize','application':'Safari','window':0})
+
     def test_screens_negative_origins_and_small_target(self):
         left=display(2,-1280,-500,1280,720)
         source,target=mc.choose_screen('левый',[self.screen,left],self.rect)
@@ -128,6 +177,7 @@ class ControlTest(unittest.TestCase):
         self.assertIn('click', tools.TOOLS['control_mac_app'][1]['properties']['action']['enum'])
         self.assertIn('type', tools.TOOLS['control_mac_app'][1]['properties']['action']['enum'])
         self.assertIn('key', tools.TOOLS['control_mac_app'][1]['properties']['action']['enum'])
+        self.assertIn('minimize', tools.TOOLS['control_mac_app'][1]['properties']['action']['enum'])
 
     def test_type_action_sets_accessibility_value_after_inspect(self):
         target = object(); window = object()
@@ -181,6 +231,21 @@ class ControlTest(unittest.TestCase):
         engine._say_quick.assert_called_once_with('Запуск запрошен','Открой Safari')
         with patch.object(tools,'t_control_mac_app',side_effect=mc.AppNotFound('unknown')):
             self.assertFalse(MusicMixin._pc_cmd(engine,'Открой неизвестное'))
+
+    def test_new_commands_route_through_existing_permissions(self):
+        from engine_base import window_phrase
+        engine=SimpleNamespace(toolbox=Mock(),_say_quick=Mock())
+        for text,action in [('Отключи программу Safari','quit'),('Сверни приложение Safari','minimize'),
+                            ('Фокус на программу Safari','focus'),('Запустить программу Safari','open')]:
+            with self.subTest(text=text):
+                self.assertIsNone(window_phrase(text))
+                for policy in [(False,False),(True,True),(True,False)]:
+                    engine.toolbox.policy.return_value=policy
+                    with patch.object(tools,'t_control_mac_app',return_value='Готово') as run:
+                        self.assertEqual(MusicMixin._pc_cmd(engine,text),policy==(True,False))
+                        if policy==(True,False):
+                            self.assertEqual(run.call_args.args[0],{'action':action,'application':'Safari'})
+                        else:run.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

@@ -19,6 +19,7 @@
 <script src="studio/theme.js"></script>
 <link rel="stylesheet" href="studio/context-help.css">
 <link rel="stylesheet" href="studio/contacts.css">
+<link rel="stylesheet" href="studio/voice-commands.css">
 </head>
 <body>
 <div id="upd"><div class="box">
@@ -60,7 +61,7 @@
 })();
 </script>
 <nav>
-  <div class="brand" id="agent-toggle" role="button" tabindex="0" aria-pressed="true" title="Показать окно агента. Повторное нажатие свернёт его и уберёт с экрана"><canvas id="brand"></canvas><div><b id="bname">Dewiar</b><span id="bsub">голосовой ассистент</span></div></div>
+  <div class="brand agent-sleeping" id="agent-toggle" role="button" tabindex="0" aria-pressed="false" title="Загрузить помощника и показать его окно"><canvas id="brand" aria-hidden="true"></canvas><b id="bname">Помощник</b></div>
   <button class="cchip" id="nav-cloud" style="display:none" title="ИИ-баланс: на сколько хватит моделей Dewiar. Нажмите — подробности и пополнение"><span>ИИ-баланс</span><em></em><i><b></b></i></button>
   <button data-p="home" class="cur" title="Сегодня и все приложения Dewiar">Главная</button>
   <div class="ng">Каждый день</div>
@@ -439,7 +440,7 @@
     <p class="lead">Большая работа в фоне: ассистент сам составляет план, выполняет шаги, пишет журнал и сообщает голосом, когда готово.
       Скажите «Агент, разберись…», «исправь в проекте…» — или поставьте задачу здесь. Для задач по коду он работает в копии проекта:
       изменения вы смотрите и принимаете сами.</p>
-    <div class="actions" style="margin:0 0 16px"><button class="btn primary" id="t-new">Новая задача</button></div>
+    <div class="actions" style="margin:0 0 16px"><button class="btn primary" id="t-new">Новая задача</button><button class="btn" data-transcribe-open>Транскрибировать</button></div>
     <div class="prof on" id="t-form" style="display:none;padding:16px 18px;margin-bottom:16px">
       <label class="f">Что сделать<textarea id="t-goal" placeholder="Например: в проекте сайта при отправке формы ошибка 500 — найди причину, исправь и проверь тестами"></textarea></label>
       <div class="row" style="margin-top:12px">
@@ -1339,6 +1340,7 @@
     <h2>Умения</h2>
     <div id="toollist"></div>
     <h2>Поиск в интернете</h2>
+    <div class="switch"><div>Страницы через браузер<span>Сайт закрыт защитой от ботов («Just a moment…», «Проверка браузера») или текст на нём рисует скрипт — ассистент откроет страницу в браузере в фоне: Chrome, Edge, Яндекс Браузер, Brave или Chromium, со своим отдельным профилем. Просит капчу или вход — спросит вас и откроет окно, проверку проходите вы.</span></div><label class="tg"><input type="checkbox" data-k="net.browser_pages"><i></i></label></div>
     <label class="f">Свой SearXNG (необязательно)<input type="url" placeholder="пусто — DuckDuckGo" data-k="tools.search_url"><span class="hint">Если держите свой поисковик SearXNG на сервере — укажите адрес, поиск станет приватным и стабильнее.</span></label>
     <h2>Напоминания</h2>
     <div id="remlist" class="hint">Все напоминания — на странице «Напоминания».</div>
@@ -1850,6 +1852,7 @@
 <script src="studio/capture.js"></script>
 <script src="studio/mic-permission.js"></script>
 <script src="studio/mac-apps.js"></script>
+<script src="studio/voice-commands.js"></script>
 <script src="assets/rich.js"></script>
 <script src="studio/chat.js"></script>
 <script src="studio/tricks.js"></script>
@@ -1858,5 +1861,7 @@
 <script src="assets/contact-suggestion.js"></script>
 <script src="studio/context-help.js"></script>
 <script src="studio/prompter.js"></script>
+<link rel="stylesheet" href="assets/transcribe-panel.css">
+<script src="assets/transcribe-panel.js"></script>
 </body>
 </html>

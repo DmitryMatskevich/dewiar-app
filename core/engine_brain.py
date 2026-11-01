@@ -768,7 +768,7 @@ class BrainMixin:
                 return self.vosk_stt.transcribe(r.stdout).strip()
             raise
 
-    def transcribe_file(self, path, cancel=None, chunk=22.0, stt=None):
+    def transcribe_file(self, path, cancel=None, chunk=22.0, stt=None, allow_fallback=True, on_progress=None):
         """Аудио или видео любой длины -> [(начало_с, конец_с, текст)]: режем по тихим местам на куски до chunk секунд
         (~22 с уверенно слышит GigaAM) и распознаём тем же слухом, что дома; не вышло — запасным Vosk.
         Работает долго (на чтение файла ffmpeg даётся до 30 мин); cancel прерывает между кусками."""
@@ -782,7 +782,7 @@ class BrainMixin:
                            capture_output=True, timeout=1800, **kw)
         if r.returncode or not r.stdout:
             raise RuntimeError("не получилось прочитать звук из файла: " + (r.stderr or b"").decode(errors="replace")[-200:])
-        for _ in range(180):                          # программа только запустилась — подождём слух (до 90 с)
+        for _ in range(180 if stt is None else 0):     # явно переданный распознаватель уже готов
             if getattr(self, "vosk_stt", None) is not None or getattr(self, "names_off", False) or self.stopping.is_set():
                 break
             time.sleep(0.5)
@@ -816,13 +816,15 @@ class BrainMixin:
                 try:
                     txt = stt.transcribe(pcm.tobytes()).strip()
                 except Exception as e:  # noqa: BLE001
-                    if getattr(self, "vosk_stt", None) and stt is not self.vosk_stt:
+                    if allow_fallback and getattr(self, "vosk_stt", None) and stt is not self.vosk_stt:
                         txt = self.vosk_stt.transcribe(pcm.tobytes()).strip()
                     else:
                         raise RuntimeError(f"распознавание: {e}") from e
                 if txt:
                     out.append((start / sr, end / sr, txt))
             start = end
+            if on_progress:
+                on_progress(end / sr, n / sr)
         return out
 
     def _tg_voice_reply(self, answer, bot=None):

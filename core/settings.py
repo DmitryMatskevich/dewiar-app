@@ -241,6 +241,7 @@ DEFAULTS = {
     # функций»): необязательное прячется из меню, пока его не включат. У новых — «Встречи», «Рядом» (радар) и «Суфлёр»
     # выключены, «Досуг» (игры) включён; у тех, кто уже пользуется Dewiar, всё остаётся как было (Settings.load).
     "features": {"meet": False, "near": False, "prompter": False, "games": True},
+    "voice_commands": {},  # встроенные команды и названия; пользовательские списки заменяют стандартные
     "tools": {"enabled": {}, "confirm": {}, "search_url": ""},   # пусто = как задумано по умолчанию
     "skills": {"disabled": [], "catalog_url": ""},   # каталог навыков с сайта (JSON)
     "plugins": {"on": {}},              # установленные плагины (core/plugins.py): id -> {at, values, jobs}
@@ -260,6 +261,7 @@ DEFAULTS = {
               "join": {}},      # заявка на Dewiar из программы: {id, secret, url} — ждём ключ (engine_brain._join_loop)   # ключ Dewiar Облака (dw-…): модели сервера Dewiar с зарядом в талерах
     "net": {"proxy": "", "dewiar": False, "web_via": True,   # прокси для серверов Dewiar, если провайдер блокирует dewiar.pro: свой (socks5://… или http://…) или «Использовать прокси Dewiar»
             "dewiar_secret": "", "dewiar_at": 0,                # прокси, выданный dewiar.pro, и когда получен (обновляется раз в 6 часов, engine_brain.py)
+            "browser_pages": True,                              # сайт с защитой от ботов — через настоящий браузер (browserpage.py)
             "lan": {}},         # дома — напрямую: {"public", "base", "id"} — папка сайта по имени и в домашней сети (engine_brain._lan_fetch)
     "music": {"service": "auto"},       # где включать музыку: auto (недавно открыта Яндекс Музыка — в ней, иначе радио) | radio | yandex | youtube
     "smarthome": {"client_id": ""},     # ID приложения Яндекс OAuth (iot:view, iot:control) для кнопки «Получить ключ»
@@ -348,6 +350,9 @@ class Settings:
 
     def update(self, patch: dict):
         """Наложить patch (как _merge) и сразу сохранить на диск."""
+        if 'voice_commands' in patch:
+            from voice_commands import validate
+            validate(patch['voice_commands'])
         if isinstance(patch.get('report'),dict) and 'server_url' in patch['report']:
             from reportdelivery import validate_url
             validate_url(patch['report']['server_url'])

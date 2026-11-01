@@ -120,6 +120,9 @@ class MacBridge(unittest.TestCase):
                 return self
         window = Mock()
         window.events.closed = Event()
+        window.events.shown = Event()
+        window.events.restored = Event()
+        window.events.minimized = Event()
         self.api._hud = None
         with patch("webview.create_window", return_value=window) as create:
             self.api.from_tray()

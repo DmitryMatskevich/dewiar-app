@@ -885,10 +885,37 @@ class Prompter:
     def _transcript_open(self, title):
         """Открыть обычный UTF-8 .txt, который пополняется во время встречи."""
         _root, _audio, root = self._meeting_dirs()
-        started = local_datetime((self.meeting or {}).get("started") or time.time())
         path = root / f"{self._meeting_base(title)}.txt"
         self._transcript_path = str(path)
-        path.write_text(f"# {title}\n# Начало: {started:%d.%m.%Y %H:%M}\n\n", encoding="utf-8")
+        path.write_text(self._transcript_header(title), encoding="utf-8")
+
+    def _transcript_header(self, title=None, note=""):
+        """Шапка текста записи: название, начало, все участники и что значат подписи «Вы»/«Собеседник»."""
+        m = self.meeting or {}
+        title = title or m.get("title") or "Встреча"
+        started = local_datetime(m.get("started") or time.time())
+        who = m.get("participants") or "не указаны (в тексте: «Вы» и «Собеседник»)"
+        rows = [f"# {title}", f"# Начало: {started:%d.%m.%Y %H:%M}", f"# Участники: {who}"]
+        if m.get("dual"):
+            rows.append("# Подписи: «Вы» — ваш микрофон, «Собеседник» — звук компьютера (все остальные участники)")
+        elif m.get("place") == "live":
+            rows.append("# Подписи: «Вы» и «Собеседник» различаются по голосу")
+        if note:
+            rows.append(f"# {note}")
+        return "\n".join(rows) + "\n\n"
+
+    def _transcript_set_participants(self, participants):
+        """После итога: вписать в шапку текста записи участников, найденных в разговоре."""
+        if not participants or not self._transcript_path:
+            return
+        try:
+            p = Path(self._transcript_path)
+            text = p.read_text(encoding="utf-8")
+            new = re.sub(r"(?m)^# Участники: .*$", lambda _m: f"# Участники: {participants}", text, count=1)
+            if new != text:
+                p.write_text(new, encoding="utf-8")
+        except OSError as exc:
+            log.info("🎬 Участники в текст записи не вписаны: %s", exc)
 
     def _transcript_write(self, line):
         path = Path(self._transcript_path) if self._transcript_path else None
@@ -1737,7 +1764,7 @@ class Prompter:
             # заполнен в реальном времени.
             try:
                 p = Path(self._transcript_path)
-                p.write_text(f"# {self.meeting.get('title', 'Встреча')}\n# Отложенная расшифровка\n\n", encoding="utf-8")
+                p.write_text(self._transcript_header(note="Расшифровано после встречи по аудиозаписи"), encoding="utf-8")
             except OSError:
                 pass
             for line in self.lines:
@@ -2369,6 +2396,38 @@ class Prompter:
         return self._ask_model(SUMMARY_SYSTEM, head + "\nВстреча длинная, расшифровка разбита на части. ЗАМЕТКИ ПО ЧАСТЯМ "
                                "(используй их как расшифровку):\n\n" + "\n\n".join(notes), max_tokens=1500)
 
+    def _folder_links(self, meeting_root, title):
+        """Ссылки на папки встречи: кадры, видео, дорожки, аудио, расшифровки, все встречи.
+
+        Папки ссылкой ``file://`` — так их открывают и окно встречи Dewiar (только внутри «Встречи»),
+        и внешние просмотрщики Markdown (Obsidian, Typora, VS Code) в Finder.
+        """
+        base = self._meeting_base(title)
+        session = Path(self._transcript_path).parent / Path(self._transcript_path).stem if self._transcript_path else None
+        rows = [
+            ("Материалы встречи (кадры, видео, журнал кадров)", session),
+            ("Кадры", session / "Кадры" if session else None),
+            ("Видео", session / "Видео" if session else None),
+            ("Дорожки «Вы» и «Собеседник»", meeting_root / "Аудио" / base),
+            ("Аудио всех встреч", meeting_root / "Аудио"),
+            ("Расшифровки всех встреч", meeting_root / "Расшифровки"),
+            ("Все встречи", meeting_root),
+        ]
+        out = []
+        for label, folder in rows:
+            try:
+                if folder is None or not folder.is_dir():
+                    continue
+                folder = folder.resolve()
+                if folder != meeting_root and meeting_root not in folder.parents:
+                    continue
+                rel = folder.relative_to(meeting_root).as_posix()
+                shown = "Встречи" + ("/" + rel if rel != "." else "")
+                out.append(f"{label}: [{shown}/]({folder.as_uri()}/)")
+            except (OSError, ValueError):
+                continue
+        return out
+
     def _save_raw_lines(self, lines):
         """Сырые реплики рядом с .txt: итог можно пересобрать другой моделью без повторной расшифровки."""
         if not self._transcript_path:
@@ -2462,7 +2521,7 @@ class Prompter:
                 + (f"**Дорожки:** {track_links}\n\n" if track_links else "")
                 + (f"**Статус аудиозаписи:** {self._record_error}\n\n" if self._record_error else "")
                 + (f"**Микрофон:** {self._mic_error}\n\n" if self._mic_error else "")
-                + (f"**Расшифровка:** {transcript_link}\n\n" if transcript_link else "")
+                + (f"**Текст записи встречи (все участники):** {transcript_link}\n\n" if transcript_link else "")
                 + (text or "_Итог не получился — модель не ответила._")
                 + ("\n\n## Материалы\n" + "\n".join(f"- {f['name']}" for f in self.files) if self.files else "")
                 + ("\n\n## Расшифровка\n" + "\n".join(
@@ -2474,6 +2533,9 @@ class Prompter:
                 f"- {meeting_link(x['path'], relative_to=transcript_root)}" + (f" — {x['ocr']}" if x.get("ocr") else "") for x in self._screenshots)
         if self._video_path:
             body += f"\n\n## Видео из кадров\n- {meeting_link(self._video_path, Path(self._video_path).name)} — таймлапс, кадр каждые {self._frame_interval:g} с"
+        folders = self._folder_links(meeting_root, m.get("title", "Встреча"))
+        if folders:
+            body += "\n\n## Папки встречи\n" + "\n".join(f"- {x}" for x in folders)
         path = ""
         try:
             d = self.eng.workspace.ensure() / "Встречи"
@@ -2483,8 +2545,104 @@ class Prompter:
             path = str(f)
         except OSError as e:
             log.warning("🎬 Итог встречи не сохранён: %s", e)
+        self._transcript_set_participants(m.get("participants"))
         self.summary = body
         self._summary_path = path
         log.info("🎬 Итог встречи: %s", path or "(не сохранён)")
         self._emit("summary", summary=body, path=path, busy=False)
 
+
+
+# ---------- прошлые встречи (студия, «Встречи → Прошлые встречи») ----------
+
+FRAME_EXTS = (".jpg", ".jpeg", ".png")
+
+
+def meetings_index(meet_dir, limit=40):
+    """Итоги прошлых встреч и их файлы: аудио, дорожки, видео, кадры, расшифровка, папка.
+
+    Пути — относительно рабочей папки («Встречи/…»), чтобы студия открывала их через ws_open.
+    Если аудио нет, в audio_error — причина из протокола («Статус аудиозаписи»), чтобы кнопка
+    воспроизведения объясняла, почему звука нет.
+    """
+    d = Path(meet_dir)
+    if not d.is_dir():
+        return []
+    rows = []
+    for f in sorted(d.glob("*.md"), reverse=True)[:limit]:
+        stem = f.stem
+        audio = d / "Аудио" / f"{stem}.wav"
+        audio_ready = audio.is_file() and audio.stat().st_size > 44
+        # Старые сборки брали для WAV второе время: если оно перешло через минуту,
+        # берём единственный WAV с тем же началом встречи.
+        if not audio_ready and len(stem) >= 15 and (d / "Аудио").is_dir():
+            candidates = [x for x in (d / "Аудио").glob(f"{stem[:15]}*.wav") if x.is_file() and x.stat().st_size > 44]
+            if len(candidates) == 1:
+                audio, audio_ready = candidates[0], True
+        session = d / "Расшифровки" / stem
+        videos = sorted(x for x in (session / "Видео").glob("*.mp4") if x.is_file()) if (session / "Видео").is_dir() else []
+        if not videos:
+            videos = [x for x in d.rglob("*.mp4") if x.is_file() and (stem in x.name or stem in str(x.parent))]
+        frames_dir = session / "Кадры"
+        frames = sorted(x for x in frames_dir.iterdir() if x.is_file() and x.suffix.lower() in FRAME_EXTS) if frames_dir.is_dir() else []
+        transcript = d / "Расшифровки" / f"{stem}.txt"
+        transcript_ready = transcript.is_file() and transcript.stat().st_size > 0
+        tracks_dir = d / "Аудио" / stem
+        tracks = {("me" if x.stem == "Вы" else "them"): f"Встречи/Аудио/{stem}/{x.name}"
+                  for x in (tracks_dir.glob("*.wav") if tracks_dir.is_dir() else []) if x.is_file() and x.stat().st_size > 44}
+        audio_error = ""
+        if not audio_ready:
+            try:
+                head = f.read_text(encoding="utf-8", errors="replace")[:6000]
+                m = re.search(r"\*\*Статус аудиозаписи:\*\*\s*(.+)", head)
+                if m:
+                    audio_error = m.group(1).strip()[:300]
+                elif "**Аудиозапись:**" not in head:
+                    audio_error = "звук этой встречи не записывался"
+                else:
+                    audio_error = "аудиофайл пустой или перемещён"
+            except OSError:
+                pass
+        rel = lambda p: "Встречи/" + p.relative_to(d).as_posix()
+        rows.append({
+            "name": stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size,
+            "audio": rel(audio) if audio_ready else "", "audio_size": audio.stat().st_size if audio_ready else 0,
+            "audio_error": audio_error, "tracks": tracks,
+            "transcript": rel(transcript) if transcript_ready else "",
+            "transcript_size": transcript.stat().st_size if transcript_ready else 0,
+            "video": rel(videos[0]) if videos else "", "video_size": videos[0].stat().st_size if videos else 0,
+            "frames": [rel(x) for x in frames[:500]], "frames_count": len(frames),
+            "folder": rel(session) if session.is_dir() else "Встречи",
+        })
+    return rows
+
+
+def meeting_frame_preview(workspace_root, rel, max_side=1600):
+    """Кадр прошлой встречи для просмотра в студии: {url: data:image/jpeg…, name, t}.
+
+    Принимается только картинка из «Встречи/Расшифровки/<встреча>/Кадры/»; крупный Retina-кадр
+    уменьшается, чтобы не гонять мегабайты через WebSocket.
+    """
+    import base64
+    root = (Path(workspace_root) / "Встречи").resolve()
+    rel = str(rel or "").replace("\\", "/")
+    parts = Path(rel).parts
+    if (len(parts) < 5 or parts[0] != "Встречи" or parts[1] != "Расшифровки" or parts[-2] != "Кадры"
+            or ".." in parts or Path(rel).suffix.lower() not in FRAME_EXTS):
+        raise ValueError("это не кадр встречи")
+    p = (Path(workspace_root) / rel).resolve()
+    if root not in p.parents or not p.is_file():
+        raise ValueError("кадр встречи не найден")
+    from PIL import Image
+    with Image.open(p) as im:
+        im = im.convert("RGB")
+        im.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=85)
+    t = None
+    try:
+        stamp = json.loads(p.with_suffix(p.suffix + ".json").read_text(encoding="utf-8"))
+        t = float(stamp.get("audio_seconds") or stamp.get("elapsed_seconds") or 0)
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"url": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), "name": p.name, "t": t}

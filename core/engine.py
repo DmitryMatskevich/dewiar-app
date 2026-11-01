@@ -233,6 +233,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.cloud.on_key_gone = self._cloud_key_gone
         self.toolbox.hooks["calendars"] = self.calendars
         self.toolbox.hooks["dewiar_web"] = self._dewiar_web          # поиск и страницы через сервер Dewiar, если сеть режет
+        import browserpage
+        self.toolbox.hooks["browser"] = browserpage                  # страницы с защитой от ботов — через настоящий браузер
         from backup import Backup
         from version import VERSION as _V
         self.backup = Backup(_CFG, STATE_DIR, self.workspace.root, self.vault, _V)

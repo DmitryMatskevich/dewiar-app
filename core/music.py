@@ -241,6 +241,9 @@ def parse(text, active=False, asked=False):
     | {"op": "app", "service"} | None. strict — играть, только если такое нашлось в своём списке («включи джаз»),
     иначе можно и каталог. active — радио играет или на паузе (только тогда «дальше» — команда);
     asked — только что спросили «какую музыку?», и это ответ (тогда хватает и короткого «джаз»)."""
+    from media_intent import protected
+    if protected(text):
+        return None
     t = re.sub(r"[^\w\s-]", " ", (text or "").lower().replace("ё", "е"))
     t = " ".join(t.split())
     if not t:

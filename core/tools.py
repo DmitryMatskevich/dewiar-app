@@ -457,14 +457,56 @@ def t_world_time(a, ctx):
     return r + " [Посчитано по часовому поясу — называй именно это время.]"
 
 
+BROWSER_NEED_USER = ("Сайт не пустил даже браузер Dewiar: просит проверку человеком («я не робот») или вход. Не пересказывай "
+                     "страницу и не выдумывай её. Спроси человека: «Открыть страницу в окне браузера, чтобы вы прошли "
+                     "проверку?» — после «да» вызови read_webpage с тем же url и visible=true. Или открой другой адрес из поиска.")
+
+
+def _browser(ctx):
+    """Модуль browserpage, если чтение через браузер разрешено (студия → «Безопасность» → «Страницы через браузер»)."""
+    st = ctx.get("settings")
+    try:
+        if st and st.get("net", "browser_pages") is False:
+            return None
+    except Exception:  # noqa: BLE001
+        pass
+    return ctx.get("browser")
+
+
+def _page_from_browser(br, url, find, question, visible=False):
+    """Страница через настоящий браузер -> текст для модели. Исключения browserpage (NoBrowser, Blocked) — наружу."""
+    p = br.fetch(url, visible=visible)
+    text = html_to_text(p["html"])
+    if len(re.sub(r"\s+", "", text)) < 200 and len(p.get("text") or "") > len(text):
+        text = p["text"]                                   # разметка без <main> и абзацев — берём видимый текст страницы
+    out = page_excerpt(text, find, question)
+    links = page_links(p["html"], p.get("url") or url)
+    if len(links) >= 3 and out != PAGE_EMPTY:
+        out += "\n\nРазделы этого сайта (нужное можно открыть read_webpage по адресу):\n" + "\n".join(f"- {t} — {u}" for t, u in links)
+    return out + f"\n[Открыто в браузере Dewiar ({p.get('browser') or 'браузер'}): сайт не отдавал текст обычному запросу.]"
+
+
 def t_read_webpage(a, ctx):
     """Текст страницы, не больше PAGE_MAX символов — чтобы одна страница не съела контекст модели; длинная — начало и
-    куски вокруг нужных слов (find или слова вопроса), пустая — честно «текста нет»."""
+    куски вокруг нужных слов (find или слова вопроса), пустая — честно «текста нет».
+    Сайт закрыт защитой от ботов (403/429/503, «Just a moment…») или текст рисует скрипт — та же страница через
+    настоящий браузер в фоне (browserpage, 30.10); просит человека — модель предлагает окно (visible=true)."""
     eng = ctx.get("engine")
     find, question = (a.get("find") or "").strip(), getattr(eng, "_turn_text", "") if eng else ""
     url = (a.get("url") or "").strip()
     if not re.match(r"^https?://", url):
         raise ToolError("нужен полный адрес страницы")
+    import browserpage
+    br = _browser(ctx)
+    if a.get("visible") in (True, "true", "1", 1):            # человек согласился пройти проверку в окне
+        if not br:
+            raise ToolError("окно браузера здесь недоступно (чтение через браузер выключено)")
+        if ctx.get("server"):
+            raise ToolError("на сервере без экрана окно браузера показать некому — открой другой адрес из поиска")
+        try:
+            return _page_from_browser(br, url, find, question, visible=True)
+        except (br.NoBrowser, br.Blocked) as e:
+            raise ToolError(f"страница не открылась в окне браузера: {e}") from e
     import video                                 # YouTube, Rutube, VK: текст ролика — из субтитров (video.py), а не описание
     if video.is_video(url):
         try:
@@ -473,24 +515,58 @@ def t_read_webpage(a, ctx):
             return video.no_transcript_text(url, e)
         except Exception as e:  # noqa: BLE001 — сеть, yt-dlp: читаем страницу как обычно
             log.info("Субтитры видео не получены: %s", e)
+
+    def via_browser():
+        """-> текст через браузер | BROWSER_NEED_USER | None (браузера нет / не вышло)."""
+        if not br:
+            return None
+        try:
+            return _page_from_browser(br, url, find, question)
+        except br.Blocked:
+            return BROWSER_NEED_USER
+        except br.NoBrowser as e:
+            log.info("Браузер для страницы недоступен: %s", e)
+        except Exception as e:  # noqa: BLE001
+            log.info("Страница через браузер не открылась: %s", e)
+        return None
+
     try:
         r = httpx.get(url, headers=UA, timeout=15, follow_redirects=True)
         r.raise_for_status()
     except httpx.HTTPError as e:
+        blocked = not isinstance(e, httpx.HTTPStatusError) or e.response.status_code in (403, 429, 451, 503)
+        bot_wall = isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (403, 429, 503) \
+            and browserpage.is_challenge(e.response.text)
+        got = via_browser() if blocked else None
+        if got and got != BROWSER_NEED_USER:
+            return got
         via = ctx.get("dewiar_web")
-        blocked = not isinstance(e, httpx.HTTPStatusError) or e.response.status_code in (403, 451)
         if via and blocked:                                         # сайт не открывается из этой сети (или 403/451 по
                                                                     # стране) — через сервер Dewiar
             try:
                 text = via("fetch", url)
                 log.info("Страница через сервер Dewiar (напрямую: %s)", e)
-                return page_excerpt(text, find, question)
+                if not browserpage.is_challenge(text):     # сервер Dewiar получил ту же проверку — не страница
+                    return page_excerpt(text, find, question)
             except Exception as e2:  # noqa: BLE001
                 log.info("Страница через сервер Dewiar не открылась: %s", e2)
+        if got == BROWSER_NEED_USER:
+            return got
+        if bot_wall and not br:
+            raise ToolError("сайт пускает только браузер (защита от ботов), а чтение через браузер выключено или браузера "
+                            "нет — открой другой адрес из поиска") from e
         raise ToolError(f"страница не открылась: {e}") from e
     if "html" not in r.headers.get("content-type", "html"):
         return page_excerpt(r.text, find, question)
+    if browserpage.is_challenge(r.text) and len(html_to_text(r.text)) < 1500:   # 200, но вместо страницы — проверка
+        got = via_browser()
+        if got:
+            return got
     out = page_excerpt(html_to_text(r.text), find, question)
+    if out == PAGE_EMPTY:                        # текст рисует скрипт — браузер его выполнит
+        got = via_browser()
+        if got and got != BROWSER_NEED_USER:
+            return got
     links = page_links(r.text, str(r.url))
     if len(links) >= 3 and out != PAGE_EMPTY:      # справочник, документация: что ещё есть на сайте — открыть нужное
         out += "\n\nРазделы этого сайта (нужное можно открыть read_webpage по адресу):\n" + "\n".join(f"- {t} — {u}" for t, u in links)
@@ -595,7 +671,10 @@ def t_control_mac_app(a, ctx):
             stream.write(json.dumps({"tool": "control_mac_app", "args": a}, ensure_ascii=False) + "\n")
         return "Тест: действие с приложением записано, рабочий стол не изменён."
     from mac_control import execute
-    result = execute(a)
+    engine = ctx.get('engine')
+    result = execute(a, alias_config=engine.s.get('voice_commands') if engine else None)
+    if a.get('action') == 'open' and ctx.get('music_app') and re.search(r'yandex.?music|яндекс.?музык|ru\.yandex\.desktop\.music', str(a.get('application', '')), re.I):
+        ctx['music_app']('yandex')
     if a.get("action") == "screens":
         return "\n".join(f"Экран {s['number']}: {s['name']}" + (" (основной)" if s['main'] else "") for s in result['screens']) or "Нет доступных экранов"
     return result.get("message") or json.dumps(result, ensure_ascii=False)
@@ -673,6 +752,10 @@ def yandex_music_installed():
     """Стоит ли приложение Яндекс Музыки (оно открывает ссылки yandexmusic://)."""
     if DRY:
         return bool(os.environ.get("DEWIAR_FAKE_YANDEX_APP"))
+    if MAC:
+        return any(x.get('id') == 'ru.yandex.desktop.music' or
+                   re.search(r'yandex.?music|яндекс.?музык', x.get('name', ''), re.I)
+                   for x in desktop_apps())
     if WIN:
         try:
             import winreg
@@ -1895,6 +1978,26 @@ def t_app_help(a, ctx):
     return guide.answer(a.get("query") or "", a.get("where") or "")
 
 
+def t_voice_command_settings(a, ctx):
+    import voice_commands
+    import voice_command_help
+    engine = ctx.get('engine')
+    if a.get('operation', 'show') == 'show':
+        settings = ctx.get('settings') or (engine.s if engine else None)
+        return json.dumps({'path': 'Студия → Руки → Голосовые команды',
+                           'config': voice_commands.config(settings.get('voice_commands') if settings else None),
+                           'installed': [{'name': r['name'], 'id': r['id']} for r in desktop_apps()]}, ensure_ascii=False)
+    if not engine:raise ToolError('Изменения голосовых команд доступны в основном чате Dewiar.')
+    return json.dumps(voice_command_help.propose(engine, a, desktop_apps()), ensure_ascii=False)
+
+
+def t_voice_command_apply(a, ctx):
+    import voice_command_help
+    engine = ctx.get('engine')
+    if not engine:raise ToolError('Предложение доступно только в текущем чате Dewiar.')
+    return json.dumps(voice_command_help.apply(engine, a.get('proposal_id')), ensure_ascii=False)
+
+
 def t_money_report(a, ctx):
     m = ctx.get("money")
     if m is None:
@@ -2327,9 +2430,12 @@ TOOLS = {
                 "city — город (не назван — из памяти о пользователе, иначе спроси), days — на сколько дней (1–7).",
                 S({"city": {"type": "string"}, "days": {"type": "number"}}, ["city"]), "safe", t_weather, "Погода"),
     "read_webpage": ("Прочитать текст веб-страницы по адресу (например, из результатов поиска). Длинная страница — начало и "
-                     "места со словами find (или вопроса).", S({"url": {"type": "string"}, "find": {"type": "string", "description":
-                     "что ищешь на странице, если она длинная: «Доллар США», «15 октября»"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
-    "control_mac_app": ("Управление приложениями macOS и выполнение задач через Универсальный доступ. Сценарий: open → inspect → click/type/key/scroll → inspect для проверки. open — запуск, focus — переключение, quit — обычное завершение с сохранением диалогов, move — перенос окна на экран, cursor — курсор к окну без клика, list/screens/windows — списки, inspect — дерево доступных кнопок и полей, click — нажать элемент по его title/description, type — ввести текст в поле, key — отправить Enter/Tab/Escape/Cmd+A и другие клавиши, scroll — прокрутить доступный список. Для inspect/click/type/key/scroll нужен Универсальный доступ. Не угадывай координаты: сначала inspect и используй точное название элемента. При нескольких окнах указывай window; приложение — точное название или bundle ID. Экран — номер с 1, основной, другой, левый, правый.", S({"action": {"type": "string", "enum": ["open", "focus", "quit", "move", "cursor", "list", "screens", "windows", "inspect", "click", "type", "key", "scroll"]}, "application": {"type": "string", "description": "Название запущенного приложения или bundle ID"}, "screen": {"type": "string"}, "window": {"type": "integer", "minimum": 1}, "target": {"type": "string", "description": "Точное title/description элемента из inspect"}, "text": {"type": "string"}, "mode": {"type": "string", "enum": ["replace", "append"]}, "key": {"type": "string", "description": "Enter, Tab, Escape, Cmd+A, Ctrl+C и т. п."}, "direction": {"type": "string", "enum": ["up", "down", "left", "right"]}}, ["action"]), "safe", t_control_mac_app, "Приложения и задачи Mac"),
+                     "места со словами find (или вопроса). Сайт с защитой от ботов или текстом на скриптах Dewiar сам "
+                     "открывает в браузере в фоне.", S({"url": {"type": "string"}, "find": {"type": "string", "description":
+                     "что ищешь на странице, если она длинная: «Доллар США», «15 октября»"}, "visible": {"type": "boolean", "description":
+                     "true — открыть страницу в окне браузера у человека, чтобы он сам прошёл проверку «я не робот» или вошёл; "
+                     "только после его согласия, когда обычное чтение ответило, что сайт просит проверку"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
+    "control_mac_app": ("Управление приложениями macOS и выполнение задач через Универсальный доступ. Сценарий: open → inspect → click/type/key/scroll → inspect для проверки. dnd_on/dnd_off — явно включить/выключить фокусировку «Не беспокоить» через системные команды macOS; это не переключатель. open — запуск, focus — переключение, minimize — свернуть окна приложения без завершения, quit — обычное завершение с сохранением диалогов, move — перенос окна на экран, cursor — курсор к окну без клика, list/screens/windows — списки, inspect — дерево доступных кнопок и полей, click — нажать элемент по его title/description, type — ввести текст в поле, key — отправить Enter/Tab/Escape/Cmd+A и другие клавиши, scroll — прокрутить доступный список. Для minimize/inspect/click/type/key/scroll нужен Универсальный доступ. Не угадывай координаты: сначала inspect и используй точное название элемента. При нескольких окнах указывай window; приложение — точное название или bundle ID. Экран — номер с 1, основной, другой, левый, правый.", S({"action": {"type": "string", "enum": ["open", "focus", "minimize", "quit", "dnd_on", "dnd_off", "move", "cursor", "list", "screens", "windows", "inspect", "click", "type", "key", "scroll"]}, "application": {"type": "string", "description": "Название запущенного приложения или bundle ID"}, "screen": {"type": "string"}, "window": {"type": "integer", "minimum": 1}, "target": {"type": "string", "description": "Точное title/description элемента из inspect"}, "text": {"type": "string"}, "mode": {"type": "string", "enum": ["replace", "append"]}, "key": {"type": "string", "description": "Enter, Tab, Escape, Cmd+A, Ctrl+C и т. п."}, "direction": {"type": "string", "enum": ["up", "down", "left", "right"]}}, ["action"]), "safe", t_control_mac_app, "Приложения и задачи Mac"),
     "open_app": ("Запустить установленную программу по названию (Firefox, Терминал, Telegram, Калькулятор…).", S({"name": {"type": "string"}}, ["name"]), "safe", t_open_app, "Запуск программ"),
     "open_path": ("Открыть файл или папку (можно «загрузки», «документы», «рабочий стол» или путь).", S({"path": {"type": "string"}}, ["path"]), "safe", t_open_path, "Открытие файлов и папок"),
     "play_music": ("Включить музыку: открывает поиск в YouTube Music.", S({"query": {"type": "string", "description": "исполнитель, песня или настроение"}}), "safe", t_play_music, "Музыка в YouTube Music"),
@@ -2472,6 +2578,10 @@ TOOLS = {
                    S({"to": {"type": "string"}, "video": {"type": "boolean"}}, ["to"]), "safe", t_close_call, "Близкие: позвонить"),
     "close_read": ("Последние сообщения от близких (и мои им): «что мне писали», «что ответил Андрей». who — имя или пусто — все.",
                    S({"who": {"type": "string"}}), "safe", t_close_read, "Близкие: прочитать"),
+    "voice_command_settings": ("Настройки голосовых команд Dewiar. show — прочитать действующие фразы, названия приложений и список установленных программ. propose — подготовить одно конкретное изменение, без сохранения. Сначала прочитай настройки; уточни недостающее действие, приложение или фразу. Предложи помощь, если пользователь не знает, как настроить команду. Никогда не говори, что предложение уже применено: для этого нужен voice_command_apply и согласие пользователя. Разрешения инструментов не меняются.",
+        S({"operation": {"type": "string", "enum": ["show", "propose"]}, "change": {"type": "string", "enum": ["add_phrase", "remove_phrase", "add_alias", "remove_alias", "set_enabled"]}, "action": {"type": "string", "enum": ["open", "quit", "minimize", "focus", "dnd_on", "dnd_off", "yandex_search"]}, "phrase": {"type": "string"}, "application": {"type": "string"}, "alias": {"type": "string"}, "enabled": {"type": "boolean"}}, ["operation"]), "safe", t_voice_command_settings, "Голосовые команды: подсказки и предложения"),
+    "voice_command_apply": ("Применить ранее подготовленное предложение голосовых команд по proposal_id. Пользователь обязательно подтверждает конкретное изменение; без подтверждения не сохранять. Не повторяй вызов после отказа. Если настройки изменились с момента предложения, подготовь новое.",
+        S({"proposal_id": {"type": "string"}}, ["proposal_id"]), "confirm", t_voice_command_apply, "Голосовые команды: применить изменение"),
     "app_help": ("Руководство Dewiar — как пользоваться самим этим приложением: где кнопка или раздел, как настроить, как пригласить "
                  "близкого или друга, сканер, стили, напоминания на часах, синхронизация, данные и т. п. Вызывай, когда спрашивают про "
                  "Dewiar и его функции («как…», «где…», «что ты умеешь…»), — не выдумывай меню и кнопки. query — о чём спросили; "
@@ -2707,6 +2817,13 @@ class Toolbox:
         Опасное подтверждается, даже если в настройках подтверждение для инструмента выключено."""
         import guard
         s = getattr(self, "s", None)
+        if name == 'voice_command_apply':
+            from voice_command_help import pending
+            engine = self.hooks.get('engine')
+            if not engine:return 'Предложение доступно только в текущем чате Dewiar.', False, None
+            try:proposal = pending(engine, (args or {}).get('proposal_id'))
+            except ValueError as error:return str(error), False, None
+            return None, True, proposal['summary'] + '? Остальные команды и разрешения останутся прежними.'
         if name in ("delete_files", "close_send") and s is not None and (s.get("privacy") or {}).get("files") == "folder":
             # замок «Файлы: только папка Dewiar»: удалять и отправлять можно только то, что лежит в папке ассистента
             roots = [Path(w).expanduser().resolve() for w in guard.WORKSPACE]
@@ -2778,7 +2895,9 @@ class Toolbox:
         """Как спросить подтверждение по-человечески."""
         if name == "control_mac_app":
             action = args.get("action")
-            label = {"open": "Открыть", "focus": "Переключиться на", "quit": "Завершить", "move": "Перенести окно", "cursor": "Переместить курсор к окну", "list": "Показать приложения", "screens": "Показать экраны", "windows": "Показать окна", "inspect": "Прочитать интерфейс", "click": "Нажать элемент", "type": "Ввести текст", "key": "Нажать клавишу", "scroll": "Прокрутить"}.get(action, "Выполнить действие")
+            if action in ('dnd_on', 'dnd_off'):
+                return ('Включить' if action == 'dnd_on' else 'Выключить') + ' фокусировку «Не беспокоить» на Mac?'
+            label = {"open": "Открыть", "focus": "Переключиться на", "minimize": "Свернуть окна приложения", "quit": "Завершить", "move": "Перенести окно", "cursor": "Переместить курсор к окну", "list": "Показать приложения", "screens": "Показать экраны", "windows": "Показать окна", "inspect": "Прочитать интерфейс", "click": "Нажать элемент", "type": "Ввести текст", "key": "Нажать клавишу", "scroll": "Прокрутить"}.get(action, "Выполнить действие")
             target = " «" + str(args.get("application") or "") + "»" if args.get("application") else ""
             screen = " на экран «" + str(args.get("screen") or "другой") + "»" if action == "move" else ""
             element = " «" + str(args.get("target") or "") + "»" if args.get("target") else ""

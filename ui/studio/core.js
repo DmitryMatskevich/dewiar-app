@@ -13,39 +13,69 @@ function escH(t) { return String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ 
 window.__jsErr = window.__jsErr || [];
 window.addEventListener("error", (e) => { window.__jsErr.push(`${e.message} @ ${(e.filename || "").split("/").pop()}:${e.lineno || 0}`); });
 let S = null, personas = [], active = "lira", entities = [];
-const brand = new DewiarEntity($("#brand"), { style: "nexus", color: "#8A9BFF", ring: false });
+const brand = new DewiarEntity($("#brand"), { style: "nexus", color: "#8A9BFF", ring: false, still: true });
 const COLORS = ["#FFB547", "#3DF5C8", "#4FC3FF", "#9BD4FF", "#B78CFF", "#FF7AB6", "#FF6B5A", "#9BE15D", "#F5E663", "#7C8CFF", "#E6EEFF"];
 const STYLE_NAMES = { nexus: "Нейросфера", aura: "Сфера", holobrain: "Голограмма мозга", lattice: "Кристалл", orbital: "Орбиты", tactical: "Радар", rings: "Кольца", strings: "Струны", particles: "Частицы" };
 
-/* Брендовая шапка — компактный переключатель окна агента. Студия уже открыта рядом
-   с виджетом, поэтому состояние считаем включённым до первого ответа tray_state. */
-let agentWindowVisible = true;
-function agentToggleState(visible) {
-  agentWindowVisible = !!visible;
+/* Состояние окна подтверждает оболочка. Скрытое окно не означает остановку ядра. */
+let agentWindowVisible = false, agentWindowLoaded = false, agentCoreOnline = !!core.connected, agentToggleBusy = false;
+function renderAgentToggle() {
   const b = $("#agent-toggle");
   if (!b) return;
-  b.setAttribute("aria-pressed", String(agentWindowVisible));
-  b.title = agentWindowVisible
-    ? "Свернуть окно агента и убрать его с экрана. Повторное нажатие снова покажет окно."
-    : "Показать окно агента. Повторное нажатие свернёт его и уберёт с экрана.";
-  b.classList.toggle("agent-hidden", !agentWindowVisible);
+  const name = (personas.find(p => p.id === active) || {}).name || "Помощник";
+  const awake = agentWindowLoaded && agentWindowVisible && agentCoreOnline;
+  $("#bname").textContent = name;
+  b.setAttribute("aria-pressed", String(awake));
+  b.setAttribute("aria-busy", String(agentToggleBusy));
+  b.setAttribute("aria-disabled", String(agentToggleBusy));
+  b.title = agentToggleBusy ? `${name}: загружаю помощника и открываю окно…` : awake
+    ? `${name}: скрыть окно помощника. Фоновые задачи продолжат работать. Повторное нажатие покажет окно.`
+    : `${name}: помощник спит. Нажмите, чтобы загрузить его и показать окно. Скрытый портрет не означает отключение микрофона или фоновых задач.`;
+  b.setAttribute("aria-label", b.title);
+  b.classList.toggle("agent-sleeping", !awake);
+  const state = awake ? "idle" : "sleeping";
+  if (brand.state !== state) brand.set({state, level: 0});
+}
+function agentToggleState(state) {
+  if (typeof state === "boolean") {
+    agentWindowVisible = state; agentWindowLoaded = true;
+  } else if (state) {
+    agentWindowLoaded = state.loaded !== false;
+    agentWindowVisible = state.visible !== undefined ? !!state.visible : !state.in_tray;
+  }
+  renderAgentToggle();
+}
+async function refreshAgentWindowState() {
+  const a = window.api && window.api();
+  if (a && typeof a.tray_state === "function") agentToggleState(await a.tray_state());
 }
 async function toggleAgentWindow() {
+  if (agentToggleBusy) return;
   const a = window.api && window.api();
   if (!a || typeof a.show !== "function" || typeof a.hide !== "function") { toast("Окно агента доступно из запущенного Dewiar.app"); return; }
-  const next = !agentWindowVisible;
+  agentToggleBusy = true; renderAgentToggle();
   try {
-    await (next ? a.show("card") : a.hide("card"));
-    agentToggleState(next);
-  } catch (e) { toast(e.message || "Не удалось изменить окно агента"); }
+    await refreshAgentWindowState();
+    const next = !(agentWindowVisible && agentWindowLoaded && agentCoreOnline);
+    const result = await (next ? (typeof a.wake_agent === "function" ? a.wake_agent() : a.show("card")) : a.hide("card"));
+    if (result && result.ok === false) throw new Error(result.error || "Не удалось загрузить помощника");
+    agentToggleState(result && result.visible !== undefined ? result : next);
+    await refreshAgentWindowState();
+  } catch (e) { toast(e.message || "Не удалось изменить окно агента", 5000, "bad"); }
+  finally { agentToggleBusy = false; renderAgentToggle(); }
 }
 const agentToggle = $("#agent-toggle");
 if (agentToggle) {
   agentToggle.onclick = toggleAgentWindow;
   agentToggle.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleAgentWindow(); } };
-  const a = window.api && window.api();
-  if (a && typeof a.tray_state === "function") a.tray_state().then(s => agentToggleState(!s?.in_tray)).catch(() => {});
+  refreshAgentWindowState().catch(() => {});
+  window.addEventListener("pywebviewready", () => refreshAgentWindowState().catch(() => {}));
+  window.addEventListener("focus", () => refreshAgentWindowState().catch(() => {}));
+  setInterval(() => { if (!document.hidden && !agentToggleBusy) refreshAgentWindowState().catch(() => {}); }, 2000);
 }
+core.on("hello", () => { agentCoreOnline = true; renderAgentToggle(); })
+  .on("offline", () => { agentCoreOnline = false; renderAgentToggle(); });
+renderAgentToggle();
 
 function toast(t, ms, kind = "") {
   const el = $("#toast");

@@ -28,11 +28,11 @@ ok('<script src="assets/dialog.js"></script>' in html and '<script src="assets/d
 from playwright.sync_api import sync_playwright  # noqa: E402
 FAKE = "window.pywebview = { api: new Proxy({}, { get: () => () => Promise.resolve(true) }) };"
 with sync_playwright() as p:
-    b = p.chromium.launch(); errs, native = [], []
+    b = getattr(p, os.environ.get("DEWIAR_TEST_BROWSER", "chromium")).launch(); errs, native = [], []
     pg = b.new_page(viewport={"width": 1280, "height": 860}); pg.on("pageerror", lambda e: errs.append(str(e)))
     pg.on("dialog", lambda d: (native.append(d.message), d.dismiss()))
     pg.add_init_script(FAKE)
-    pg.goto((ROOT / "ui/settings.html").as_uri() + "?port=1&skin=neusky"); pg.wait_for_timeout(900)
+    pg.goto((ROOT / "ui/settings.html").as_uri() + "?port=65534&skin=neusky"); pg.wait_for_timeout(900)
     pg.evaluate("void (window.r1 = ask('Удалить заметку «Идея»? Она уйдёт в корзину — оттуда её можно вернуть.'))")
     pg.wait_for_timeout(300)
     d = pg.evaluate("() => ({ n: document.querySelectorAll('.dwq').length, yes: document.querySelector('.dwq .yes').textContent, "
@@ -53,12 +53,50 @@ with sync_playwright() as p:
     pg.evaluate("void (window.r4 = ask('Удалить?'))"); pg.wait_for_timeout(250)
     pg.mouse.click(10, 10); pg.wait_for_timeout(250)
     ok(pg.evaluate("r4") is False, "щелчок мимо — нет")
+    # RAM management opens a native modal: confirmation must be above it and clickable.
+    pg.evaluate("""() => {
+      window.ramCalls = [];
+      core.call = async (cmd, args) => {
+        ramCalls.push([cmd, args]);
+        return {ram_total_gib: 16, ram_available_gib: 8, freed_gib: 1, items: []};
+      };
+      renderRam({items: [{pid: 987654, name: 'Тестовое приложение', rss_gib: 1}]});
+      document.querySelector('#m-ram-dlg').showModal();
+    }""")
+    pg.check('#m-ram-list input'); pg.click('#m-ram-close')
+    pg.wait_for_timeout(250)
+    ok(pg.evaluate("""() => {
+      const yes = document.querySelector('.dwq .yes'), r = yes.getBoundingClientRect();
+      return document.querySelector('.dwq-back').matches(':modal') &&
+        document.elementFromPoint(r.x + r.width/2, r.y + r.height/2) === yes;
+    }"""), "подтверждение поверх окна ОЗУ: кнопка видна и доступна для нажатия")
+    pg.screenshot(path='/tmp/claude-0/dialog-ram-confirm.png')
+    pg.keyboard.press('Escape'); pg.wait_for_timeout(200)
+    ok(pg.evaluate("document.querySelector('#m-ram-dlg').open && !ramCalls.some(c => c[0] === 'memory_close') && document.querySelector('#m-ram-dlg').contains(document.activeElement)"),
+       "Esc отменяет закрытие приложений, оставляет ОЗУ открытым и возвращает фокус")
+    pg.click('#m-ram-close'); pg.click('.dwq .yes'); pg.wait_for_timeout(200)
+    ok(pg.evaluate("ramCalls.filter(c => c[0] === 'memory_close').length === 1 && ramCalls.find(c => c[0] === 'memory_close')[1].pids[0] === 987654"),
+       "подтверждение вызывает закрытие выбранного приложения ровно один раз (ядро подменено)")
+    pg.evaluate("document.querySelector('#m-ram-dlg').close()")
+    pg.evaluate("""() => {
+      renderStrataMemory({items: [{pid: 987654, name: 'Тестовое приложение', rss_gib: 1}]});
+      document.querySelector('#strata-memory-dlg').showModal();
+    }""")
+    pg.check('#strata-memory-list input'); pg.click('#strata-memory-close')
+    pg.click('.dwq button:not(.yes)'); pg.wait_for_timeout(200)
+    ok(pg.evaluate("document.querySelector('#strata-memory-dlg').open && ramCalls.filter(c => c[0] === 'memory_close').length === 1"),
+       "в Strata подтверждение тоже доступно, «Отмена» сохраняет исходное окно")
+    pg.evaluate("document.querySelector('#strata-memory-dlg').close(); document.querySelector('#m-ram-dlg').showModal()")
     pg.evaluate("void (window.r5 = messagePopup('Доступ запрещён. Включите Dewiar в системных настройках Контактов.', {title:'Нужен доступ к Контактам macOS', steps:['Откройте настройки macOS.', 'Включите Dewiar в разделе «Контакты».', 'Вернитесь и проверьте доступ.'] }))")
     pg.wait_for_timeout(250)
     info = pg.evaluate("() => ({title: document.querySelector('.dwm h2')?.textContent, text: document.querySelector('.dwm')?.textContent, steps: document.querySelectorAll('.dwm-steps li').length, copy: document.querySelector('.dwm-copy-status')?.textContent || '', close: document.querySelector('.dwm-actions .primary')?.textContent})")
     ok(info['title'] == 'Нужен доступ к Контактам macOS' and info['steps'] == 3 and 'Включите Dewiar' in info['text'] and info['close'] == 'Понятно', f"информативное окно сообщения со всеми шагами и копированием: {info}")
+    pg.click('.dwm-actions button:not(.primary)'); pg.wait_for_timeout(100)
+    ok(pg.evaluate("document.querySelector('.dwm-back').matches(':modal')"), "информационное сообщение и его кнопки также доступны поверх ОЗУ")
     pg.keyboard.press("Escape"); pg.wait_for_timeout(250)
     ok(pg.evaluate("r5") is True and pg.locator('.dwm').count() == 0, "Esc закрывает информативное окно")
+    ok(pg.evaluate("document.querySelector('#m-ram-dlg').open"), "закрытие сообщения сохраняет окно ОЗУ")
+    pg.evaluate("document.querySelector('#m-ram-dlg').close()")
     ok(not native, f"системных окон не было: {native}")
     ok(not errs, f"без ошибок JavaScript: {errs[:2]}")
     b.close()

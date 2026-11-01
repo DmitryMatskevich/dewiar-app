@@ -1241,6 +1241,14 @@ class Api:
             return ""
         return res if isinstance(res, str) else res[0]
 
+    def pick_media_files(self):
+        """Native multiple-file picker: media stays on disk, without chat upload size limits."""
+        import webview
+        kind = getattr(getattr(webview, 'FileDialog', None), 'OPEN', None) or webview.OPEN_DIALOG
+        result = (self._studio or self._hud).create_file_dialog(kind, directory=str(Path.home()), allow_multiple=True,
+                  file_types=('Видео и аудио (*.mp4;*.mkv;*.mov;*.webm;*.mp3;*.wav;*.m4a;*.ogg;*.flac;*.aiff)', 'Все файлы (*.*)'))
+        return [result] if isinstance(result,str) else list(result or [])
+
     def pick_file(self, kind=""):
         """Выбор файла (например, резервной копии): kind — «Описание (*.ext)». Начинаем с папки резервных копий."""
         import webview

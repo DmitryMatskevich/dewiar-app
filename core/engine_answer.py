@@ -180,6 +180,10 @@ class AnswerMixin:
             text = "Что на этой картинке?"
         if not text:
             return
+        if not raw and not quiet and not images and '\n\nВложения:' not in text:
+            from media_intent import resolve_followup, request_scope
+            text = resolve_followup(text, getattr(self, '_video_pending', None),
+                                    request_scope(via, getattr(getattr(self, 'chatlog', None), 'active', 'legacy')), time.monotonic())
         if via:
             quiet = False
         # 24.10 (владелец: «попросил обновиться — нет; „а теперь“ — она что-то не связанное»): короткое «а теперь?»,
@@ -250,6 +254,8 @@ class AnswerMixin:
             self._say_quick("Открываю режим встречи. Я молчу и подсказываю на экране.", text)
             return
         if not raw and not quiet and not via and not images and self._window_cmd(text):
+            return
+        if not raw and not quiet and not images and '\n\nВложения:' not in text and self._video_request(text, via):
             return
         if not raw and not quiet and not via and not images and self._pc_cmd(text):
             return

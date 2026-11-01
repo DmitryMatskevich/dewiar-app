@@ -27,6 +27,7 @@
     speaking:  { speed: 1.0,  glow: 1.0, sat: 1 },
     muted:     { speed: 0.35, glow: 0.6, sat: 1 },     // микрофон выключен — как в покое: это видно по значку и подписи (отзыв 14.10)
     offline:   { speed: 0.08, glow: 0.3, sat: 0 },
+    sleeping:  { speed: 0,    glow: 0.2, sat: 0 },   // закрытое/недоступное окно помощника в студии
   };
 
   // ---------- стили ----------
@@ -848,6 +849,7 @@
   }
   function liveFace(g, e, L) {
     const { ctx, r, c, t, lv, k } = g;
+    const sleeping = e.state === "sleeping";
     const R = r * 0.78, now = performance.now(), dt = Math.min(0.1, e._dt || 0.016);
     const A = e._live || (e._live = { ex: 0, ey: 0, tx: 0, ty: 0, nextEye: now + 1500, blinkTill: 0, nextBlink: now + 2500 + Math.random() * 2500,
       smile: 0, smileTill: 0, mPrev: 0, mTarget: 0, mBlend: 1, nextMouth: 0, wasSpeaking: false, heard: 0 });
@@ -890,7 +892,7 @@
     const G = L.geo, [cx0, cy0, cs] = G.crop;             // портрет целиком: видно причёску (хвостики Лиры), лицо не огромное
     // к зрителю — лёгкий сдвиг без увеличения: портрет целиком, кадр крупнее исходного (отзыв 14.10: «лицо стало крупнее,
     // еле вмещается в круге»); за краем кадра — тёмная подложка, при сдвиге в 3 % её не видно
-    const gk = e.lookGain, z = 1, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;
+    const gk = sleeping ? 0 : e.lookGain, z = 1, ox = e._lx * R * 0.03 * gk, oy = e._ly * R * 0.025 * gk;
     const sc = (2 * R) / cs * z, X = (x) => -R * z + ox + (x - cx0) * sc, Y = (y) => -R * z + oy + (y - cy0) * sc;
     ctx.imageSmoothingQuality = "high";
     const mono = e.tone === "mono" || e.tone === "ink" || e.tone === "neu";
@@ -907,7 +909,24 @@
       ctx.fillStyle = bgr; ctx.fillRect(-R, -R, 2 * R, 2 * R);
     }
     ctx.drawImage(L.base, X(0), Y(0), L.base.naturalWidth * sc, L.base.naturalHeight * sc);
-    if (now > A.blinkTill) {
+    if (sleeping) {
+      // Веки рисуются в координатах живого лица, а не поверх произвольной фотографии.
+      // Цвет металла/кожи берём над глазом; радужки во сне не выводятся.
+      if (!L.lidColors) {
+        const cv = document.createElement("canvas"); cv.width = L.base.naturalWidth; cv.height = L.base.naturalHeight;
+        const cg = cv.getContext("2d"); cg.drawImage(L.base, 0, 0);
+        L.lidColors = G.eyes.map(([x, y]) => {
+          try { const p = cg.getImageData(Math.round(x + G.iris / 2), Math.max(0, Math.round(y - 5)), 1, 1).data;
+            return `rgb(${p[0]},${p[1]},${p[2]})`; } catch (_) { return "#a9adb4"; }
+        });
+      }
+      G.eyes.forEach(([x, y], i) => {
+        const ex = X(x + G.iris / 2), ey = Y(y + G.iris / 2), rw = G.iris * sc;
+        ctx.fillStyle = L.lidColors[i]; ctx.beginPath(); ctx.ellipse(ex, ey, rw * .95, rw * .6, 0, 0, TAU); ctx.fill();
+        ctx.strokeStyle = "rgba(24,27,35,.9)"; ctx.lineWidth = Math.max(.6, rw * .1); ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(ex - rw * .85, ey); ctx.quadraticCurveTo(ex, ey + rw * .45, ex + rw * .85, ey); ctx.stroke();
+      });
+    } else if (now > A.blinkTill) {
       if (L.mask) {                               // зрачки — только внутри разреза глаз: веки прикрывают их сверху и снизу
         const W = L.base.naturalWidth, H = L.base.naturalHeight, f = 3;
         const oc = L._eyeCv || (L._eyeCv = document.createElement("canvas"));
@@ -1268,7 +1287,7 @@
       if (!w || !h) return;
       const st = STATE[this.state] || STATE.idle;
       // экономим CPU: в покое (и под пластинку) ~25 кадров/с, без микрофона или связи ~8, в работе до ~70
-      let minDt = this.vinyl && (this.state === "idle" || this.state === "muted") ? 40 :
+      let minDt = this.state === "sleeping" ? 400 : this.vinyl && (this.state === "idle" || this.state === "muted") ? 40 :
         this.state === "offline" ? 120 : this.state === "idle" || this.state === "muted" ? 40 : 14;
       // слабый компьютер (или WebKit без ускорения): кадр рисуется долго — рисуем реже, чтобы кнопки не «залипали»
       if (this._cost > 6) minDt = Math.max(minDt, Math.min(120, this._cost * 6));

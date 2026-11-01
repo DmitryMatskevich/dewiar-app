@@ -169,7 +169,7 @@ class MusicMixin:
         self.set_state("idle")
         return True
 
-    def _yandex_cmd(self, query, text):
+    def _yandex_cmd(self, query, text, exact=False):
         """Открыть поиск в Яндекс Музыке (приложение или сайт) и ответить без модели. Пустой query — просто открыть.
         Из запроса убираются лишние слова, а «электронную музыку» превращаем в «электронная музыка» — как жанр."""
         import tools as _tools
@@ -178,6 +178,7 @@ class MusicMixin:
                      if w not in ("музыку", "музыка", "музычку", "мне", "пожалуйста", "что-нибудь", "какую-нибудь", "*"))
         if q and any(w.startswith("музык") for w in words) and re.search(r"ая$", q):
             q += " музыка"
+        if exact:q = query.strip()
         _tools.t_yandex_music({"query": q}, self.toolbox.hooks)
         app = _tools.yandex_music_installed()
         msg = (f"Открываю в Яндекс Музыке: «{q}». Нажмите на трек — или скажите «играй»." if q else
@@ -189,6 +190,9 @@ class MusicMixin:
         """«Включи музыку» → спросим жанр; «поставь джаз», «что-нибудь спокойное», «дальше», «выключи музыку».
         «Играй», «пауза», «следующий трек» — кнопки открытого плеера; «… в Яндекс Музыке» — там."""
         from music import control, genre_tag, parse
+        from media_intent import protected
+        if protected(text):
+            return False
         act = control(text)
         if act == "play" and self.radio.playing and not self.radio.sounding and time.monotonic() - self.radio.last_at > 8:
             last = self.radio.station or self.radio.last         # «играет», а звука нет — станция зависла: включаем заново
@@ -394,19 +398,137 @@ class MusicMixin:
         threading.Thread(target=run, daemon=True).start()
         return True
 
+    def _video_request(self, text, via=None):
+        """Acknowledge transcription only after a real task exists; clarify bare links."""
+        from media_intent import intent, video_urls, TRANSCRIBE, CHOICE_QUESTION, active_pending, request_scope, reply_choice
+        action = intent(text)
+        if action == 'status':
+            items = [t for t in self.tasks.list() if t.get('workflow') == 'media-transcription'
+                     or TRANSCRIBE.search(str(t.get('title') or '') + ' ' + str(t.get('goal') or ''))]
+            urls = video_urls(text)
+            if urls:
+                items = [t for t in items if any(u in str(t.get('goal') or '') or u in (t.get('media_sources') or []) for u in urls)]
+            active = [t for t in items if t.get('status') in ('running','waiting','sleeping')]
+            task = (active or items or [None])[0]
+            if not task:
+                message = 'Задача транскрибации не создана; запущенной обработки нет. Пришлите ссылку или файл с просьбой извлечь текст.'
+            elif task.get('status') == 'done':
+                message = f'Транскрибация завершена. В задаче «{task["title"]}» сохранено результатов: {len(task.get("outputs") or [])}. Откройте её кнопкой задач в верхней строке.'
+            elif task.get('status') in ('failed','stopped','paused'):
+                message = f'Задача «{task["title"]}»: {task.get("status_ru") or task["status"]}. ' + (task.get('error') or 'Обработка сейчас не выполняется. Подробности — в журнале задачи.')
+            else:
+                message = f'Задача «{task["title"]}»: {task.get("status_ru") or task["status"]}. ' + (task.get('activity') or 'Текущий этап — в карточке задачи.')
+            self._say_quick(message, text, via)
+            return True
+        scope = request_scope(via, getattr(getattr(self, 'chatlog', None), 'active', 'legacy'))
+        pending = active_pending(getattr(self, '_video_pending', None), scope, time.monotonic())
+        if pending and reply_choice(text) == 'cancel':
+            self._video_pending = None
+            self._say_quick('Хорошо, ничего с этим роликом не запускаю.', text, via)
+            return True
+        urls = video_urls(text)
+        if pending and not urls and TRANSCRIBE.search(text):
+            urls = pending['urls']
+        if action == 'transcribe' and not urls and not via:
+            for message in reversed(getattr(self, 'history', [])[-8:]):
+                if message.get('role') == 'user':
+                    previous = video_urls(str(message.get('content') or ''))
+                    if previous:
+                        urls = previous
+                        break
+        if not action and pending and str(text).strip().casefold().rstrip('.!') in ('да','хорошо','давай'):
+            self._say_quick(CHOICE_QUESTION, text, via)
+            return True
+        if not action:
+            return False
+        if action == 'process' and re.fullmatch(r'\s*обработ(?:ай|ать)\s+(?:ролик|видео)\s*:?\s*', re.sub(r'https?://\S+', '', text), re.I):
+            self._video_pending = dict(scope=scope, time=time.monotonic(), urls=urls, action='process')
+            self._say_quick('Как обработать ролик: сделать конспект, анализ, резюме или что-то другое? Уточните нужный результат.', text, via)
+            return True
+        if action in ('open', 'download', 'process'):
+            self._video_pending = None
+            return False  # normal tools preserve the requested viewing/analysis and their permissions
+        if action == 'clarify' and pending and pending.get('action') == 'transcribe':
+            action = 'transcribe'
+        if action == 'clarify':
+            self._video_pending = dict(scope=scope, time=time.monotonic(), urls=urls, action='clarify')
+            self._say_quick(CHOICE_QUESTION, text, via)
+            return True
+        if not urls:
+            self._video_pending = dict(scope=scope, time=time.monotonic(), urls=[], action='transcribe')
+            self._say_quick('Пришлите ссылку на ролик или аудио/видеофайл — извлеку текст речи.', text, via)
+            return True
+        on, confirm = self.toolbox.policy('start_task')
+        if not on or confirm:
+            return False
+        try:
+            task = self.tasks.create_transcription(urls, goal=text)
+        except Exception as error:
+            self._say_quick('Не удалось запустить транскрибацию: ' + str(error), text, via)
+            return True
+        self._video_pending = None
+        ready = getattr(task, 'status', '') == 'done'
+        message = (f'Этот источник уже обработан. Результаты — в задаче «{task.title}»; повторная загрузка не нужна.' if ready else
+                   f'Задача «{task.title}» запущена. Ход обработки — по кнопке задач в верхней строке.')
+        self._say_quick(message, text, via, acts=[] if ready else ['start_task'])
+        return True
+
     def _pc_cmd(self, text):
         """«Громче», «тише», «громкость 40», «выключи звук», «выключи компьютер», «отмени выключение» — без модели."""
         from pc import parse
+        from media_intent import protected
+        if protected(text):
+            return False
         import tools as _tools
+        from voice_commands import parse as parse_voice
+        settings = getattr(self, 's', None)
+        configured = parse_voice(text, settings.get('voice_commands') if settings else None)
+        if configured and configured['action'] != 'yandex_search' and not _tools.MAC:
+            configured = None
+        if configured and not configured['enabled']:
+            self._say_quick('Эта голосовая команда выключена в настройках «Руки → Голосовые команды».', text)
+            return True
+        if configured and hasattr(self, 'confirm'):
+            tool = 'yandex_music' if configured['action'] == 'yandex_search' else 'control_mac_app'
+            on, needs_confirm = self.toolbox.policy(tool)
+            if not on:
+                self._say_quick('Управление недоступно или выключено в настройках «Руки → Умения».', text)
+                return True
+            if needs_confirm:
+                args = {'query': configured['query']} if tool == 'yandex_music' else {k:v for k,v in configured.items() if k not in ('enabled','title')}
+                def run_confirmed():
+                    question = self.toolbox.describe(tool, args) if tool != 'yandex_music' else 'Открыть поиск в Яндекс Музыке: «' + args['query'] + '»?'
+                    if not self.confirm(question, timeout=30):return
+                    if not self.toolbox.policy(tool)[0]:return
+                    try:
+                        result = _tools.t_yandex_music(args, self.toolbox.hooks) if tool == 'yandex_music' else _tools.t_control_mac_app(args, self.toolbox.hooks)
+                    except Exception as error:result = str(error)
+                    self._say_quick(result, text)
+                threading.Thread(target=run_confirmed, name='voice-command-confirm', daemon=True).start()
+                return True
+        if configured and configured['action'] == 'yandex_search':
+            on, confirm = self.toolbox.policy('yandex_music')
+            if not on or confirm:return False
+            try:return self._yandex_cmd(configured['query'], text, exact=True)
+            except Exception as error:
+                self._say_quick(str(error), text)
+                return True
         if _tools.MAC:
             from mac_control import parse as parse_app, AppNotFound
-            request = parse_app(text)
+            request = {k:v for k,v in configured.items() if k not in ('enabled','title')} if configured else parse_app(text)
+            if not configured and request and request['action'] in ('open','quit','focus','minimize','dnd_on','dnd_off'):
+                request = None  # Removed templates must not return through the built-in parser.
             if request:
                 on, confirm = self.toolbox.policy("control_mac_app")
                 if on and not confirm:
                     try:
                         result = _tools.t_control_mac_app(request, self.toolbox.hooks)
-                    except AppNotFound:
+                    except AppNotFound as error:
+                        from voice_commands import config
+                        known = configured and configured.get('application') in {x['target'] for x in config(settings.get('voice_commands') if settings else None)['applications']}
+                        if known or re.search(r'\b(?:приложение|программу)\b', text, re.I):
+                            self._say_quick(str(error) + '. Могу помочь проверить название в «Руки → Голосовые команды». Настроим?', text)
+                            return True
                         return False  # Other commands (web, music, tasks) retain their normal routing.
                     except Exception as error:
                         result = str(error)

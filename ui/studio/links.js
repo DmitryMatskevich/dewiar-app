@@ -582,23 +582,221 @@ core.on("update", e => renderUpdate(e.update));
 
 /* ---------- встречи (core/prompter.py): окно, итоги и локальные аудио/видео ---------- */
 $("#pr-open").onclick = () => { const a = api(); if (a && a.open_prompter) a.open_prompter(); else core.call("prompter_open").catch(e => toast(e.message)); };
+const PR_ICONS = {
+  summary: '<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9 3.5h6v2.5H9zM8.5 11l1.5 1.5 3-3M8.5 16h7"/>',
+  play: '<circle cx="12" cy="12" r="8.5"/><path d="M10.2 8.6v6.8l5.6-3.4z" fill="currentColor"/>',
+  audio: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  video: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M10 9.2v5.6l4.8-2.8z" fill="currentColor"/>',
+  frames: '<rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.7"/><path d="m4 17.5 5-4.5 3.5 3 3-2.5 4.5 4"/>',
+  text: '<path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10A.5.5 0 0 1 7 20z"/><path d="M14 3.5V8h4M9.5 12h6M9.5 15h6M9.5 18h4"/>',
+  folder: '<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/>',
+};
+const prSvg = (k) => `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${PR_ICONS[k]}</svg>`;
+let prMeetings = [];
+/* Итог и текст записи — во встроенном редакторе (раздел «Папка»), а не во внешней программе */
+function prEdit(path) {
+  const nav = $('nav button[data-p="folder"]');
+  if (nav) nav.click();
+  setTimeout(() => (typeof openFile === "function" ? openFile(path) : core.call("ws_open", { path }).catch(e => toast(e.message))), 250);
+}
+/* Полоса над файлом встречи во встроенном редакторе: итог ↔ текст записи ↔ прослушать ↔ кадры ↔ папка.
+   В режиме правки ссылки в тексте не нажимаются — переходы вынесены сюда. path — открытый файл. */
+async function prMeetingBar(path) {
+  const m1 = /^Встречи\/([^/]+)\.md$/.exec(path), m2 = /^Встречи\/Расшифровки\/([^/]+)\.txt$/.exec(path);
+  const stem = (m1 || m2 || [])[1];
+  if (!stem) return null;
+  let list = prMeetings;
+  if (!list.some(x => x.name === stem)) { try { list = prMeetings = await core.call("prompter_meetings"); } catch (e) { return null; } }
+  const m = list.find(x => x.name === stem);
+  if (!m) return null;
+  const bar = document.createElement("div");
+  bar.className = "pr-fbar"; bar.setAttribute("role", "toolbar"); bar.setAttribute("aria-label", "Файлы встречи");
+  const b = (label, title, on, active) => `<button class="btn small${active ? " on" : ""}" title="${escH(title)}" ${on ? "" : "disabled"}>${label}</button>`;
+  bar.innerHTML = `<span>Встреча:</span>`
+    + b("Итог", "Итог встречи", true, !!m1)
+    + b("Текст записи", m.transcript ? "Текст записи со всеми участниками" : "Текста записи нет", !!m.transcript, !!m2)
+    + b("▶ Прослушать", m.audio || Object.keys(m.tracks || {}).length ? "Звук, кадры и текст синхронно" : "Аудиозаписи нет: " + (m.audio_error || "звук не записывался"), !!(m.audio || Object.keys(m.tracks || {}).length))
+    + (m.frames_count ? b(`Кадры (${m.frames_count})`, "Кадры экрана", true) : "")
+    + b("Папка", "Открыть папку встречи в Finder", true);
+  const [sum, txt, play, ...rest] = bar.querySelectorAll("button");
+  const nm = m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — ");
+  sum.onclick = () => m1 || openFile(m.path);
+  txt.onclick = () => m2 || openFile(m.transcript);
+  play.onclick = () => prPlayer(m, nm, play, "frames");
+  if (m.frames_count) rest[0].onclick = () => prGallery(m.frames, nm, rest[0]);
+  rest[rest.length - 1].onclick = () => core.call("ws_open", { path: m.folder || "Встречи" }).catch(e => toast(e.message));
+  return bar;
+}
 function loadMeetings() {
   core.call("prompter_meetings").then(l => {
+    prMeetings = l || [];
     const nm = (m) => m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — ");
-    $("#pr-list").innerHTML = l.length ? l.map(m => `<div class="pr-row"><button class="pr-it" data-p="${escH(m.path)}"><b>${escH(nm(m))}</b><span>Открыть итог${m.audio ? " · аудио" : ""}${m.video ? " · видео" : ""}${m.transcript ? " · расшифровка" : ""}</span></button>
-        ${m.video ? `<button class="pr-play" data-media="${escH(m.video)}" title="Просмотреть видео встречи" aria-label="Просмотреть видео встречи">▶</button>` : ""}
-        ${m.audio ? `<button class="pr-play" data-media="${escH(m.audio)}" title="Прослушать аудиозапись встречи" aria-label="Прослушать аудиозапись встречи">🔊</button>` : ""}
-        ${m.transcript ? `<button class="pr-play" data-media="${escH(m.transcript)}" title="Открыть расшифровку встречи" aria-label="Открыть расшифровку встречи">▤</button>` : ""}
+    const parts = (m) => [m.audio && "аудио", Object.keys(m.tracks || {}).length > 1 && "две дорожки", m.video && "видео", m.frames_count && `кадров: ${m.frames_count}`]
+      .filter(Boolean).join(" · ") || "только итог";
+    // Перед корзиной: звук (всегда — без записи кнопка неактивна и объясняет почему), видео и кадры (если есть),
+    // расшифровка и папка встречи.
+    const btn = (cls, k, title, attrs, extra = "") => `<button class="pr-ic ${cls}" ${attrs} title="${escH(title)}" aria-label="${escH(title)}">${prSvg(k)}${extra}</button>`;
+    $("#pr-list").innerHTML = prMeetings.length ? prMeetings.map((m, i) => `<div class="pr-row"><div class="pr-it pr-static"><b>${escH(nm(m))}</b><span>${escH(parts(m))}</span></div>
+        ${btn("pr-pill", "summary", "Итог встречи — открыть во встроенном редакторе", `data-edit="${escH(m.path)}"`, "<em>Итог</em>")}
+        ${m.transcript ? btn("pr-pill", "text", "Текст записи встречи со всеми участниками — открыть во встроенном редакторе", `data-edit="${escH(m.transcript)}"`, "<em>Текст</em>")
+                       : btn("pr-pill", "text", "Текста записи нет: встреча не расшифровывалась", "disabled aria-disabled=\"true\"", "<em>Текст</em>")}
+        ${m.audio || Object.keys(m.tracks || {}).length ? btn("pr-main", "play", "Прослушать встречу: дорожки, кадры и текст синхронно", `data-player="${i}"`)
+                  : btn("", "play", "Аудиозаписи нет: " + (m.audio_error || "звук не записывался"), "disabled aria-disabled=\"true\"")}
+        ${m.video ? btn("", "video", "Просмотреть видео встречи", `data-player="${i}" data-mode="video"`) : ""}
+        ${m.frames_count ? btn("", "frames", `Просмотреть кадры экрана (${m.frames_count})`, `data-frames="${i}"`, `<i class="pr-badge">${m.frames_count > 99 ? "99+" : m.frames_count}</i>`) : ""}
+        ${btn("", "folder", "Открыть папку встречи", `data-media="${escH(m.folder || "Встречи")}"`)}
         <button class="pr-del" data-p="${escH(m.path)}" data-n="${escH(nm(m))}" title="Удалить итог встречи" aria-label="Удалить итог встречи ${escH(nm(m))}"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button></div>`).join("")
       : `<p class="hint">Пока встреч не было. Итог каждой появится здесь.</p>`;
-    $$("#pr-list .pr-it").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.p }).catch(e => toast(e.message)));
-    $$("#pr-list .pr-play").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.media }).catch(e => toast(e.message)));
+    $$("#pr-list .pr-ic[data-media]").forEach(b => b.onclick = () => core.call("ws_open", { path: b.dataset.media }).catch(e => toast(e.message)));
+    $$("#pr-list .pr-ic[data-edit]").forEach(b => b.onclick = () => prEdit(b.dataset.edit));
+    $$("#pr-list .pr-ic[data-frames]").forEach(b => b.onclick = () => { const m = prMeetings[+b.dataset.frames]; if (m) prGallery(m.frames, nm(m), b); });
+    $$("#pr-list .pr-ic[data-player]").forEach(b => b.onclick = () => { const m = prMeetings[+b.dataset.player]; if (m) prPlayer(m, nm(m), b, b.dataset.mode || "frames"); });
     // удалить итог — в корзину, как всё удаление в Dewiar (отзыв 17.10: «как удалить прошлую встречу?»)
     $$("#pr-list .pr-del").forEach(b => b.onclick = async () => {
       if (!await ask(`Удалить итог встречи «${b.dataset.n}»? Файл уйдёт в корзину — вернуть можно оттуда.`)) return;
       core.call("prompter_meeting_remove", { path: b.dataset.p }).then(() => { toast("Итог встречи — в корзине"); loadMeetings(); }).catch(e => toast(e.message, 4000));
     });
   }).catch(() => {});
+}
+/* Просмотр кадров прошлой встречи: стрелки ← →, Esc — закрыть, щелчок по кадру — открыть оригинал. */
+function prGallery(frames, title, opener) {
+  if (!frames || !frames.length) return;
+  const cache = new Map();
+  let i = 0;
+  const box = document.createElement("div");
+  box.className = "pr-gal"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");
+  box.setAttribute("aria-label", "Кадры встречи " + title);
+  box.innerHTML = `<div class="pr-gal-top"><b>${escH(title)}</b><span class="pr-gal-n"></span>
+      <button class="pr-gal-x" title="Закрыть (Esc)" aria-label="Закрыть просмотр">✕</button></div>
+    <div class="pr-gal-body"><button class="pr-gal-nav" data-d="-1" title="Предыдущий кадр (←)" aria-label="Предыдущий кадр">‹</button>
+      <figure><img alt=""><figcaption></figcaption></figure>
+      <button class="pr-gal-nav" data-d="1" title="Следующий кадр (→)" aria-label="Следующий кадр">›</button></div>`;
+  document.body.appendChild(box);
+  const img = box.querySelector("img"), cap = box.querySelector("figcaption");
+  const stamp = (t) => t == null ? "" : `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+  const load = (k) => cache.has(k) ? cache.get(k) : (cache.set(k, core.call("prompter_meeting_frame", { path: frames[k] })), cache.get(k));
+  async function show(k) {
+    i = (k + frames.length) % frames.length;
+    box.querySelector(".pr-gal-n").textContent = `${i + 1} из ${frames.length}`;
+    img.classList.add("busy"); cap.textContent = "Загружаю…";
+    try {
+      const want = i, r = await load(want);
+      if (want !== i) return;                                            // уже листнули дальше
+      img.src = r.url; img.alt = r.name; img.title = "Открыть оригинал";
+      cap.textContent = [stamp(r.t) && "на " + stamp(r.t), r.name].filter(Boolean).join(" · ");
+    } catch (e) { cap.textContent = e.message; img.removeAttribute("src"); }
+    img.classList.remove("busy");
+    if (frames.length > 1) load((i + 1) % frames.length).catch(() => {});      // следующий — заранее
+  }
+  const close = () => { document.removeEventListener("keydown", onKey, true); box.remove(); if (opener) opener.focus(); };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); show(i + 1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); show(i - 1); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  box.querySelector(".pr-gal-x").onclick = close;
+  box.onclick = (e) => { if (e.target === box) close(); };
+  box.querySelectorAll(".pr-gal-nav").forEach(b => { b.onclick = () => show(i + +b.dataset.d); b.hidden = frames.length < 2; });
+  img.onclick = () => core.call("ws_open", { path: frames[i] }).catch(e => toast(e.message));
+  box.querySelector(".pr-gal-x").focus();
+  show(0);
+}
+/* Проигрыватель встречи: дорожка (общая / Вы / Собеседник), кадры и расшифровка по одной шкале — часам записи.
+   Кадр показывается тот, что был на экране в эту секунду (даже без собранного видео); реплика подсвечивается,
+   щелчок по реплике или отметке кадра — перемотка. Пробел — пауза, ← → — на 5 секунд, Esc — закрыть. */
+async function prPlayer(meeting, title, opener, mode) {
+  let d;
+  try { d = await core.call("prompter_meeting_player", { path: meeting.path }); }
+  catch (e) { toast(e.message, 4000); return; }
+  if (!d.tracks.length && !d.video) { toast("У этой встречи нет звука"); return; }
+  const fmt = (t) => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60;
+    return (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(s).padStart(2, "0"); };
+  const who = { me: "Вы", them: "Собеседник" };
+  const box = document.createElement("div");
+  box.className = "pr-gal pr-pl"; box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true");
+  box.setAttribute("aria-label", "Проигрыватель встречи " + title);
+  box.innerHTML = `<div class="pr-gal-top"><b>${escH(title)}</b>
+      <div class="pr-seg" role="group" aria-label="Дорожка">${d.tracks.map(t => `<button data-track="${t.key}" title="${t.key === "mix" ? "Обе стороны вместе" : "Только " + escH(t.label.toLowerCase())}">${escH(t.label)}</button>`).join("")}</div>
+      ${d.video ? `<div class="pr-seg" role="group" aria-label="Изображение"><button data-mode="frames" title="Кадры экрана по времени записи">Кадры</button><button data-mode="video" title="Собранное видео встречи">Видео</button></div>` : ""}
+      <button class="pr-gal-x" title="Закрыть (Esc)" aria-label="Закрыть проигрыватель">✕</button></div>
+    <div class="pr-pl-body">
+      <figure class="pr-pl-stage"><img alt=""><video playsinline hidden></video><figcaption></figcaption></figure>
+      <ol class="pr-pl-lines" aria-label="Расшифровка">${d.lines.map((l, k) => `<li data-k="${k}" data-t="${l.t}" class="w-${escH(l.who)}" tabindex="0"><time>${fmt(l.t)}</time><b>${escH(who[l.who] || l.who)}</b> ${escH(l.text)}</li>`).join("") || '<li class="pr-pl-empty">Расшифровки нет</li>'}</ol>
+    </div>
+    <div class="pr-pl-bar"><div class="pr-pl-marks" title="Кадры экрана: щелчок — перейти">${d.frames.map((f, k) => `<i data-k="${k}" style="left:${d.duration ? (100 * f.t / d.duration).toFixed(3) : 0}%" title="Кадр ${k + 1} — ${fmt(f.t)}"></i>`).join("")}</div>
+      <audio controls preload="metadata"></audio></div>`;
+  document.body.appendChild(box);
+  const audio = box.querySelector("audio"), video = box.querySelector("video"), img = box.querySelector("img");
+  const cap = box.querySelector("figcaption"), list = box.querySelector(".pr-pl-lines");
+  const items = [...list.querySelectorAll("li[data-t]")];
+  let media = audio, curFrame = -2, curLine = -2, track = (d.tracks.find(t => t.key === "mix") || d.tracks[0] || {}).key;
+  const lastAt = (arr, t) => { let lo = 0, hi = arr.length - 1, r = -1; while (lo <= hi) { const mid = (lo + hi) >> 1; if (arr[mid] <= t) { r = mid; lo = mid + 1; } else hi = mid - 1; } return r; };
+  const frameT = d.frames.map(f => f.t), lineT = d.lines.map(l => l.t);
+  function sync() {
+    const t = media.currentTime + 0.05;
+    if (media === audio) {
+      const k = lastAt(frameT, t);
+      if (k !== curFrame) {
+        curFrame = k;
+        if (k >= 0) { img.src = d.frames[k].url; img.hidden = false; }
+        else img.hidden = true;
+        box.querySelectorAll(".pr-pl-marks i").forEach((m, n) => m.classList.toggle("on", n === k));
+      }
+      cap.textContent = d.frames.length ? (curFrame >= 0 ? `Кадр ${curFrame + 1} из ${d.frames.length} · на экране с ${fmt(d.frames[curFrame].t)}` : "До первого кадра")
+        : "Кадров экрана нет — слушайте и читайте расшифровку";
+    } else cap.textContent = "Видео встречи";
+    const j = lastAt(lineT, t);
+    if (j !== curLine) {
+      curLine = j;
+      items.forEach((li, n) => li.classList.toggle("on", n === j));
+      if (j >= 0 && !list.matches(":hover")) items[j].scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }
+  function seek(t) { media.currentTime = Math.max(0, t); sync(); }
+  function setTrack(key) {
+    const tr = d.tracks.find(t => t.key === key); if (!tr) return;
+    const at = audio.currentTime || 0, playing = !audio.paused;
+    track = key; audio.src = tr.url;
+    audio.addEventListener("loadedmetadata", () => { audio.currentTime = Math.min(at, audio.duration || at); if (playing) audio.play().catch(() => {}); }, { once: true });
+    box.querySelectorAll("[data-track]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.track === key)));
+  }
+  function setMode(m) {
+    const at = media.currentTime || 0, playing = !media.paused;
+    media.pause();
+    mode = m === "video" && d.video ? "video" : "frames";
+    media = mode === "video" ? video : audio;
+    video.hidden = mode !== "video"; img.hidden = mode === "video" || curFrame < 0;
+    box.querySelector(".pr-pl-bar").classList.toggle("video", mode === "video");
+    box.querySelectorAll("[data-track]").forEach(b => b.disabled = mode === "video");
+    if (mode === "video" && !video.src) { video.src = d.video; video.controls = true; }
+    const go = () => { media.currentTime = at; if (playing) media.play().catch(() => {}); sync(); };
+    media.readyState >= 1 ? go() : media.addEventListener("loadedmetadata", go, { once: true });
+    box.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+    curFrame = -2;
+  }
+  [audio, video].forEach(el => { el.addEventListener("timeupdate", () => el === media && sync()); el.addEventListener("seeked", () => el === media && sync()); });
+  items.forEach(li => { li.onclick = () => { seek(+li.dataset.t); media.play().catch(() => {}); };
+    li.onkeydown = (e) => { if (e.key === "Enter") li.click(); }; });
+  box.querySelectorAll(".pr-pl-marks i").forEach(m => m.onclick = () => seek(d.frames[+m.dataset.k].t));
+  box.querySelectorAll("[data-track]").forEach(b => b.onclick = () => setTrack(b.dataset.track));
+  box.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  img.onclick = () => curFrame >= 0 && core.call("ws_open", { path: meeting.frames.find(p => p.endsWith("/" + d.frames[curFrame].name)) || meeting.folder }).catch(e => toast(e.message));
+  const close = () => { audio.pause(); video.pause(); audio.removeAttribute("src"); video.removeAttribute("src");
+    document.removeEventListener("keydown", onKey, true); box.remove(); if (opener) opener.focus(); };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); close(); }
+    else if (e.target.closest && e.target.closest("button, li, audio, video")) return;
+    else if (e.key === " ") { e.preventDefault(); media.paused ? media.play().catch(() => {}) : media.pause(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); seek(media.currentTime + 5); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); seek(media.currentTime - 5); }
+  };
+  document.addEventListener("keydown", onKey, true);
+  box.querySelector(".pr-gal-x").onclick = close;
+  if (d.tracks.length) setTrack(track); else mode = "video";
+  setMode(mode);
+  sync();
+  box.querySelector(".pr-gal-x").focus();
 }
 // Итог и видео создаются в фоне после остановки. Обновляем список без
 // повторного открытия раздела, чтобы кнопка ▶ появилась сразу.

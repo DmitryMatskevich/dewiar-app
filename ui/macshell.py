@@ -35,6 +35,36 @@ def free_core_port():
         return listener.getsockname()[1]
 
 
+def start_owned_core(app, token, text_only, port):
+    """Launch only our core; failed launches leave no process or open log behind."""
+    logs = STATE_DIR / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    stream = (logs / "mac-launch.log").open("a", encoding="utf-8")
+    process = None
+    try:
+        command = ([sys.executable, "--core"] if getattr(sys, "frozen", False)
+                   else [sys.executable, str(app.ROOT / "core/main.py")])
+        if text_only:
+            command.append("--server")
+        process = subprocess.Popen(command, cwd=app.ROOT, stdout=stream, stderr=stream, start_new_session=True)
+        deadline = time.monotonic() + 25
+        while not core_authenticated(port, token):
+            if process.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"Ядро не запустилось; журнал: {logs / 'mac-launch.log'}")
+            time.sleep(0.1)
+        return process, stream
+    except Exception:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+        stream.close()
+        raise
+
+
 def source_checkout_update(root, timeout=120):
     """Safely update a Dewiar checkout and return a small, UI-safe result.
 
@@ -381,7 +411,8 @@ def make_api(app):
             return [self._hud.x, self._hud.y] if self._hud else [0, 0]
 
         def move_to(self, mode, x, y):
-            self._hud.move(int(x), int(y))
+            if self._hud is not None:          # окна виджета нет (закрыто или ещё не создано) — двигать нечего
+                self._hud.move(int(x), int(y))
 
         def _ensure_hud(self):
             """Return the HUD, recreating it if the user closed its window."""
@@ -397,14 +428,30 @@ def make_api(app):
                 background_color="#0b0b0e", menu=getattr(self, "_mac_menu_spec", []),
             )
             self._hud = window
+            self._hud_shown = True
             self.wins["card"] = window
 
             def closed():
                 if self._hud is window:
                     self._hud = None
+                    self._hud_shown = False
+                    self.in_tray = True
                     self.wins.pop("card", None)
 
+            def shown():
+                if self._hud is window:
+                    self._hud_shown = True
+                    self.in_tray = False
+
+            def minimized():
+                if self._hud is window:
+                    self._hud_shown = False
+                    self.in_tray = True
+
             window.events.closed += closed
+            window.events.shown += shown
+            window.events.restored += shown
+            window.events.minimized += minimized
             return window
 
         def _activate(self, mode="card"):
@@ -415,8 +462,21 @@ def make_api(app):
         def show(self, mode="card"):
             self.from_tray()
 
+        def wake_agent(self):
+            """Start a stopped owned core, then recreate/show a closed HUD."""
+            ensure = getattr(self, "_wake_core", None)
+            if ensure:
+                ensure()
+            self.from_tray()
+            return {"ok": True, **self.tray_state()}
+
         def hide(self, mode="card"):
-            self._hud.hide()
+            # Окно HUD ещё не создано (первый запуск, студия без виджета) — скрывать нечего.
+            # Раньше здесь падал AttributeError: 'NoneType' object has no attribute 'hide'.
+            if self._hud is not None:
+                self._hud.hide()
+            self._hud_shown = False
+            self.in_tray = True
 
         def _hide_now(self, mode="card"):
             self.hide(mode)
@@ -426,27 +486,33 @@ def make_api(app):
             self.hide()
 
         def from_tray(self, quiet=False):
-            self.in_tray = False
             self._activate()
+            self.in_tray = False
+            self._hud_shown = True
 
         def bring_back(self):
             self.from_tray()
 
         def tray_state(self):
-            return {"in_tray": self.in_tray, "icon": False}
+            loaded = self._hud is not None
+            visible = loaded and bool(getattr(self, "_hud_shown", not self.in_tray))
+            return {"in_tray": not visible, "icon": False, "loaded": loaded, "visible": visible}
 
         def set_mode(self, mode="card", auto=False):
             self.mode = "card"
             self.from_tray()
 
         def card_size(self):
+            if self._hud is None:
+                return list(app.SIZES.get("card") or (340, 500))
             return [self._hud.width, self._hud.height]
 
         def resize_card(self, w, h, final=False):
-            self._hud.resize(max(280, min(640, int(w))), max(360, min(1000, int(h))))
+            if self._hud is not None:
+                self._hud.resize(max(280, min(640, int(w))), max(360, min(1000, int(h))))
 
         def set_zoom(self, z):
-            if app.set_zoom_sizes(z):
+            if app.set_zoom_sizes(z) and self._hud is not None:
                 self._hud.resize(*app.SIZES["card"])
             return self.get_pos()
 
@@ -570,8 +636,9 @@ def make_api(app):
             if summary.suffix.lower() != ".md" or meeting_root.name != "Встречи":
                 raise ValueError("ссылка не относится к итогам встречи")
             target = (meeting_root / rel).resolve()
-            if meeting_root not in target.parents or not target.is_file():
-                raise ValueError("файл встречи не найден")
+            # Файл встречи или её папка (раздел «Папки встречи» в итоге) — только внутри «Встречи».
+            if not (target == meeting_root or meeting_root in target.parents) or not (target.is_file() or target.is_dir()):
+                raise ValueError("файл или папка встречи не найдены")
             open_target(target)
             return True
 
@@ -749,26 +816,30 @@ def main_mac(args, extra, app):
             settings.WS_PORT = app.WS_PORT = WS_PORT
     os.environ["DEWIAR_MAC_DESKTOP"] = "1"
     os.environ["DEWIAR_PORT"] = str(WS_PORT)
+    core_start_lock = threading.Lock()
+
+    def ensure_owned_core():
+        nonlocal process, stream
+        with core_start_lock:
+            if process is not None and process.poll() is None:
+                if core_authenticated(WS_PORT, token):
+                    return
+                raise RuntimeError("Ядро ещё работает, но не отвечает. Повторный экземпляр не запускается.")
+            if app.core_alive():
+                if core_authenticated(WS_PORT, token):
+                    return
+                raise RuntimeError("Порт ядра занят другой программой. Не удалось загрузить помощника.")
+            if stream:
+                stream.close()
+            process, stream = start_owned_core(app, token, args.text_only, WS_PORT)
+
     if not own_core:
-        logs = STATE_DIR / "logs"
-        logs.mkdir(parents=True, exist_ok=True)
-        stream = (logs / "mac-launch.log").open("a", encoding="utf-8")
-        command = ([sys.executable, "--core"] if getattr(sys, "frozen", False)
-                   else [sys.executable, str(app.ROOT / "core/main.py")])
-        if args.text_only:
-            command.append("--server")
-        process = subprocess.Popen(command, cwd=app.ROOT, stdout=stream, stderr=stream, start_new_session=True)
-        deadline = time.monotonic() + 25
-        while not core_authenticated(WS_PORT, token):
-            if process.poll() is not None or time.monotonic() > deadline:
-                if process.poll() is None:
-                    process.terminate()
-                raise RuntimeError(f"Ядро не запустилось; журнал: {logs / 'mac-launch.log'}")
-            time.sleep(0.1)
+        ensure_owned_core()
     port_file = STATE_DIR / "core-port.json"
     port_file.write_text(json.dumps({"port": WS_PORT, "ui_pid": os.getpid()}), encoding="utf-8")
     os.chmod(port_file, 0o600)
     api = make_api(app)(token)
+    api._wake_core = ensure_owned_core
     api._mac_menu_spec = make_macos_menu(api)
     api._ensure_hud()
     if args.settings or getattr(args, "request_microphone", False) or not app.SETTINGS_PATH.exists():
@@ -800,7 +871,7 @@ def main_mac(args, extra, app):
             try:
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
-                    state = json.loads(api._hud.evaluate_js("JSON.stringify({title:document.title,body:document.body.innerText.length,bridge:!!window.pywebview.api,connected:!!window.core?.connected,text_mode:document.getElementById('say')?.textContent === 'Текстовый режим',mic_disabled:!!document.getElementById('b-mic')?.disabled,mic_switch:document.getElementById('b-mic')?.title.startsWith('Включить голосовой режим')})"))
+                    state = json.loads(api._hud.evaluate_js("JSON.stringify({title:document.title,body:document.body.innerText.length,bridge:!!window.pywebview.api,connected:!!window.core?.connected,text_mode:audioMode === 'text',mic_disabled:!!document.getElementById('b-mic')?.disabled,mic_switch:document.getElementById('b-mic')?.title.startsWith('Включить голосовой режим')})"))
                     state["studio"] = bool(api._studio and api._studio.evaluate_js(
                         "!!window.core?.connected && !!window.pywebview?.api && document.body.innerText.length > 100"))
                     state["mic_permission"] = api.microphone_permission()["state"]
@@ -829,21 +900,21 @@ def main_mac(args, extra, app):
                     try {
                         window.api = () => ({open_settings: page => visited.push(page)});
                         setLocal(false);
-                        const shield = document.getElementById('b-lo'), brain = document.getElementById('b-model');
+                        const shield = document.getElementById('b-lo'), brain = document.getElementById('ask-model');
                         result.external_shield = !shield.hidden && shield.title.includes('разрешены') && getComputedStyle(document.getElementById('corner-l')).opacity === '1';
                         shield.click(); setLocal(true);
                         result.local_shield = !shield.hidden && shield.title.includes('запрещены');
                         setModelSettings({active:'fixture',profiles:{fixture:{model:'fixture-model',name:'Local'}}});
                         core.call = async () => ({automatic:false});
                         await refreshModelHint();
-                        result.model_hint = brain.title.includes('fixture-model');
+                        result.model_hint = brain.textContent.includes('fixture-model');
                         brain.click(); result.navigation = visited.join(',') === 'safety,brain';
                         hudModels.auto_select = true;
-                        core.call = async () => ({automatic:true,next:null,selected:{model:'old-model'}});
-                        await refreshModelHint(); result.unavailable = brain.title.includes('нет доступной модели') && brain.title.includes('Последний запрос: old-model');
+                        core.call = async () => ({automatic:true,next:null,selected:null});
+                        await refreshModelHint(); result.unavailable = brain.textContent.includes('нет доступной модели');
                         window.__hudControlsSmoke = result;
                     } catch (error) {
-                        window.__hudControlsSmoke = {failed:false};
+                        window.__hudControlsSmoke = {failed:false,error:String(error)};
                     } finally {
                         window.api = savedApi; core.call = savedCall; setLocal(savedLocal);
                         setModelSettings(savedModels); refreshModelHint();
@@ -858,7 +929,7 @@ def main_mac(args, extra, app):
                 state['hud_controls'] = hud_result or {'timeout':False}
                 if not all(state['hud_controls'].values()):
                     raise RuntimeError('HUD security/model controls failed: '+str(state['hud_controls']))
-                api._hud.evaluate_js("document.getElementById('b-model').click()")
+                api._hud.evaluate_js("document.getElementById('ask-model').click()")
                 until = time.monotonic() + 5
                 while time.monotonic() < until:
                     if api._studio.evaluate_js("!!document.querySelector('#p-brain.cur')"):

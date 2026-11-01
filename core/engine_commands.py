@@ -480,40 +480,17 @@ class CommandsMixin:
             if cmd == "prompter_file_remove":
                 return pr.remove_file(a.get("name", ""))
             if cmd == "prompter_meetings":                 # итоги прошлых встреч — студия, «Встречи»
-                d = self.workspace.ensure() / "Встречи"
-                fs = sorted(d.glob("*.md"), reverse=True)[:40] if d.is_dir() else []
-                rows = []
-                for f in fs:
-                    stem = f.stem
-                    audio = d / "Аудио" / f"{stem}.wav"
-                    audio_ready = audio.is_file() and audio.stat().st_size > 44
-                    # Older builds used a second clock for the WAV name. If
-                    # that crossed a minute boundary, recover the only WAV
-                    # with the same meeting start minute.
-                    if not audio_ready and len(stem) >= 15:
-                        candidates = [x for x in (d / "Аудио").glob(f"{stem[:15]}*.wav")
-                                      if x.is_file() and x.stat().st_size > 44]
-                        if len(candidates) == 1:
-                            audio, audio_ready = candidates[0], True
-                    # Видео создаётся после итогового Markdown, поэтому ищем
-                    # его при каждом открытии списка, а не только в памяти.
-                    videos = []
-                    for candidate in (d / "Расшифровки" / stem / "Видео").glob("*.mp4") if (d / "Расшифровки" / stem / "Видео").is_dir() else []:
-                        if candidate.is_file():
-                            videos.append(candidate)
-                    if not videos:
-                        videos = [x for x in d.rglob("*.mp4") if x.is_file() and (stem in x.name or stem in str(x.parent))]
-                    transcript = d / "Расшифровки" / f"{stem}.txt"
-                    transcript_ready = transcript.is_file() and transcript.stat().st_size > 0
-                    row = {"name": stem, "path": f"Встречи/{f.name}", "size": f.stat().st_size,
-                           "audio": f"Встречи/Аудио/{audio.name}" if audio_ready else "",
-                           "audio_size": audio.stat().st_size if audio_ready else 0,
-                           "transcript": f"Встречи/Расшифровки/{transcript.name}" if transcript_ready else "",
-                           "transcript_size": transcript.stat().st_size if transcript_ready else 0,
-                           "video": f"Встречи/{videos[0].relative_to(d).as_posix()}" if videos else "",
-                           "video_size": videos[0].stat().st_size if videos else 0}
-                    rows.append(row)
-                return rows
+                from prompter import meetings_index
+                return meetings_index(self.workspace.ensure() / "Встречи")
+            if cmd == "prompter_meeting_player":           # «Прошлые встречи» → ▶: дорожки, кадры и текст по времени
+                from meeting_media import MediaServer, player_data
+                root = self.workspace.ensure() / "Встречи"
+                if getattr(self, "_meeting_media", None) is None:
+                    self._meeting_media = MediaServer(lambda: self.workspace.ensure() / "Встречи")
+                return player_data(root, a.get("path", ""), self._meeting_media)
+            if cmd == "prompter_meeting_frame":            # «Прошлые встречи» → просмотр кадров
+                from prompter import meeting_frame_preview
+                return meeting_frame_preview(self.workspace.ensure(), a.get("path", ""))
             if cmd == "prompter_meeting_remove":           # студия, «Прошлые встречи» → корзина (отзыв 17.10: «как удалить прошлую встречу?»)
                 rel = str(a.get("path") or "")
                 if not rel.startswith("Встречи/") or "/" in rel[len("Встречи/"):] or not rel.endswith(".md"):
@@ -1542,6 +1519,32 @@ class CommandsMixin:
         if cmd == "task_create":
             t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""), start=a.get("start", True),team=a.get('team'))
             return t.public()
+        if cmd == 'media_transcribe':
+            sources = a.get('sources') or []
+            uploads = a.get('files') or []
+            if not isinstance(sources, list) or not isinstance(uploads,list) or not 1 <= len(sources)+len(uploads) <= 200 or not all(isinstance(s,str) and 0 < len(s.strip()) <= 8192 for s in sources):
+                raise ValueError('Укажите от 1 до 200 файлов или ссылок, по одному источнику на строку')
+            if len(uploads) > 10:
+                raise ValueError('Для большого пакета выберите файлы через «Выбрать файлы…»')
+            if uploads:
+                import base64, hashlib
+                sources = list(sources)
+                for upload in uploads:
+                    raw = str(upload.get('b64') or '')
+                    if len(raw) > 16_000_000:
+                        raise ValueError('Большой файл выберите через «Выбрать файлы…», без отправки вложением чата')
+                    data = base64.b64decode(raw.split(',',1)[-1] if raw.startswith('data:') else raw, validate=True)
+                    if not data:
+                        raise ValueError('Выбран пустой файл')
+                    name = re.sub(r'[\\/:*?"<>|]', '_', Path(str(upload.get('name') or 'audio.wav')).name)[:120]
+                    dst = self.workspace.ensure()/'.media-cache/uploads'/hashlib.sha256(data).hexdigest()/name
+                    dst.parent.mkdir(parents=True,exist_ok=True)
+                    if not dst.exists():
+                        dst.write_bytes(data)
+                    sources.append(str(dst))
+            previous = set(self.tasks.tasks)
+            task = self.tasks.create_transcription(sources, language=str(a.get('language') or 'ru'))
+            return dict(task.public(), reused=task.id in previous)
         if cmd in ('task_team_set','task_team_restart'):
             team = a.get('team') if 'team' in a else self.tasks.get(a.get('id')).data.get('team',{})
             return self.tasks.set_team(a.get('id'),team,restart=cmd=='task_team_restart')
@@ -1631,6 +1634,21 @@ class CommandsMixin:
             return {"ready": self.vosk_tts.ready}
         if cmd == "devices":
             return list_devices()
+        if cmd == "voice_commands":
+            from voice_commands import config
+            import tools as _tools
+            apps = _tools.desktop_apps() if _tools.MAC else []
+            return {"config": config(self.s.get("voice_commands")), "defaults": config(), "installed": [
+                {"name": x["name"], "target": x["id"]} for x in apps]}
+        if cmd == "voice_command_test":
+            from voice_commands import parse, validate, config
+            value = a.get("config") if a.get("config") is not None else self.s.get("voice_commands")
+            value = validate(config(value))
+            result = parse(str(a.get("text") or ""), value)
+            if result:
+                tool = "yandex_music" if result["action"] == "yandex_search" else "control_mac_app"
+                result["allowed"], result["confirm"] = self.toolbox.policy(tool)
+            return result
         if cmd == "tools":
             return self.toolbox.catalog()
         if cmd == "confirm_answer":

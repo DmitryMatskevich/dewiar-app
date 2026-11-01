@@ -1,4 +1,4 @@
-"""Картинка из буфера обмена в виджете: Ctrl+V (и когда поле вопроса закрыто) или кнопка «из буфера» — картинку
+"""Картинка из буфера обмена в виджете: Ctrl+V (и когда поле вопроса закрыто), без отдельной кнопки — картинку
 берёт окно (Api.clipboard_image), она уходит модели вместе с вопросом. Живое ядро, модель-заглушка, страница виджета."""
 
 import json, os, socket, subprocess, sys, tempfile, time
@@ -66,9 +66,10 @@ try:
         ok("Вижу картинку 640x480" in cap, f"картинка дошла до модели: {cap[:80]}")
         pg.evaluate("window.CLIP = ''")
         # Поле текста теперь открыто постоянно; старую кнопку «Текст» намеренно убрали из панели.
-        pg.click("#a-clip"); pg.wait_for_timeout(400)
-        ok("нет картинки" in pg.evaluate("document.getElementById('cap').textContent") and pg.evaluate("atts.length") == 0,
-           "в буфере нет картинки — понятная подсказка, без отчёта об ошибке")
+        ok(pg.locator('#a-clip').count() == 0, 'лишней кнопки вставки картинки нет')
+        pg.evaluate("document.getElementById('askin').dispatchEvent(new ClipboardEvent('paste',{clipboardData:new DataTransfer(),bubbles:true,cancelable:true}))")
+        pg.wait_for_timeout(400)
+        ok(pg.evaluate("atts.length") == 0, "пустой буфер не создаёт вложений")
         ok(not errs, f"без ошибок на странице: {errs}")
         b.close()
 finally:

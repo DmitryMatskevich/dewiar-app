@@ -20,18 +20,22 @@ def applications(directories=None):
     roots = directories if directories is not None else (
         Path("/Applications"), Path("/System/Applications"), Path.home() / "Applications")
     found = {}
-    for root in map(Path, roots):
-        for pattern in ("*.app", "*/*.app"):
-            for bundle in sorted(root.glob(pattern)):
-                try:
-                    with (bundle / "Contents/Info.plist").open("rb") as stream:
-                        info = plistlib.load(stream)
-                    key = str(info.get("CFBundleIdentifier") or bundle.resolve())
-                    name = str(info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle.stem)
-                    found.setdefault(key, {"name": name, "ru": "", "keywords": bundle.stem,
-                                           "id": key, "path": str(bundle)})
-                except (OSError, ValueError, plistlib.InvalidFileException):
-                    continue
+    bundles = [bundle for root in map(Path, roots) for pattern in ('*.app', '*/*.app') for bundle in sorted(root.glob(pattern))]
+    # A packaged Dewiar may run from dist/ or Downloads rather than /Applications.
+    import sys
+    if directories is None and getattr(sys, 'frozen', False):
+        current = Path(sys.executable).parents[2]
+        if current.suffix == '.app':bundles.append(current)
+    for bundle in bundles:
+        try:
+            with (bundle / "Contents/Info.plist").open("rb") as stream:
+                info = plistlib.load(stream)
+            key = str(info.get("CFBundleIdentifier") or bundle.resolve())
+            name = str(info.get("CFBundleDisplayName") or info.get("CFBundleName") or bundle.stem)
+            found.setdefault(key, {"name": name, "ru": "", "keywords": bundle.stem,
+                                   "id": key, "path": str(bundle)})
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
     return list(found.values())
 
 

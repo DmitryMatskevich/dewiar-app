@@ -8,7 +8,7 @@
    лишь при открытии редактора. */
 /* ---------- персонажи ---------- */
 function accent(color) { document.documentElement.style.setProperty("--persona", color); }   // интерфейс — в фирменных цветах, цвет персонажа — только у его облика
-/* Перерисовать карточки и логотип по personas/active; подпись «сейчас говорит …» читает curName() в soul.js */
+/* Перерисовать карточки и кнопку текущего помощника по personas/active. */
 function renderPersonas() {
   entities.forEach(e => e.destroy()); entities = [];
   const g = $("#pgrid"); g.innerHTML = "";
@@ -30,7 +30,8 @@ function renderPersonas() {
   n.onclick = () => openEditor(null); g.appendChild(n);
   loadGallery();
   const cur = personas.find(p => p.id === active);
-  if (cur) { accent(cur.color); brand.configure({ style: cur.avatar_url && cur.style !== "aura" ? "photo" : cur.style, color: cur.color, image: cur.avatar_url || null }); $("#bsub").textContent = `сейчас говорит ${cur.name}`; }
+  if (cur) { accent(cur.color); brand.configure({ style: cur.avatar_url && cur.style !== "aura" ? "photo" : cur.style, color: cur.color, image: cur.avatar_url || null, live: cur.live || "" }); }
+  renderAgentToggle();
 }
 
 /* Компьютеру не хватает памяти (status.tight от ядра) — все облики студии почти неподвижны */

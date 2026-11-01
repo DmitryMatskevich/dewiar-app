@@ -13,6 +13,14 @@ STOP = set("как мне мой моя мои что где это для ил�
 _cache = None
 
 
+def _assistant_note(sections):
+    if not any(s.get('id') == 'voice-commands' for s in sections):return ''
+    return ('\nПомощь с командами: предложи настроить конкретную фразу или название, если пользователь затрудняется. '
+            'Для текущих данных используй voice_command_settings operation=show; уточни недостающее. '
+            'operation=propose готовит одно изменение, не сохраняет. voice_command_apply показывает предложение и обязательно спрашивает разрешение. '
+            'До успешного применения не говори «сохранено». После отказа не меняй настройки и не повторяй предложение.')
+
+
 def load():
     global _cache
     if _cache is None:
@@ -73,7 +81,7 @@ def hint(query, where=""):
     if best < 2 or top is None:
         return ""
     return ("Вопрос про само приложение — вот раздел руководства (отвечай по нему своими словами, коротко; не выдумывай "
-            "того, чего тут нет):\n" + text(top))
+            "того, чего тут нет):\n" + text(top) + _assistant_note([top]))
 
 
 def text(s):
@@ -90,4 +98,4 @@ def answer(query, where=""):
     found = search(query, where)
     if not found:
         return f"В руководстве такого нет. Не выдумывай кнопки и меню: скажи честно и предложи посмотреть руководство — {URL}"
-    return "\n\n".join(text(s) for s in found) + "\n\nОтветь своими словами, коротко, с точными названиями разделов и кнопок; ссылку назови, если просят подробнее."
+    return "\n\n".join(text(s) for s in found) + "\n\nОтветь своими словами, коротко, с точными названиями разделов и кнопок; ссылку назови, если просят подробнее." + _assistant_note(found)

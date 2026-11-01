@@ -6,13 +6,6 @@ from pathlib import Path
 from macsys import applications
 
 
-ALIASES={'сафари':'safari','телеграм':'telegram','телеграмм':'telegram','хром':'google chrome','гугл хром':'google chrome',
-         'калькулятор':'calculator','терминал':'terminal','заметки':'notes','календарь':'calendar',
-         'текстэдит':'textedit','текстовый редактор':'textedit','файндер':'finder','настройки системы':'system settings',
-         'яндекс браузер':'yandex','яндекс':'yandex','вскод':'code','вс код':'code',
-         'девиар':'dewiar','оллама':'ollama','страта':'strata','курсор':'cursor','visual studio code':'code'}
-
-
 class AppNotFound(ValueError):pass
 
 
@@ -21,13 +14,13 @@ def norm(text):return ' '.join(str(text).casefold().replace('ё','е').strip(' �
 
 def parse(text):
     t=' '.join(text.strip().split()).rstrip('.!')
+    t=re.sub(r'^(?:пожалуйста[, ]+|(?:можешь|можно)\s+)', '', t, flags=re.I)
+    t=re.sub(r'[, ]+пожалуйста$', '', t, flags=re.I)
     if re.search(r'\b(?:сайт|страниц|вкладк|задач|файл|папк|ссылк)\w*\b',t,re.I):return None
-    m=re.fullmatch(r'(?:открой|запусти|открыть|запустить)\s+(?:приложение\s+|программу\s+)?(.+)',t,re.I)
-    if m:return {'action':'open','application':m[1]}
-    m=re.fullmatch(r'(?:переключись\s+на|перейди\s+в|активируй|покажи\s+приложение)\s+(.+)',t,re.I)
-    if m:return {'action':'focus','application':m[1]}
-    m=re.fullmatch(r'(?:закрой|закрыть|заверши|завершить)\s+(?:приложение\s+|программу\s+)?(.+)',t,re.I)
-    if m:return {'action':'quit','application':m[1]}
+    from voice_commands import parse as parse_voice
+    request=parse_voice(text)
+    if request and request['action'] != 'yandex_search':
+        return {k:v for k,v in request.items() if k not in ('enabled','title')}
     m=re.fullmatch(r'(?:перенеси|перемести|перенести|переместить)\s+(?:окно\s+)?(.+?)\s+на\s+(.+?)\s+(?:экран|монитор)',t,re.I)
     if m:return {'action':'move','application':m[1],'screen':m[2]}
     m=re.fullmatch(r'(?:перемести|переведи|перенеси|наведи)\s+(?:курсор|мышку|указатель|курсор мыши)\s+(?:к|на|в)\s+(?:окну\s+|окно\s+|приложение\s+)?(.+)',t,re.I)
@@ -36,11 +29,16 @@ def parse(text):
     return None
 
 
-def resolve(query,rows):
-    q=norm(query);q=ALIASES.get(q,q)
+def resolve(query,rows,alias_config=None):
+    from voice_commands import config, target
+    aliases=config(alias_config)
+    canonical=target(query,aliases)
+    q=norm(canonical)
     exact=[r for r in rows if q in (norm(r['name']),norm(r['id']),norm(Path(r['path']).stem) if r.get('path') else '')]
     candidates=exact or [r for r in rows if len(q)>=3 and re.search(r'(?:^|\s)'+re.escape(q)+r'(?:\s|$)',norm(r['name']))]
-    if not candidates:raise AppNotFound('Не найдено приложение «'+str(query)+'»')
+    if not candidates:
+        label=next((a['name'] for a in aliases['applications'] if norm(a['target']) == q),str(query))
+        raise AppNotFound('Не найдено установленное приложение «'+label+'»')
     if len(candidates)>1:raise ValueError('Уточните приложение: '+', '.join(r['name'] for r in candidates[:8]))
     return candidates[0]
 
@@ -311,9 +309,12 @@ def windows(row):
     return root,result
 
 
-def execute(args):
+def execute(args, alias_config=None):
     action=args.get('action');query=str(args.get('application') or '').strip()
-    if action not in ('screens','list','open','quit','focus','move','cursor','windows','inspect','click','type','key','scroll'):
+    if action in ('dnd_on', 'dnd_off'):
+        from mac_focus import set_dnd
+        return set_dnd(action == 'dnd_on')
+    if action not in ('screens','list','open','quit','focus','minimize','move','cursor','windows','inspect','click','type','key','scroll'):
         raise ValueError('Неизвестное действие с приложением')
     if action=='screens':return {'screens':screens()}
     # Opening an application does not require Accessibility or a snapshot of
@@ -323,13 +324,13 @@ def execute(args):
     # command «Открой календарь» fail before /usr/bin/open was reached.
     # Resolve the installed bundle from its plist and launch it directly.
     if action=='open':
-        row=resolve(query,applications())
+        row=resolve(query,applications(),alias_config)
         p=subprocess.run(['/usr/bin/open','-a',row['path']],capture_output=True,text=True,timeout=15)
         if p.returncode:raise ValueError('macOS не открыла приложение: '+row['name'])
         return {'message':'Приложение «'+row['name']+'» открыто.'}
     rows=running()
     if action=='list':return {'applications':[{k:v for k,v in row.items() if k!='_app'} for row in rows]}
-    row=resolve(query,rows);app=row['_app']
+    row=resolve(query,rows,alias_config);app=row['_app']
     if action=='quit':
         if row['id'] in ('com.apple.finder','pro.dewiar.macos'):raise ValueError('Это приложение не завершаю этой командой')
         if not app.terminate():raise ValueError('macOS не приняла запрос завершения')
@@ -342,6 +343,21 @@ def execute(args):
         app.unhide()
         if not app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps):raise ValueError('macOS не приняла переключение приложения')
         return {'message':'Переключение на «'+row['name']+'» запрошено.'}
+    if action=='minimize':
+        if not permission()['granted']:raise PermissionError('Разрешите Dewiar: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ. Затем повторите команду.')
+        _,items=windows(row)
+        if not items:raise ValueError('У приложения нет доступного обычного окна')
+        index=args.get('window')
+        if index is not None:
+            if isinstance(index,bool) or not isinstance(index,int) or not 1<=index<=len(items):raise ValueError('Укажите существующий номер окна')
+            items=[items[index-1]]
+        if any(_get(item['_element'],'AXFullScreen') for item in items):
+            raise ValueError('Выйдите из полноэкранного режима приложения и повторите команду')
+        for item in items:
+            element=item['_element']
+            if not _get(element,'AXMinimized'):_set(element,'AXMinimized',True)
+            if not _get(element,'AXMinimized'):raise ValueError('Приложение не подтвердило сворачивание окна')
+        return {'message':'Окна приложения «'+row['name']+'» свёрнуты.', 'windows':len(items)}
     if action in ('inspect','click','type','key','scroll'):
         if not permission()['granted']:
             raise PermissionError('Разрешите Dewiar: Системные настройки → Конфиденциальность и безопасность → Универсальный доступ. Затем повторите команду.')

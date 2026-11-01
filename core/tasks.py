@@ -111,9 +111,12 @@ WORK_TOOLS = {
     "show": ("Показать файл пользователю как готовый результат: страница, дашборд, презентация, картинка, PDF, документ, "
              "таблица. Он появится в студии во вкладке «Результаты» с просмотром. Вызывай для каждого главного файла.",
              S({"path": {"type": "string"}, "title": {"type": "string"}}, ["path"])),
-    "transcribe": ("Расшифровать речь из аудио или видео в текст с метками времени [мм:сс] (своим распознаванием). "
-                   "path — файл в папке задачи, в папке ассистента или полный путь. Сохраняет .txt и .srt в outputs/.",
-                   S({"path": {"type": "string"}}, ["path"])),
+    "transcribe": ("Получить полный текст видео: сначала готовые субтитры, иначе скачать звук и распознать. "
+                   "path — файл или ссылка; urls — пакет ссылок; urls_file — список в файле задачи. "
+                   "Русская речь (language=ru по умолчанию) — GigaAM v3 Dewiar. Сохраняет TXT, SRT, чистовой Markdown и общее резюме (тема, выступающие, идеи, вывод) в outputs/transcripts/. "
+                   "Ошибки отдельных роликов не прерывают пакет; force=true повторяет готовые результаты.",
+                   S({"path": {"type": "string"}, "urls": {"type": "array", "items": {"type": "string"}},
+                      "urls_file": {"type": "string"}, "language": {"type": "string"}, "force": {"type": "boolean"}})),
     "download": ("Скачать файл по ссылке в папку задачи (downloads/). Вернёт путь.",
                  S({"url": {"type": "string"}, "name": {"type": "string"}}, ["url"])),
 }
@@ -417,6 +420,98 @@ class TaskManager:
             self.start(tid)
         return t
 
+    def create_transcription(self, sources, goal='', language='ru'):
+        """A persisted native workflow: no LLM call is needed to start or perform ASR."""
+        from media_transcription import unique_sources, source_key, seed_cache
+        from transcript_editor import VERSION as CLEAN_VERSION
+        from transcript_summary import VERSION as SUMMARY_VERSION
+        sources = unique_sources(sources)
+        if not sources:
+            raise ValueError('Нужна ссылка или файл')
+        def signature(source):
+            if source.startswith(('https://','http://')):
+                return None
+            path = Path(source).expanduser()
+            if not path.is_absolute():
+                path = self.host.workspace.root/path
+            try:
+                st = path.stat()
+                out = [str(path.resolve()),st.st_size,st.st_mtime_ns]
+                for ext in ('.srt','.vtt'):
+                    sub = path.with_suffix(ext)
+                    if sub.is_file():
+                        ss = sub.stat(); out.append([ext,ss.st_size,ss.st_mtime_ns])
+                return out
+            except OSError:
+                return ['unavailable',source]
+        signatures = [signature(source) for source in sources]
+        keys = [source_key(source) for source in sources]
+        with self._lock:
+            for existing in self.tasks.values():
+                same = ([source_key(s) for s in existing.data.get('media_sources',[])] == keys
+                        and existing.data.get('media_language') == language)
+                if (same and existing.status in ALIVE):
+                    return existing
+                if (same and existing.status == 'done'
+                        and existing.data.get('media_signatures', [None]*len(sources)) == signatures
+                        and existing.data.get('outputs')
+                        and all((existing.dir/o['path']).is_file() for o in existing.data['outputs'])):
+                    if (existing.data.get('media_clean_version') != CLEAN_VERSION
+                            or existing.data.get('media_summary_version') != SUMMARY_VERSION):
+                        seed_cache(self.host.workspace.root/'.media-cache',existing.dir)
+                        existing.data['media_postprocess'] = True
+                        existing.save()
+                        return self.start(existing.id)
+                    return existing
+            for existing in list(self.tasks.values()):
+                if existing.data.get('workflow') == 'media-transcription':
+                    seed_cache(self.host.workspace.root/'.media-cache',existing.dir)
+            task = self.create('Извлечение текста из видео', goal or '\n'.join(sources), start=False)
+            task.data.update(workflow='media-transcription', media_sources=list(sources), media_language=language, media_signatures=signatures)
+            task.save()
+            return self.start(task.id)
+
+    def _run_media(self, t):
+        try:
+            from transcript_editor import VERSION as CLEAN_VERSION
+            from transcript_summary import VERSION as SUMMARY_VERSION
+            self._beat(t, 'transcribe')
+            postprocess=t.data.pop('media_postprocess',False)
+            t.data.update(steps=int(t.data.get('steps') or 0)+1, finished=False,
+                          activity='Готовлю постобработку из сохранённой расшифровки…' if postprocess else 'Этап 1/4 — получаю исходную расшифровку…')
+            plan=['Получить исходные расшифровки и сохранить TXT/SRT','Подготовить связный чистовой Markdown по правилам очистки','Сохранить отчёт изменений и места для сверки по аудио','Сделать общее резюме: тема, выступающие, идеи и вывод']
+            (t.dir/'план.md').write_text('\n'.join('- [ ] '+line for line in plan)+'\n',encoding='utf-8')
+            self._emit(t)
+            result = self._work(t, 'transcribe', {'urls':t.data['media_sources'], 'language':t.data.get('media_language','ru')})
+            if t.cancel.is_set():
+                t.data.update(status='stopped', activity='')
+            else:
+                report = json.loads((t.dir/'outputs/transcripts/batch-results.json').read_text(encoding='utf-8'))
+                success = bool(report) and all(r['status']=='ok' for r in report)
+                t.data.update(status='done' if success else 'failed', finished=success, activity='', result=result,
+                              error='' if success else 'Некоторые источники не обработаны — см. журнал и отчёт')
+                (t.dir/'итог.md').write_text(result+'\n',encoding='utf-8')
+                if success:
+                    t.data['media_clean_version']=CLEAN_VERSION
+                    t.data['media_summary_version']=SUMMARY_VERSION
+                    (t.dir/'план.md').write_text('\n'.join('- [x] '+line for line in plan)+'\n',encoding='utf-8')
+                elif report and all(r.get('extraction_complete') or r.get('status')=='ok' for r in report):
+                    (t.dir/'план.md').write_text('- [x] '+plan[0]+'\n'+'\n'.join('- [ ] '+line for line in plan[1:])+'\n',encoding='utf-8')
+                review_count=sum(r.get('cleanup',{}).get('review_count',0) for r in report)
+                t.data['media_review_count']=review_count
+                message='готова. Чистовой Markdown и итоговое резюме — в результатах задачи.'
+                if review_count:
+                    message+=f' Мест для сверки по аудио: {review_count}.'
+                self.host.announce('Задача «'+t.title+'» '+(message if success else 'завершилась с ошибками. Подробности — в журнале задачи.'))
+            t.journal(result)
+        except Exception as error:
+            t.data.update(status='stopped' if t.cancel.is_set() else 'failed', activity='', error=str(error))
+            t.journal(str(error))
+        finally:
+            self._beat(t)
+            t.save()
+            self._emit(t)
+
     def _validate_team(self, team):
         if not isinstance(team, dict):
             raise ValueError('Неверные настройки команды')
@@ -632,7 +727,8 @@ class TaskManager:
         import time as _t
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
-        t.thread = threading.Thread(target=self._run, args=(t,), name=f"task-{t.id}", daemon=True)
+        runner = self._run_media if t.data.get('workflow') == 'media-transcription' else self._run
+        t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
         self._emit(t)
         return t
@@ -1402,33 +1498,108 @@ class TaskManager:
             rel = p.relative_to(t.dir).as_posix()
             outs = [o for o in t.data.get("outputs") or [] if o.get("path") != rel]
             outs.append({"path": rel, "title": (args.get("title") or p.stem)[:120], "time": dt.datetime.now().isoformat(timespec="seconds")})
-            t.data["outputs"] = outs[-30:]
+            t.data["outputs"] = outs[-1000:] if t.data.get('workflow') == 'media-transcription' else outs[-30:]
             t.save()
             self._emit(t)
             t.journal(f"👁 Показал пользователю: {rel}")
             return f"Показано пользователю: {rel} (студия → «Задачи» → «Результаты»)."
         if name == "transcribe":
-            src = str(args.get("path") or "").strip()
-            # источник можно взять и вне папки задачи: из папки ассистента или по полному пути
-            cands = [t.dir / src, self.host.workspace.root / src, Path(os.path.expanduser(src))]
-            p = next((c for c in cands if c.is_file()), None)
-            if p is None:
-                return "Файл не найден — укажи путь в папке задачи (например downloads/лекция.mp4) или полный путь."
-            t.data["activity"] = "расшифровываю запись…"
-            self._emit(t)
-            segs = self.host.transcribe_file(p, cancel=t.cancel)
-            out = t.dir / "outputs"
-            out.mkdir(parents=True, exist_ok=True)
+            from media_transcription import run_batch
+            sources = list(args.get('urls') or [])
+            if args.get('path'):
+                sources.insert(0, str(args['path']))
+            if args.get('urls_file'):
+                listing = self._path(t, args['urls_file']).read_text(encoding='utf-8-sig')
+                sources += [s.strip() for s in listing.splitlines() if s.strip() and not s.lstrip().startswith('#')]
+            if not sources:
+                return 'Укажи path (файл или ссылка), urls (список ссылок) или urls_file.'
 
-            def ts(x, srt=False):                       # секунды -> [мм:сс] / [ч:мм:сс] или 00:00:00,000 для .srt
-                h, m, s_ = int(x // 3600), int(x % 3600 // 60), x % 60
-                return f"{h:02d}:{m:02d}:{int(s_):02d},{int((s_ % 1) * 1000):03d}" if srt else (f"{h}:{m:02d}:{int(s_):02d}" if h else f"{m:02d}:{int(s_):02d}")
-            txt = "\n".join(f"[{ts(a)}] {x}" for a, b, x in segs)
-            (out / f"{p.stem}.txt").write_text(txt + "\n", encoding="utf-8")
-            (out / f"{p.stem}.srt").write_text("\n".join(f"{i}\n{ts(a, True)} --> {ts(b, True)}\n{x}\n" for i, (a, b, x) in enumerate(segs, 1)), encoding="utf-8")
-            t.journal(f"🎙 Расшифровал {p.name}: {len(segs)} фрагментов")
-            return (f"Готово: outputs/{p.stem}.txt и outputs/{p.stem}.srt ({len(segs)} фрагментов). Начало:\n" + txt[:6000]
-                    + ("\n…(дальше — в файле, читай read_file)" if len(txt) > 6000 else ""))
+            def resolve(src):
+                candidates = [t.dir / src, self.host.workspace.root / src, Path(os.path.expanduser(src))]
+                for p in candidates:
+                    try:
+                        if not p.is_file():
+                            continue
+                        with p.open('rb') as probe:
+                            probe.read(1)
+                        return p
+                    except PermissionError as error:
+                        raise PermissionError(f'Нет доступа к файлу {p}. Выберите его через кнопку добавления файла в Dewiar. Если macOS отказала в доступе, проверьте «Конфиденциальность и безопасность → Файлы и папки».') from error
+                raise FileNotFoundError(f'Файл не найден: {src}')
+
+            def recognize(path, language):
+                if language != 'ru':
+                    raise ValueError('Встроенная транскрибация GigaAM предназначена для русского. Для другого языка выбери способ из media-transcribe.')
+                from stt import GigaAMSTT
+                model = self.host.s.get('stt', 'gigaam_model') or 'gigaam-v3-e2e-rnnt'
+                stt = getattr(self.host, 'gigaam', None)
+                if stt is None or stt.model_name != model:
+                    stt = GigaAMSTT(model)
+                if not stt.ready and not stt.load():
+                    raise RuntimeError(f'GigaAM не загрузился: {stt.error}')
+                def progress(done, total):
+                    prefix = t.data.get('media_batch_prefix','')
+                    t.data['activity'] = prefix + f'Распознано {int(done)//60}:{int(done)%60:02d} из {int(total)//60}:{int(total)%60:02d}'
+                    self._beat(t, 'transcribe')
+                    self._emit(t)
+                segs = self.host.transcribe_file(path, cancel=t.cancel, stt=stt, allow_fallback=False, on_progress=progress)
+                return segs, 'gigaam', model
+
+            def notify(message):
+                self._beat(t, 'transcribe')
+                match = re.match(r'^(\d+/\d+ — )', message)
+                if match:
+                    t.data['media_batch_prefix'] = match[1]
+                t.data['activity'] = message
+                self._emit(t)
+                t.journal(message)
+
+            # Резюме — отдельный этап после очистки. Если языковая модель недоступна,
+            # media_transcription создаст честный локальный резерв без выдуманных фактов.
+            def summarize(prompt):
+                profile = self.host.llm_profile()
+                if not profile:
+                    return ''
+                p = dict(profile, max_tokens=min(2600, int(profile.get('max_tokens') or 2600)),
+                         temperature=0.2)
+                chunks = []
+                stream = stream_chat(p, 'Ты аккуратный редактор резюме русскоязычных видеозаписей. Не выдумывай факты.',
+                                      [{'role': 'user', 'content': prompt}], cancel=t.cancel)
+                try:
+                    for chunk in stream:
+                        if t.cancel.is_set():
+                            raise RuntimeError('Задачу остановили')
+                        chunks.append(chunk)
+                        self._beat(t, 'transcribe')
+                finally:
+                    stream.close()
+                return ''.join(chunks)
+
+            results = run_batch(sources, t.dir / 'outputs/transcripts', resolve, recognize,
+                                t.cancel, str(args.get('language') or 'ru'), bool(args.get('force')), notify,
+                                cache=self.host.workspace.root/'.media-cache', summarize=summarize)
+            good = [r for r in results if r['status'] == 'ok']
+            summary = [f"Обработано: {len(good)} из {len(results)}. Отчёт: outputs/transcripts/batch-results.json."]
+            if t.data.get('workflow') == 'media-transcription':
+                t.data['outputs']=[]  # refresh result links after cache-key/editor migrations; source files stay intact
+            for r in results:
+                if r['status'] == 'ok':
+                    summary.append(f"{r['source']}: {r['method']} ({r.get('language')}); чистовой MD: outputs/{r['markdown']}; общее резюме: outputs/{r['summary']}; исходник: outputs/{r['text']}, outputs/{r['srt']}")
+                    files=[('text','исходная расшифровка'),('srt','субтитры')]
+                    if r.get('cleanup',{}).get('review_count'):
+                        files.append(('review','места для сверки по аудио'))
+                        summary.append(f"Сверка по аудио требуется: {r['cleanup']['review_count']} мест; они сохранены в чистовом тексте и перечислены отдельно.")
+                    files.append(('markdown','чистовой Markdown'))
+                    files.append(('summary','общее резюме'))
+                    for field, suffix in files:
+                        self._work(t, 'show', {'path': 'outputs/' + r[field], 'title': f"{r.get('title') or r['source']} — {suffix}"})
+                else:
+                    summary.append(f"{r['source']}: ОШИБКА — {r.get('error')}")
+                    if r.get('extraction_complete'):
+                        summary.append('Исходная расшифровка сохранена; очистку можно продолжить без повторного извлечения.')
+                        for field,suffix in (('text','исходник — этап 1 готов'),('srt','субтитры — этап 1 готов')):
+                            self._work(t,'show',{'path':'outputs/'+r[field],'title':f"{r.get('title') or r['source']} — {suffix}"})
+            return '\n'.join(summary)
         if name == "download":
             import httpx
             url = str(args.get("url") or "").strip()
