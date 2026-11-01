@@ -547,6 +547,12 @@ class AudioMixin:
         while not self.stopping.is_set() and not self.restart_audio.is_set():
             frame = self.capture.read()
             if not frame:
+                # Поток захвата может закрыться во время теста/переподключения микрофона.
+                # Не оставляем голосовую команду в состоянии «завершаю» без FIFO-барьера.
+                if (getattr(self, "dictation_active", False) and self.dictation_finish_requested
+                        and not self._dictation_closed):
+                    tail = b"".join(utt[:len(utt) - max(0, silence - 6)]) if in_speech else b""
+                    self._dictation_flush(tail)
                 return
             now = time.monotonic()
             current_session = (getattr(self, "_dictation_session", 0), getattr(self, "dictation_active", False))
@@ -613,7 +619,10 @@ class AudioMixin:
                     # В диктовке имя — явная отправка, а «стоп» и другие слова остаются частью текста.
                     aliases = self.aliases.get(self.s.get("persona"), [])
                     if kind == "wake" and phrase.casefold() in {a.casefold() for a in aliases}:
-                        self.dictation_finish(submit=True)
+                        # Имя завершает диктовку, но не должно обрывать текущий аудиофрагмент
+                        # посреди слова. Дожидаемся ближайшей естественной паузы; кнопка Stop
+                        # по-прежнему вызывает немедленное завершение.
+                        self.dictation_finish(submit=True, wait_for_pause=True)
                     continue
                 if kind == "wake" and self.state == "idle" and now < self._quiet_until:
                     # только что остановили кнопкой ответ, начатый по голосу, — это было ложное срабатывание (видео, ТВ):
@@ -667,7 +676,8 @@ class AudioMixin:
                     self.interrupt(phrase, follow=False)
                     self.follow_up_until = now + 3.0             # «стоп, лучше расскажи…» — договорить успеете
 
-            if getattr(self, "dictation_active", False) and self.dictation_finish_requested:
+            if (getattr(self, "dictation_active", False) and self.dictation_finish_requested
+                    and (not getattr(self, "_dictation_wait_for_pause", False) or not in_speech)):
                 self._dictation_flush(b"".join(utt[:len(utt) - max(0, silence - 6)] + [frame]) if in_speech else b"")
                 in_speech, utt, silence, starts = False, [], 0, 0
                 preroll.clear()
@@ -947,6 +957,7 @@ class AudioMixin:
             self._dictation_closed = self._dictation_submit = False
             self.dictation_active = True
             self.dictation_finish_requested = False
+            self._dictation_wait_for_pause = False
             self.stop_utt = False
             self._wake_tone_due = 0.0
             self.wake_time = time.monotonic()
@@ -961,17 +972,19 @@ class AudioMixin:
             was = self.dictation_active
             self.dictation_active = False
             self.dictation_finish_requested = False
+            self._dictation_wait_for_pause = False
             self._dictation_session += 1
             self.set_state("idle")
             self.emit("dictation", state="cancelled")
         return {"ok": was, "state": "cancelled"}
 
-    def dictation_finish(self, submit=False):
-        """Остановить захват сейчас; отправка ждёт все уже записанные фрагменты."""
+    def dictation_finish(self, submit=False, wait_for_pause=False):
+        """Завершить диктовку; голосовая команда ждёт паузу, кнопка закрывает захват сразу."""
         with self._dictation_lock:
             if not self.dictation_active:
                 return {"ok": False, "state": "idle"}
             self._dictation_submit = self._dictation_submit or submit
+            self._dictation_wait_for_pause = self._dictation_wait_for_pause or wait_for_pause
             if not self.dictation_finish_requested:
                 self.dictation_finish_requested = True
                 self.emit("dictation", state="finishing")
@@ -1009,6 +1022,7 @@ class AudioMixin:
                 return
             self.dictation_active = False
             self.dictation_finish_requested = False
+            self._dictation_wait_for_pause = False
             self.set_state("idle")
             self.emit("dictation", state="done", submit=self._dictation_submit)
 
