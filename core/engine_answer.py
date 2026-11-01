@@ -1189,7 +1189,7 @@ class AnswerMixin:
         if re.search(r"(говори|голос|озвучк|звук).*(громче|погромче)", raw): volume = 0.1
         elif re.search(r"(говори|голос|озвучк|звук).*(тише|потише)", raw): volume = -0.1
         engine = None
-        if re.search(r"системн(?:ый|ого)\s+голос|голос\s+систем", raw): engine = "espeak"
+        if re.search(r"(?:системн(?:ый|ого)\s+голос|голос\s+(?:на\s+)?системн\w*)", raw): engine = "espeak"
         elif re.search(r"голос\s+(?:vosk|воск)", raw): engine = "vosk"
         elif re.search(r"голос\s+piper|пайпер", raw): engine = "piper"
         elif re.search(r"голос\s+(?:dewiar|девиар|сервера)", raw): engine = "remote"
