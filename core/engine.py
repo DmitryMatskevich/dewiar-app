@@ -28,7 +28,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self._voice_enable_lock = threading.Lock()
         self.server = server              # режим сервера (main.py --server): без микрофона и звука, ответы — текстом
         self.state = "idle"
-        self.muted = (settings.get("privacy", "mic") == "button")   # замок «Микрофон: только кнопка» (студия → «Безопасность»)
+        self.muted = (settings.get("privacy", "mic") == "button" or
+                      settings.get("audio", "start_listening") is False)   # «Голос» → запуск: слушать сразу или кнопкой
         self._mute_pass = False                          # микрофон выключен, но нажали «говорить» — слушаем одну фразу
         self.stopping = threading.Event()
         self.aec = EchoCancel()

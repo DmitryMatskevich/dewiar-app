@@ -176,6 +176,7 @@ DEFAULTS = {
         "engine": "vosk",           # vosk | piper | remote | elevenlabs | espeak | off
         "v2": False,                # метка разового перевода с Piper на Vosk TTS (engine.py): после неё выбор Piper не трогаем
         "text_only": False,         # отвечать только текстом (кнопка-динамик в виджете): голос молчит, ответы — в виджете
+        "startup_voice": True,      # знакомство при первом запуске говорит голосом; False — только на экране
         "speed": 1.25,              # как на телефоне: 1.0 звучало медленно и устало (0.33.1; прежние 1.0 переводятся в load)
         "fx": "persona",            # обработка голоса: persona (у каждого своя) | off | clear | warm | deep | cinema | ai | space
         "remote": {"base_url": "", "api_key": "", "model": "", "sample_rate": 24000,
@@ -187,6 +188,7 @@ DEFAULTS = {
     "audio": {
         "input": "",                # пусто = системный микрофон по умолчанию
         "output": "",
+        "start_listening": True,    # после запуска сразу слушать имя; False — микрофон включается кнопкой
         "echo_cancel": True,
         "headphones": False,        # в наушниках эха нет — можно слушать во время ответа и без эхоподавления
         "barge_in": "smart",        # smart (речью ~0,8 с, сначала приглушает) | any_speech | wakeword | off

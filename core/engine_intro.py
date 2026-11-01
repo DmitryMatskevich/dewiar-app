@@ -102,6 +102,8 @@ class IntroMixin:
             return False
         text = self._g(text)
         self.emit("intro", step=step, text=text, **extra)
+        if self.s.get("tts", "startup_voice") is False:
+            return not getattr(self, "_intro_stop", False)
         with self._turn_lock:
             self._cancel_locked()
             self.turn_n += 1

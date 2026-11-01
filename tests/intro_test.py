@@ -129,7 +129,7 @@ ok("mic_weak" in steps(e), f"голос слышен, слов нет — сов
 e = make()
 t0 = time.time()
 run(e, None, wait=30)
-ok("mic_fail" in steps(e) and any("раздел «Звук и поведение»" in t for t in e.said), "тишина — подсказка про выбор микрофона: «Звук и поведение», где его выбирают (17.10)")
+ok("mic_fail" in steps(e) and any("раздел «Голос»" in t for t in e.said), "тишина — подсказка про выбор микрофона: «Голос», где его выбирают (17.10)")
 
 # 4. микрофон выключен — не ждём
 e = make(muted=True)
