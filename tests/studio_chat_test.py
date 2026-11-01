@@ -51,7 +51,7 @@ base = f"http://127.0.0.1:{UP}/v1"
 (tmp / "cfg/settings.json").write_text(json.dumps({
     "persona": "lira", "stt": {"engine": "vosk"}, "tts": {"engine": "off"}, "audio": {"sounds": False}, "ui": {"intro": "done", "welcome": "done", "news_seen": "99.0.0"},
     "report": {"pulse": False}, "team": {"route": False}, "tools": {"enabled_all": False},
-    "llm": {"active": "m", "profiles": {"m": {"name": "mock", "kind": "openai", "base_url": base, "model": "m"}}}}))
+    "llm": {"active": "m", "profiles": {"m": {"name": "mock", "kind": "openai", "base_url": base, "model": "m", "roles": ["communication", "planning", "coding", "analytics"]}}}}))
 env = dict(os.environ, DEWIAR_CONFIG_DIR=str(tmp / "cfg"), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_PORT=str(PORT), DEWIAR_ASSUME_AEC="1",
            DEWIAR_WORKSPACE_DIR=str(tmp / "ws"), DEWIAR_FAKE_RAM_GB="16", DEWIAR_FAKE_CORES="8")
 

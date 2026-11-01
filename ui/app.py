@@ -1241,6 +1241,56 @@ class Api:
             return ""
         return res if isinstance(res, str) else res[0]
 
+    def clipboard_text(self):
+        """Read text only after an explicit paste action in the UI."""
+        if sys.platform == "darwin":
+            if os.environ.get("DEWIAR_MAC_SMOKE_FEATURES") and os.environ.get("DEWIAR_MAC_SMOKE_REPORT"):
+                return ""
+            from AppKit import NSPasteboard, NSPasteboardTypeString
+            return str(NSPasteboard.generalPasteboard().stringForType_(NSPasteboardTypeString) or "")
+        if WIN:
+            import ctypes
+            from ctypes import wintypes
+            user, kernel = ctypes.windll.user32, ctypes.windll.kernel32
+            user.GetClipboardData.restype = wintypes.HANDLE
+            kernel.GlobalLock.restype = ctypes.c_void_p
+            kernel.GlobalLock.argtypes = [wintypes.HGLOBAL]
+            kernel.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+            if not user.OpenClipboard(0):
+                raise RuntimeError("Буфер обмена занят. Попробуйте ещё раз.")
+            try:
+                handle = user.GetClipboardData(13)
+                if not handle:
+                    return ""
+                pointer = kernel.GlobalLock(handle)
+                if not pointer:
+                    raise RuntimeError("Не удалось прочитать буфер обмена.")
+                try:
+                    return ctypes.wstring_at(pointer)
+                finally:
+                    kernel.GlobalUnlock(handle)
+            finally:
+                user.CloseClipboard()
+        def get():
+            from gi.repository import Gdk, Gtk
+            return Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text() or ""
+        result = self._gtk(get, timeout=4)
+        if result is None:
+            raise RuntimeError("Не удалось прочитать буфер обмена. Используйте Ctrl+V.")
+        return result
+
+    def transcription_browsers(self):
+        if sys.platform != "darwin":
+            return []
+        from macsys import transcription_browsers
+        return transcription_browsers()
+
+    def transcription_browser_url(self, browser_id):
+        if sys.platform != "darwin":
+            return {"error": "Вставьте ссылку из буфера обмена. Чтение вкладки доступно на macOS."}
+        from macsys import transcription_browser_url
+        return transcription_browser_url(browser_id)
+
     def pick_media_files(self):
         """Native multiple-file picker: media stays on disk, without chat upload size limits."""
         import webview

@@ -17,13 +17,14 @@ class MacMenu(unittest.TestCase):
         self.assertEqual([menu.title for menu in menus], ["__app__", "Агент Dewiar"])
         self.assertEqual(
             [item.title for item in menus[0].items[1:]],
-            ["Показать агента", "Открыть настройки", "Модели"],
+            ["Показать агента", "Открыть настройки", "Доступы macOS", "Модели", "Обновить и перезапустить Dewiar"],
         )
         for item in menus[0].items[1:]:
             item.function()
         api.from_tray.assert_called_once_with()
         api.open_settings.assert_any_call()
         api.open_settings.assert_any_call("brain")
+        api.open_settings.assert_any_call("safety", "&mac_access_setup=1")
 
 
 if __name__ == "__main__":

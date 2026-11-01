@@ -1,6 +1,9 @@
 import tempfile
+import sys
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'core'))
 
 from transcript_summary import VERSION, ensure_summary
 

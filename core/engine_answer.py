@@ -1448,6 +1448,7 @@ class AnswerMixin:
             # Автоматическое рассуждение не должно обходить ограничение выбранной
             # очереди: у общения, планирования, кода и аналитики свои лимиты.
             prof = self.s.apply_llm_role_limit(prof, role)
+            prof = dict(prof, _continue_response=self.s.get("llm", "continue_response") is not False)
             from llm import creative_temp
             ask0 = text.split("\n\nВложения:")[0]
             temp = creative_temp(ask0, prof.get("temperature", 0.7))
@@ -1800,6 +1801,9 @@ class AnswerMixin:
                 self._maybe_learn(text, prof)
         except LLMError as e:
             log.warning("Модель: %s", e)
+            if 'split' in locals() and 'codef' in locals():
+                for pending_speech in split.feed(codef.flush()) + split.flush():
+                    sentences.put(pending_speech)
             self.health_count("net_fail")
             self.health_why(prof, e)
             self.health_problem(f"Модель ({(prof or {}).get('kind') or 'openai'}): {e}")
@@ -1809,8 +1813,9 @@ class AnswerMixin:
                 msg = "Ключ Dewiar удалён на сайте — теперь думаю по аккаунту dewiar.pro. Повторите, пожалуйста, вопрос."
             turn.error = msg
             self.emit("error", text=msg)
-            self.emit("answer", text=msg, done=True)
-            turn.full = ""
+            # Keep the part already generated if a later continuation failed.
+            turn.full = (turn.full.rstrip() + "\n\n" + msg) if turn.full.strip() else ""
+            self.emit("answer", text=turn.full or msg, done=True)
             sentences.put(msg)
         sentences.put(None)
         speaker.join()

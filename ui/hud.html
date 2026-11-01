@@ -254,6 +254,11 @@
   #corner-l #b-tasks.attention { color: #ffce77; }
   #b-tasks-count { position: absolute; top: 0; right: 0; min-width: 13px; padding: 0 3px; border-radius: 9px; background: #255c4a; color: white; font: 600 10px/13px sans-serif; }
   #b-tasks-count[hidden], #b-tasks-count:empty { display: none; }
+  #b-notes { position: relative; }
+  #b-notes-dot { position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #8b8cf7); box-shadow: 0 0 0 2px var(--bg, #172336); pointer-events: none; }
+  #b-notes-dot[hidden] { display: none; }
+  #b-notes.has-new-notes { color: var(--accent, #8b8cf7); background: rgba(139,140,247,.18); }
+  #bar:has(#b-notes.has-new-notes) { opacity: 1; }
   @keyframes taskPulse { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { #b-tasks.working, #task .spin { animation: none; } }
   @keyframes tspin { to { transform: rotate(360deg); } }
@@ -305,25 +310,32 @@
     scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
   #ask textarea::placeholder { color: rgba(255,255,255,.4); }
   #ask textarea.scroll { overflow-y: auto; }
-  .askrow { display: flex; align-items: center; gap: 2px; margin-left: -7px; }
+  .askrow { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; margin-left: -7px; }
+  .ask-tools { display: flex; flex: 1 1 0; min-width: 0; align-items: center; gap: 2px; }
+  .ask-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
   .askrow .ab { width: 34px; height: 34px; min-width: 34px; }
-  #ask-model { min-width: 0; max-width: 118px; margin-left: 2px; margin-right: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  #a-clear:disabled, #a-copy:disabled { opacity: .35; cursor: default; background: none; }
+  #a-copy .copied-icon, #a-copy.copied .copy-icon { display: none; }
+  #a-copy.copied .copied-icon { display: block; }
+  #a-copy.copied { color: #63d5a2; }
+  #ask-feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #ask-model { flex: 1 1 118px; min-width: 14px; max-width: 118px; margin-left: 2px; margin-right: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                border: 0; padding: 0; background: transparent; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 1.2; text-align: left; cursor: pointer; }
   #ask-model:hover, #ask-model:focus-visible { color: var(--ink); outline: none; }
   #ask-model::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%; background: #63d5a2; }
   #ask-model.off::before { background: #f2b35d; }
   #ask-model.off { color: var(--muted); }
-  #a-stop { display: none; margin-left: 2px; color: #ff7895; background: rgba(255,104,144,.12); }
+  #a-stop { display: none; color: #ff7895; background: rgba(255,104,144,.12); }
   #a-stop:hover, #a-stop:focus-visible { color: #fff; background: rgba(255,104,144,.28); }
   #ask.running #a-stop { display: grid; }
   #ask.running #a-send { display: none; }
   #a-mic, #a-mic-pick { border-radius: 10px; }
   #a-mic.recording { border-radius: 50%; color: var(--ink); background: rgba(255,104,144,.13); }
-  #a-mic-pick { width: 25px; min-width: 25px; margin-left: -8px; }
+  #a-mic-pick { width: 22px; min-width: 22px; margin-left: 0; }
   #a-mic-pick svg { width: 13px; height: 13px; }
   /* Уровень диктовки находится слева от микрофона и появляется только во время записи. */
-  #dict-level { display: none; width: 72px; min-width: 42px; max-width: 96px; height: 5px; margin: 0 1px 0 2px;
-                flex: 0 1 96px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
+  #dict-level { display: none; width: 48px; min-width: 0; max-width: 48px; height: 5px; margin: 0 1px 0 2px;
+                flex: 0 2 48px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
   #dict-level.on { display: block; }
   #dict-level i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#65d6a4,#ffc95b,#ff6b8b); transition: width .08s linear; }
   #askn { display: none; }
@@ -550,20 +562,27 @@
     <div id="clb" role="button" tabindex="0" title="Открыть переписку"><span id="clb-t"></span><em id="clb-n" hidden></em><button id="clb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
     <div id="ask">
       <div class="askbox" id="askbox">
-        <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка · Ctrl+Enter — отправить" autocomplete="off" spellcheck="true"></textarea>
+        <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода скажите в конце фразы имя помощника, «ввод» или «вот», либо отдельно «ввод» или «вот»." autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
+          <div class="ask-tools">
           <button class="ab" id="a-att" title="Добавить файлы или папку" aria-label="Добавить файлы или папку"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-          <button class="ab" id="a-shot" title="Приложить снимок экрана"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
+          <button class="ab" id="a-shot" title="Снимок экрана: сохранить в заметки, распознать текст и приложить к сообщению" aria-label="Снимок экрана в заметки с распознаванием текста"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
           <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+          </div>
+          <div class="ask-actions">
+          <button class="ab" id="a-clear" type="button" disabled title="Очистить весь текст в поле ввода. Вложения и переписка сохранятся. Во время диктовки новые распознанные фразы продолжат добавляться в поле." aria-label="Очистить весь текст ввода"><svg viewBox="0 0 24 24"><path d="m16 3 5 5-11 11H6l-4-4L13 4a2 2 0 0 1 3-1ZM9 8l7 7M10 19h11"/></svg></button>
+          <button class="ab" id="a-copy" type="button" disabled title="Скопировать весь текст поля ввода в буфер обмена, включая переносы строк, даже если выделена только часть. Текст останется в поле; сообщение не отправляется." aria-label="Скопировать весь текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
           <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
-          <button class="ab send" id="a-send" title="Отправить сообщение (Ctrl+Enter)" aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+          <button class="ab send" id="a-send" title="Отправить сообщение и вложения. Во время диктовки — завершить распознавание и отправить весь текст." aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+          </div>
         </div>
+        <span id="ask-feedback" role="status" aria-live="polite"></span>
       </div>
-      <div id="att-menu" role="menu" aria-label="Добавить вложение"><h4>Добавить</h4><button id="att-files" type="button">Файлы</button><button id="att-folder" type="button">Папку</button></div>
+      <div id="att-menu" role="menu" aria-label="Добавить вложение"><h4>Добавить</h4><button id="att-files" type="button" title="Выбрать файлы для следующего сообщения. Проверьте вложения перед отправкой: их содержимое может получить выбранная модель.">Файлы</button><button id="att-folder" type="button" title="Выбрать папку для следующего сообщения. Проверьте её содержимое перед отправкой; рабочая папка Dewiar этим действием не меняется.">Папку</button></div>
       <div id="mic-menu" role="menu" aria-label="Микрофоны"><h4>Микрофон</h4><div id="mic-list"></div></div>
       <input type="file" id="a-file" multiple hidden>
       <input type="file" id="a-folder" webkitdirectory directory multiple hidden>
@@ -604,7 +623,7 @@
     <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
-    <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg></button>
+    <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <!-- чат — в нижней панели рядом с «Встречами»; из строки ввода убран, чтобы не дублировать навигацию -->
     <button class="btn" id="b-chat" title="Сообщения (Чат) — вся переписка: голосом и текстом" aria-label="Открыть сообщения"><svg viewBox="0 0 24 24"><path d="M6.5 4h8a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5H10l-3.5 3v-3A2.5 2.5 0 0 1 4 11.5v-5A2.5 2.5 0 0 1 6.5 4z"/><path d="M17 9.5h.5A2.5 2.5 0 0 1 20 12v4.5a2.5 2.5 0 0 1-2 2.45V21l-3-2.5h-2.5a2.5 2.5 0 0 1-2.4-1.8"/></svg></button>
     <button class="btn" id="b-set" title="Настройки"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
@@ -698,6 +717,9 @@ function setAskPlaceholder() {
   input.placeholder = audioMode === "text" || !["listening"].includes(state)
     ? `Я ${name}, жду ваше задание…`
     : `Я ${name}, говорите, я слушаю…`;
+  const hint = `Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода скажите в конце фразы «${name}», «ввод» или «вот», либо отдельно «ввод» или «вот». Завершающее слово не попадёт в сообщение. Дождитесь распознавания после паузы. Повторное нажатие микрофона остановит запись и оставит текст в поле.`;
+  input.title = hint;
+  if (input.dataset.tip) input.dataset.tip = hint;
 }
 function setRunControls(s) {
   const running = s === "thinking" || s === "speaking";
@@ -790,7 +812,7 @@ core.on("radio", setRadio);
 const WAIT = {};   // метка для showCap: ответ готовится — вместо текста мигающие точки
 document.getElementById("rem-undo").onclick = async () => {
   const el = document.getElementById("rem"); const id = el.dataset.id;
-  if (el.classList.contains("note")) { core.call("ws_open", { path: el.dataset.path }).catch(() => {}); return; }
+  if (el.classList.contains("note")) { const path = el.dataset.path; core.call("ws_open", { path }).then(() => markNoteSeen(path)).catch(() => {}); return; }
   if (el.classList.contains("power")) {                 // выключение через минуту — отменить
     clearInterval(el._cd); try { await core.call("power_cancel", {}); document.getElementById("rem-when").textContent = "Отменено"; } catch (e) {}
     setTimeout(() => el.classList.remove("show", "power"), 1500); return;
@@ -1081,6 +1103,7 @@ core.on("hello", d => {
 .on("confirm_done", () => { $("yn").classList.remove("on"); requestAnimationFrame(fitCap); })
 .on("handoff", e => { $("act").className = "on"; $("act").textContent = `Отвечает ${e.name}${e.role ? " · " + e.role.toLowerCase() : ""}`; })
 .on("note_saved", e => {
+  markNewNote(e);
   $("rem-ico").textContent = { list: "🛒", fact: "🧠" }[e.kind] || "📝";
   $("rem-when").textContent = { list: "В список · " + e.title, fact: "Запомнил о вас" }[e.kind] || "Записал в заметки";
   $("rem-text").textContent = e.kind === "note" ? e.title : e.text; $("rem").dataset.id = ""; $("rem").dataset.path = e.path || "";
@@ -1303,13 +1326,27 @@ function dictationUi(on) {
   $("a-mic").innerHTML = dictating
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>'
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
-  $("a-mic").title = dictating ? "Остановить голосовой ввод — текст останется в поле" : "Начать голосовой ввод";
+  $("a-mic").title = (dictating ? "Остановить голосовой ввод — текст останется в поле. " : "Начать голосовой ввод. ") + "Завершить и отправить голосом: скажите имя текущего помощника, «ввод» или «вот» в конце фразы, либо отдельно «ввод» или «вот». После паузы дождитесь распознавания.";
   $("a-mic").setAttribute("aria-pressed", String(dictating));
   $("a-mic").disabled = false;
   $("a-mic").setAttribute("aria-label", $("a-mic").title);
   $("dict-level").classList.toggle("on", dictating);
   $("dict-level").setAttribute("aria-hidden", dictating ? "false" : "true");
   if (!dictating) { $("dict-level").firstElementChild.style.width = "0%"; $("dict-level").setAttribute("aria-valuenow", "0"); }
+}
+function insertDictationText(text) {
+  const t = $("askin"), words = text.trim();
+  if (!words) return;
+  // Use the current selection for every STT fragment: the user can move the caret
+  // while recognition is running. Preserve all text and whitespace outside it.
+  const start = t.selectionStart, end = t.selectionEnd;
+  const before = t.value.slice(0, start), after = t.value.slice(end);
+  const left = before && !/\s$/.test(before) && !/[(\[{«“„]$/.test(before)
+    && !/^[,.;:!?…)}\]»”]/.test(words) ? " " : "";
+  const right = after && !/^\s/.test(after) && !/^[,.;:!?…)}\]»”]/.test(after)
+    && !/[(\[{«“„]$/.test(words) ? " " : "";
+  t.setRangeText(left + words + right, start, end, "end");
+  fitAsk(); t.focus();
 }
 core.on("dictation", e => {
   if (e.state === "recording") { openAsk(); dictationUi(true); return; }
@@ -1323,7 +1360,7 @@ core.on("dictation", e => {
     return;
   }
   if (e.state === "partial" && e.text) {
-    const t = $("askin"); t.value = (t.value ? t.value.replace(/\s*$/, "") + " " : "") + e.text.trim(); fitAsk(); t.focus();
+    insertDictationText(e.text);
   }
   if (e.state === "done") {
     dictationUi(false);
@@ -1454,7 +1491,33 @@ $("a-stop").onclick = () => {
   core.call("stop").catch(showErr).finally(() => { delete b.dataset.busy; b.disabled = false; b.title = "Остановить ответ и текущую работу модели"; });
 };
 $("b-chat").onclick = () => { const a = api(); if (a) a.open_settings("chat"); };   // совместимость со старыми сценариями
-$("b-notes").onclick = () => { const a = api(); if (a) a.open_settings("notes"); };
+const unreadNotes = new Map(), seenNotePaths = new Set();
+function renderNotesBadge() {
+  const button = $('b-notes'), last = [...unreadNotes.values()].pop();
+  $('b-notes-dot').hidden = !last;
+  button.classList.toggle('has-new-notes', !!last);
+  button.title = last ? `Новых заметок: ${unreadNotes.size}. Последняя: «${last.title}». Нажмите — открыть новую заметку.` : 'Заметки: все записи, поиск, фото и файлы';
+  button.setAttribute('aria-label', button.title);
+}
+function markNewNote(note) {
+  if (note.kind !== 'note' || !String(note.path || '').startsWith('Заметки/') || seenNotePaths.has(note.path)) return;
+  seenNotePaths.add(note.path);
+  if (seenNotePaths.size > 300) seenNotePaths.delete(seenNotePaths.values().next().value);
+  unreadNotes.set(note.path, {path:note.path, title:note.title || 'Новая заметка'});
+  renderNotesBadge();
+}
+function markNoteSeen(path) { unreadNotes.delete(path); renderNotesBadge(); }
+core.on('notes_seen', e => markNoteSeen(e.path));
+renderNotesBadge();
+$('b-notes').onclick = async () => {
+  const a = api(), last = [...unreadNotes.values()].pop();
+  if (!a) return;
+  try {
+    // Studio acknowledges after ws_read succeeds. Merely raising a window is not a read.
+    if (last) await a.open_settings('notes', '&note=' + encodeURIComponent(last.path));
+    else await a.open_settings('notes');
+  } catch (error) { showErr(error); }
+};
 /* фоновые задачи и обновления — строкой в карточке */
 const tasks = {}, doneAt = {}, dismissed = new Set();
 /* Готовая расшифровка открывает сохранённый текст, а не предлагает действия с исходным роликом.
@@ -1738,7 +1801,7 @@ $("att-files").onclick = () => { attMenu.classList.remove("on"); $("a-file").cli
 $("att-folder").onclick = () => { attMenu.classList.remove("on"); $("a-folder").click(); };
 $("a-file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
 $("a-folder").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
-$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(url => { atts.push({ kind: "image", name: "Снимок экрана", url }); renderAtts(); }).catch(showErr));
+$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(url => { atts.push({ kind: "image", name: "Снимок экрана", url }); renderAtts(); }).catch(showErr), () => "Сохраняю снимок в заметки и распознаю текст локально…");
 document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
 document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
@@ -1790,6 +1853,7 @@ function fitAsk() {
   const lim = Math.min(available, longText ? 260 : 120);
   const h = Math.min(t.scrollHeight, lim); t.style.height = Math.max(24, h) + "px";
   $("askbox").classList.toggle("has", !!t.value.trim() || atts.length > 0);
+  $("a-clear").disabled = $("a-copy").disabled = !t.value.length;
   t.classList.toggle("scroll", t.scrollHeight > lim);
   const long = t.value.length > 60 || t.value.includes("\n");
   $("card").classList.toggle("long", long && $("ask").style.display === "block");
@@ -1806,6 +1870,25 @@ new ResizeObserver(entries => {
   if (w && Math.abs(w - askWidth) > .5) { askWidth = w; fitAsk(); }
 }).observe($("askbox"));
 $("a-send").onclick = sendAsk;
+$("a-clear").onclick = () => {
+  $("askin").value = "";
+  fitAsk(); $("askin").focus();
+  $("ask-feedback").textContent = "Текст ввода очищен";
+};
+let draftCopiedTimer;
+$("a-copy").onclick = async () => {
+  const text = $("askin").value;
+  if (!text.length) return;
+  clearTimeout(draftCopiedTimer);
+  $("a-copy").classList.remove("copied");
+  $("ask-feedback").textContent = "";
+  try {
+    await writeClipboardText(text);
+    $("a-copy").classList.add("copied");
+    $("ask-feedback").textContent = "Весь текст ввода скопирован";
+    draftCopiedTimer = setTimeout(() => $("a-copy").classList.remove("copied"), 1500);
+  } catch (e) { showErr(e); }
+};
 
 /* ---------- ход работы и ответ целиком ---------- */
 const TL = { you: "", steps: [], answer: "" };
@@ -1849,10 +1932,21 @@ function renderReader() {
   if (window.DewiarRich) DewiarRich.diagrams(box).then(n => { if (n && atEnd) box.scrollTop = box.scrollHeight; });   // ```mermaid — схемой
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
+async function writeClipboardText(text) {
+  try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; } } catch (e) { /* Native WebViews may require the local fallback. */ }
+  const active = document.activeElement;
+  const selection = active && typeof active.selectionStart === "number"
+    ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
+  const ta = document.createElement("textarea"); ta.value = text;
+  ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+  document.body.appendChild(ta); ta.select();
+  try { if (!document.execCommand("copy")) throw Error("Не удалось скопировать текст в буфер обмена. Попробуйте ещё раз или используйте ⌘C/Ctrl+C."); }
+  finally { ta.remove(); if (active?.isConnected) { active.focus({ preventScroll: true }); if (selection) active.setSelectionRange(...selection); } }
+}
 function copyText(t, btn) {
-  const done = () => { btn.textContent = "Скопировано"; setTimeout(() => btn.textContent = "Копировать", 1500); };
-  const fb = () => { const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) {} ta.remove(); };
-  try { navigator.clipboard.writeText(t).then(done, fb); } catch (e) { fb(); }
+  writeClipboardText(t).then(() => {
+    btn.textContent = "Скопировано"; setTimeout(() => btn.textContent = "Копировать", 1500);
+  }).catch(showErr);
 }
 $("rd-body").addEventListener("click", (e) => { const b = e.target.closest(".cp"); if (b) { e.preventDefault(); copyText(b.parentNode.querySelector("code").textContent, b); } });
 $("rd-body").addEventListener("mousedown", (e) => e.stopPropagation());

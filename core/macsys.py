@@ -228,3 +228,50 @@ def clip_secret(text, sec=30, board=None):
     timer.daemon = True
     timer.start()
     return True
+
+
+# Only known browser identifiers enter AppleScript; never interpolate arbitrary app names.
+_TAB_BROWSERS = {
+    "com.apple.Safari": ("Safari", "safari"),
+    "com.google.Chrome": ("Google Chrome", "chromium"),
+    "ru.yandex.desktop.yandex-browser": ("Яндекс Браузер", "chromium"),
+    "com.microsoft.edgemac": ("Microsoft Edge", "chromium"),
+    "com.brave.Browser": ("Brave", "chromium"),
+    "org.chromium.Chromium": ("Chromium", "chromium"),
+    "com.vivaldi.Vivaldi": ("Vivaldi", "chromium"),
+}
+
+
+def transcription_browsers():
+    """Running supported browsers only: listing never opens an application."""
+    from AppKit import NSWorkspace
+    running = {str(app.bundleIdentifier()) for app in NSWorkspace.sharedWorkspace().runningApplications()}
+    return [{"id": key, "name": name} for key, (name, _) in _TAB_BROWSERS.items() if key in running]
+
+
+def transcription_browser_url(browser_id):
+    """Read the selected browser's front window, without switching apps or using the clipboard."""
+    from urllib.parse import urlsplit
+    if browser_id not in _TAB_BROWSERS:
+        return {"error": "Этот браузер не поддерживается. Скопируйте ссылку и вставьте из буфера."}
+    name, kind = _TAB_BROWSERS[browser_id]
+    tab = "current tab" if kind == "safari" else "active tab"
+    script = (f'tell application id "{browser_id}"\n'
+              'if not running then return ""\n'
+              'if (count of windows) is 0 then return ""\n'
+              f'return URL of {tab} of front window\nend tell')
+    try:
+        result = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        return {"error": "Браузер не ответил. Проверьте системный запрос доступа и попробуйте снова."}
+    if result.returncode:
+        return {"error": f"Не удалось прочитать вкладку {name}. Разрешите Dewiar доступ к браузеру в настройках macOS → Конфиденциальность и безопасность → Автоматизация, либо вставьте ссылку из буфера."}
+    url = result.stdout.strip()
+    try:
+        parsed = urlsplit(url)
+        valid = parsed.scheme in ("http", "https") and bool(parsed.hostname) and not any(c.isspace() for c in url)
+    except ValueError:
+        valid = False
+    if not valid:
+        return {"error": f"В {name} нет активной вкладки с веб-ссылкой. Откройте страницу с видео или аудио."}
+    return {"url": url, "browser": name}

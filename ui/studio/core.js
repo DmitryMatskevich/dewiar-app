@@ -19,16 +19,17 @@ const STYLE_NAMES = { nexus: "Нейросфера", aura: "Сфера", holobra
 
 /* Состояние окна подтверждает оболочка. Скрытое окно не означает остановку ядра. */
 let agentWindowVisible = false, agentWindowLoaded = false, agentCoreOnline = !!core.connected, agentToggleBusy = false;
+let agentToggleTarget = null, agentStateRevision = 0;
 function renderAgentToggle() {
   const b = $("#agent-toggle");
   if (!b) return;
   const name = (personas.find(p => p.id === active) || {}).name || "Помощник";
-  const awake = agentWindowLoaded && agentWindowVisible && agentCoreOnline;
+  const awake = agentToggleTarget !== false && agentWindowLoaded && agentWindowVisible && agentCoreOnline;
   $("#bname").textContent = name;
   b.setAttribute("aria-pressed", String(awake));
   b.setAttribute("aria-busy", String(agentToggleBusy));
   b.setAttribute("aria-disabled", String(agentToggleBusy));
-  b.title = agentToggleBusy ? `${name}: загружаю помощника и открываю окно…` : awake
+  b.title = agentToggleBusy ? (agentToggleTarget === false ? `${name}: скрываю окно помощника…` : `${name}: загружаю помощника и открываю окно…`) : awake
     ? `${name}: скрыть окно помощника. Фоновые задачи продолжат работать. Повторное нажатие покажет окно.`
     : `${name}: помощник спит. Нажмите, чтобы загрузить его и показать окно. Скрытый портрет не означает отключение микрофона или фоновых задач.`;
   b.setAttribute("aria-label", b.title);
@@ -47,22 +48,32 @@ function agentToggleState(state) {
 }
 async function refreshAgentWindowState() {
   const a = window.api && window.api();
-  if (a && typeof a.tray_state === "function") agentToggleState(await a.tray_state());
+  const revision = agentStateRevision;
+  if (a && typeof a.tray_state === "function") {
+    const state = await a.tray_state();
+    if (revision === agentStateRevision) agentToggleState(state);
+  }
 }
 async function toggleAgentWindow() {
   if (agentToggleBusy) return;
   const a = window.api && window.api();
   if (!a || typeof a.show !== "function" || typeof a.hide !== "function") { toast("Окно агента доступно из запущенного Dewiar.app"); return; }
+  // Открытое окно скрываем сразу, даже если ядро потеряло связь.
+  // Проверка состояния нужна только перед пробуждением: окно могли закрыть снаружи.
+  const hiding = agentWindowLoaded && agentWindowVisible;
+  agentToggleTarget = !hiding;
+  agentStateRevision++;
   agentToggleBusy = true; renderAgentToggle();
   try {
-    await refreshAgentWindowState();
-    const next = !(agentWindowVisible && agentWindowLoaded && agentCoreOnline);
+    if (!hiding) await refreshAgentWindowState();
+    const next = hiding ? false : !(agentWindowVisible && agentWindowLoaded);
+    agentToggleTarget = next; renderAgentToggle();
     const result = await (next ? (typeof a.wake_agent === "function" ? a.wake_agent() : a.show("card")) : a.hide("card"));
     if (result && result.ok === false) throw new Error(result.error || "Не удалось загрузить помощника");
     agentToggleState(result && result.visible !== undefined ? result : next);
     await refreshAgentWindowState();
   } catch (e) { toast(e.message || "Не удалось изменить окно агента", 5000, "bad"); }
-  finally { agentToggleBusy = false; renderAgentToggle(); }
+  finally { agentStateRevision++; agentToggleTarget = null; agentToggleBusy = false; renderAgentToggle(); }
 }
 const agentToggle = $("#agent-toggle");
 if (agentToggle) {

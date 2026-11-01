@@ -285,6 +285,15 @@ def install_meeting_status(api):
     return target
 
 
+def access_setup_on_start(path):
+    """Show our preparation page once; repeating it is an explicit preference."""
+    try:
+        ui = json.loads(Path(path).read_text(encoding='utf-8')).get('ui') or {}
+    except (OSError, ValueError):
+        ui = {}
+    return not ui.get('mac_access_setup_seen', False) or bool(ui.get('mac_access_at_startup', False))
+
+
 def make_macos_menu(api):
     """Return pywebview's persistent native menu for every Dewiar window."""
     from webview.menu import Menu, MenuAction, MenuSeparator
@@ -294,6 +303,7 @@ def make_macos_menu(api):
         MenuSeparator(),
         MenuAction("Показать агента", lambda: api.from_tray()),
         MenuAction("Открыть настройки", lambda: api.open_settings()),
+        MenuAction("Доступы macOS", lambda: api.open_settings("safety", "&mac_access_setup=1")),
         MenuAction("Модели", lambda: api.open_settings("brain")),
         MenuAction(update_title, lambda: api.update_from_source()),
     ]
@@ -309,6 +319,8 @@ def make_api(app):
 
     class MacApi(app.Api):
         _mic_permission_lock = threading.RLock()
+        _screen_permission_lock = threading.RLock()
+        _files_permission_lock = threading.RLock()
 
         def microphone_permission(self):
             from macsys import microphone_permission
@@ -401,7 +413,83 @@ def make_api(app):
                 granted = bool(CGPreflightScreenCaptureAccess())
             except Exception as e:  # noqa: BLE001 — older macOS/PyObjC
                 return {"state": "unknown", "granted": False, "error": str(e)}
-            return {"state": "authorized" if granted else "denied", "granted": granted}
+            with self._screen_permission_lock:
+                if granted or (getattr(self, '_screen_pending', False) and time.monotonic()-self._screen_started > 90):
+                    self._screen_pending = False
+                if granted:self._screen_error = ''
+                return {"state": "authorized" if granted else "denied", "granted": granted,
+                        "error": getattr(self, '_screen_error', ''),
+                        "pending": bool(getattr(self, '_screen_pending', False)),
+                        "requested": bool(getattr(self, '_screen_requested', False)),
+                        "request_supported": bool(getattr(sys, 'frozen', False))}
+
+        def request_screen_access(self):
+            with self._screen_permission_lock:
+                status = self.screen_capture_permission()
+                if not status.get('request_supported') or status.get('granted') or status.get('pending') or status.get('requested'):
+                    return status
+                self._screen_requested = self._screen_pending = True
+                self._screen_started = time.monotonic()
+            from PyObjCTools import AppHelper
+            def request():
+                try:
+                    from macsys import request_screen_capture_permission
+                    if not request_screen_capture_permission():
+                        self.open_screen_settings()
+                except Exception as error:
+                    with self._screen_permission_lock:self._screen_error = str(error)
+                finally:
+                    with self._screen_permission_lock:self._screen_pending = False
+            AppHelper.callAfter(request)
+            return self.screen_capture_permission()
+
+        def files_access_state(self):
+            folders = _core_request(self.token, 'mac_files_access', timeout=3) or {}
+            with self._files_permission_lock:
+                cached = getattr(self, '_files_access', {})
+                for key, value in cached.items():
+                    if key == 'selected':
+                        folders[key] = value
+                    elif key in folders and (not value.get('path') or folders[key].get('path') == value.get('path')):
+                        merged = dict(folders[key], **value)
+                        merged['path'] = value.get('path') or folders[key].get('path', '')
+                        folders[key] = merged
+                return {"folders": folders, "pending": getattr(self, '_files_pending', ''),
+                        "request_supported": bool(getattr(sys, 'frozen', False))}
+
+        def request_files_access(self, target="workspace"):
+            if target not in ('workspace', 'documents', 'desktop', 'downloads', 'selected'):
+                raise ValueError('Неизвестная папка')
+            if not getattr(sys, 'frozen', False):
+                return self.files_access_state()
+            with self._files_permission_lock:
+                if getattr(self, '_files_pending', ''):
+                    return self.files_access_state()
+                self._files_pending = target
+            def request():
+                selected = ''
+                try:
+                    if target == 'selected':
+                        selected = self.pick_folder()
+                        if not selected:return
+                    result = _core_request(self.token, 'mac_files_access', {"target":target, "selected":selected}, timeout=90)
+                    with self._files_permission_lock:
+                        if not hasattr(self, '_files_access'):self._files_access = {}
+                        self._files_access[target] = result
+                    if result.get('state') == 'denied':
+                        self.open_files_settings()
+                except Exception as error:
+                    with self._files_permission_lock:
+                        if not hasattr(self, '_files_access'):self._files_access = {}
+                        self._files_access[target] = {"state":"error", "readable":False, "error":str(error), "path":selected}
+                finally:
+                    with self._files_permission_lock:self._files_pending = ''
+            threading.Thread(target=request, name='files-permission', daemon=True).start()
+            return self.files_access_state()
+
+        def open_files_settings(self):
+            open_target('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders')
+            return True
 
         def open_screen_settings(self):
             open_target("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
@@ -842,7 +930,10 @@ def main_mac(args, extra, app):
     api._wake_core = ensure_owned_core
     api._mac_menu_spec = make_macos_menu(api)
     api._ensure_hud()
-    if args.settings or getattr(args, "request_microphone", False) or not app.SETTINGS_PATH.exists():
+    setup_access = not os.environ.get('DEWIAR_MAC_SMOKE_REPORT') and access_setup_on_start(app.SETTINGS_PATH)
+    if setup_access:
+        api.open_settings('safety', extra + '&mac_access_setup=1')
+    elif args.settings or getattr(args, "request_microphone", False) or not app.SETTINGS_PATH.exists():
         api.open_settings("sound" if getattr(args, "request_microphone", False) else "", extra)
 
     def ready():

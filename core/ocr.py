@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,11 +17,47 @@ from platform_info import MAC
 log = logging.getLogger("dewiar.ocr")
 
 
+def _vision_worker(data, languages, details):
+    """Keep native Vision out of the long-lived frozen core's thread pool.
+
+    A stuck native request must time out so the existing Tesseract fallback can
+    finish the note, rather than leaving it indefinitely at 'OCR in progress'.
+    """
+    import json
+    result = subprocess.run([sys.executable, "--ocr-worker", json.dumps(list(languages)),
+                             "details" if details else "text"], input=data,
+                            capture_output=True, timeout=25)
+    if result.returncode:
+        raise RuntimeError("Процесс Vision завершился с ошибкой")
+    reply = json.loads(result.stdout)
+    if not reply.get("ok"):
+        raise RuntimeError(reply.get("error") or "Vision не выполнил запрос")
+    return reply["result"]
+
+
+def worker_main(args):
+    """Private .app entry: image on stdin, one JSON response on stdout; no model."""
+    import json
+    try:
+        # PyInstaller windowed builds may set sys.stdin/stdout to None even when
+        # the parent supplied pipes. Use their actual descriptors instead.
+        with os.fdopen(os.dup(0), "rb") as source:
+            data = source.read()
+        result = _vision(data, json.loads(args[0]), strict=True, details=args[1] == "details")
+        reply = {"ok": True, "result": result}
+    except Exception as exc:
+        reply = {"ok": False, "error": str(exc)}
+    with os.fdopen(os.dup(1), "wb") as destination:
+        destination.write(json.dumps(reply, ensure_ascii=False).encode("utf-8"))
+
+
 def _vision(data, languages=("ru-RU", "en-US"), strict=False, details=False):
     """Распознать PNG/JPEG через macOS Vision; вернуть текст или пустую строку."""
     if not MAC:
         return ""
     try:
+        if getattr(sys, "frozen", False) and "--ocr-worker" not in sys.argv:
+            return _vision_worker(data, languages, details)
         import Vision
         from Foundation import NSData
         nsdata = NSData.dataWithBytes_length_(data, len(data))

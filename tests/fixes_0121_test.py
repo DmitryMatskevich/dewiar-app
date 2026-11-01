@@ -15,10 +15,14 @@ sys.path.insert(0, str(ROOT / "core"))
 import eyes, tools  # noqa: E401,E402
 from PIL import Image  # noqa: E402
 b = io.BytesIO(); Image.new("RGB", (64, 40), (30, 60, 90)).save(b, "PNG")
-eyes.capture_screen = lambda env: b.getvalue()
-tools.pictures_dir = lambda: tmp / "home" / "Изображения"
-r = tools.t_save_screenshot({}, {})
-shots = list((tmp / "home" / "Изображения" / "Снимки экрана").glob("*.png"))
+eyes.capture_screen = lambda env, **kwargs: b.getvalue()
+from workspace import Workspace
+from unittest.mock import patch
+os.environ['DEWIAR_WORKSPACE'] = str(tmp / 'screenshot-workspace')
+with patch('ocr.recognize_result', return_value={'text':'','status':'empty','engine':'test'}):
+    r = tools.t_save_screenshot({}, {'workspace':Workspace(None)})
+shots = list((tmp / 'screenshot-workspace').rglob('*.png'))
+os.environ.pop('DEWIAR_WORKSPACE')
 ok(len(shots) == 1 and shots[0].read_bytes()[:4] == b"\x89PNG" and "сохранён" in r, f"скриншот сохранён файлом: {shots[0].name if shots else '—'}")
 ok("save_screenshot" in tools.TOOLS and tools.TOOLS["save_screenshot"][2] == "safe", "инструмент «Скриншот» есть и не требует подтверждения")
 

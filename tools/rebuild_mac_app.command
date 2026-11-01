@@ -1,5 +1,5 @@
 #!/bin/bash
-# Пересборка dist/Dewiar.app из исходников: тесты встреч → хелпер звука → PyInstaller → проверка → запуск.
+# Сборка → проверка → установка в /Applications/Dewiar.app → запуск установленной версии.
 # Двойной щелчок в Finder. Журнал: work/rebuild-<время>.log; итог — строка REBUILD_STATUS=OK|FAIL.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -23,11 +23,23 @@ bash tools/build_audio_tap.sh || fail "сборка dewiar-audio-tap"
 
 step "Закрываю запущенный Dewiar"
 osascript -e 'tell application "Dewiar" to quit' >/dev/null 2>&1 || true
-for i in $(seq 1 20); do pgrep -f "dist/Dewiar.app/Contents/MacOS/" >/dev/null || break; sleep 1; done
-if pgrep -f "dist/Dewiar.app/Contents/MacOS/" >/dev/null; then
-  echo "Dewiar не закрылся сам — завершаю процессы сборки dist/Dewiar.app"
-  pkill -TERM -f "dist/Dewiar.app/Contents/MacOS/" || true; sleep 3
-fi
+"$PY" - <<'PY' || fail "завершение прежней версии"
+import os, signal, subprocess, time
+from pathlib import Path
+binaries = {str(p.resolve() / 'Contents/MacOS/Dewiar') for p in
+            (Path('dist/Dewiar.app'), Path('/Applications/Dewiar.app'))}
+def running():
+    return [int(pid) for line in subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True).splitlines()
+            for pid, command in [line.strip().split(None, 1)]
+            if any(command == exe or command.startswith(exe + ' ') for exe in binaries)]
+for pid in running():
+    try: os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError: pass
+for _ in range(30):
+    if not running(): break
+    time.sleep(0.5)
+else: raise SystemExit('Старое ядро не завершилось; приложение не будет заменено')
+PY
 
 if [ -d dist/Dewiar.app ]; then
   step "Копия прежней сборки"
@@ -45,6 +57,9 @@ UI=$(find dist/Dewiar.app -path "*ui/studio/links.js" | head -1)
 grep -q prMeetingBar "$UI" && echo "OK   новый интерфейс встреч в сборке" || fail "в сборке старый links.js"
 [ -n "$(find dist/Dewiar.app -name meeting_media.py | head -1)" ] || fail "нет core/meeting_media.py в сборке"
 
-step "Запуск новой версии"
-open dist/Dewiar.app
+step "Установка в Applications"
+"$PY" tools/install_mac_app.py || fail "установка /Applications/Dewiar.app"
+
+step "Запуск установленной версии"
+open /Applications/Dewiar.app
 echo "REBUILD_STATUS=OK"

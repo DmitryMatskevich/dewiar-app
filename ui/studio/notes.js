@@ -22,7 +22,13 @@ function ntParse(path, text) {
   if (/^#\s+/.test(lines[0] || "")) { title = lines[0].replace(/^#\s+/, "").trim() || title; i = 1; }
   while (i < lines.length && !lines[i].trim()) i++;
   if (/^\*[^*\n]+\*$/.test((lines[i] || "").trim())) { date = lines[i].trim(); i++; }
-  for (; i < lines.length; i++) { const m = NT_LINK.exec(lines[i]); if (m) att.push({ img: !!m[1], name: m[2], link: m[3], line: lines[i].trim() }); else body.push(lines[i]); }
+  let fence = null;
+  for (; i < lines.length; i++) {
+    const mark = lines[i].match(/^(`{3,}|~{3,})/);
+    if (fence) { body.push(lines[i]); if (new RegExp('^' + fence[0] + '{' + fence.length + ',}\\s*$').test(lines[i])) fence = null; continue; }
+    if (mark) { fence = mark[1]; body.push(lines[i]); continue; }
+    const m = NT_LINK.exec(lines[i]); if (m) att.push({ img: !!m[1], name: m[2], link: m[3], line: lines[i].trim() }); else body.push(lines[i]);
+  }
   return { title, date, body: body.join("\n").trim(), att };
 }
 const ntCompose = (d) => `# ${d.title}\n\n${d.date ? d.date + "\n\n" : ""}${d.body.trim()}\n${d.att.length ? "\n" + d.att.map(a => a.line).join("\n") + "\n" : ""}`;
@@ -70,16 +76,23 @@ async function ntOpen(path, edit) {
   NT.cur = path; NT.edit = !!edit; NT.doc = Object.assign(ntParse(path, d.text), { mtime: d.mtime });
   $$("#nt-list .nt-row").forEach(b => b.classList.toggle("cur", b.dataset.p === path));
   ntShow();
+  core.call('notes_seen', {path}).catch(() => {});
 }
 function ntShow() {
   const d = NT.doc, path = NT.cur, v = $("#nt-view"); if (!d) { v.innerHTML = ""; return; }
   const pics = d.att.filter(a => a.img), files = d.att.filter(a => !a.img);
-  const attHtml = (edit) => `${pics.length ? `<div class="nt-pics">${pics.map(a => `<figure data-i="${d.att.indexOf(a)}"><i data-img="${escH(ntAbs(path, a.link))}"></i>${edit ? `<button class="nt-x" title="Убрать">×</button>` : ""}</figure>`).join("")}</div>` : ""}
+  let bodyHtml = ntRender(d.body), inlineScreen = false;
+  if (!NT.edit && path.startsWith('Заметки/Снимки экрана/') && pics.length && /<h2>Снимок экрана<\/h2>/.test(bodyHtml)) {
+    inlineScreen = true;
+    bodyHtml = bodyHtml.replace(/<h2>Снимок экрана<\/h2>/, heading => heading + pics.map(a =>
+      `<figure class="nt-screen-figure" data-i="${d.att.indexOf(a)}" role="button" tabindex="0" title="Открыть снимок в полном размере"><img data-screen-img="${escH(ntAbs(path,a.link))}" alt="Снимок экрана без окон Dewiar" style="display:block;width:100%;height:auto;border-radius:12px"></figure>`).join(''));
+  }
+  const attHtml = (edit) => `${pics.length && (!inlineScreen || edit) ? `<div class="nt-pics">${pics.map(a => `<figure data-i="${d.att.indexOf(a)}"><i data-img="${escH(ntAbs(path, a.link))}"></i>${edit ? `<button class="nt-x" title="Убрать">×</button>` : ""}</figure>`).join("")}</div>` : ""}
     ${files.length ? `<div class="nt-files">${files.map(a => `<span class="nt-f" data-i="${d.att.indexOf(a)}"><svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg>${escH(a.name)}${edit ? `<button class="nt-x" title="Убрать">×</button>` : ""}</span>`).join("")}</div>` : ""}`;
   if (!NT.edit) {
     v.innerHTML = `<div class="nt-top"><div><h2 class="nt-h">${escH(d.title)}</h2><small>${ntDate(d.mtime)}${ntDir(path) !== "Заметки" ? " · " + escH(ntDir(path).replace(/^Заметки\//, "")) : ""}</small></div>
         <span class="nt-act"><button class="btn primary" id="nt-edit">Изменить</button><button class="btn" id="nt-open" title="Открыть файл заметки в своей программе">В программе</button><button class="btn danger" id="nt-del">Удалить</button></span></div>
-      <div class="nt-body"${ntCs() ? ` data-cs="${escH(ntCs())}"` : ""}>${ntRender(d.body) || `<p class="hint">Пустая заметка — нажмите «Изменить».</p>`}</div>${attHtml(false)}`;
+      <div class="nt-body"${ntCs() ? ` data-cs="${escH(ntCs())}"` : ""}>${bodyHtml || `<p class="hint">Пустая заметка — нажмите «Изменить».</p>`}</div>${attHtml(false)}`;
     if (window.DewiarRich) DewiarRich.diagrams($("#nt-view .nt-body")).catch(() => { });   // ```mermaid — схемой
     $("#nt-edit").onclick = () => { NT.edit = true; ntShow(); setTimeout(() => $("#nt-text") && $("#nt-text").focus(), 50); };
     $("#nt-open").onclick = () => core.call("ws_open", { path }).catch(e => toast(e.message));
@@ -105,7 +118,9 @@ function ntShow() {
     $$("#nt-view .nt-x").forEach(b => b.onclick = (e) => { e.preventDefault(); e.stopPropagation(); const i = +b.parentElement.dataset.i; d.att.splice(i, 1); ntDirty(); ntShow(); });
   }
   $$("#nt-view .nt-pics i").forEach(async (el) => { const u = await ntImg(el.dataset.img); if (u) el.style.backgroundImage = `url("${u}")`; });
-  $$("#nt-view .nt-pics figure, #nt-view .nt-f").forEach(el => el.addEventListener("click", (e) => {
+  $$("#nt-view [data-screen-img]").forEach(async el => { const u = await ntImg(el.dataset.screenImg); if (u) el.src = u; });
+  $$("#nt-view .nt-screen-figure").forEach(el => el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); } });
+  $$("#nt-view .nt-pics figure, #nt-view .nt-screen-figure, #nt-view .nt-f").forEach(el => el.addEventListener("click", (e) => {
     if (e.target.closest(".nt-x")) return; const a = d.att[+el.dataset.i]; if (a) core.call("ws_open", { path: ntAbs(path, a.link) }).catch(x => toast(x.message)); }));
 }
 function ntDirty() { const r = $("#nt-res"); if (r) { r.className = "res"; r.textContent = "…"; } clearTimeout(NT.saveT); NT.saveT = setTimeout(ntFlush, 700); }

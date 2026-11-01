@@ -104,7 +104,7 @@ ROLE_MAX_TOKENS_DEFAULT = {
 
 
 def _role_token_limit(llm, role=None):
-    """Effective response cap for a work role.
+    """Effective per-request response budget for a work role.
 
     A profile may still have a smaller per-model cap; the role value is the
     upper bound used by automatic routing.  Ordinary calls without an
@@ -144,7 +144,8 @@ DEFAULTS = {
         "auto_select": False,
         "active": "",
         "profiles": {},             # id -> {name, kind, base_url, api_key, model, disable_thinking, temperature, max_tokens}
-        "role_max_tokens": copy.deepcopy(ROLE_MAX_TOKENS_DEFAULT),  # верхний предел ответа для каждой очереди
+        "role_max_tokens": copy.deepcopy(ROLE_MAX_TOKENS_DEFAULT),  # порция одного запроса для каждой очереди
+        "continue_response": True,  # в разговоре лимит запроса — порция, а не обрезка всего ответа
         "history_turns": 8,
         "lean_prompt": False,       # проба: короткая инструкция — навыки только именами, описания — к подходящему вопросу
         "think_auto": True,         # сложная просьба (стих, расчёт, анализ, план, код) — модель думает перед ответом (llm.wants_think)
@@ -200,7 +201,7 @@ DEFAULTS = {
         # ждать дольше (+150 мс, до +600); обычные разговоры понемногу возвращают к end_silence_ms
         "end_silence_auto": True, "end_silence_extra": 0,
         # длинная фраза без имени после ответа (дольше 9 с или 26 слов) — обычно разговор людей рядом; True — это тоже мне (№226)
-        "follow_long": False,
+        "follow_long": True,
         "sounds": True,
         "turn_tone": True,          # ответ закончен и можно говорить без имени — мягкий сигнал «ваша очередь» (нужно и sounds)
         "asr_wake": True,           # искать имя точным распознавателем в каждой короткой фразе (любые имена)
@@ -222,6 +223,8 @@ DEFAULTS = {
            "cursor_look": False,            # портрет смотрит на курсор над виджетом (hud.html lookAt) — по желанию, выключено
            "memory_motion": "auto",         # «Память»: анимация карты — auto (на слабом компьютере выкл) | on | off
            "welcome": "",                   # «Первые шаги»: "" — показать, "later" — кнопкой в меню, "done" — всё
+           "mac_access_setup_seen": False,    # Native permission setup has actually been shown.
+           "mac_access_at_startup": False,    # Optional repeat of setup on each launch; never repeat OS prompts automatically.
            "intro": "",                     # знакомство голосом (engine_intro.py): "" — ещё не было, "done" — было
            "pad_w": None, "pad_h": None,    # свой размер блокнота у виджета (растянули за уголок), px при 100 % (ui/app.py pad_resize)
            "pad_text": None,                # размер текста в блокноте, 0.8–1.7 (ui/pad.js textSize); пусто — как задумано

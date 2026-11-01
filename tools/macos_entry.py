@@ -11,6 +11,10 @@ multiprocessing.freeze_support()  # Hugging Face/tqdm starts a resource-tracker 
 
 root = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(root / "core"), str(root / "ui")]
+if "--ocr-worker" in sys.argv:
+    from ocr import worker_main
+    worker_main(sys.argv[sys.argv.index("--ocr-worker") + 1:])
+    raise SystemExit(0)
 if "--download-gigaam" in sys.argv:
     from model_download import worker_main
     raise SystemExit(worker_main(sys.argv[sys.argv.index("--download-gigaam") + 1:]))

@@ -17,10 +17,17 @@ with sync_playwright() as pw:
     page.add_init_script("""
       window.launcherState = {loaded:false, visible:false, in_tray:true};
       window.launcherCalls = []; window.launcherDelay = false; window.launcherFail = false;
+      window.launcherHideDelay = false; window.launcherStateDelay = false;
       window.pywebview = {api:{
-        tray_state: async () => ({...window.launcherState}),
+        tray_state: async () => {
+          const state={...window.launcherState};
+          if(launcherStateDelay) await new Promise(resolve=>window.releaseState=resolve);
+          return state;
+        },
         show: async () => {launcherCalls.push('show');launcherState={loaded:true,visible:true,in_tray:false};},
-        hide: async () => {launcherCalls.push('hide');launcherState.visible=false;launcherState.in_tray=true;},
+        hide: async () => {launcherCalls.push('hide');
+          if(launcherHideDelay) await new Promise(resolve=>window.releaseHide=resolve);
+          launcherState.visible=false;launcherState.in_tray=true;},
         wake_agent: async () => {launcherCalls.push('wake');
           if(launcherDelay) await new Promise(resolve=>window.releaseWake=resolve);
           if(launcherFail) throw new Error('Не удалось загрузить: тестовая ошибка');
@@ -54,8 +61,19 @@ with sync_playwright() as pw:
     page.wait_for_function("document.querySelector('#agent-toggle').getAttribute('aria-pressed') === 'true'")
     assert page.evaluate("launcherCalls") == ["wake"]
     button.screenshot(path=str(OUT / "awake.png"))
+    # A pending status poll must neither delay hiding nor restore an old awake state.
+    page.evaluate("launcherStateDelay=true;void refreshAgentWindowState()")
+    page.wait_for_function("!!window.releaseState")
+    page.evaluate("launcherStateDelay=false;launcherHideDelay=true")
     button.focus()
     page.keyboard.press("Enter")
+    page.wait_for_function("!!window.releaseHide")
+    assert button.get_attribute("aria-pressed") == "false"
+    assert "скрываю" in button.get_attribute("title")
+    assert page.evaluate("launcherCalls") == ["wake", "hide"]
+    page.evaluate("releaseHide();launcherHideDelay=false")
+    page.wait_for_function("document.querySelector('#agent-toggle').getAttribute('aria-busy') === 'false'")
+    page.evaluate("releaseState()")
     page.wait_for_function("document.querySelector('#agent-toggle').classList.contains('agent-sleeping')")
     assert page.evaluate("launcherCalls") == ["wake", "hide"]
 
@@ -82,6 +100,9 @@ with sync_playwright() as pw:
     # Disconnection sleeps the portrait even when the window exists.
     page.evaluate("core.connected=false;core.emit('offline',{})")
     assert "agent-sleeping" in button.get_attribute("class")
+    button.click()
+    page.wait_for_function("document.querySelector('#agent-toggle').getAttribute('aria-busy') === 'false'")
+    assert page.evaluate("launcherCalls.at(-1)") == "hide", "an open offline window must hide in one click"
     page.evaluate("launcherFail=true")
     button.click()
     page.wait_for_function("document.querySelector('#toast').textContent.includes('тестовая ошибка')")

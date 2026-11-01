@@ -498,6 +498,13 @@ class RemoteMixin:
         ready = queue.Queue(maxsize=2)                  # готовящиеся фразы: ("say", s, text, chunks) | ("skip", s) | ("sync", ev) | None
         done = threading.Event()                        # звук закончил (отмена или конец) — синтезу больше не ждать
 
+        def synth_text(eng, text):
+            from llm import speech_chunks
+            for part in speech_chunks(text):
+                if turn.cancel.is_set() or done.is_set():
+                    return
+                yield from self._synth_mixed(eng, part, voice, speed / pitch)
+
         def put(item):
             while not done.is_set() and not turn.cancel.is_set():
                 try:
@@ -538,7 +545,7 @@ class RemoteMixin:
                             # высота голоса без отдельной обработки: синтезируем в 1/pitch раз быстрее, а играем с частотой
                             # rate*pitch — темп прежний, голос ниже (pitch < 1) или выше
                             t_syn = time.monotonic()
-                            for rate, pcm in self._synth_mixed(eng, text, voice, speed / pitch):
+                            for rate, pcm in synth_text(eng, text):
                                 if not sent and time.monotonic() - t_syn > 3:   # синтез не успевает за речью (для отчётов)
                                     log.info("🗣 %s: фраза из %d симв. синтезировалась %.1f с", getattr(eng, "name", "голос"), len(text),
                                              time.monotonic() - t_syn)
@@ -557,7 +564,7 @@ class RemoteMixin:
                                 simple = re.sub(r"[^А-Яа-яЁё0-9 ,.!?-]+", " ", text).strip()
                                 try:
                                     if simple and simple != text and not sent:
-                                        for rate, pcm in eng.synth(pronounce(simple), voice, speed / pitch):
+                                        for rate, pcm in synth_text(eng, simple):
                                             chunks.put((rate, pcm))
                                 except Exception as e2:  # noqa: BLE001
                                     log.warning("Синтез %s не справился с фразой, пропускаю её: %s", getattr(eng, "name", eng), e2)

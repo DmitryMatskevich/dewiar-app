@@ -21,6 +21,7 @@ class Recorder(AudioMixin):
         self.state = "idle"
         self.stt_q = queue.Queue()
         self.events = []
+        self.finishing = threading.Event()
         self.stopping, self.restart_audio = threading.Event(), threading.Event()
         self.aliases = {"lira": ["лира"], "patrik": ["патрик"]}
         self.s = SimpleNamespace(get=lambda *k: {
@@ -45,6 +46,8 @@ class Recorder(AudioMixin):
     def emit(self, kind, **data):
         if kind == "dictation":
             self.events.append(data)
+            if data.get("state") == "finishing":
+                self.finishing.set()
 
     def interrupt(self, *args, **kwargs):
         pass
@@ -117,12 +120,15 @@ r.listen([False] * 2)
 r.transcribe([])
 assert r.events[-1] == {"state": "done", "submit": False}
 
-# Active agent's name flushes capture and sends once; terminal name is removed.
+# A fast name detection must not submit a sentence before STT confirms its ending.
 r = Recorder()
 r.dictation_start()
 r.listen([True] * 30, wake_at=20)
-r.transcribe(["Напиши письмо, Лира."])
-assert r.events[-2]["text"] == "Напиши письмо"
+assert not r.dictation_finish_requested
+r._dictation_result("Напиши письмо, Лира.", "test", r._dictation_session)
+r.listen([False] * 2)
+r.transcribe([])
+assert [e["text"] for e in r.events if e["state"] == "partial"] == ["Напиши письмо"]
 assert r.events[-1] == {"state": "done", "submit": True}
 assert sum(e["state"] == "done" for e in r.events) == 1
 
@@ -147,6 +153,42 @@ r = Recorder()
 r.dictation_start()
 r._dictation_result("Лирами называют музыкальные инструменты. Стоп.", "test", r._dictation_session)
 assert not r.dictation_finish_requested
+
+# Exercise the real STT queue -> command detection -> capture flush -> FIFO done.
+# Terminal words are stripped; a one-word utterance submits the preceding draft.
+for texts, expected, persona in [
+    (["Напиши письмо, ввод."], ["Напиши письмо"], "lira"),
+    (["Напиши письмо, ВОТ!"], ["Напиши письмо"], "lira"),
+    (["Первая часть.", "Ввод"], ["Первая часть."], "lira"),
+    (["Первая часть.", "вот…"], ["Первая часть."], "lira"),
+    (["ввод"], [], "lira"),
+    (["Вот."], [], "lira"),
+    (["Составь список, Патрик!"], ["Составь список"], "patrik"),
+    (["Составь список. Лира!"], ["Составь список."], "lira"),
+    (["Текст, ввод"], ["Текст"], "no-aliases"),
+]:
+    r = Recorder()
+    r.s = SimpleNamespace(get=lambda *k, p=persona: p if k == ("persona",) else None)
+    r.dictation_start()
+    for _ in texts:
+        r._on_utterance(b"\x01\x00" * RATE, 0, 1)
+    worker = threading.Thread(target=r.transcribe, args=(texts,), daemon=True)
+    worker.start()
+    assert r.finishing.wait(2), texts
+    r.listen([False] * 2)
+    worker.join(2)
+    assert not worker.is_alive(), texts
+    assert [e["text"] for e in r.events if e["state"] == "partial"] == expected, (texts, r.events)
+    assert r.events[-1] == {"state": "done", "submit": True}, (texts, r.events)
+    assert sum(e["state"] == "done" for e in r.events) == 1
+
+for text in ["Вот план на завтра.", "Настрой ввод данных.", "Лира подготовит план.",
+             "Расскажи про вводные.", "Поворот", "Вводить", "Составь список, Патрик."]:
+    r = Recorder()
+    r.dictation_start()
+    r._dictation_result(text, "test", r._dictation_session)
+    assert not r.dictation_finish_requested, text
+    assert r.events[-1]["text"] == text
 
 # Cancel during STT, then start again: an old result must not enter the new draft.
 r = Recorder()
@@ -188,6 +230,23 @@ assert not worker.is_alive()
 assert [e["text"] for e in r.events if e["state"] == "partial"] == ["Первая часть.", "Хвост."]
 assert r.events[-1] == {"state": "done", "submit": True}
 
-print("OK: continuous dictation, 5/10-second pauses, stop/empty stop, name/send, FIFO and stale session isolation")
+# Ordinary voice questions must not be submitted just because 25 seconds elapsed.
+r = Recorder()
+r.wake_time = 0
+r.follow_up_until = float('inf')
+r.state = 'listening'
+utterances = []
+r._on_utterance = lambda pcm, t0, now: utterances.append(pcm)
+r.listen([True] * int(70 / FRAME_S))
+assert utterances == [], 'A long voice question was sent before the user paused'
+r = Recorder()
+r.wake_time = 0
+r.follow_up_until = float('inf')
+r.state = 'listening'
+r._on_utterance = lambda pcm, t0, now: utterances.append(pcm)
+r.listen([True] * int(70 / FRAME_S) + [False] * int(6 / FRAME_S))
+assert len(utterances) == 1 and len(utterances[0]) / (RATE * 2) >= 69, 'Long voice question lost its beginning or end'
+
+print("OK: continuous dictation, 5/10-second pauses, 70-second voice question, name/send, FIFO and stale session isolation")
 
 print("OK")

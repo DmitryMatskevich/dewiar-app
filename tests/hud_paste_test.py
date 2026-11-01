@@ -34,7 +34,7 @@ mock = subprocess.Popen([sys.executable, str(TESTS / "mock_llm.py"), str(LLM)])
 cfg = tmp / "cfg"; cfg.mkdir()
 (cfg / "settings.json").write_text(json.dumps({"persona": "dewiar", "audio": {"sounds": False}, "ui": {"welcome": "done"},
                                                "stt": {"engine": "vosk"}, "tts": {"engine": "off"},
-                                               "llm": {"active": "m", "profiles": {"m": {"name": "Мок", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM}/v1", "model": "mock"}}}}))
+                                               "llm": {"active": "m", "profiles": {"m": {"name": "Мок", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM}/v1", "model": "mock", "roles": ["communication", "planning", "coding", "analytics"]}}}}))
 env = dict(os.environ, DEWIAR_CONFIG_DIR=str(cfg), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_PORT=str(PORT), DEWIAR_ASSUME_AEC="1",
            DEWIAR_WORKSPACE_DIR=str(tmp / "ws"))
 core = subprocess.Popen([PY, str(ROOT / "core/main.py"), "--wav", str(TESTS / "silence90.wav"), "--null-audio"], env=env,

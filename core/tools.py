@@ -1322,12 +1322,14 @@ def t_save_screenshot(a, ctx):
             if event["stage"] in ("ocr", "done"):
                 engine.emit("note_saved", kind="note", title=event["title"], path=event["path"], text=event["message"])
     try:
-        result = create(workspace, progress, ctx.get("screenshot_cancelled"))
+        turn = getattr(engine, "turn", None) if engine else None
+        cancelled = ctx.get("screenshot_cancelled") or (turn.cancel.is_set if turn else None)
+        result = create(workspace, progress, cancelled)
     except Exception as exc:
         raise ToolError(str(exc)) from exc
     status = {"done": "Текст распознан и добавлен в документ.", "empty": "Читаемый текст не найден; снимок сохранён.",
               "cancelled": "Распознавание остановлено; снимок сохранён.", "error": "OCR не сработал; снимок сохранён."}[result["status"]]
-    return f"Документ со снимком: {result['path']}. {status} Откройте его в «Заметках → Снимки экрана»."
+    return f"Документ со снимком добавлен в заметки, в папку «Снимки экрана». {status} Файл: {result['path']}."
 
 
 def t_meeting_screenshot(a, ctx):
@@ -2732,7 +2734,8 @@ class Toolbox:
                 return False, False
         if name == "control_mac_app" and not (MAC and (os.environ.get("DEWIAR_MAC_DESKTOP") == "1" or DRY or EXAM_LAUNCH)):
             return False, False
-        if name in SERVER_OFF and self.hooks.get("server"):   # сервер без экрана и звука: «открыла сайт» было бы неправдой
+        desktop_screenshot = name == "save_screenshot" and MAC and os.environ.get("DEWIAR_MAC_DESKTOP") == "1"
+        if name in SERVER_OFF and self.hooks.get("server") and not desktop_screenshot:   # text-only Mac still has a real desktop
             return False, False
         if name == "smart_home":                # только когда подключён умный дом Яндекса
             h = self.hooks.get("home")

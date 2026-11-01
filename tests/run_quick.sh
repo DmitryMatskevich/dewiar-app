@@ -33,6 +33,8 @@ run "версия: окно читает верно"     $PY "$T/version_read_te
 run "мозг: форматы серверов"        $PY "$T/llm_compat_test.py"
 run "размышления и код не в ответе" $PY "$T/reasoning_test.py"
 run "руки: модули"                  $PY "$T/tools_unit_test.py"
+run "снимок: документ и локальный OCR" $PY "$T/screen_document_test.py"
+run "снимок: команда и разрешения"   $PY "$T/screen_command_test.py"
 run "руки без флагов на сервере"    $PY "$T/prompt_tools_test.py"
 run "подключение, навыки, MCP"      $PY "$T/stage5_unit_test.py"
 run "папка ассистента"              $PY "$T/workspace_test.py"
@@ -90,6 +92,7 @@ run "телефон: календарь — что у меня завтра, з�
 run "лицо говорит губами только под звук: голос с сервера ещё не пришёл — рот закрыт" $PY "$T/lipsync_test.py"
 run "диктовка удержанием на компьютере: держите облик или пробел — сколько угодно, отпустили — ушло" $PY "$T/hold_dictation_test.py"
 run "непрерывная диктовка: пауза, стоп, имя" $PY "$T/dictation_engine_test.py"
+run "длинная речь: полный ввод, продолжение ответа и синтез" $PY "$T/long_voice_test.py"
 if command -v node >/dev/null; then
   run "диктовка: кнопка стоп и отправка черновика" node "$T/hud_dictation_test.js"
 fi
@@ -237,4 +240,5 @@ echo "== Сайт и телефон"
 run "сервер речи"                   $PY "$T/speech_server_test.py"
 run "телефон: руки"                 $PY "$T/android_hands_test.py"
 run "телефон: журнал разговора"     $PY "$T/android_log_test.py"
+run "транскрибация: безопасное чтение активной вкладки браузера" $PY "$T/transcription_sources_test.py"
 exit $FAIL

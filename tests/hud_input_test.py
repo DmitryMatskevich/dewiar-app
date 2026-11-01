@@ -13,7 +13,7 @@ def ok(value, message):
         fails.append(message)
 
 
-ok('title="Enter — новая строка · Ctrl+Enter — отправить"' in src, "Enter оставляет перенос, отправка описана через Ctrl+Enter")
+ok('Enter — новая строка. Отправить — кнопка со стрелкой вверх.' in src and 'title="Отправить сообщение (Ctrl+Enter)"' not in src, "Enter оставляет перенос, подсказка предлагает стрелку вместо Ctrl+Enter")
 ok('e.key === "Enter" && (e.ctrlKey || e.metaKey)' in src, "Ctrl/⌘+Enter отправляет сообщение")
 ok('#ask { display: block;' in src, "окно чата агента открыто постоянно")
 ok('M12 19V5M6 11l6-6 6 6' in src, "стрелка отправки направлена вверх")
@@ -72,7 +72,7 @@ ok('#corner #b-play { display: none !important; }' in src,
    "кнопка «Досуг» убрана из первой строки HUD")
 ok('chat-open' in src and '#card.chat-open #cap' in src, "ответ и чат растягиваются при расширении окна")
 ok('box.classList.toggle("show")' in src and 'function tapOrb()' in src, "круг помощника открывает выбор персонажа")
-ok("Ctrl+Enter (или ⌘+Enter)" in help_src and "выбрать устройство macOS" in help_src
+ok("Enter добавляет новую строку" in help_src and "«ввод» или «вот»" in help_src and "выбрать устройство macOS" in help_src
    and "автоматически добавляется" in help_src and "слева от микрофона" in help_src
    and "справа в первой строке" in help_src and "Досуг" in help_src
    and "динамик с крестиком" in help_src and "не открывает карточку сообщения" in help_src,

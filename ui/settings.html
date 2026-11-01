@@ -1054,9 +1054,9 @@
       <div id="model-role-panel" role="tabpanel" aria-live="polite">
         <h2 id="model-role-title">Общение</h2>
         <p class="hint" id="model-role-description">Обычные ответы, вопросы и задачи, которым не назначено планирование, программирование или аналитика.</p>
-        <label class="f role-token-limit" title="Верхний предел длины ответа для всех моделей этой очереди. Если у отдельного профиля задан меньший лимит, используется меньшее значение.">Максимум токенов в ответе для этой очереди
-          <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Максимум токенов ответа для текущей очереди" title="Ограничивает длину ответа выбранной очереди: Общение, Планирование, Программирование или Аналитика. Это не лимит средств и не размер контекста.">
-          <span class="hint">Это верхняя граница ответа, а не остаток средств. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192, Аналитика — 32768. Можно указать до 32768.</span>
+        <label class="f role-token-limit" title="Порция ответа на один запрос модели. Если сервер сообщает об обрыве по лимиту токенов, разговор автоматически продолжается. Общая длина разговорного ответа не ограничена этой порцией.">Токенов на один запрос для этой очереди
+          <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Токенов на один запрос для текущей очереди" title="Размер одной порции ответа выбранной очереди. В разговоре обрыв по токенам автоматически продолжается без общего ограничения длины. Это не лимит средств и не размер контекста.">
+          <span class="hint">Порция одного запроса, а не длина всего разговора. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192, Аналитика — 32768. Длинный разговорный ответ автоматически продолжается после лимита; «Стоп» прекращает ответ. Ограничения сервера, контекста и подписки сохраняются.</span>
         </label>
         <div class="model-role-add actions" id="model-role-add" hidden>
           <label class="f">Добавить уже подключённую модель в эту очередь<select id="model-role-add-select" aria-label="Выбор подключённой модели для очереди"></select></label>
@@ -1428,7 +1428,7 @@
   </section>
 
   <section id="p-sound">
-    <h2>Звук и поведение</h2>
+    <h1>Звук и поведение</h1>
     <p class="lead">Микрофон, эхоподавление и то, как ассистент ведёт разговор.</p>
     <h2>При запуске</h2>
     <div class="switch"><div>Говорить голосом при запуске<span>Знакомство и стартовые фразы при первом запуске можно произносить вслух или показывать только на экране. Изменение применяется после перезапуска.</span></div><label class="tg"><input type="checkbox" data-k="tts.startup_voice"><i></i></label></div>
@@ -1548,6 +1548,23 @@
   <section id="p-safety">
     <h1>Безопасность</h1>
     <p class="lead">Что ассистент видит, что хранит и куда отправляет — на одной странице. Сверху стоп-кран: одно нажатие, и наружу не уходит ничего.</p>
+    <div class="prof on" id="mac-access" hidden style="padding:18px;margin-bottom:20px">
+      <h2>Доступы macOS</h2>
+      <div id="mac-access-setup" hidden><p>Подготовка к работе: разрешите нужные функции кнопками ниже и подтвердите системные запросы macOS. Можно настроить доступы позже в этом разделе.</p><button class="btn" id="mac-access-later" title="Закрыть подсказку подготовки. Разрешения не запрашиваются, раздел остаётся доступным.">Настрою позже</button></div>
+      <p class="hint" id="mac-access-source" hidden>Запущена версия из исходников. Системное разрешение может относиться к Python или Терминалу. Чтобы выдать доступ самому Dewiar, откройте Dewiar.app.</p>
+      <h3>Микрофон</h3><p class="hint" id="mac-access-mic" role="status" aria-live="polite">Проверяю…</p>
+      <div class="actions"><button class="btn primary" id="mac-access-mic-allow" title="Запросить системное разрешение микрофона. Это не включает запись или прослушивание.">Разрешить микрофон</button><button class="btn" id="mac-access-mic-settings" title="Открыть macOS → Конфиденциальность и безопасность → Микрофон.">Настройки микрофона</button></div>
+      <h3>Запись экрана</h3><p class="hint" id="mac-access-screen" role="status" aria-live="polite">Проверяю…</p>
+      <div class="actions"><button class="btn primary" id="mac-access-screen-allow" title="Запросить разрешение для снимков и записи встреч. Захват экрана при этом не начинается. Если запрос уже рассмотрен, откроется нужный раздел macOS.">Разрешить запись экрана</button><button class="btn" id="mac-access-screen-settings" title="Открыть macOS → Конфиденциальность и безопасность → Запись экрана. После изменения macOS может потребовать перезапуск Dewiar.">Настройки записи экрана</button></div>
+      <h3>Документы и файлы</h3><p class="hint">Доступ выдаётся отдельно к папкам. Кнопка проверки обращается к выбранной папке из ядра Dewiar; macOS при необходимости покажет Allow / «Разрешить». Проверка не читает документы и не меняет рабочую папку.</p>
+      <div id="mac-access-files" role="status" aria-live="polite"></div>
+      <p class="hint">Для папок показан результат последней проверки. После изменения разрешения в macOS нажмите кнопку нужной папки ещё раз.</p>
+      <div class="actions"><button class="btn primary" data-mac-folder="workspace" title="Проверить чтение текущей рабочей папки и при необходимости вызвать запрос macOS. Файлы не изменяются.">Разрешить рабочую папку</button><button class="btn" data-mac-folder="documents" title="Обратиться к папке «Документы», чтобы macOS могла запросить разрешение. Содержимое документов не читается.">Разрешить Документы</button><button class="btn" data-mac-folder="selected" title="Открыть системный выбор папки и проверить доступ. Рабочая папка и индекс знаний не изменяются.">Выбрать другую папку</button><button class="btn" id="mac-access-files-settings" title="Открыть macOS → Конфиденциальность и безопасность → Файлы и папки. Отсутствие Dewiar в списке само по себе не доказывает запрет: сначала обратитесь к нужной папке.">Настройки файлов и папок</button></div>
+      <p class="hint" id="mac-access-result" role="status" aria-live="polite"></p>
+      <div class="actions"><button class="btn" id="mac-access-refresh" title="Повторно проверить разрешения экрана и микрофона. Для файлов показывает последний результат; повторная проверка папки запускается только её кнопкой.">Проверить доступы</button></div>
+      <label class="check" style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="mac-access-startup" title="При следующем запуске открыть страницу подготовки доступов. Системные запросы Allow / «Разрешить» появятся только после нажатия соответствующей кнопки.">Показывать настройку доступов при каждом запуске</label>
+      <p class="hint">Показ страницы не запрашивает разрешения автоматически и не включает микрофон, запись экрана или отправку данных. Настройки безопасности самого агента сохраняют силу.</p>
+    </div>
     <div class="prof on sfstop" id="sf-stop">
       <label class="tg sfbig"><input type="checkbox" id="sf-lo" aria-describedby="sf-lo-hint"><i></i></label>
       <div class="sftxt"><h2>Ничего не уходит с компьютера <span id="sf-lo-state"></span></h2><p id="sf-lo-hint"></p><div class="sfnow" id="sf-now"></div></div>
@@ -1851,6 +1868,7 @@
 <script src="studio/snapshot.js"></script>
 <script src="studio/capture.js"></script>
 <script src="studio/mic-permission.js"></script>
+<script src="studio/mac-permissions.js"></script>
 <script src="studio/mac-apps.js"></script>
 <script src="studio/voice-commands.js"></script>
 <script src="assets/rich.js"></script>

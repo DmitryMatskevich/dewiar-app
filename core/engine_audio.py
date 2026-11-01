@@ -573,7 +573,7 @@ class AudioMixin:
                 hold["pcm"].append(frame)
                 a = np.frombuffer(frame, dtype=np.int16).astype(np.float32)
                 self._level(min(1.0, float(np.sqrt(np.mean(a * a))) / 3000.0), "mic")
-                if len(hold["pcm"]) * FRAME_S >= hold["max"]:
+                if hold["max"] and len(hold["pcm"]) * FRAME_S >= hold["max"]:
                     log.info("🎙 Удержание длиннее %d с — отправляю, что есть", hold["max"])
                     threading.Thread(target=self.hold_end, kwargs={"why": "limit"}, daemon=True).start()
                 in_hold = True
@@ -616,13 +616,9 @@ class AudioMixin:
             barge = self.s.get("audio", "barge_in")
             for kind, phrase in self.spotter.feed(frame):
                 if getattr(self, "dictation_active", False):
-                    # В диктовке имя — явная отправка, а «стоп» и другие слова остаются частью текста.
-                    aliases = self.aliases.get(self.s.get("persona"), [])
-                    if kind == "wake" and phrase.casefold() in {a.casefold() for a in aliases}:
-                        # Имя завершает диктовку, но не должно обрывать текущий аудиофрагмент
-                        # посреди слова. Дожидаемся ближайшей естественной паузы; кнопка Stop
-                        # по-прежнему вызывает немедленное завершение.
-                        self.dictation_finish(submit=True, wait_for_pause=True)
+                    # Быстрый детектор не знает, находится ли имя в конце фразы.
+                    # Завершение проверяем по полному тексту STT в _dictation_result:
+                    # упоминание помощника внутри предложения не отправляет черновик.
                     continue
                 if kind == "wake" and self.state == "idle" and now < self._quiet_until:
                     # только что остановили кнопкой ответ, начатый по голосу, — это было ложное срабатывание (видео, ТВ):
@@ -749,7 +745,10 @@ class AudioMixin:
                         and (self.wake_checker() or self.voiceprints.items)):
                     self.barge_sent = self.utt_id                 # 1.5 с речи поверх ответа — не имя ли это?
                     self.check_q.put(("barge", b"".join(utt), self.utt_id))
-                if silence >= self._end_frames or len(utt) * FRAME_S > 25:  # фраза длиннее 25 с — режем принудительно
+                # Dictation/meetings consume live segments. An ordinary voice question
+                # must wait for the real pause, not start answering after 25 seconds.
+                live_segments = getattr(self, 'dictation_active', False) or bool(getattr(getattr(self, 'prompter', None), 'active', False))
+                if silence >= self._end_frames or (live_segments and len(utt) * FRAME_S > 25):
                     log.debug("речь кончилась (фраза %d, %.1f с)", self.utt_id, len(utt) * FRAME_S)
                     in_speech, starts = False, 0
                     if ducked and self.player:                  # кашлянули, «угу» — продолжаем как было
@@ -902,7 +901,7 @@ class AudioMixin:
 
     # ---------- диктовка удержанием ----------
 
-    def hold_start(self, back_ms=400, max_s=600):
+    def hold_start(self, back_ms=400, max_s=0):
         """Нажали и держат (кнопка-облик в виджете, пробел): всё, что звучит, — один вопрос, сколько бы ни длилось и какие бы
         паузы ни были; конец — когда отпустят (hold_end). Ответ, если звучал, замолкает. back_ms — сколько звука до
         вызова взять из кольца: интерфейс зовёт после ~0,3 с удержания, а говорить человек мог начать сразу."""
@@ -914,7 +913,7 @@ class AudioMixin:
             self.interrupt("удержание", follow=False)
         self.follow_up_until = 0.0
         n = max(0, min(len(self._mic_ring), int(back_ms / 1000 / FRAME_S)))
-        self.hold = {"pcm": list(self._mic_ring)[len(self._mic_ring) - n:] if n else [], "t0": time.monotonic(), "max": max(5, int(max_s))}
+        self.hold = {"pcm": list(self._mic_ring)[len(self._mic_ring) - n:] if n else [], "t0": time.monotonic(), "max": max(5, int(max_s)) if max_s else 0}
         log.info("🎙 Диктовка удержанием — говорите, отпустите — отправлю")
         self.set_state("listening")
         self.emit("hold", on=True)
@@ -1002,13 +1001,13 @@ class AudioMixin:
             self.stt_q.put((b"", False, False, None, "dictation_end", sid))
 
     def _dictation_result(self, text, by, sid):
-        """Фрагменты возвращаются в черновик по порядку. Имя в конце — резерв для имён без Vosk."""
+        """Фрагменты идут по порядку; имя, «ввод» или «вот» в конце отправляют черновик."""
         with self._dictation_lock:
             if not self.dictation_active or sid != self._dictation_session:
                 return
             aliases = self.aliases.get(self.s.get("persona"), [])
-            names = "|".join(re.escape(a) for a in sorted(aliases, key=len, reverse=True))
-            match = re.search(r"(?<!\w)(?:" + names + r")[\s,.!?;:—-]*$", text, re.I) if names else None
+            endings = "|".join(re.escape(a) for a in sorted(set(aliases) | {"ввод", "вот"}, key=len, reverse=True))
+            match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I)
             if match:
                 text = text[:match.start()].rstrip(" ,;:—-")
             if text:
@@ -1077,7 +1076,7 @@ class AudioMixin:
                     continue
             stt = self.current_stt()
             t0 = time.monotonic()
-            if held:
+            if held or len(pcm) > RATE * 2 * 22:
                 text = self._transcribe_long(stt, pcm)
             else:
                 try:

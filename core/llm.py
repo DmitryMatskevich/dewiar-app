@@ -911,6 +911,7 @@ class _Collector:
         self.calls = {}
         self.reasoning = 0
         self.finish = ""
+        self.ended = False
         self.fmt = ""
         self.raw_head = ""
         self.pending = ""
@@ -932,6 +933,8 @@ class _Collector:
         piece = ""
         if self.anthropic:
             typ = obj.get("type")
+            if typ == 'message_stop':
+                self.ended = True
             if typ == "content_block_start" and obj.get("content_block", {}).get("type") == "tool_use":
                 cb = obj["content_block"]
                 self._call(obj.get("index", len(self.calls)), cb.get("id"), cb.get("name"))
@@ -945,9 +948,11 @@ class _Collector:
                     piece = d.get("text", "")
             elif typ == "message_delta":
                 self.finish = obj.get("delta", {}).get("stop_reason") or self.finish
+                self.ended = self.ended or bool(self.finish)
         elif "choices" in obj:
             ch = (obj.get("choices") or [{}])[0]
             self.finish = ch.get("finish_reason") or self.finish
+            self.ended = self.ended or bool(self.finish)
             d = ch.get("delta") or ch.get("message") or {}
             self.fmt = self.fmt or ("openai-stream" if "delta" in ch else "openai-json")
             piece = d.get("content") or ""
@@ -964,6 +969,7 @@ class _Collector:
                 fn = tc.get("function") or {}
                 self._call(len(self.calls), "", fn.get("name", ""), fn.get("arguments") or {})
             if obj.get("done"):
+                self.ended = True
                 self.finish = obj.get("done_reason") or "stop"
         d0 = self.strip.dropped
         piece = self.strip.feed(piece)
@@ -989,6 +995,7 @@ class _Collector:
         if s.startswith("data:"):
             s = s[5:].strip()
             if s == "[DONE]":
+                self.ended = True
                 return ""
         try:
             obj = json.loads(self.pending + s)
@@ -1154,7 +1161,7 @@ def _stream_events_raw(p, system, messages, cancel=None, tools=None, _retry=0):
     import modelrouter
     choices = p.get('_route_candidates')
     if not choices:
-        yield from _stream_events_single(p, system, messages, cancel, tools, _retry)
+        yield from _stream_events_complete(p, system, messages, cancel, tools, _retry)
         return
     errors = []
     for candidate in choices:
@@ -1163,9 +1170,11 @@ def _stream_events_raw(p, system, messages, cancel=None, tools=None, _retry=0):
         if modelrouter.blocked(candidate) or not modelrouter.in_schedule(candidate):
             continue
         attempt = dict(candidate, _routing_attempt=True, _routing_deadline=time.monotonic() + float(candidate.get('timeout') or 60))
+        if p.get('_continue_response'):
+            attempt['_continue_response'] = True
         emitted = False
         try:
-            for event in _stream_events_single(attempt, system, messages, cancel, tools, _retry):
+            for event in _stream_events_complete(attempt, system, messages, cancel, tools, _retry):
                 if cancel is not None and cancel.is_set():
                     return
                 if not emitted:
@@ -1183,6 +1192,43 @@ def _stream_events_raw(p, system, messages, cancel=None, tools=None, _retry=0):
             if emitted:
                 raise
     raise LLMError('Доступные модели не ответили или исчерпали лимит' + (': ' + ', '.join(errors) if errors else '. Проверьте расписание и лимиты в «Модели»'))
+
+
+def _stream_events_complete(p, system, messages, cancel=None, tools=None, _retry=0):
+    """A conversation has no aggregate token cap; each request keeps its backend budget."""
+    if not p.get('_continue_response'):
+        yield from _stream_events_single(p, system, messages, cancel, tools, _retry)
+        return
+    import hashlib
+    history, chunks, seen = list(messages), [], set()
+    while cancel is None or not cancel.is_set():
+        finish, segment, called = '', [], False
+        for kind, value in _stream_events_single(p, system, history, cancel, tools, _retry):
+            if cancel is not None and cancel.is_set():
+                return
+            if kind == '_finish':
+                finish = value
+                continue
+            if kind == 'text':
+                segment.append(value)
+            elif kind == 'tools':
+                called = True
+            yield kind, value
+        if called or finish not in ('length', 'max_tokens') or (cancel is not None and cancel.is_set()):
+            return
+        text = ''.join(segment)
+        fingerprint = hashlib.sha256(text.strip().encode()).digest()
+        if not text.strip() or fingerprint in seen:
+            raise LLMError('Модель не смогла продолжить ответ после лимита токенов. Полученный текст сохранён; повторите продолжение или выберите другую модель')
+        seen.add(fingerprint)
+        chunks.append(text)
+        history = list(messages) + [
+            {'role': 'assistant', 'content': ''.join(chunks)},
+            {'role': 'user', 'content': 'Ответ оборвался из-за технического лимита одного запроса. Продолжи точно с места обрыва, без повторения уже написанного, вступления и новых действий. Заверши исходный ответ.'},
+        ]
+        if p.get('_routing_deadline'):
+            p = dict(p, _routing_deadline=time.monotonic() + float(p.get('timeout') or 60))
+        log.info('Продолжаю ответ после технического лимита одного запроса')
 
 
 def _stream_events_single(p, system, messages, cancel=None, tools=None, _retry=0):
@@ -1341,7 +1387,10 @@ def _stream_events_single(p, system, messages, cancel=None, tools=None, _retry=0
                     raise LLMError('Модель не начала ответ за установленное время')
                 if cancel is not None and cancel.is_set():
                     return
+                previous_reasoning = col.reasoning
                 piece = bare.feed(col.feed_line(line))
+                if p.get('_routing_deadline') and col.reasoning > previous_reasoning:
+                    p = dict(p, _routing_deadline=time.monotonic() + float(p.get('timeout') or 60))
                 if piece:
                     got_text = True
                     yield "text", piece
@@ -1366,6 +1415,8 @@ def _stream_events_single(p, system, messages, cancel=None, tools=None, _retry=0
         elif held:
             got_text = True
             yield "text", held
+        if p.get('_continue_response') and col.finish in ('length', 'max_tokens') and (calls or col.calls):
+            raise LLMError('Модель оборвала вызов инструмента по лимиту токенов. Незавершённое действие не выполнено; увеличьте порцию токенов для этой модели')
         if calls and not (cancel is not None and cancel.is_set()):
             yield "tools", calls
             return
@@ -1401,6 +1452,10 @@ def _stream_events_single(p, system, messages, cancel=None, tools=None, _retry=0
                 yield from _stream_events_single(dict(p, _blank_retry=True), system, messages, cancel, tools, _retry)
                 return
             raise LLMError(f"сервер вернул ответ без текста (модель «{model}»). Отчёт для разработчика: студия → «О программе» → «Сохранить отчёт»")
+        if p.get('_continue_response') and got_text and not (cancel is not None and cancel.is_set()):
+            if not col.ended and (col.fmt in ('openai-stream', 'ollama') or col.anthropic):
+                raise LLMError('Сервер оборвал поток без подтверждения завершения ответа. Полученный текст сохранён; проверьте соединение и запросите продолжение')
+            yield '_finish', col.finish
     except LLMError as e:
         if not locals().get("got_text") and ctx_full(e):
             yield from _ctx_retry(p, system, messages, cancel, tools, _retry, e)
@@ -1697,6 +1752,21 @@ def discover_local(start=False):
 _SENT_END = re.compile(r"([.!?…]+[»\")]?)(\s+)")
 
 
+def speech_chunks(text, max_chars=400):
+    """Bound one TTS operation, preserving the complete text and its order."""
+    if max_chars < 1:
+        raise ValueError('max_chars must be positive')
+    start = 0
+    while len(text) - start > max_chars:
+        end = start + max_chars
+        cut = max(text.rfind(' ', start, end), text.rfind('\n', start, end))
+        cut = cut + 1 if cut >= start else end
+        yield text[start:cut]
+        start = cut
+    if start < len(text):
+        yield text[start:]
+
+
 class SentenceSplitter:
     """Режет поток текста на фразы для озвучки. Законченное предложение (знак конца и пробел за ним) отдаёт сразу,
     даже короткое («Да.»); первую фразу без знака конца — как можно раньше (можно по запятой, после 60 символов),
@@ -1735,6 +1805,13 @@ class SentenceSplitter:
                     self.buf = self.buf[cut + 2:]
                     self.first = False
                     continue
+            if len(self.buf) > 400:
+                cut = max(self.buf.rfind(' ', 0, 400), self.buf.rfind('\t', 0, 400))
+                cut = cut + 1 if cut >= 0 else 400
+                out.append(self.buf[:cut].strip())
+                self.buf = self.buf[cut:]
+                self.first = False
+                continue
             break
         return [x for x in out if x]
 

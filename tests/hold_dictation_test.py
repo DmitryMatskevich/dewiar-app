@@ -87,7 +87,9 @@ PORT, LLM = free(), free()
     "persona": "lira", "tts": {"engine": "off"}, "audio": {"sounds": False, "follow_up_seconds": 0},
     "ui": {"welcome": "done"},
     "stt": {"engine": "remote", "remote": {"base_url": f"http://127.0.0.1:{stt_srv.server_address[1]}/v1", "model": "whisper-1"}},
-    "llm": {"active": "m", "profiles": {"m": {"name": "mock", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM}/v1", "model": "chat"}}}}))
+    # This test covers capture, not model routing: its one mock must serve every role.
+    "llm": {"active": "m", "profiles": {"m": {"name": "mock", "kind": "openai", "base_url": f"http://127.0.0.1:{LLM}/v1", "model": "chat",
+                                               "roles": ["communication", "planning", "coding", "analytics"]}}}}))
 env = dict(os.environ, DEWIAR_CONFIG_DIR=str(tmp / "cfg"), DEWIAR_STATE_DIR=str(tmp / "st"), DEWIAR_PORT=str(PORT), DEWIAR_ASSUME_AEC="1",
            DEWIAR_WORKSPACE_DIR=str(tmp / "ws"), NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost", MOCK_LOG_FULL=str(tmp / "llm.jsonl"))
 mock = subprocess.Popen([sys.executable, str(TESTS / "mock_llm.py"), str(LLM)], env=env)

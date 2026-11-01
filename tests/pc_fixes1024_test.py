@@ -22,8 +22,8 @@ ea = (ROOT / "core/engine_audio.py").read_text(encoding="utf-8")
 ok(re.search(r'long_ = \(dur is not None and dur > FOLLOW_MAX_S\) or len\(ws\) > FOLLOW_MAX_WORDS\n\s+if self\.s\.get\("audio", "follow_long"\):\s+[^\n]*\n\s+long_ = False', ea) is not None,
    "audio.follow_long — длинная фраза без имени тоже мне")
 import settings  # noqa: E402
-ok(settings.DEFAULTS["audio"]["follow_long"] is False if hasattr(settings, "DEFAULTS") else '"follow_long": False' in (ROOT / "core/settings.py").read_text(encoding="utf-8"),
-   "по умолчанию — выключено, как раньше")
+ok(settings.DEFAULTS["audio"]["follow_long"] is True if hasattr(settings, "DEFAULTS") else '"follow_long": True' in (ROOT / "core/settings.py").read_text(encoding="utf-8"),
+   "по умолчанию длинный рассказ не отбрасывается по количеству слов")
 html = (ROOT / "ui/settings.html").read_text(encoding="utf-8")
 ok('data-k="audio.follow_long"' in html and "pause-reset" in (ROOT / "ui/studio/brain.js").read_text(encoding="utf-8"),
    "в студии: переключатель «Отвечать и на длинный рассказ без имени» и «Вернуть обычную» паузу")

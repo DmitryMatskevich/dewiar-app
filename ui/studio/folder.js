@@ -27,7 +27,9 @@ function md(src) {
   let i = 0;
   while (i < L.length) {
     const l = L[i];
-    if (/^```/.test(l)) { const buf = []; i++; while (i < L.length && !/^```/.test(L[i])) buf.push(L[i++]); i++;
+    const fence = l.match(/^(`{3,}|~{3,})/);
+    if (fence) { const buf = [], close = new RegExp('^' + fence[1][0] + '{' + fence[1].length + ',}\\s*$');
+      i++; while (i < L.length && !close.test(L[i])) buf.push(L[i++]); if (i < L.length) i++;
       out.push(`<pre><code>${escH(buf.join("\n"))}</code></pre>`); continue; }
     let m;
     if ((m = l.match(/^(#{1,6})\s+(.*)/))) { const n = Math.min(4, m[1].length); out.push(`<h${n}>${mdInline(m[2])}</h${n}>`); i++; continue; }
@@ -49,7 +51,7 @@ function md(src) {
       out.push(`<${ordered ? "ol" : "ul"}>${items.join("")}</${ordered ? "ol" : "ul"}>`); continue; }
     if (!l.trim()) { i++; continue; }
     const buf = [];
-    while (i < L.length && L[i].trim() && !/^(#{1,6}\s|```|>|\s*([-*+]|\d+[.)])\s+|\|)/.test(L[i])) buf.push(L[i++]);
+    while (i < L.length && L[i].trim() && !/^(#{1,6}\s|`{3,}|~{3,}|>|\s*([-*+]|\d+[.)])\s+|\|)/.test(L[i])) buf.push(L[i++]);
     if (!buf.length) buf.push(L[i++]);
     out.push(`<p>${buf.map(mdInline).join("<br>")}</p>`);
   }

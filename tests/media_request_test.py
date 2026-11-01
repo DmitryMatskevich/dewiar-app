@@ -26,7 +26,8 @@ class TestMediaRequest(unittest.TestCase):
  def test_bare_link_and_followup(self):
   e=self.engine();self.assertTrue(MusicMixin._video_request(e,URL));e.tasks.create_transcription.assert_not_called()
   question=e._say_quick.call_args.args[0]
-  for option in ['открыть для просмотра','скачать видеофайл','расшифровать речь','обработать']:self.assertIn(option,question)
+  for option in ['открыть для просмотра','скачать видеофайл','обработать']:self.assertIn(option,question)
+  self.assertRegex(question,r'расшифровать речь|извлечь текст')
   MusicMixin._video_request(e,'Извлеки текст');e.tasks.create_transcription.assert_called_once_with([URL],goal='Извлеки текст')
  def test_all_followup_choices_keep_the_offered_source(self):
   import time

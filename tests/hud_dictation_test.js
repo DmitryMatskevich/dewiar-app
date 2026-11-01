@@ -5,11 +5,23 @@ const assert = require('assert/strict');
 const src = fs.readFileSync(require('path').join(__dirname, '../ui/hud.html'), 'utf8');
 const elements = new Map();
 function $(id) {
-  if (!elements.has(id)) elements.set(id, {
+  if (!elements.has(id)) {
+    const element = {
     value: '', title: '', innerHTML: '', disabled: false, attributes: {}, style: {},
     firstElementChild: { style: {} }, classList: { toggle() {} },
     setAttribute(k, v) { this.attributes[k] = v; }, focus() {},
-  });
+    setRangeText(text, start, end) {
+      this.value = this.value.slice(0, start) + text + this.value.slice(end);
+      this.selectionStart = this.selectionEnd = start + text.length;
+    },
+    };
+    let value = '';
+    Object.defineProperty(element, 'value', { get: () => value, set: v => {
+      value = v; element.selectionStart = element.selectionEnd = v.length;
+    } });
+    element.value = '';
+    elements.set(id, element);
+  }
   return elements.get(id);
 }
 const calls = [], sent = [], handlers = {};

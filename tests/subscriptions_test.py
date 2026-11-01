@@ -122,6 +122,44 @@ class Subscriptions(unittest.TestCase):
         self.assertEqual(list(sub.stream({'kind': 'claude_subscription', 'model': 'haiku'}, 'sys', [])), ['OK'])
         self.assertIn('--system-prompt', FakeSession.instances[-1].extra)
 
+    def test_stream_timeout_is_inactivity_not_total_answer_length(self):
+        from types import SimpleNamespace
+        for provider in ('codex', 'claude'):
+            with self.subTest(provider=provider):
+                clock = [100.0]
+                class ProgressSession(FakeSession):
+                    def event(self, deadline, cancel=None):
+                        clock[0] += 9
+                        if clock[0] >= deadline:
+                            raise TimeoutError('Total duration incorrectly capped')
+                        return super().event(deadline, cancel)
+                if provider == 'codex':
+                    ProgressSession.events = [{'method': 'item/agentMessage/delta', 'params': {'delta': str(i)}} for i in range(4)] + [
+                        {'method': 'turn/completed', 'params': {'turn': {'status': 'completed'}}}]
+                    ProgressSession.events[:0] = [{'method':'item/reasoning/summaryTextDelta','params':{'delta':'Thinking'}}] * 3
+                else:
+                    ProgressSession.events = [{'type': 'stream_event', 'event': {'type': 'content_block_delta',
+                        'delta': {'type': 'text_delta', 'text': str(i)}}} for i in range(4)] + [{'type': 'result', 'result': '0123'}]
+                    ProgressSession.events[:0] = [{'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'thinking_delta','thinking':'Thinking'}}}] * 3
+                with patch('subscriptions.Session', ProgressSession), patch('subscriptions.time', SimpleNamespace(monotonic=lambda: clock[0])):
+                    result = list(sub.stream({'kind': provider+'_subscription', 'model': 'fixture', 'timeout': 10}, '', []))
+                self.assertEqual(''.join(result), '0123')
+                self.assertGreater(clock[0], 140)
+
+    def test_empty_deltas_do_not_keep_a_stalled_subscription_alive(self):
+        from types import SimpleNamespace
+        clock = [100.0]
+        class StalledSession(FakeSession):
+            events = [{'method':'item/agentMessage/delta','params':{'delta':''}}] * 3
+            def event(self, deadline, cancel=None):
+                clock[0] += 9
+                if clock[0] >= deadline:
+                    raise TimeoutError('No text progress')
+                return super().event(deadline,cancel)
+        with patch('subscriptions.Session',StalledSession), patch('subscriptions.time',SimpleNamespace(monotonic=lambda:clock[0])):
+            with self.assertRaisesRegex(TimeoutError,'No text progress'):
+                list(sub.stream({'kind':'codex_subscription','model':'fixture','timeout':10},'',[]))
+
     @patch('subscriptions.Session', FakeSession)
     def test_auth_required_without_api_fallback(self):
         FakeSession.auth = False

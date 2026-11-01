@@ -1,5 +1,6 @@
 """Screenshot → durable illustrated note → local OCR. No LLM or network."""
 import io
+import json
 import re
 import threading
 import uuid
@@ -14,7 +15,7 @@ def is_command(text):
     value = re.sub(r"^(?:лира|агент|ассистент)[, ]+", "", value)
     return bool(re.fullmatch(
         r"(?:пожалуйста[, ]+)?(?:(?:сделай|сделайте|создай|сохрани)\s+(?:мне\s+)?(?:снимок\s+экрана|скриншот(?:\s+экрана)?)"
-        r"|сфотографируй\s+экран|скриншот\s+экрана)(?:\s+пожалуйста)?[.!]*", value))
+        r"|сфотографируй\s+экран|снимок\s+экрана|скриншот(?:\s+экрана)?)(?:\s+пожалуйста)?[.!]*", value))
 
 
 def create(workspace, progress=None, cancelled=None):
@@ -71,16 +72,26 @@ def create(workspace, progress=None, cancelled=None):
             body = "Не удалось распознать текст локально. Изображение сохранено.\n\n" + str(result.get("error") or "Ошибка OCR") + "\n"
         # Save recognized text in the document before attempting the optional TXT attachment.
         workspace.write(rel, head + body)
-        txt_path = ""
+        txt_path, audit_path, extra = "", "", []
         if text:
             try:
                 txt = workspace.note_attach(rel, "Распознанный текст.txt", text.encode("utf-8"))
                 txt_path = txt["path"]
-                workspace.write(rel, head + body + "\n" + txt["line"] + "\n")
+                extra.append(txt["line"])
             except Exception:
                 # The document already contains all OCR text even if TXT export failed.
                 pass
+        try:
+            audit = {**result, "image": attachment["path"], "width": image.width, "height": image.height,
+                     "languages": ["ru-RU", "en-US"], "coordinates": "normalized bottom-left x/y/width/height"}
+            saved = workspace.note_attach(rel, "OCR.json", json.dumps(audit, ensure_ascii=False, indent=2).encode("utf-8"))
+            audit_path = saved["path"]
+            extra.append(saved["line"])
+        except Exception:
+            pass
+        if extra:
+            workspace.write(rel, head + body + "\n" + "\n".join(extra) + "\n")
         notify(stage="done", message="Снимок и результат распознавания сохранены", path=rel, title=title, status=result["status"])
-        return {"path": rel, "image": attachment["path"], "txt": txt_path, **result}
+        return {"path": rel, "image": attachment["path"], "txt": txt_path, "audit": audit_path, **result}
     finally:
         LOCK.release()

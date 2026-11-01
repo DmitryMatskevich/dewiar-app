@@ -997,11 +997,22 @@ class CommandsMixin:
             self.ask(text, images)
             return True
         if cmd == "screenshot_attach":               # кнопка «снимок экрана» в поле вопроса
-            from eyes import EyesError, capture_screen, prepare
-            from tools import desktop_env
+            from eyes import prepare
+            from screen_document import create
+            # An explicit click requests this local capture, but never bypasses
+            # the disabled screen/tool policy. Save and OCR the SAME image that
+            # is attached to the draft; do not capture a second, different screen.
+            if not self.toolbox.policy("save_screenshot")[0]:
+                raise ValueError("Снимок экрана отключён. Проверьте «Экран» в «Безопасности» и «Скриншот» в «Руки → Умения».")
+            def progress(**event):
+                self.note(event["message"])
+                if event["stage"] in ("ocr", "done"):
+                    self.emit("note_saved", kind="note", title=event["title"], path=event["path"],
+                              text=event["message"])
             try:
-                b64, _, _ = prepare(capture_screen(desktop_env()))
-            except EyesError as e:
+                result = create(self.workspace, progress)
+                b64, _, _ = prepare(self.workspace.safe(result["image"]).read_bytes())
+            except Exception as e:
                 raise ValueError(str(e)) from e
             return "data:image/jpeg;base64," + b64
         if cmd == "calib_start":
@@ -1104,7 +1115,7 @@ class CommandsMixin:
             self.chatlog.clear()
             return True
         if cmd == "hold_start":                           # диктовка удержанием: держат кнопку или пробел — говорят сколько нужно
-            return self.hold_start(int(a.get("back_ms") or 400), int(a.get("max_s") or 600))
+            return self.hold_start(int(a.get("back_ms") or 400), int(a.get("max_s") or 0))
         if cmd == "hold_end":
             return self.hold_end(bool(a.get("cancel")))
         if cmd == "dictation_start":

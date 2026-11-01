@@ -34,6 +34,12 @@ run "руки: сквозной"                  $PY "$T/e2e_tools_test.py" "$A
 run "подключение: сквозной"           $PY "$T/e2e_stage5_test.py"
 run "редактор навыков"                $PY "$T/stage51_test.py"
 run "глаза"                           $PY "$T/stage6_test.py"
+run "снимок: документ и локальный OCR" $PY "$T/screen_document_test.py"
+run "снимок: команда и разрешения"     $PY "$T/screen_command_test.py"
+run "снимок: документ в интерфейсе"    $PY "$T/screen_document_ui_test.py"
+run "заметки: индикатор новой записи"  $PY "$T/notes_badge_ui_test.py"
+run "Mac: подготовка доступов"         $PY "$T/mac_access_test.py"
+run "Mac: интерфейс доступов"          $PY "$T/mac_access_ui_test.py"
 run "обновление: сервер из пакета"   $PY "$T/upgrade_test.py"
 run "звук через libpulse"             $PY "$T/pulse_test.py"
 run "папка ассистента, обработка голоса" $PY "$T/workspace_test.py"
@@ -169,6 +175,11 @@ run "телефон: календарь — что у меня завтра, з�
 run "лицо говорит губами только под звук: голос с сервера ещё не пришёл — рот закрыт" $PY "$T/lipsync_test.py"
 run "диктовка удержанием на компьютере: держите облик или пробел — сколько угодно, отпустили — ушло" $PY "$T/hold_dictation_test.py"
 run "непрерывная диктовка: пауза, стоп, имя" $PY "$T/dictation_engine_test.py"
+run "длинная речь: полный ввод, продолжение ответа и синтез" $PY "$T/long_voice_test.py"
+run "ядро: длинный ответ и сохранение при обрыве" $PY "$T/long_voice_core_test.py"
+run "голосовой ввод: подсказки и завершение в интерфейсе" $PY "$T/hud_voice_finish_ui_test.py"
+run "поле ввода: очистка, копирование и правый край" $PY "$T/hud_draft_actions_ui_test.py"
+run "кнопка снимка: заметка, OCR и индикатор" $PY "$T/screenshot_button_ui_test.py"
 if command -v node >/dev/null; then
   run "диктовка: кнопка стоп и отправка черновика" node "$T/hud_dictation_test.js"
 fi
@@ -310,3 +321,6 @@ run "результат задачи: скачать HTML, PDF" $PY "$T/export_t
 run "дневник ассистента: ночная запись, выводы на завтра" $PY "$T/diary_test.py"
 run "отчёт: только новое с прошлого"    $PY "$T/report_fresh_test.py"
 run "радио: какие станции у вас играют" $PY "$T/radio_health_test.py"
+
+run "транскрибация: безопасное чтение активной вкладки браузера" $PY "$T/transcription_sources_test.py"
+run "транскрибация: буфер и выбор браузера в диалоге" $PY "$T/transcription_sources_ui_test.py"

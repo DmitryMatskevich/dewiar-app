@@ -830,7 +830,7 @@ class BrainMixin:
     def _tg_voice_reply(self, answer, bot=None):
         """На голосовое — ещё и голосом: тем же голосом персонажа, файлом OGG/Opus (как голосовые в Telegram)."""
         from eyes import ffmpeg_path
-        text = speakable(answer)[:1500]
+        text = speakable(answer)
         exe = ffmpeg_path()
         if not text or not exe:
             return
@@ -838,9 +838,11 @@ class BrainMixin:
         for eng in self._engines_for_speech(voice):
             try:
                 rate, buf = None, bytearray()
-                for r_, pcm in eng.synth(pronounce(text, remote=isinstance(eng, RemoteTTS)), voice, 1.0):
-                    rate = rate or r_
-                    buf += pcm
+                from llm import speech_chunks
+                for part in speech_chunks(text):
+                    for r_, pcm in eng.synth(pronounce(part, remote=isinstance(eng, RemoteTTS)), voice, 1.0):
+                        rate = rate or r_
+                        buf += pcm
                 if not buf:
                     continue
                 kw = {"creationflags": 0x08000000} if os.name == "nt" else {}

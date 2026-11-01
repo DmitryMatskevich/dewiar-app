@@ -235,7 +235,7 @@ function renderProfiles() {
       <label class="f">API-ключ<input type="password" data-f="api_key" placeholder="для локальных не нужен"></label>
       <label class="f">Модель<select data-model-picker aria-label="Выбор модели на сервере" disabled><option>Нажмите «Обновить список моделей»</option></select><span class="hint" data-model-status role="status"></span></label>
       <details><summary>Указать модель вручную</summary><label class="f">Идентификатор модели<input type="text" data-f="model" placeholder="пусто — первая с сервера"></label></details>
-      <label class="f">Максимум токенов в ответе<input type="number" data-f="max_tokens" placeholder="600"></label>
+      <label class="f" title="Размер одной порции генерации. Разговорный ответ автоматически продолжается, если сервер сообщил об обрыве по токенам.">Токенов на один запрос<input type="number" data-f="max_tokens" placeholder="По очереди"></label>
       <label class="f">Температура<input type="number" step="0.1" min="0" max="2" data-f="temperature" placeholder="0.7"></label>
       <label class="f" style="justify-content:end"><span><input type="checkbox" data-f="disable_thinking"> отключать «размышления» (Qwen3 и подобные в vLLM)</span></label>
     </div><div class="actions"><button class="btn primary" data-a="test">Проверить</button><button class="btn" data-a="models">Обновить список моделей</button><span style="flex:1"></span><button class="btn danger" data-a="del">Удалить</button></div></div>`;

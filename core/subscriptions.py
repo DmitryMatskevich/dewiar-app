@@ -369,8 +369,13 @@ def stream(p, system, messages, cancel=None):
                 if method == 'account/rateLimits/updated':
                     _codex_limits(data)
                 if method == 'item/agentMessage/delta':
-                    emitted = True
-                    yield data.get('delta', '')
+                    chunk = data.get('delta', '')
+                    if chunk:
+                        emitted = True
+                        yield chunk
+                        deadline = session.deadline = time.monotonic() + float(p.get('timeout') or 60)
+                elif 'reasoning' in str(method).lower() and str(method).lower().endswith('delta') and data.get('delta'):
+                    deadline = session.deadline = time.monotonic() + float(p.get('timeout') or 60)
                 elif method == 'turn/completed':
                     turn = data.get('turn') or {}
                     if turn.get('status') != 'completed':
@@ -390,8 +395,13 @@ def stream(p, system, messages, cancel=None):
                     event = obj.get('event', {})
                     delta = event.get('delta', {})
                     if event.get('type') == 'content_block_delta' and delta.get('type') == 'text_delta':
-                        emitted = True
-                        yield delta.get('text', '')
+                        chunk = delta.get('text', '')
+                        if chunk:
+                            emitted = True
+                            yield chunk
+                            deadline = session.deadline = time.monotonic() + float(p.get('timeout') or 60)
+                    elif event.get('type') == 'content_block_delta' and delta.get('type') == 'thinking_delta' and delta.get('thinking'):
+                        deadline = session.deadline = time.monotonic() + float(p.get('timeout') or 60)
                 elif obj.get('type') == 'result':
                     if obj.get('is_error'):
                         error = str(obj.get('result') or obj.get('errors') or 'ошибка')
