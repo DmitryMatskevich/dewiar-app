@@ -1,0 +1,1457 @@
+{
+  "checked_at": "2026-11-01T10:19:17.590633+00:00",
+  "models": [
+    {
+      "id": "openai/gpt-6.1-terra-pro",
+      "name": "OpenAI: GPT-6.1 Terra Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000005",
+        "input_cache_write": "0.00000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000002",
+            "completion": "0.0000075",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6.1-terra-pro"
+    },
+    {
+      "id": "openai/gpt-6.1-terra",
+      "name": "OpenAI: GPT-6.1 Terra",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000005",
+        "input_cache_write": "0.00000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000002",
+            "completion": "0.0000075",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6.1-terra"
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash-1017",
+      "name": "DeepSeek: DeepSeek V4.1 Flash 1017",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "input_cache_read": "0.000000003",
+        "overrides": [
+          {
+            "utc_days": [
+              "saturday",
+              "sunday"
+            ],
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 0,
+            "utc_end": 100,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 100,
+            "utc_end": 400,
+            "prompt": "0.0000003",
+            "completion": "0.0000012",
+            "input_cache_read": "0.000000006"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 400,
+            "utc_end": 600,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 600,
+            "utc_end": 1000,
+            "prompt": "0.0000003",
+            "completion": "0.0000012",
+            "input_cache_read": "0.000000006"
+          },
+          {
+            "utc_days": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday"
+            ],
+            "utc_start": 1000,
+            "utc_end": 0,
+            "prompt": "0.00000015",
+            "completion": "0.0000006",
+            "input_cache_read": "0.000000003"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4.1-flash-1017"
+    },
+    {
+      "id": "anthropic/claude-haiku-5.5",
+      "name": "Anthropic: Claude Haiku 5.5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "input_cache_write_1h": "0.0000002",
+        "overrides": [
+          {
+            "min_prompt_tokens": 100000,
+            "prompt": "0.0000005",
+            "completion": "0.0000025",
+            "input_cache_read": "0.00000005",
+            "input_cache_write": "0.000000625",
+            "input_cache_write_1h": "0.000001"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/anthropic/claude-haiku-5.5"
+    },
+    {
+      "id": "inclusionai/ling-3.1-flash",
+      "name": "inclusionAI: Ling 3.1 Flash",
+      "provider": "Ling",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000000075",
+        "completion": "0.000000225",
+        "input_cache_read": "0.000000015"
+      },
+      "url": "https://openrouter.ai/inclusionai/ling-3.1-flash"
+    },
+    {
+      "id": "openai/gpt-6.1-sol-pro",
+      "name": "OpenAI: GPT-6.1 Sol Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000002",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6.1-sol-pro"
+    },
+    {
+      "id": "openai/gpt-6.1-sol",
+      "name": "OpenAI: GPT-6.1 Sol",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000002",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6.1-sol"
+    },
+    {
+      "id": "anthropic/claude-sonnet-5.5",
+      "name": "Anthropic: Claude Sonnet 5.5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.0000025",
+        "input_cache_write_1h": "0.000004"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-sonnet-5.5"
+    },
+    {
+      "id": "openai/gpt-6-luna-pro",
+      "name": "OpenAI: GPT-6 Luna Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000002",
+            "completion": "0.00000075",
+            "input_cache_read": "0.00000002",
+            "input_cache_write": "0.00000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-luna-pro"
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "name": "OpenAI: GPT-6 Luna",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000001",
+        "input_cache_write": "0.000000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000002",
+            "completion": "0.00000075",
+            "input_cache_read": "0.00000002",
+            "input_cache_write": "0.00000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-luna"
+    },
+    {
+      "id": "openai/gpt-6-sol-pro",
+      "name": "OpenAI: GPT-6 Sol Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000004",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-sol-pro"
+    },
+    {
+      "id": "openai/gpt-6-sol",
+      "name": "OpenAI: GPT-6 Sol",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000015",
+            "input_cache_read": "0.0000004",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-sol"
+    },
+    {
+      "id": "anthropic/claude-opus-5.5",
+      "name": "Anthropic: Claude Opus 5.5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000004",
+        "completion": "0.00002",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.000005",
+        "input_cache_write_1h": "0.000008"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-5.5"
+    },
+    {
+      "id": "inclusionai/ling-3.0-flash-vl",
+      "name": "inclusionAI: Ling 3.0 Flash VL",
+      "provider": "Ling",
+      "context": 131072,
+      "pricing": {
+        "prompt": "0.00000006",
+        "completion": "0.00000018",
+        "input_cache_read": "0.000000012"
+      },
+      "url": "https://openrouter.ai/inclusionai/ling-3.0-flash-vl"
+    },
+    {
+      "id": "deepseek/deepseek-v4.1-flash",
+      "name": "DeepSeek: DeepSeek V4.1 Flash",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.000000045",
+        "completion": "0.0000005",
+        "input_cache_read": "0.000000006"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "name": "OpenAI: GPT-6 Astra",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00005",
+        "web_search": "0.01",
+        "input_cache_read": "0.000001",
+        "input_cache_write": "0.0000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00002",
+            "completion": "0.000075",
+            "input_cache_read": "0.000002",
+            "input_cache_write": "0.000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-astra"
+    },
+    {
+      "id": "openai/gpt-6-astra-pro",
+      "name": "OpenAI: GPT-6 Astra Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00005",
+        "web_search": "0.01",
+        "input_cache_read": "0.000001",
+        "input_cache_write": "0.0000125",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00002",
+            "completion": "0.000075",
+            "input_cache_read": "0.000002",
+            "input_cache_write": "0.000025"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-6-astra-pro"
+    },
+    {
+      "id": "anthropic/claude-fable-5.1",
+      "name": "Anthropic: Claude Fable 5.1",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00005",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000025",
+        "input_cache_write": "0.0000125",
+        "input_cache_write_1h": "0.00002"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-fable-5.1"
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash-vision-exp",
+      "name": "DeepSeek: DeepSeek V4 Flash Vision Exp",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.0000002156",
+        "completion": "0.0000006468",
+        "input_cache_read": "0.00000000686"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4-flash-vision-exp"
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro-0813",
+      "name": "DeepSeek: DeepSeek V4 Pro 0813",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.000000115",
+        "completion": "0.000004",
+        "input_cache_read": "0.00000011"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4-pro-0813"
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash-0731",
+      "name": "DeepSeek: DeepSeek V4 Flash 0731",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.000000119",
+        "completion": "0.000000238",
+        "input_cache_read": "0.0000000238"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4-flash-0731"
+    },
+    {
+      "id": "anthropic/claude-opus-5",
+      "name": "Anthropic: Claude Opus 5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
+        "input_cache_write_1h": "0.00001"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-5"
+    },
+    {
+      "id": "inclusionai/ling-3.0-flash",
+      "name": "inclusionAI: Ling 3.0 Flash",
+      "provider": "Ling",
+      "context": 262144,
+      "pricing": {
+        "prompt": "0.000000021",
+        "completion": "0.000000063",
+        "input_cache_read": "0.0000000042"
+      },
+      "url": "https://openrouter.ai/inclusionai/ling-3.0-flash"
+    },
+    {
+      "id": "openai/gpt-5.6-luna-pro",
+      "name": "OpenAI: GPT-5.6 Luna Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0.0000012",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000002",
+        "input_cache_write": "0.00000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000004",
+            "completion": "0.0000018",
+            "input_cache_read": "0.00000004",
+            "input_cache_write": "0.0000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-luna-pro"
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "name": "OpenAI: GPT-5.6 Luna",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0.0000012",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000002",
+        "input_cache_write": "0.00000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000004",
+            "completion": "0.0000018",
+            "input_cache_read": "0.00000004",
+            "input_cache_write": "0.0000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-luna"
+    },
+    {
+      "id": "openai/gpt-5.6-terra-pro",
+      "name": "OpenAI: GPT-5.6 Terra Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000012",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000018",
+            "input_cache_read": "0.0000004",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-terra-pro"
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "name": "OpenAI: GPT-5.6 Terra",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000012",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000018",
+            "input_cache_read": "0.0000004",
+            "input_cache_write": "0.000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-terra"
+    },
+    {
+      "id": "openai/gpt-5.6-sol-pro",
+      "name": "OpenAI: GPT-5.6 Sol Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000004",
+        "completion": "0.00002",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000004",
+        "input_cache_write": "0.000005",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000008",
+            "completion": "0.00003",
+            "input_cache_read": "0.0000008",
+            "input_cache_write": "0.00001"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-sol-pro"
+    },
+    {
+      "id": "openai/gpt-5.6-sol",
+      "name": "OpenAI: GPT-5.6 Sol",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000004",
+        "completion": "0.00002",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000004",
+        "input_cache_write": "0.000005",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000008",
+            "completion": "0.00003",
+            "input_cache_read": "0.0000008",
+            "input_cache_write": "0.00001"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.6-sol"
+    },
+    {
+      "id": "anthropic/claude-sonnet-5",
+      "name": "Anthropic: Claude Sonnet 5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000002",
+        "input_cache_write": "0.0000025",
+        "input_cache_write_1h": "0.000004"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-sonnet-5"
+    },
+    {
+      "id": "anthropic/claude-fable-5",
+      "name": "Anthropic: Claude Fable 5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00005",
+        "web_search": "0.01",
+        "input_cache_read": "0.000001",
+        "input_cache_write": "0.0000125",
+        "input_cache_write_1h": "0.00002"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-fable-5"
+    },
+    {
+      "id": "anthropic/claude-opus-4.8",
+      "name": "Anthropic: Claude Opus 4.8",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
+        "input_cache_write_1h": "0.00001"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-4.8"
+    },
+    {
+      "id": "openai/gpt-chat-latest",
+      "name": "OpenAI: GPT Chat Latest",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.00003",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005"
+      },
+      "url": "https://openrouter.ai/openai/gpt-chat-latest"
+    },
+    {
+      "id": "openai/gpt-5.5-pro",
+      "name": "OpenAI: GPT-5.5 Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.00003",
+        "completion": "0.00018",
+        "web_search": "0.01",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00006",
+            "completion": "0.00027"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.5-pro"
+    },
+    {
+      "id": "openai/gpt-5.5",
+      "name": "OpenAI: GPT-5.5",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.00003",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00001",
+            "completion": "0.000045",
+            "input_cache_read": "0.000001"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.5"
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "name": "DeepSeek: DeepSeek V4 Pro 0423",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.0000016",
+        "completion": "0.0000032",
+        "input_cache_read": "0.000000135"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4-pro"
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "name": "DeepSeek: DeepSeek V4 Flash 0423",
+      "provider": "DeepSeek",
+      "context": 1048576,
+      "pricing": {
+        "prompt": "0.000000091",
+        "completion": "0.000000182",
+        "input_cache_read": "0.0000000182"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v4-flash"
+    },
+    {
+      "id": "openai/gpt-5.4-image-2",
+      "name": "OpenAI: GPT-5.4 Image 2",
+      "provider": "OpenAI",
+      "context": 272000,
+      "pricing": {
+        "prompt": "0.000008",
+        "completion": "0.000015",
+        "image_output": "0.00003",
+        "web_search": "0.01",
+        "input_cache_read": "0.000002"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.4-image-2"
+    },
+    {
+      "id": "anthropic/claude-opus-4.7",
+      "name": "Anthropic: Claude Opus 4.7",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
+        "input_cache_write_1h": "0.00001"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-4.7"
+    },
+    {
+      "id": "openai/gpt-5.4-nano",
+      "name": "OpenAI: GPT-5.4 Nano",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0.00000125",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000002"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.4-nano"
+    },
+    {
+      "id": "openai/gpt-5.4-mini",
+      "name": "OpenAI: GPT-5.4 Mini",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000075",
+        "completion": "0.0000045",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000075"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.4-mini"
+    },
+    {
+      "id": "openai/gpt-5.4-pro",
+      "name": "OpenAI: GPT-5.4 Pro",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.00003",
+        "completion": "0.00018",
+        "web_search": "0.01",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00006",
+            "completion": "0.00027"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.4-pro"
+    },
+    {
+      "id": "openai/gpt-5.4",
+      "name": "OpenAI: GPT-5.4",
+      "provider": "OpenAI",
+      "context": 1050000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.000015",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000025",
+        "overrides": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000005",
+            "completion": "0.0000225",
+            "input_cache_read": "0.0000005"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.4"
+    },
+    {
+      "id": "openai/gpt-5.3-codex",
+      "name": "OpenAI: GPT-5.3-Codex",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000175",
+        "completion": "0.000014",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000175"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.3-codex"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.6",
+      "name": "Anthropic: Claude Sonnet 4.6",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000003",
+        "input_cache_write": "0.00000375",
+        "input_cache_write_1h": "0.000006"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-sonnet-4.6"
+    },
+    {
+      "id": "anthropic/claude-opus-4.6",
+      "name": "Anthropic: Claude Opus 4.6",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
+        "input_cache_write_1h": "0.00001"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-4.6"
+    },
+    {
+      "id": "openai/gpt-audio",
+      "name": "OpenAI: GPT Audio",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001",
+        "audio": "0.000032",
+        "audio_output": "0.000064"
+      },
+      "url": "https://openrouter.ai/openai/gpt-audio"
+    },
+    {
+      "id": "openai/gpt-audio-mini",
+      "name": "OpenAI: GPT Audio Mini",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.0000006",
+        "completion": "0.0000024",
+        "audio": "0.0000006",
+        "audio_output": "0.0000024"
+      },
+      "url": "https://openrouter.ai/openai/gpt-audio-mini"
+    },
+    {
+      "id": "openai/gpt-5.2-codex",
+      "name": "OpenAI: GPT-5.2-Codex",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000175",
+        "completion": "0.000014",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000175"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.2-codex"
+    },
+    {
+      "id": "openai/gpt-5.2-chat",
+      "name": "OpenAI: GPT-5.2 Chat",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.00000175",
+        "completion": "0.000014",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000175"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.2-chat"
+    },
+    {
+      "id": "openai/gpt-5.2-pro",
+      "name": "OpenAI: GPT-5.2 Pro",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.000021",
+        "completion": "0.000168",
+        "web_search": "0.01"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.2-pro"
+    },
+    {
+      "id": "openai/gpt-5.2",
+      "name": "OpenAI: GPT-5.2",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000175",
+        "completion": "0.000014",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000175"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.2"
+    },
+    {
+      "id": "openai/gpt-5.1-codex-max",
+      "name": "OpenAI: GPT-5.1-Codex-Max",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.1-codex-max"
+    },
+    {
+      "id": "deepseek/deepseek-v3.2",
+      "name": "DeepSeek: DeepSeek V3.2",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.00000026",
+        "completion": "0.00000038",
+        "input_cache_read": "0.00000013"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v3.2"
+    },
+    {
+      "id": "anthropic/claude-opus-4.5",
+      "name": "Anthropic: Claude Opus 4.5",
+      "provider": "Claude",
+      "context": 200000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005",
+        "input_cache_write": "0.00000625",
+        "input_cache_write_1h": "0.00001"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-4.5"
+    },
+    {
+      "id": "openai/gpt-5.1",
+      "name": "OpenAI: GPT-5.1",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.1"
+    },
+    {
+      "id": "openai/gpt-5.1-codex",
+      "name": "OpenAI: GPT-5.1-Codex",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000013"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.1-codex"
+    },
+    {
+      "id": "openai/gpt-5.1-codex-mini",
+      "name": "OpenAI: GPT-5.1-Codex-Mini",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000025",
+        "completion": "0.000002",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000003"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5.1-codex-mini"
+    },
+    {
+      "id": "openai/gpt-oss-safeguard-20b",
+      "name": "OpenAI: gpt-oss-safeguard-20b",
+      "provider": "OpenAI",
+      "context": 131072,
+      "pricing": {
+        "prompt": "0.000000075",
+        "completion": "0.0000003",
+        "input_cache_read": "0.0000000375"
+      },
+      "url": "https://openrouter.ai/openai/gpt-oss-safeguard-20b"
+    },
+    {
+      "id": "openai/gpt-5-image-mini",
+      "name": "OpenAI: GPT-5 Image Mini",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.000002",
+        "image_output": "0.000008",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000025"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5-image-mini"
+    },
+    {
+      "id": "anthropic/claude-haiku-4.5",
+      "name": "Anthropic: Claude Haiku 4.5",
+      "provider": "Claude",
+      "context": 200000,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000005",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001",
+        "input_cache_write": "0.00000125",
+        "input_cache_write_1h": "0.000002"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-haiku-4.5"
+    },
+    {
+      "id": "openai/gpt-5-image",
+      "name": "OpenAI: GPT-5 Image",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00001",
+        "image_output": "0.00004",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5-image"
+    },
+    {
+      "id": "openai/gpt-5-pro",
+      "name": "OpenAI: GPT-5 Pro",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.000015",
+        "completion": "0.00012",
+        "web_search": "0.01"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5-pro"
+    },
+    {
+      "id": "anthropic/claude-sonnet-4.5",
+      "name": "Anthropic: Claude Sonnet 4.5",
+      "provider": "Claude",
+      "context": 1000000,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000015",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000003",
+        "input_cache_write": "0.00000375",
+        "input_cache_write_1h": "0.000006",
+        "overrides": [
+          {
+            "min_prompt_tokens": 200000,
+            "prompt": "0.000006",
+            "completion": "0.0000225",
+            "input_cache_read": "0.0000006",
+            "input_cache_write": "0.0000075",
+            "input_cache_write_1h": "0.000012"
+          }
+        ]
+      },
+      "url": "https://openrouter.ai/anthropic/claude-sonnet-4.5"
+    },
+    {
+      "id": "deepseek/deepseek-v3.2-exp",
+      "name": "DeepSeek: DeepSeek V3.2 Exp",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.00000027",
+        "completion": "0.00000041"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v3.2-exp"
+    },
+    {
+      "id": "deepseek/deepseek-v3.1-terminus",
+      "name": "DeepSeek: DeepSeek V3.1 Terminus",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.00000027",
+        "completion": "0.000001"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-v3.1-terminus"
+    },
+    {
+      "id": "deepseek/deepseek-chat-v3.1",
+      "name": "DeepSeek: DeepSeek V3.1",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.00000025",
+        "completion": "0.00000095",
+        "input_cache_read": "0.00000013"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-chat-v3.1"
+    },
+    {
+      "id": "openai/gpt-5",
+      "name": "OpenAI: GPT-5",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.00001",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5"
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "name": "OpenAI: GPT-5 Mini",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000025",
+        "completion": "0.000002",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000025"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5-mini"
+    },
+    {
+      "id": "openai/gpt-5-nano",
+      "name": "OpenAI: GPT-5 Nano",
+      "provider": "OpenAI",
+      "context": 400000,
+      "pricing": {
+        "prompt": "0.00000005",
+        "completion": "0.0000004",
+        "web_search": "0.01",
+        "input_cache_read": "0.000000005"
+      },
+      "url": "https://openrouter.ai/openai/gpt-5-nano"
+    },
+    {
+      "id": "openai/gpt-oss-120b",
+      "name": "OpenAI: gpt-oss-120b",
+      "provider": "OpenAI",
+      "context": 131072,
+      "pricing": {
+        "prompt": "0.000000019",
+        "completion": "0.00000007"
+      },
+      "url": "https://openrouter.ai/openai/gpt-oss-120b"
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "name": "OpenAI: gpt-oss-20b",
+      "provider": "OpenAI",
+      "context": 131072,
+      "pricing": {
+        "prompt": "0.00000003",
+        "completion": "0.00000013",
+        "input_cache_read": "0.00000003"
+      },
+      "url": "https://openrouter.ai/openai/gpt-oss-20b"
+    },
+    {
+      "id": "anthropic/claude-opus-4.1",
+      "name": "Anthropic: Claude Opus 4.1",
+      "provider": "Claude",
+      "context": 200000,
+      "pricing": {
+        "prompt": "0.000015",
+        "completion": "0.000075",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000015",
+        "input_cache_write": "0.00001875",
+        "input_cache_write_1h": "0.00003"
+      },
+      "url": "https://openrouter.ai/anthropic/claude-opus-4.1"
+    },
+    {
+      "id": "openai/o3-pro",
+      "name": "OpenAI: o3 Pro",
+      "provider": "OpenAI",
+      "context": 200000,
+      "pricing": {
+        "prompt": "0.00002",
+        "completion": "0.00008",
+        "web_search": "0.01"
+      },
+      "url": "https://openrouter.ai/openai/o3-pro"
+    },
+    {
+      "id": "deepseek/deepseek-r1-0528",
+      "name": "DeepSeek: R1 0528",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.0000005",
+        "completion": "0.00000215",
+        "input_cache_read": "0.00000035"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-r1-0528"
+    },
+    {
+      "id": "openai/o3",
+      "name": "OpenAI: o3",
+      "provider": "OpenAI",
+      "context": 200000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000008",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005"
+      },
+      "url": "https://openrouter.ai/openai/o3"
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "name": "OpenAI: GPT-4.1",
+      "provider": "OpenAI",
+      "context": 1047576,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000008",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000005"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4.1"
+    },
+    {
+      "id": "openai/gpt-4.1-mini",
+      "name": "OpenAI: GPT-4.1 Mini",
+      "provider": "OpenAI",
+      "context": 1047576,
+      "pricing": {
+        "prompt": "0.0000004",
+        "completion": "0.0000016",
+        "web_search": "0.01",
+        "input_cache_read": "0.0000001"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4.1-mini"
+    },
+    {
+      "id": "openai/gpt-4.1-nano",
+      "name": "OpenAI: GPT-4.1 Nano",
+      "provider": "OpenAI",
+      "context": 1047576,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000004",
+        "web_search": "0.01",
+        "input_cache_read": "0.00000003"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4.1-nano"
+    },
+    {
+      "id": "deepseek/deepseek-chat-v3-0324",
+      "name": "DeepSeek: DeepSeek V3 0324",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.00000029",
+        "completion": "0.00000114",
+        "input_cache_read": "0.00000011"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-chat-v3-0324"
+    },
+    {
+      "id": "deepseek/deepseek-chat",
+      "name": "DeepSeek: DeepSeek V3",
+      "provider": "DeepSeek",
+      "context": 163840,
+      "pricing": {
+        "prompt": "0.0000002574",
+        "completion": "0.0000010287"
+      },
+      "url": "https://openrouter.ai/deepseek/deepseek-chat"
+    },
+    {
+      "id": "openai/gpt-4o-2024-11-20",
+      "name": "OpenAI: GPT-4o (2024-11-20)",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001",
+        "input_cache_read": "0.00000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o-2024-11-20"
+    },
+    {
+      "id": "openai/gpt-4o-2024-08-06",
+      "name": "OpenAI: GPT-4o (2024-08-06)",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001",
+        "input_cache_read": "0.00000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o-2024-08-06"
+    },
+    {
+      "id": "openai/gpt-4o-mini",
+      "name": "OpenAI: GPT-4o-mini",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "input_cache_read": "0.000000075"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o-mini"
+    },
+    {
+      "id": "openai/gpt-4o-mini-2024-07-18",
+      "name": "OpenAI: GPT-4o-mini (2024-07-18)",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.00000015",
+        "completion": "0.0000006",
+        "input_cache_read": "0.000000075"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o-mini-2024-07-18"
+    },
+    {
+      "id": "openai/gpt-4o",
+      "name": "OpenAI: GPT-4o",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.00001",
+        "input_cache_read": "0.00000125"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o"
+    },
+    {
+      "id": "openai/gpt-4o-2024-05-13",
+      "name": "OpenAI: GPT-4o (2024-05-13)",
+      "provider": "OpenAI",
+      "context": 128000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000015"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4o-2024-05-13"
+    },
+    {
+      "id": "openai/gpt-3.5-turbo-0613",
+      "name": "OpenAI: GPT-3.5 Turbo (older v0613)",
+      "provider": "OpenAI",
+      "context": 4095,
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000002"
+      },
+      "url": "https://openrouter.ai/openai/gpt-3.5-turbo-0613"
+    },
+    {
+      "id": "openai/gpt-3.5-turbo-16k",
+      "name": "OpenAI: GPT-3.5 Turbo 16k",
+      "provider": "OpenAI",
+      "context": 16385,
+      "pricing": {
+        "prompt": "0.000003",
+        "completion": "0.000004"
+      },
+      "url": "https://openrouter.ai/openai/gpt-3.5-turbo-16k"
+    },
+    {
+      "id": "openai/gpt-4",
+      "name": "OpenAI: GPT-4",
+      "provider": "OpenAI",
+      "context": 8191,
+      "pricing": {
+        "prompt": "0.00003",
+        "completion": "0.00006"
+      },
+      "url": "https://openrouter.ai/openai/gpt-4"
+    }
+  ]
+}

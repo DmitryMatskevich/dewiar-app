@@ -2087,3 +2087,18 @@ html.framed .py-drawer { top: 38px; }
 .local-model-details dd { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; user-select:text; max-height:240px; overflow:auto; }
 .local-model-row:has(.local-model-details[open]) { align-items:flex-start; }
 @media(max-width:640px) { .local-model-details dl { grid-template-columns:1fr; gap:4px; } .local-model-details dd { margin-bottom:8px; } }
+
+.model-prices-filters { flex-wrap:wrap; align-items:end; }
+.model-prices-filters .f { flex:1; min-width:180px; }
+.model-prices-table { overflow:auto; max-height:520px; margin:16px 0; }
+.model-prices-table table { width:100%; border-collapse:collapse; font-size:13px; }
+.model-prices-table td, .model-prices-table th { text-align:left; padding:12px; vertical-align:top; border-bottom:1px solid var(--line); }
+.model-prices-table td:not(:first-child) { white-space:nowrap; }
+.model-prices-table td:first-child { min-width:210px; overflow-wrap:anywhere; }
+.model-prices-table small { display:block; margin-top:6px; color:var(--muted); }
+.model-prices-table a, #model-prices-sources a { color:var(--accent); }
+.model-prices-guide { display:grid; grid-template-columns:minmax(150px,1fr) minmax(0,3fr); gap:12px 20px; margin-top:16px; }
+.model-prices-guide dd { margin:0; }
+#model-prices-panel summary { cursor:pointer; min-height:44px; padding:12px 0; }
+@media(max-width:640px) { .model-prices-guide { grid-template-columns:1fr; gap:8px; } .model-prices-guide dd { margin-bottom:12px; } }
+#model-prices-panel { text-align:left; }

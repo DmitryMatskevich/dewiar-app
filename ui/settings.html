@@ -1011,6 +1011,37 @@
 
   <section id="p-brain">
     <h1>Модели</h1>
+    <div class="actions"><button class="btn" id="model-prices-open" aria-expanded="false" aria-controls="model-prices-panel">Проверить стоимость моделей</button></div>
+    <div class="card" id="model-prices-panel" hidden>
+      <h2>Стоимость и выбор модели</h2>
+      <p class="hint">Тарифы OpenRouter, USD за 1 млн токенов. Это стоимость API, а не подписок Codex или Claude. Прямые тарифы провайдеров могут отличаться.</p>
+      <div class="actions model-prices-filters">
+        <label class="f">Поиск<input id="model-prices-search" type="search" placeholder="Claude, DeepSeek, Ling, GPT"></label>
+        <label class="f">Провайдер<select id="model-prices-provider" aria-label="Провайдер"><option value="">Все</option><option>OpenAI</option><option>Claude</option><option>DeepSeek</option><option>Ling</option></select></label>
+        <label class="f">Список<select id="model-prices-scope" aria-label="Список моделей"><option value="main">Основные модели</option><option value="all">Все модели каталога</option></select></label>
+        <button class="btn small" id="model-prices-refresh">Обновить из интернета</button>
+      </div>
+      <div class="actions model-prices-filters">
+        <label class="f">Входных токенов на запрос<input id="model-prices-input" type="number" min="0" max="10000000" step="1000" value="10000"></label>
+        <label class="f">Токенов ответа<input id="model-prices-output" type="number" min="0" max="10000000" step="100" value="1000"></label>
+        <button class="btn small" id="model-prices-calculate">Рассчитать</button>
+      </div>
+      <p id="model-prices-status" class="hint" role="status"></p>
+      <p id="model-prices-warning" class="res" role="status"></p>
+      <div class="model-prices-table"><table><thead><tr><th>Модель</th><th>Вход / 1 млн</th><th>Ответ / 1 млн</th><th>Кеш / 1 млн</th><th>За запрос, ≈</th></tr></thead><tbody id="model-prices-rows"></tbody></table></div>
+      <p class="hint">Расчёт без кеша, поиска и других платных инструментов, комиссий и налогов. Условные тарифы учитывают длину входа и текущее время UTC по каталогу; исключения и акции проверяйте у провайдера. Токены рассуждений также могут оплачиваться как выход. Это оценка, а не проверка баланса.</p>
+      <div id="model-prices-sources" class="actions"></div>
+      <details open><summary>Рекомендации для режимов Dewiar</summary>
+        <p class="hint">Начальные варианты для сравнения на ваших задачах. Стоимость не определяет качество; эти рекомендации не переключают модели автоматически.</p>
+        <dl class="model-prices-guide">
+          <dt>Общение · быстрый ответ</dt><dd>Начните с GPT-6 Luna или Claude Haiku 5.5. Ling Flash и DeepSeek Flash — варианты для сравнения цены и качества русского языка. Короткие ответы, минимум рассуждений.</dd>
+          <dt>Планирование · много шагов</dt><dd>Claude Sonnet, GPT-6.1 Terra или Sol. Для сложного плана — Opus или Astra. Включайте рассуждение на сложных задачах; длинная история увеличивает расходы.</dd>
+          <dt>Программирование · правки и проверки</dt><dd>Для небольших правок — Luna или Haiku; для реализации и тестов — Terra, Sol или Sonnet; для сложного ревью — Opus или Astra. Flint можно использовать локально, если хватает памяти.</dd>
+          <dt>Аналитика · документы и данные</dt><dd>Sonnet, Sol, Opus либо DeepSeek с рассуждением. Сначала отберите нужные страницы и данные. Проверяйте контекст и цену длинного запроса, особенно у Haiku.</dd>
+          <dt>Без интернета · приватные данные</dt><dd>Установленная локальная модель LM Studio, Ollama или Strata. Нет оплаты API за токены, но требуются память и вычисления. Для быстрого отклика выбирайте модель, помещающуюся в ОЗУ, и дождитесь прогрева.</dd>
+        </dl>
+      </details>
+    </div>
     <p class="lead">Настройте отдельные очереди моделей для трёх типов работы. «Общение» используется по умолчанию для всех задач, кроме планирования и программирования.</p>
     <div class="card model-routing">
       <div class="model-role-tabs" id="model-role-tabs" role="tablist" aria-label="Назначение моделей">
@@ -1801,6 +1832,7 @@
 <script src="studio/soul.js"></script>
 <script src="studio/personas.js"></script>
 <script src="studio/brain.js"></script>
+<script src="studio/model-prices.js"></script>
 <script src="studio/subscriptions.js"></script>
 <script src="studio/connect.js"></script>
 <script src="studio/plugins.js"></script>

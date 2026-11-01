@@ -1161,6 +1161,9 @@ class CommandsMixin:
                 threading.Thread(target=self.ensure_voice, args=(after["persona"],), daemon=True).start()
             self.emit("settings", settings=after)
             return after
+        if cmd == 'model_prices':
+            from model_prices import get_prices
+            return get_prices(STATE_DIR, bool(a.get('refresh')), a.get('input_tokens', 10000), a.get('output_tokens', 1000))
         if cmd == 'models_routing_status':
             import modelrouter
             llm = self.s.get('llm')
