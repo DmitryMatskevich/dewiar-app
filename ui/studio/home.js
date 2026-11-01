@@ -82,7 +82,7 @@ $$("nav .ng").forEach(g => {
 });
 document.addEventListener("click", (e) => { if (e.target.closest && e.target.closest("nav button[data-p]")) setTimeout(ngApply, 0); });
 window.ngApply = ngApply;
-const HM_SET = [["personas", "Персонажи"], ["brain", "Мозг"], ["ears", "Слух"], ["voice", "Голос"], ["look", "Оформление"], ["sound", "Звук и поведение"],
+const HM_SET = [["personas", "Персонажи"], ["brain", "Мозг"], ["ears", "Слух"], ["voice", "Голос"], ["look", "Оформление"],
   ["hands", "Руки"], ["connect", "Подключение"], ["features", "Возможности"], ["dw", "Dewiar.pro"], ["safety", "Безопасность"], ["about", "О программе"]];
 const HM = { edit: false, data: {} };
 const hmEsc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));

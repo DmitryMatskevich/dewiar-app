@@ -22,5 +22,5 @@ $("#cap-on").onchange = capSave;
 $("#cap-key").onchange = capSave;
 $("#cap-key").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); capSave(); } };
 $("#cap-try").onclick = () => { const a = window.api && window.api(); if (a && a.show_capture) a.show_capture(); else toast("Окно открывается из программы Dewiar"); };
-{ const b = $('nav button[data-p="sound"]'); if (b) b.addEventListener("click", capLoad); }
-window.addEventListener("pywebviewready", () => { if ($("#p-sound").classList.contains("cur")) capLoad(); });
+{ const b = $('nav button[data-p="voice"]') || $('nav button[data-p="sound"]'); if (b) b.addEventListener("click", capLoad); }
+window.addEventListener("pywebviewready", () => { if ($("#p-voice").classList.contains("cur")) capLoad(); });

@@ -1452,25 +1452,12 @@ class AnswerMixin:
                     pass
             msgs = _put_context(msgs, "\n\n".join(c for c in ctx if c))
             split, last, codef = SentenceSplitter(), 0.0, CodeFilter()
-            # вслух — не больше ~900 символов (около минуты): длинный ответ дальше только на экране («Открыть целиком»);
-            # сказки, истории и чтение вслух — целиком
-            voice_cap = 10 ** 9 if re.search(r"сказк|истори|расскаж|прочитай|прочти|читай|стих|подробно", text.lower()) else 900
-            spoken = [0, False]                         # сколько символов отдано в озвучку; предел уже достигнут
-
             from gender import for_persona
             gnd = self.persona_gender()
             fem = lambda t: for_persona(t, gnd)        # noqa: E731 — героиня, а модель сбилась на «рад», «понял»: правим сами
 
             def speak(s_):
                 s_ = fem(s_)
-                if spoken[1]:
-                    return
-                if spoken[0] + len(s_) > voice_cap and spoken[0] > 0:
-                    spoken[1] = True
-                    sentences.put("Дальше не читаю вслух — всё на экране.")
-                    log.info("🔇 Ответ длинный — вслух прочитано %d симв., остальное на экране", spoken[0])
-                    return
-                spoken[0] += len(s_)
                 sentences.put(s_)
             blind_key = f"{prof.get('base_url')}|{prof.get('model')}"
             t_start = time.monotonic()

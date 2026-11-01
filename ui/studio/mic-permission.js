@@ -45,6 +45,6 @@
   };
   window.addEventListener("pywebviewready", refresh);
   window.addEventListener("focus", refresh);
-  document.querySelector('nav button[data-p="sound"]')?.addEventListener("click", refresh);
+  document.querySelectorAll('nav button[data-p="voice"], nav button[data-p="sound"]').forEach(b => b.addEventListener("click", refresh));
   setTimeout(refresh, 300);
 })();

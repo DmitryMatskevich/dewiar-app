@@ -88,7 +88,10 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
     if (t !== "diary" && SOUL_TABS.some(x => x[0] === t)) return soulGo(t);
   }
   $$("nav button").forEach(x => x.classList.toggle("cur", x === b));
-  $$("section").forEach(s => s.classList.toggle("cur", s.id === "p-" + b.dataset.p));
+  const voicePage = b.dataset.p === "voice";
+  $$("section").forEach(s => s.classList.toggle("cur", voicePage
+    ? (s.id === "p-voice" || s.id === "p-sound")
+    : s.id === "p-" + b.dataset.p));
   if (SOUL_TABS.some(t => t[0] === b.dataset.p)) { $('nav button[data-p="diary"]').classList.add("cur"); $$(".stabs button").forEach(x => x.classList.toggle("on", x.dataset.go === b.dataset.p)); try { LS.set("soul_tab", b.dataset.p); } catch (e) { } }
   if (b.dataset.p === "soul") loadSoul();
   if (b.dataset.p === "const") loadConst();
@@ -97,7 +100,7 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   if (b.dataset.p === "pay" && window.loadPayPage) loadPayPage();      // «Платежи» (studio/pay.js)
   if (b.dataset.p === "vault" && window.loadVaultPage) loadVaultPage();  // «Сейф паролей» (studio/vault.js)
   if (!S) return;                                    // данные подгрузятся после связи с ядром
-  if (b.dataset.p === "sound") loadDevices();
+  if (b.dataset.p === "voice" || b.dataset.p === "sound") loadDevices();
   if (b.dataset.p === "about") core.call("status").then(renderStatus).catch(() => {});
   if (b.dataset.p === "skills") { loadPlugins(); core.call("skills").then(renderSkills).catch(() => {}); core.call("mcp_status").then(renderMcp).catch(() => {});
     if (S.skills && S.skills.catalog_url) { $("#cat-url").value = S.skills.catalog_url; openCatalog(); } }
