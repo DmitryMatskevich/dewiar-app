@@ -4,7 +4,7 @@
 .media-panel h2 { margin:0; font-size:18px; }
 .media-panel p { margin:10px 0; }
 .media-panel label { display:block; margin-top:12px; }
-.media-panel textarea,.media-panel input,.media-panel select { display:block; width:100%; box-sizing:border-box; min-height:38px; padding:9px; margin:5px 0 10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420; color:inherit; font:inherit; }
+.media-panel textarea,.media-panel input,.media-panel select { display:block; width:100%; box-sizing:border-box; min-height:38px; padding:9px; margin:5px 0 10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420 !important; color:#edf3fa !important; color-scheme:dark; font:inherit; }
 .media-panel textarea { min-height:88px; resize:vertical; }
 .media-panel button,.media-transcribe-open { min-height:32px; padding:6px 10px; border:1px solid #7a8a9f; border-radius:9px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
 .media-panel button:focus-visible,.media-transcribe-open:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
@@ -16,12 +16,15 @@
 .media-panel .mt-hint { font-size:12px; opacity:.8; }
 .media-panel #mt-error { color:#ffaaaa; }
 body.light .media-panel { background:#f1f5fa; color:#192b40; }
-body.light .media-panel textarea { background:#fff; }
-body.light .media-panel input,body.light .media-panel select { background:#fff; }
+body.light .media-panel textarea,body.light .media-panel input,body.light .media-panel select,
+html.st-light .media-panel textarea,html.st-light .media-panel input,html.st-light .media-panel select { background:#fff !important; color:#192b40 !important; color-scheme:light; }
+html.st-light .media-panel { background:#f1f5fa; color:#192b40; }
 body.light .media-panel #mt-error { color:#9b1a29; }
 
 .media-panel .mt-source-actions,.media-panel .mt-browser-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-.media-panel select { flex:1; min-width:140px; max-width:100%; min-height:36px; padding:6px 8px; border:1px solid #7a8a9f; border-radius:9px; background:#0d1420; color:inherit; font:inherit; }
+.media-panel select { flex:1; min-width:140px; max-width:100%; min-height:36px; padding:6px 8px; border:1px solid #7a8a9f; border-radius:9px; background:#0d1420 !important; background-image:none !important; color:#edf3fa !important; font:inherit; }
+.media-panel select option { background:#0d1420; color:#edf3fa; }
 .media-panel select:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
 .media-panel { box-sizing:border-box; overflow-y:auto; }
-body.light .media-panel select { background:#fff; }
+body.light .media-panel select,html.st-light .media-panel select { background:#fff !important; background-image:none !important; color:#192b40 !important; }
+html.st-light .media-panel select option { background:#fff; color:#192b40; }
