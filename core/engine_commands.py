@@ -1459,6 +1459,12 @@ class CommandsMixin:
             return self._pad_cmd(cmd, a)
         if cmd == "notes_list":                                 # «Заметки»: все заметки и поиск
             return self.workspace.notes(a.get("q", ""))
+        if cmd == "notes_seen":
+            path = str(a.get("path") or "")
+            if not path.startswith("Заметки/"):
+                raise ValueError("укажите заметку из раздела «Заметки»")
+            self.emit("notes_seen", path=path)
+            return True
         if cmd in ("note_attach", "note_file"):                 # «Заметки»: фото и файлы к заметке, картинка для показа
             import base64
             try:
@@ -1626,7 +1632,8 @@ class CommandsMixin:
             previous = set(self.tasks.tasks)
             task = self.tasks.create_video_translation(sources,
                                                        source_language=str(a.get('source_language') or 'auto'),
-                                                       target_language=str(a.get('target_language') or 'ru'))
+                                                       target_language=str(a.get('target_language') or 'ru'),
+                                                       voice=str(a.get('voice') or ''))
             return dict(task.public(), reused=task.id in previous)
         if cmd in ('task_team_set','task_team_restart'):
             team = a.get('team') if 'team' in a else self.tasks.get(a.get('id')).data.get('team',{})
@@ -1672,6 +1679,14 @@ class CommandsMixin:
                 self.ensure_vosk_tts()
             return {"ready": self.vosk_tts.ready, "loading": self._vosk_loading, "error": self.vosk_tts.error,
                     "speakers": self.vosk_tts.speakers}
+        if cmd == "translation_voices":
+            from personas import PIPER_VOICES
+            from tts import EN_VOICES
+            target = str(a.get('target_language') or 'ru')
+            values = list(PIPER_VOICES.items()) if target == 'ru' else [(vid, 'Женский' if gender == 'female' else 'Мужской') for gender, vid in EN_VOICES.items()]
+            current = (self.personas.get(self.s.get('persona')) or {}).get('voice', {}).get('piper', '')
+            options = [{'id': vid, 'label': label, 'installed': bool(self.piper.has(vid)), 'selected': vid == current} for vid, label in values]
+            return {'target_language': target, 'options': options, 'default': current if any(x['id'] == current for x in options) else (options[0]['id'] if options else '')}
         if cmd == "intro_start":                      # «Познакомиться» — знакомство голосом заново
             return self.intro_start()
         if cmd == "intro_stop":
@@ -1693,6 +1708,10 @@ class CommandsMixin:
 
             def run():
                 self.ensure_voice(pid)                 # скачать голос — уже не в обработчике нажатия
+                selected = (a.get('voice') or {}).get('piper') if isinstance(a.get('voice'), dict) else ''
+                if selected and not self.piper.has(selected):
+                    self.piper.mirror = self._mirror('piper')
+                    self.piper.ensure(selected, on_progress=lambda f: self._dl('voice', f))
                 self._speak_worker(turn, q, fx_override=a.get("fx"), voice_override=a.get("voice"))
                 with self._turn_lock:
                     if self.turn is turn:

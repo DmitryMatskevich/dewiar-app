@@ -55,7 +55,7 @@ def _srt(rows):
     return ''.join(f'{i}\n{_srt_time(a)} --> {_srt_time(b)}\n{text}\n\n' for i, (a, b, text) in enumerate(rows, 1))
 
 
-def ensure_translation(directory, source_language, target_language, generate, title='', source='', notify=lambda _: None):
+def ensure_translation(directory, source_language, target_language, generate, title='', source='', notify=lambda _: None, voice=None):
     directory = Path(directory)
     clean = directory / 'transcript.clean.md'
     segments_path = directory / 'segments.json'
@@ -94,6 +94,7 @@ def ensure_translation(directory, source_language, target_language, generate, ti
     manifest = {
         'version': VERSION, 'status': 'prepared', 'title': title or '', 'source': source or '',
         'source_language': source_language, 'target_language': target_language,
+        'voice': voice or '',
         'source_transcript': 'transcript.clean.md', 'translation': 'translation.md',
         'target_subtitles': 'translation.srt', 'dubbing_script': 'dubbing-script.md',
         'voice_mode': 'pending_user_choice', 'screen_text_review': 'pending',

@@ -4,7 +4,8 @@
 .media-panel h2 { margin:0; font-size:18px; }
 .media-panel p { margin:10px 0; }
 .media-panel label { display:block; margin-top:12px; }
-.media-panel textarea { display:block; width:100%; box-sizing:border-box; min-height:88px; padding:9px; margin:5px 0 10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420; color:inherit; font:inherit; resize:vertical; }
+.media-panel textarea,.media-panel input,.media-panel select { display:block; width:100%; box-sizing:border-box; min-height:38px; padding:9px; margin:5px 0 10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420; color:inherit; font:inherit; }
+.media-panel textarea { min-height:88px; resize:vertical; }
 .media-panel button,.media-transcribe-open { min-height:32px; padding:6px 10px; border:1px solid #7a8a9f; border-radius:9px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
 .media-panel button:focus-visible,.media-transcribe-open:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
 .media-panel #mt-start { background:#315f92; color:white; font-weight:600; width:100%; }
@@ -16,4 +17,11 @@
 .media-panel #mt-error { color:#ffaaaa; }
 body.light .media-panel { background:#f1f5fa; color:#192b40; }
 body.light .media-panel textarea { background:#fff; }
+body.light .media-panel input,body.light .media-panel select { background:#fff; }
 body.light .media-panel #mt-error { color:#9b1a29; }
+
+.media-panel .mt-source-actions,.media-panel .mt-browser-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.media-panel select { flex:1; min-width:140px; max-width:100%; min-height:36px; padding:6px 8px; border:1px solid #7a8a9f; border-radius:9px; background:#0d1420; color:inherit; font:inherit; }
+.media-panel select:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
+.media-panel { box-sizing:border-box; overflow-y:auto; }
+body.light .media-panel select { background:#fff; }

@@ -18,12 +18,13 @@ class MediaTranslationTest(unittest.TestCase):
                     return '[{"id": 0, "text": "Привет, мир."}]'
                 return 'Привет, мир.'
 
-            result = ensure_translation(root, 'en', 'ru', generate, title='Demo', source='demo')
+            result = ensure_translation(root, 'en', 'ru', generate, title='Demo', source='demo', voice='ru_RU-irina-medium')
             self.assertEqual(result['status'], 'prepared')
             self.assertTrue((root / 'translation.md').is_file())
             self.assertTrue((root / 'translation.srt').read_text(encoding='utf-8').startswith('1\n00:00:00,000 --> 00:00:01,200'))
             manifest = json.loads((root / 'openmontage.json').read_text(encoding='utf-8'))
             self.assertEqual(manifest['target_language'], 'ru')
+            self.assertEqual(manifest['voice'], 'ru_RU-irina-medium')
             self.assertEqual(manifest['render'], 'not_started')
 
 

@@ -471,7 +471,7 @@ class TaskManager:
             task.save()
             return self.start(task.id)
 
-    def create_video_translation(self, sources, source_language='auto', target_language='ru', goal=''):
+    def create_video_translation(self, sources, source_language='auto', target_language='ru', goal='', voice=''):
         """Native workflow: prepare translated text/subtitles and an OpenMontage manifest."""
         from media_transcription import unique_sources, source_key
         from media_translation import VERSION as TRANSLATION_VERSION
@@ -487,7 +487,8 @@ class TaskManager:
                 same = (existing.data.get('workflow') == 'video-translation'
                         and [source_key(s) for s in existing.data.get('media_sources', [])] == keys
                         and existing.data.get('translation_source_language') == source_language
-                        and existing.data.get('translation_target_language') == target_language)
+                        and existing.data.get('translation_target_language') == target_language
+                        and existing.data.get('translation_voice', '') == str(voice or ''))
                 if same and existing.status in ALIVE:
                     return existing
                 if same and existing.status == 'done' and existing.data.get('translation_version') == TRANSLATION_VERSION:
@@ -496,6 +497,7 @@ class TaskManager:
             task.data.update(workflow='video-translation', media_sources=list(sources),
                              translation_source_language=source_language,
                              translation_target_language=target_language,
+                             translation_voice=str(voice or ''),
                              translation_version=TRANSLATION_VERSION)
             task.save()
             return self.start(task.id)
@@ -558,6 +560,7 @@ class TaskManager:
             self._emit(t)
             source_language = t.data.get('translation_source_language') or 'auto'
             target_language = t.data.get('translation_target_language') or 'ru'
+            voice = t.data.get('translation_voice') or ''
 
             def resolve(src):
                 candidates = [t.dir / src, self.host.workspace.root / src, Path(os.path.expanduser(src))]
@@ -617,14 +620,15 @@ class TaskManager:
                 key = row['text'].rsplit('/', 1)[-2]
                 directory = t.dir / 'outputs/transcripts' / key
                 notify(f'{i}/{len(results)} — перевожу на {target_language}')
-                info = ensure_translation(directory, source_language, target_language, generate, row.get('title'), row['source'], notify)
+                info = ensure_translation(directory, source_language, target_language, generate, row.get('title'), row['source'], notify, voice=voice)
                 row['translation'] = (directory / 'translation.md').relative_to((t.dir / 'outputs').resolve()).as_posix()
                 row['translation_srt'] = (directory / 'translation.srt').relative_to((t.dir / 'outputs').resolve()).as_posix()
                 row['dubbing_script'] = (directory / 'dubbing-script.md').relative_to((t.dir / 'outputs').resolve()).as_posix()
                 row['openmontage'] = (directory / 'openmontage.json').relative_to((t.dir / 'outputs').resolve()).as_posix()
             (t.dir / 'outputs/transcripts/batch-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             t.data.update(status='done', finished=True, activity='', translation_version=TRANSLATION_VERSION,
-                          translation_source_language=source_language, translation_target_language=target_language)
+                          translation_source_language=source_language, translation_target_language=target_language,
+                          translation_voice=voice)
             (t.dir / 'план.md').write_text('\n'.join('- [x] ' + line for line in plan) + '\n', encoding='utf-8')
             lines = [f'Подготовлено: {len(results)} из {len(results)}. Перевод {source_language} → {target_language}.']
             t.data['outputs'] = []
