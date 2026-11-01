@@ -1311,22 +1311,23 @@ def pictures_dir():
 
 
 def t_save_screenshot(a, ctx):
-    from eyes import EyesError, capture_screen
+    from screen_document import create
+    workspace = ctx.get("workspace")
+    if not workspace:
+        raise ToolError("Рабочая папка недоступна — некуда сохранить документ со снимком")
+    engine = ctx.get("engine")
+    def progress(**event):
+        if engine:
+            engine.note(event["message"])
+            if event["stage"] in ("ocr", "done"):
+                engine.emit("note_saved", kind="note", title=event["title"], path=event["path"], text=event["message"])
     try:
-        data = capture_screen(desktop_env())
-    except EyesError as e:
-        raise ToolError(str(e)) from e
-    d = pictures_dir() / "Снимки экрана"
-    d.mkdir(parents=True, exist_ok=True)
-    f = d / f"Снимок экрана {datetime.now():%Y-%m-%d %H-%M-%S}.png"
-    if data[:8] != b"\x89PNG\r\n\x1a\n":                   # снимок мог прийти в JPEG (портал, Windows) — сохраним как PNG
-        import io
-        from PIL import Image
-        buf = io.BytesIO()
-        Image.open(io.BytesIO(data)).save(buf, "PNG")
-        data = buf.getvalue()
-    f.write_bytes(data)
-    return f"Снимок экрана сохранён: {f}. Скажи пользователю коротко, что сохранил в «Изображения/Снимки экрана»."
+        result = create(workspace, progress, ctx.get("screenshot_cancelled"))
+    except Exception as exc:
+        raise ToolError(str(exc)) from exc
+    status = {"done": "Текст распознан и добавлен в документ.", "empty": "Читаемый текст не найден; снимок сохранён.",
+              "cancelled": "Распознавание остановлено; снимок сохранён.", "error": "OCR не сработал; снимок сохранён."}[result["status"]]
+    return f"Документ со снимком: {result['path']}. {status} Откройте его в «Заметках → Снимки экрана»."
 
 
 def t_meeting_screenshot(a, ctx):
@@ -2529,8 +2530,10 @@ TOOLS = {
                       S({"question": {"type": "string"}, "base": {"type": "string", "description": "необязательно: название "
                          "папки или раздела публичной библиотеки, если пользователь его назвал («в Библии», «в истории РФ»)"}},
                         ["question"]), "safe", t_ask_knowledge, "Знания с сайта"),
-    "save_screenshot": ("Сделать снимок экрана и сохранить его файлом в «Изображения/Снимки экрана». Вызывай, когда "
-                        "просят «сделай скриншот», «сфотографируй экран», «сохрани экран». Смотреть на снимок не нужно.",
+    "save_screenshot": ("Сделать снимок основного экрана (на Mac без окон Dewiar), вставить в новый Markdown-документ "
+                        "в «Заметки/Снимки экрана», локально распознать текст и добавить туда же. PNG и TXT лежат рядом с документом. "
+                        "Вызывай для «сделай снимок экрана», «скриншот экрана», «сфотографируй экран». Модель со зрением не требуется. "
+                        "При сбое OCR снимок остаётся сохранён. Не запускай распознавание повторно после успешного результата.",
                         S({}, []), "safe", t_save_screenshot, "Скриншот"),
     "meeting_screenshot": ("Сделать снимок экрана во время активной встречи в «Суфлёре», сохранить его рядом с расшифровкой "
                            "и распознать надписи локально. Вызывай по просьбе «сними экран встречи» или «вставь текущий слайд "

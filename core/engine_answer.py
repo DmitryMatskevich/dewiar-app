@@ -255,6 +255,8 @@ class AnswerMixin:
             return
         if not raw and not quiet and not via and not images and self._window_cmd(text):
             return
+        if not raw and not quiet and not via and not images and '\n\nВложения:' not in text and self._screenshot_cmd(text):
+            return
         if not raw and not quiet and not images and '\n\nВложения:' not in text and self._video_request(text, via):
             return
         if not raw and not quiet and not via and not images and self._pc_cmd(text):

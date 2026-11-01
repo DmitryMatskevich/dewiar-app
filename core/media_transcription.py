@@ -288,7 +288,7 @@ def run_batch(sources, output, resolve, recognize, cancel=None, language='ru', f
                     local, info = _audio(source, directory, cancel)
                     entry['title'] = info.get('title') or source
                     original = (info.get('language') or '').split('-')[0]
-                    if original and original != language:
+                    if original and language != 'auto' and original != language:
                         raise ValueError(f'Язык записи {original}, а запрошен {language}. Укажи язык исходной речи.')
             else:
                 entry['title'] = local.stem

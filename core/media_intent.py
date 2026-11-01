@@ -3,10 +3,11 @@ import re
 from urllib.parse import urlsplit
 
 TRANSCRIBE = re.compile(r'транс+кри(?:б|пц)\w*|расшифр\w*|(?:извле\w*|получи\w*)\s+(?:мне\s+)?(?:текст|голос|речь)', re.I)
+TRANSLATE = re.compile(r'перевед\w*\s+(?:мне\s+)?(?:этот\s+)?(?:ролик|видео)|перевод\w*\s+(?:этот\s+)?(?:ролик|видео)|локализ\w*\s+(?:этот\s+)?(?:ролик|видео)', re.I)
 PROCESS = re.compile(r'(?:сдела\w*|состав\w*|подготов\w*)\s+(?:мне\s+)?(?:конспект|выжимк\w*|резюме)|проанализируй\s+(?:этот\s+)?(?:ролик|видео)|обработ(?:ай|ать)\s+(?:этот\s+)?(?:ролик|видео)', re.I)
 OPEN = re.compile(r'откро\w*|откры\w*|покажи\w*|посмотр\w*|включи\w*|воспроизве\w*', re.I)
 DOWNLOAD = re.compile(r'\b(?:скачай|скачать|скачивай|загрузи)\b', re.I)
-CHOICE_QUESTION = 'Что сделать с роликом: открыть для просмотра, скачать видеофайл, расшифровать речь или обработать — например, сделать конспект или анализ?'
+CHOICE_QUESTION = 'Что сделать с роликом: открыть для просмотра, скачать видеофайл, извлечь текст, перевести на русский или английский, либо обработать — например, сделать конспект или анализ?'
 
 
 def request_scope(via=None, chat='legacy'):
@@ -24,6 +25,7 @@ def reply_choice(text):
         'open': ('посмотреть','посмотри','открыть','открой','просмотр','посмотреть ролик','открой ролик'),
         'download': ('скачать','скачай','скачай ролик','скачать ролик','скачать видео','скачай видео'),
         'transcribe': ('транскрибировать','транскрибируй','транскрибация','расшифровать','расшифруй','расшифровка','извлеки текст','извлечь текст'),
+        'translate': ('перевести','переведи','перевод','перевод ролика','перевести ролик','переведи ролик','перевести видео','переведи видео','локализовать','локализуй'),
         'process': ('обработать','обработай','обработка','обработать видео','обработай ролик','конспект','анализ','резюме'),
         'cancel': ('отмена','отмени','не надо','ничего','ничего не делай'),
     }
@@ -38,13 +40,13 @@ def resolve_followup(text, pending, scope, now):
     choice = reply_choice(text)
     if choice == 'cancel':
         return text
-    action = choice or ('transcribe' if TRANSCRIBE.search(text) else 'process' if PROCESS.search(text) else None)
+    action = choice or ('translate' if TRANSLATE.search(text) else 'transcribe' if TRANSCRIBE.search(text) else 'process' if PROCESS.search(text) else None)
     if not action:
         return text
     if choice:
         value = str(text).strip().casefold()
         request = {'open':'Открой ролик для просмотра', 'download':'Скачай исходный видеофайл',
-                   'transcribe':'Расшифруй речь из ролика', 'process':'Обработай ролик'}[action]
+                   'transcribe':'Расшифруй речь из ролика', 'translate':'Переведи ролик и подготовь субтитры', 'process':'Обработай ролик'}[action]
         if value in ('конспект','анализ','резюме'):
             request = {'конспект':'Сделай конспект ролика', 'анализ':'Проанализируй ролик', 'резюме':'Подготовь резюме ролика'}[value]
     else:
@@ -77,6 +79,8 @@ def intent(text):
         return 'open'
     if re.search(r'(?:не|без)\s+(?:дела\w*\s+)?(?:транс+кри(?:б|пц)\w*|расшифр\w*)', text or '', re.I):
         return None
+    if TRANSLATE.search(text or ''):
+        return 'translate'
     if TRANSCRIBE.search(text or ''):
         return 'transcribe'
     urls = video_urls(text)
@@ -89,4 +93,4 @@ def intent(text):
     return 'clarify' if urls else None
 
 def protected(text):
-    return bool(TRANSCRIBE.search(text or '') or video_urls(text))
+    return bool(TRANSCRIBE.search(text or '') or TRANSLATE.search(text or '') or video_urls(text))

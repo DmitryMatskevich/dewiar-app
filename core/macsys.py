@@ -54,7 +54,66 @@ def trash(path):
         raise OSError(str(result[-1]) or "macOS не смогла переместить файл в Корзину")
 
 
-def screen_capture(source="screen", region=None, application=""):
+def _screenshot_without_dewiar():
+    """macOS 14+: compositor capture, revealing the content behind Dewiar windows."""
+    import json
+    import threading
+    import ScreenCaptureKit as SC
+    from AppKit import NSBitmapImageRep, NSBitmapImageFileTypePNG
+    from Quartz import CGMainDisplayID
+    from settings import STATE_DIR, WS_PORT
+
+    def await_result(start):
+        ready, result = threading.Event(), {}
+        def complete(value, error):
+            result.update(value=value, error=error)
+            ready.set()
+        start(complete)
+        if not ready.wait(15):
+            raise TimeoutError("macOS не ответила на запрос снимка экрана за 15 секунд")
+        if result.get("error") or result.get("value") is None:
+            raise OSError(str(result.get("error") or "macOS вернула пустой снимок"))
+        return result["value"]
+
+    content = await_result(SC.SCShareableContent.getShareableContentWithCompletionHandler_)
+    # Source runs in Python, so a generic Python bundle id must never exclude
+    # other Python applications. The authenticated shell publishes its pid/port.
+    ui_pid = 0
+    try:
+        shell = json.loads((STATE_DIR / "core-port.json").read_text())
+        if int(shell.get("port", 0)) == WS_PORT:
+            ui_pid = int(shell.get("ui_pid", 0))
+    except (OSError, ValueError, TypeError):
+        pass
+    excluded = []
+    for window in content.windows():
+        owner = window.owningApplication()
+        title = str(window.title() or "").casefold()
+        if ((owner and str(owner.bundleIdentifier()) == "pro.dewiar.macos")
+                or (ui_pid and owner and int(owner.processID()) == ui_pid)
+                or title == "dewiar" or title.startswith("dewiar — ")):
+            excluded.append(window)
+    displays = list(content.displays())
+    display = next((d for d in displays if d.displayID() == CGMainDisplayID()), None)
+    if display is None:
+        raise OSError("основной экран Mac не найден; проверьте, не заблокирован ли компьютер")
+    filter_ = SC.SCContentFilter.alloc().initWithDisplay_excludingWindows_(display, excluded)
+    config = SC.SCStreamConfiguration.alloc().init()
+    # Keep native pixel resolution for OCR, rather than the LLM's resized JPEG.
+    scale = float(filter_.pointPixelScale())
+    rect = filter_.contentRect()
+    config.setWidth_(max(1, round(rect.size.width * scale)))
+    config.setHeight_(max(1, round(rect.size.height * scale)))
+    config.setShowsCursor_(False)
+    image = await_result(lambda done: SC.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(filter_, config, done))
+    bitmap = NSBitmapImageRep.alloc().initWithCGImage_(image)
+    data = bitmap.representationUsingType_properties_(NSBitmapImageFileTypePNG, {})
+    if not data:
+        raise OSError("macOS не смогла преобразовать снимок в PNG")
+    return bytes(data)
+
+
+def screen_capture(source="screen", region=None, application="", exclude_dewiar=False):
     """Capture a screen, region, or visible application window.
 
     ``source`` is deliberately small and serialisable because it is passed from
@@ -68,6 +127,14 @@ def screen_capture(source="screen", region=None, application=""):
     from PIL import ImageGrab
     if not CGPreflightScreenCaptureAccess():
         raise PermissionError("Разрешите Dewiar запись экрана: Системные настройки → Конфиденциальность и безопасность → Запись экрана; затем перезапустите приложение")
+    if exclude_dewiar:
+        if source != "screen":
+            raise ValueError("снимок без Dewiar поддерживает основной экран целиком")
+        try:
+            return _screenshot_without_dewiar()
+        except (ImportError, AttributeError) as exc:
+            # Do not silently fall back to a screenshot containing the assistant.
+            raise OSError("Для снимка без ассистента нужны macOS 14+ и компонент ScreenCaptureKit. Обновите зависимости Dewiar.") from exc
     source = str(source or "screen").lower()
     if source == "region":
         try:

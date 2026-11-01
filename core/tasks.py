@@ -471,6 +471,35 @@ class TaskManager:
             task.save()
             return self.start(task.id)
 
+    def create_video_translation(self, sources, source_language='auto', target_language='ru', goal=''):
+        """Native workflow: prepare translated text/subtitles and an OpenMontage manifest."""
+        from media_transcription import unique_sources, source_key
+        from media_translation import VERSION as TRANSLATION_VERSION
+        sources = unique_sources(sources)
+        if not sources:
+            raise ValueError('Нужна ссылка или файл видео')
+        source_language, target_language = str(source_language or 'auto'), str(target_language or 'ru')
+        if target_language not in ('ru', 'en'):
+            raise ValueError('Пока поддерживаются целевые языки ru и en')
+        keys = [source_key(s) for s in sources]
+        with self._lock:
+            for existing in self.tasks.values():
+                same = (existing.data.get('workflow') == 'video-translation'
+                        and [source_key(s) for s in existing.data.get('media_sources', [])] == keys
+                        and existing.data.get('translation_source_language') == source_language
+                        and existing.data.get('translation_target_language') == target_language)
+                if same and existing.status in ALIVE:
+                    return existing
+                if same and existing.status == 'done' and existing.data.get('translation_version') == TRANSLATION_VERSION:
+                    return existing
+            task = self.create('Перевод видео для OpenMontage', goal or '\n'.join(sources), start=False)
+            task.data.update(workflow='video-translation', media_sources=list(sources),
+                             translation_source_language=source_language,
+                             translation_target_language=target_language,
+                             translation_version=TRANSLATION_VERSION)
+            task.save()
+            return self.start(task.id)
+
     def _run_media(self, t):
         try:
             from transcript_editor import VERSION as CLEAN_VERSION
@@ -511,6 +540,110 @@ class TaskManager:
             self._beat(t)
             t.save()
             self._emit(t)
+
+    def _run_media_translation(self, t):
+        """Подготовить локализацию, не запускать дубляж или публикацию без отдельного решения."""
+        try:
+            from media_transcription import run_batch
+            from media_translation import ensure_translation, VERSION as TRANSLATION_VERSION
+            self._beat(t, 'translate')
+            t.data.update(steps=int(t.data.get('steps') or 0) + 1, finished=False,
+                          activity='Этап 1/5 — извлекаю исходную речь…')
+            plan = ['Извлечь исходную речь и сохранить TXT/SRT',
+                    'Подготовить чистовой текст оригинала',
+                    'Перевести содержание на целевой язык',
+                    'Создать целевые субтитры и сценарий озвучки',
+                    'Сохранить manifest проекта для OpenMontage и чек-лист QA']
+            (t.dir / 'план.md').write_text('\n'.join('- [ ] ' + line for line in plan) + '\n', encoding='utf-8')
+            self._emit(t)
+            source_language = t.data.get('translation_source_language') or 'auto'
+            target_language = t.data.get('translation_target_language') or 'ru'
+
+            def resolve(src):
+                candidates = [t.dir / src, self.host.workspace.root / src, Path(os.path.expanduser(src))]
+                for p in candidates:
+                    if p.is_file():
+                        try:
+                            with p.open('rb') as probe: probe.read(1)
+                            return p
+                        except PermissionError as error:
+                            raise PermissionError(f'Нет доступа к файлу {p}. Выберите его через кнопку добавления файла в Dewiar.') from error
+                raise FileNotFoundError(f'Файл не найден: {src}')
+
+            def recognize(path, language):
+                language = language if language in ('ru', 'en') else 'auto'
+                if language == 'ru':
+                    from stt import GigaAMSTT
+                    model = self.host.s.get('stt', 'gigaam_model') or 'gigaam-v3-e2e-rnnt'
+                    stt = getattr(self.host, 'gigaam', None)
+                    if stt is None or stt.model_name != model: stt = GigaAMSTT(model)
+                    if not stt.ready and not stt.load(): raise RuntimeError(f'GigaAM не загрузился: {stt.error}')
+                    segs = self.host.transcribe_file(path, cancel=t.cancel, stt=stt, allow_fallback=False)
+                    return segs, 'gigaam', model
+                try:
+                    import mlx_whisper
+                except ImportError as exc:
+                    raise RuntimeError('Для речи без субтитров на этом языке нужен mlx-whisper; установите его или добавьте субтитры рядом с файлом') from exc
+                result = mlx_whisper.transcribe(str(path), path_or_hf_repo='mlx-community/whisper-large-v3-turbo',
+                                                language=None if language == 'auto' else language)
+                segs = [(x.get('start', 0), x.get('end', x.get('start', 0) + 1), x.get('text', '')) for x in result.get('segments', [])]
+                return segs, 'mlx-whisper', 'mlx-community/whisper-large-v3-turbo'
+
+            def notify(message):
+                self._beat(t, 'translate'); t.data['activity'] = message; self._emit(t); t.journal(message)
+
+            profile = self.host.llm_profile()
+            if not profile:
+                raise RuntimeError('Для перевода подключите языковую модель в разделе «Модели»')
+            def generate(prompt):
+                chunks = []
+                stream = stream_chat(dict(profile, max_tokens=min(6000, int(profile.get('max_tokens') or 6000)), temperature=0.2),
+                                      'Ты профессиональный переводчик субтитров и сценариев озвучки. Не выдумывай факты.',
+                                      [{'role': 'user', 'content': prompt}], cancel=t.cancel)
+                try:
+                    for chunk in stream:
+                        if t.cancel.is_set(): raise RuntimeError('Задачу остановили')
+                        chunks.append(chunk); self._beat(t, 'translate')
+                finally:
+                    stream.close()
+                return ''.join(chunks)
+
+            results = run_batch(t.data['media_sources'], t.dir / 'outputs/transcripts', resolve, recognize,
+                                t.cancel, source_language, False, notify, pause=10,
+                                cache=self.host.workspace.root / '.media-cache')
+            if not results or any(r.get('status') != 'ok' for r in results):
+                raise RuntimeError('Исходная речь не извлечена; перевод не запускался')
+            for i, row in enumerate(results, 1):
+                key = row['text'].rsplit('/', 1)[-2]
+                directory = t.dir / 'outputs/transcripts' / key
+                notify(f'{i}/{len(results)} — перевожу на {target_language}')
+                info = ensure_translation(directory, source_language, target_language, generate, row.get('title'), row['source'], notify)
+                row['translation'] = (directory / 'translation.md').relative_to((t.dir / 'outputs').resolve()).as_posix()
+                row['translation_srt'] = (directory / 'translation.srt').relative_to((t.dir / 'outputs').resolve()).as_posix()
+                row['dubbing_script'] = (directory / 'dubbing-script.md').relative_to((t.dir / 'outputs').resolve()).as_posix()
+                row['openmontage'] = (directory / 'openmontage.json').relative_to((t.dir / 'outputs').resolve()).as_posix()
+            (t.dir / 'outputs/transcripts/batch-results.json').write_text(json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            t.data.update(status='done', finished=True, activity='', translation_version=TRANSLATION_VERSION,
+                          translation_source_language=source_language, translation_target_language=target_language)
+            (t.dir / 'план.md').write_text('\n'.join('- [x] ' + line for line in plan) + '\n', encoding='utf-8')
+            lines = [f'Подготовлено: {len(results)} из {len(results)}. Перевод {source_language} → {target_language}.']
+            t.data['outputs'] = []
+            for row in results:
+                for field, label in [('text', 'исходный текст'), ('srt', 'исходные субтитры'), ('markdown', 'чистовой оригинал'),
+                                     ('translation', 'перевод'), ('translation_srt', 'целевые субтитры'),
+                                     ('dubbing_script', 'сценарий озвучки'), ('openmontage', 'manifest OpenMontage')]:
+                    self._work(t, 'show', {'path': 'outputs/' + row[field], 'title': f"{row.get('title') or row['source']} — {label}"})
+                lines.append(f"{row['source']}: перевод, субтитры, сценарий и manifest сохранены в outputs/{row['openmontage']}")
+            result = '\n'.join(lines)
+            t.data['result'] = result
+            (t.dir / 'итог.md').write_text(result + '\n', encoding='utf-8')
+            self.host.announce(f'Задача «{t.title}» готова. Перевод подготовлен для OpenMontage; дубляж и рендер не запускались.')
+            t.journal(result)
+        except Exception as error:
+            t.data.update(status='stopped' if t.cancel.is_set() else 'failed', finished=False, activity='', error=str(error))
+            t.journal(str(error))
+        finally:
+            self._beat(t); t.save(); self._emit(t)
 
     def _validate_team(self, team):
         if not isinstance(team, dict):
@@ -727,7 +860,8 @@ class TaskManager:
         import time as _t
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
-        runner = self._run_media if t.data.get('workflow') == 'media-transcription' else self._run
+        runner = (self._run_media if t.data.get('workflow') == 'media-transcription'
+                  else self._run_media_translation if t.data.get('workflow') == 'video-translation' else self._run)
         t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
         self._emit(t)
@@ -1580,7 +1714,7 @@ class TaskManager:
                                 cache=self.host.workspace.root/'.media-cache', summarize=summarize)
             good = [r for r in results if r['status'] == 'ok']
             summary = [f"Обработано: {len(good)} из {len(results)}. Отчёт: outputs/transcripts/batch-results.json."]
-            if t.data.get('workflow') == 'media-transcription':
+            if t.data.get('workflow') in ('media-transcription', 'video-translation'):
                 t.data['outputs']=[]  # refresh result links after cache-key/editor migrations; source files stay intact
             for r in results:
                 if r['status'] == 'ok':

@@ -400,10 +400,10 @@ class MusicMixin:
 
     def _video_request(self, text, via=None):
         """Acknowledge transcription only after a real task exists; clarify bare links."""
-        from media_intent import intent, video_urls, TRANSCRIBE, CHOICE_QUESTION, active_pending, request_scope, reply_choice
+        from media_intent import intent, video_urls, TRANSCRIBE, TRANSLATE, CHOICE_QUESTION, active_pending, request_scope, reply_choice
         action = intent(text)
         if action == 'status':
-            items = [t for t in self.tasks.list() if t.get('workflow') == 'media-transcription'
+            items = [t for t in self.tasks.list() if t.get('workflow') in ('media-transcription', 'video-translation')
                      or TRANSCRIBE.search(str(t.get('title') or '') + ' ' + str(t.get('goal') or ''))]
             urls = video_urls(text)
             if urls:
@@ -413,7 +413,8 @@ class MusicMixin:
             if not task:
                 message = 'Задача транскрибации не создана; запущенной обработки нет. Пришлите ссылку или файл с просьбой извлечь текст.'
             elif task.get('status') == 'done':
-                message = f'Транскрибация завершена. В задаче «{task["title"]}» сохранено результатов: {len(task.get("outputs") or [])}. Откройте её кнопкой задач в верхней строке.'
+                label = 'Перевод подготовлен' if task.get('workflow') == 'video-translation' else 'Транскрибация завершена'
+                message = f'{label}. В задаче «{task["title"]}» сохранено результатов: {len(task.get("outputs") or [])}. Откройте её кнопкой задач в верхней строке.'
             elif task.get('status') in ('failed','stopped','paused'):
                 message = f'Задача «{task["title"]}»: {task.get("status_ru") or task["status"]}. ' + (task.get('error') or 'Обработка сейчас не выполняется. Подробности — в журнале задачи.')
             else:
@@ -427,9 +428,9 @@ class MusicMixin:
             self._say_quick('Хорошо, ничего с этим роликом не запускаю.', text, via)
             return True
         urls = video_urls(text)
-        if pending and not urls and TRANSCRIBE.search(text):
+        if pending and not urls and (TRANSCRIBE.search(text) or TRANSLATE.search(text)):
             urls = pending['urls']
-        if action == 'transcribe' and not urls and not via:
+        if action in ('transcribe', 'translate') and not urls and not via:
             for message in reversed(getattr(self, 'history', [])[-8:]):
                 if message.get('role') == 'user':
                     previous = video_urls(str(message.get('content') or ''))
@@ -455,16 +456,24 @@ class MusicMixin:
             self._say_quick(CHOICE_QUESTION, text, via)
             return True
         if not urls:
-            self._video_pending = dict(scope=scope, time=time.monotonic(), urls=[], action='transcribe')
-            self._say_quick('Пришлите ссылку на ролик или аудио/видеофайл — извлеку текст речи.', text, via)
+            pending_action = 'translate' if action == 'translate' else 'transcribe'
+            self._video_pending = dict(scope=scope, time=time.monotonic(), urls=[], action=pending_action)
+            message = ('Пришлите ссылку на ролик или аудио/видеофайл — подготовлю перевод и субтитры.'
+                       if action == 'translate' else 'Пришлите ссылку на ролик или аудио/видеофайл — извлеку текст речи.')
+            self._say_quick(message, text, via)
             return True
         on, confirm = self.toolbox.policy('start_task')
         if not on or confirm:
             return False
         try:
-            task = self.tasks.create_transcription(urls, goal=text)
+            if action == 'translate':
+                target = 'en' if re.search(r'на\s+(?:англ|english)|по-англий', text, re.I) else 'ru'
+                source = 'en' if re.search(r'(?:с|из)\s+(?:англ|english)', text, re.I) else ('ru' if re.search(r'(?:с|из)\s+(?:рус|russian)', text, re.I) else 'auto')
+                task = self.tasks.create_video_translation(urls, source_language=source, target_language=target, goal=text)
+            else:
+                task = self.tasks.create_transcription(urls, goal=text)
         except Exception as error:
-            self._say_quick('Не удалось запустить транскрибацию: ' + str(error), text, via)
+            self._say_quick(('Не удалось запустить перевод: ' if action == 'translate' else 'Не удалось запустить транскрибацию: ') + str(error), text, via)
             return True
         self._video_pending = None
         ready = getattr(task, 'status', '') == 'done'

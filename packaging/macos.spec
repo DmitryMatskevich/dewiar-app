@@ -9,7 +9,7 @@ root = Path(SPECPATH).parent
 datas = [(str(root / name), name) for name in ("core", "ui", "data", "icons")]
 datas += [(str(root / "tools/subscription_ui_smoke.js"), "tools")]
 binaries = []
-hidden = [p.stem for p in (root / "core").glob("*.py")] + ["macshell", "Vision", "webview.platforms.cocoa", "logging.handlers"]
+hidden = [p.stem for p in (root / "core").glob("*.py")] + ["macshell", "Vision", "ScreenCaptureKit", "webview.platforms.cocoa", "logging.handlers"]
 for package in ("onnxruntime", "onnx_asr", "huggingface_hub", "vosk", "piper", "imageio_ffmpeg"):
     data, binary, imports = collect_all(package)
     datas += data

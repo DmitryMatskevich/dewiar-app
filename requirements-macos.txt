@@ -23,3 +23,4 @@ pyobjc-framework-AVFoundation>=12.2.2
 pyobjc-framework-ApplicationServices>=12.2.2
 pyobjc-framework-Contacts>=12.2.2
 pyobjc-framework-Vision>=12.2.2
+pyobjc-framework-ScreenCaptureKit>=12.2.2

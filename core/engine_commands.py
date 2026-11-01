@@ -11,6 +11,62 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 class CommandsMixin:
     # ---------- команды из интерфейса ----------
 
+    def _screenshot_cmd(self, text):
+        """Two local steps without invoking an LLM, with normal screen permission policy."""
+        from screen_document import is_command
+        if not is_command(text):
+            return False
+        on, confirm = self.toolbox.policy("save_screenshot")
+        if not on:
+            self._say_quick("Снимок экрана недоступен. Проверьте разрешение «Экран» в «Безопасности» и настройку «Скриншот» в «Руки → Умения».", text)
+            return True
+        with self._turn_lock:
+            self._cancel_locked()
+            self.turn_n += 1
+            turn = Turn(self.turn_n)
+            turn.asked = text
+            self.turn = turn
+        self.emit("heard", text=text)
+        self.set_state("thinking")
+
+        def work():
+            from tools import t_save_screenshot
+            sentences = queue.Queue()
+            speaker = threading.Thread(target=self._speak_worker, args=(turn, sentences), daemon=True)
+            speaker.start()
+            msg = "Создание снимка отменено."
+            try:
+                if confirm and not self._confirm(turn, "Сделать снимок экрана без окон Dewiar и распознать текст локально?", sentences):
+                    return
+                if turn.cancel.is_set():
+                    return
+                # Recheck policy after a confirmation dialog or a settings change.
+                if not self.toolbox.policy("save_screenshot")[0]:
+                    msg = "Снимок не сделан: доступ к экрану отключён в Dewiar."
+                else:
+                    self.emit("tool", name="save_screenshot", title="Скриншот", status="run")
+                    msg = t_save_screenshot({}, {"workspace": self.workspace, "engine": self,
+                                                "screenshot_cancelled": turn.cancel.is_set})
+                    self.emit("tool", name="save_screenshot", title="Скриншот", status="done", result=msg)
+            except Exception as exc:
+                msg = "Не удалось создать документ со снимком: " + str(exc)
+                self.emit("tool", name="save_screenshot", title="Скриншот", status="error", error=str(exc))
+            finally:
+                if not turn.cancel.is_set():
+                    self.emit("answer", text=msg, done=True)
+                    sentences.put(msg)
+                    self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": msg,
+                                     "who": self.s.get("persona")}]
+                    self._conv_after()
+                sentences.put(None)
+                speaker.join()
+                with self._turn_lock:
+                    if self.turn is turn:
+                        self.turn = None
+                        self.set_state("idle")
+        threading.Thread(target=work, name="screen-document", daemon=True).start()
+        return True
+
     def switch_persona(self, pid):
         if pid not in {p["id"] for p in self.personas.all()}:
             raise ValueError("нет такого персонажа")
@@ -1544,6 +1600,33 @@ class CommandsMixin:
                     sources.append(str(dst))
             previous = set(self.tasks.tasks)
             task = self.tasks.create_transcription(sources, language=str(a.get('language') or 'ru'))
+            return dict(task.public(), reused=task.id in previous)
+        if cmd == 'media_translate':
+            sources = a.get('sources') or []
+            uploads = a.get('files') or []
+            if not isinstance(sources, list) or not isinstance(uploads, list) or not 1 <= len(sources) + len(uploads) <= 200 or not all(isinstance(s, str) and 0 < len(s.strip()) <= 8192 for s in sources):
+                raise ValueError('Укажите от 1 до 200 файлов или ссылок, по одному источнику на строку')
+            if len(uploads) > 10:
+                raise ValueError('Для большого пакета выберите файлы через «Выбрать файлы…»')
+            if uploads:
+                import base64, hashlib
+                sources = list(sources)
+                for upload in uploads:
+                    raw = str(upload.get('b64') or '')
+                    if len(raw) > 16_000_000:
+                        raise ValueError('Большой файл выберите через «Выбрать файлы…», без отправки вложением чата')
+                    data = base64.b64decode(raw.split(',', 1)[-1] if raw.startswith('data:') else raw, validate=True)
+                    if not data:
+                        raise ValueError('Выбран пустой файл')
+                    name = re.sub(r'[\\/:*?"<>|]', '_', Path(str(upload.get('name') or 'video.mp4')).name)[:120]
+                    dst = self.workspace.ensure() / '.media-cache/uploads' / hashlib.sha256(data).hexdigest() / name
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    if not dst.exists(): dst.write_bytes(data)
+                    sources.append(str(dst))
+            previous = set(self.tasks.tasks)
+            task = self.tasks.create_video_translation(sources,
+                                                       source_language=str(a.get('source_language') or 'auto'),
+                                                       target_language=str(a.get('target_language') or 'ru'))
             return dict(task.public(), reused=task.id in previous)
         if cmd in ('task_team_set','task_team_restart'):
             team = a.get('team') if 'team' in a else self.tasks.get(a.get('id')).data.get('team',{})
