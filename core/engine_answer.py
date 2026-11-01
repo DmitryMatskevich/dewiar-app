@@ -738,7 +738,7 @@ class AnswerMixin:
             f"{dv['ram']} ГБ памяти, {dv['cores']} ядер" + ("" if dv["level"] == "ok" else f" — мало ({'лёгкий режим' if dv['light'] else 'может тормозить'})"),
             dv["advice"], "dw", warn=True)
         add("Микрофон", st.get("input"), st.get("input") or "не найден",
-            "Подключите микрофон и выберите его в «Звук и поведение».", "sound")
+            "Подключите микрофон и выберите его в «Голос».", "voice")
         prof = self.s.active_llm()
         if not prof:
             add("Модели", False, "модель не подключена", "Выберите в разделе «Модели», где будет думать ассистент.", "brain")

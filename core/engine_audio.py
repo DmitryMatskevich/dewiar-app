@@ -1383,7 +1383,7 @@ class AudioMixin:
         if len(self._echo_hits) >= 2 and now > self._echo_until:
             self._echo_until = now + 600                  # 10 минут слушаем только по имени
             self.note("Я слышу сам себя: звук из колонок попадает в микрофон. Наденьте наушники или включите "
-                      "эхоподавление (студия → «Звук и поведение»). Пока отвечаю только когда зовут по имени.")
+                      "эхоподавление (студия → «Голос»). Пока отвечаю только когда зовут по имени.")
         self.set_state("idle")
 
     def handle_text(self, text, by_wake, follow, forced=None, dur=None):
