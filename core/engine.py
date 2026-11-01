@@ -88,7 +88,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.dictation_finish_requested = False
         self._mic_ring = collections.deque(maxlen=40)   # последние ~1,2 с микрофона: удержание начинается с самого нажатия
         self.asr_names = []
-        self.status = {"aec": False, "stt": "", "stt_ready": False, "tts": "", "llm": "", "note": "",
+        self.status = {"aec": False, "stt": "", "stt_ready": False, "tts": "", "llm": "", "model": "", "note": "",
                        "input": "", "downloads": {}, "loading": {}}
         self.piper = PiperTTS()
         self.vosk_tts = VoskTTS(MODELS_DIR)

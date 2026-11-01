@@ -984,7 +984,7 @@ core.on("hello", d => {
   setLocal(d.settings.privacy && d.settings.privacy.local_only);
   setModelSettings(d.settings.llm); refreshModelHint();
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
-  applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status); selectedMic = (d.settings.audio && d.settings.audio.input) || ""; setAskModel(d.status && d.status.llm);
+  applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status); selectedMic = (d.settings.audio && d.settings.audio.input) || ""; setAskModel(d.status && d.status.model);
   if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Модели» → «Подключить бесплатно».", true); }
 })
 .on("offline", () => { setState("offline"); $("bubble").title = "Нет связи с ядром. Это индикатор режима ввода; модель выбирается отдельной кнопкой в строке сообщения."; $("bubble").setAttribute("aria-label", $("bubble").title); })
@@ -1046,7 +1046,7 @@ core.on("hello", d => {
 .on("push", e => { showCap(null, `${e.title}${e.text ? " — " + e.text : ""}`, !!e.critical && e.title.startsWith("⚠")); hideCapLater(9000); })
 .on("sleep", () => { showCap(null, "Сплю. Позовите по имени — или нажмите на облик.", false); hideCapLater(2500); })
 .on("interrupted", () => hideCapLater(1500))
-.on("status", e => { note(e.status); if (e.status && typeof e.status === "object") setAskModel(e.status.llm || e.status.model); })
+.on("status", e => { note(e.status); if (e.status && typeof e.status === "object" && "model" in e.status) setAskModel(e.status.model); })
 .on("muted", e => { muted = !!e.on; $("b-mic").classList.toggle("on", muted); updateAudioMode(audioMode); })
 .on("calib", e => {
   if (e.step === "listen") showCap("", `Скажите «${e.name}» — 1 из ${e.need}`);

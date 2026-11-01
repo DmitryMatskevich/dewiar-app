@@ -118,7 +118,7 @@ class AudioMixin:
         self.status.update(stt=self.stt.name, stt_ready=getattr(self.stt, "ready", True),
                            tts={"piper": "Piper", "vosk": "Vosk TTS" + ("" if self.vosk_tts.ready else " (загружается, пока Piper)"),
                                 "remote": "Голос Dewiar" if (tt.get("remote") or {}).get("cloud") else "Удалённый голос", "elevenlabs": "ElevenLabs", "espeak": "Голос Windows" if os.name == "nt" else "Голос macOS" if __import__("sys").platform == "darwin" else "eSpeak", "off": "Выключен"}.get(tt["engine"], tt["engine"]),
-                           llm=(prof or {}).get("name", ""))
+                           llm=(prof or {}).get("name", ""), model=(prof or {}).get("model", ""))
         self.emit("status", status=self.status)
 
     def _background_loads(self):
