@@ -483,7 +483,7 @@ class CommandsMixin:
                 from tools import desktop_env
                 from PIL import Image
                 import io
-                cfg = self.s.get("prompter", {})
+                cfg = self.s.get("prompter", default={})
                 source = str(cfg.get("capture_source") or "screen")
                 data = capture_screen(desktop_env(), source=source,
                                       region=cfg.get("capture_region") or {},
