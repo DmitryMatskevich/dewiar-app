@@ -215,7 +215,7 @@ async function chatAddFiles(list) {
     try {
       if (/^image\//.test(f.type) && !/svg/.test(f.type)) {
         const url = await chatShrink(f);
-        chAtts.push({ kind: "image", name: (f.name || "картинка").replace(/\.\w+$/, "") + ".jpg", b64: url, url, size: Math.round(url.length * 0.75) });
+        chAtts.push({ kind: "image", name: (f.name || "картинка").replace(/\.\w+$/, "") + ".jpg", b64: url, url, ocrData: f.size <= 10 * 1024 * 1024 ? await chatB64(f) : null, size: Math.round(url.length * 0.75) });
       } else if (f.size > CH_MAX) $("#ch-res").textContent = `«${f.name}» больше 11 МБ — положите его в папку ассистента`;
       else chAtts.push({ kind: "file", name: f.name, b64: await chatB64(f), size: f.size });
     } catch (e) { $("#ch-res").textContent = `«${f.name}»: ${e.message}`; }
@@ -225,7 +225,18 @@ async function chatAddFiles(list) {
 }
 function chatAttsRender() {
   $("#ch-atts").innerHTML = chAtts.map((a, i) => `<span class="ch-chip">${a.kind === "image" ? `<img src="${escH(a.url)}" alt="">` : `<i>${escH((a.name.split(".").pop() || "").slice(0, 4).toUpperCase())}</i>`}<b>${escH(a.name)}</b><button data-i="${i}" title="Убрать" aria-label="Убрать">✕</button></span>`).join("");
-  $$("#ch-atts button").forEach(b => b.onclick = () => { chAtts.splice(+b.dataset.i, 1); chatAttsRender(); });
+  $$("#ch-atts button").forEach(b => {
+    b.onclick = () => { chAtts.splice(+b.dataset.i, 1); chatAttsRender(); };
+    const attachment = chAtts[+b.dataset.i];
+    if (attachment.kind !== "image") return;
+    const ocr = document.createElement("button"); ocr.type = "button"; ocr.className = "image-ocr-action";
+    ocr.textContent = "Извлечь текст"; ocr.title = "Распознать текст картинки локально (OCR)";
+    ocr.onclick = () => window.extractImageText(attachment, text => {
+      const input = $("#ch-text"); input.value = [input.value.trimEnd(), text].filter(Boolean).join("\n\n");
+      input.dispatchEvent(new Event("input", {bubbles:true})); input.focus();
+    });
+    b.before(ocr);
+  });
 }
 function chatSend() {
   const t = $("#ch-text"), q = t.value.trim(); if (!q && !chAtts.length) return;

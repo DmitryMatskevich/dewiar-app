@@ -302,6 +302,9 @@ class CommandsMixin:
         return CommandsMixin._command(self, cmd, a)
 
     def _command(self, cmd, a):
+        if cmd == "image_ocr":
+            from image_ocr import extract
+            return extract(a.get("image"))
         if isinstance(cmd,str) and cmd.startswith('contacts_'):
             from contacts_book import get_book
             book=get_book(self)

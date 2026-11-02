@@ -245,5 +245,6 @@ echo "== Сайт и телефон"
 run "сервер речи"                   $PY "$T/speech_server_test.py"
 run "телефон: руки"                 $PY "$T/android_hands_test.py"
 run "телефон: журнал разговора"     $PY "$T/android_log_test.py"
+run "картинка: локальный OCR и проверка данных" $PY "$T/image_ocr_test.py"
 run "транскрибация: безопасное чтение активной вкладки браузера" $PY "$T/transcription_sources_test.py"
 exit $FAIL

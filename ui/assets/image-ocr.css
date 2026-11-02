@@ -1,0 +1,17 @@
+.image-ocr-panel { box-sizing:border-box; width:min(94vw,650px); max-height:88vh; overflow:auto; margin:auto; padding:18px; border:1px solid #637189; border-radius:18px; background:#141c29; color:#edf3fa; font:14px/1.45 sans-serif; text-align:left; }
+.image-ocr-panel::backdrop { background:#0008; }
+.image-ocr-panel header,.image-ocr-panel footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.image-ocr-panel h2 { margin:0; font-size:18px; }
+.image-ocr-panel p { margin:12px 0; }
+.image-ocr-panel label { display:block; }
+.image-ocr-panel textarea { box-sizing:border-box; width:100%; min-height:160px; margin:6px 0; padding:10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420; color:inherit; font:inherit; resize:vertical; }
+.image-ocr-panel button { min-height:36px; padding:6px 10px; border:1px solid #7a8a9f; border-radius:9px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.image-ocr-panel button:focus-visible,.image-ocr-panel textarea:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
+.image-ocr-panel button:disabled { opacity:.5; cursor:default; }
+.image-ocr-panel #image-ocr-insert { background:#315f92; color:white; }
+.image-ocr-panel #image-ocr-error { color:#ffaaaa; }
+body.light .image-ocr-panel { background:#f1f5fa; color:#192b40; }
+body.light .image-ocr-panel textarea { background:white; }
+body.light .image-ocr-panel #image-ocr-error { color:#9b1a29; }
+.att,.ch-chip { flex-wrap:wrap; }
+.att button.image-ocr-action,.ch-chip button.image-ocr-action { min-height:30px; padding:4px 7px; font-size:12px; line-height:1.3; border:1px solid currentColor; border-radius:7px; color:inherit; flex:none; }

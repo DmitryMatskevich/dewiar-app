@@ -329,5 +329,7 @@ run "дневник ассистента: ночная запись, вывод�
 run "отчёт: только новое с прошлого"    $PY "$T/report_fresh_test.py"
 run "радио: какие станции у вас играют" $PY "$T/radio_health_test.py"
 
+run "картинка: локальный OCR и проверка данных" $PY "$T/image_ocr_test.py"
 run "транскрибация: безопасное чтение активной вкладки браузера" $PY "$T/transcription_sources_test.py"
 run "транскрибация: буфер и выбор браузера в диалоге" $PY "$T/transcription_sources_ui_test.py"
+run "картинка: OCR в виджете и студии" $PY "$T/image_ocr_ui_test.py"

@@ -1857,6 +1857,15 @@ function renderAtts() {
     if (a.kind === "image") d.querySelector("img").src = a.url; else d.querySelector(".ic").textContent = ext || "ФАЙЛ";
     d.querySelector("span").textContent = a.name;
     d.querySelector("button").onclick = (ev) => { ev.stopPropagation(); atts.splice(i, 1); renderAtts(); };
+    if (a.kind === "image") {
+      const ocr = document.createElement("button"); ocr.type = "button"; ocr.className = "image-ocr-action";
+      ocr.textContent = "Извлечь текст"; ocr.title = "Распознать текст картинки локально (OCR)";
+      ocr.onclick = ev => { ev.stopPropagation(); window.extractImageText(a, text => {
+        const input = $("askin"); input.value = [input.value.trimEnd(), text].filter(Boolean).join("\n\n");
+        input.dispatchEvent(new Event("input", {bubbles:true})); openAsk(); input.focus();
+      }); };
+      d.insertBefore(ocr, d.querySelector("button"));
+    }
     box.appendChild(d);
   });
   $("askbox").classList.toggle("has", !!$("askin").value.trim() || atts.length > 0);
@@ -1864,7 +1873,7 @@ function renderAtts() {
 async function addFiles(list) {
   for (const f of list) {
     try {
-      if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f) });
+      if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f), ocrData: f.size <= 10 * 1024 * 1024 ? await b64of(f) : null });
       else if (f.size > MAXF) showErr(`«${f.name}» больше 11 МБ — положите его в папку ассистента`);
       else atts.push({ kind: "file", name: f.name, b64: await b64of(f), size: f.size });
     } catch (err) { showErr(err); }
@@ -2102,6 +2111,8 @@ $("askin").addEventListener("keydown", (e) => {
 <script src="assets/contact-suggestion.js"></script>
 <link rel="stylesheet" href="assets/transcribe-panel.css">
 <script src="assets/transcribe-panel.js"></script>
+<link rel="stylesheet" href="assets/image-ocr.css">
+<script src="assets/image-ocr.js"></script>
 <script src="assets/translate-panel.js"></script>
 <script>
 DewiarLinks.bind(document.getElementById('askin'), {parent:'#askbox',before:true});
