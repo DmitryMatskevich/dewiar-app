@@ -1299,6 +1299,41 @@ def t_mail(a, ctx):
         raise ToolError(str(e)) from e
 
 
+def t_mail_importance(a, ctx):
+    """Manage persistent, explainable importance rules without reading message bodies."""
+    service = _mail(ctx)
+    action = a.get("action", "list")
+    try:
+        if action == "list":
+            rules = service.rules.get("importance_rules", [])
+            if not rules:
+                return "Правил важности по отправителю, адресату или теме пока нет."
+            return "\n".join(f"[{r['id']}] {'Включено' if r.get('enabled', True) else 'Выключено'} · "
+                f"{'важное' if r.get('importance', 'important') == 'important' else 'обычное'} · "
+                + (f"отправитель {r['sender_address']}" if r.get('sender_address') else
+                   f"адресат {r['recipient_address']}" if r.get("recipient_address") else
+                   f"тема {'точно равна' if r.get('subject_match') == 'exact' else 'содержит'} «{r['subject']}»")
+                + (f" · {r['name']}" if r.get('name') else "") for r in rules)
+        if action == "add":
+            result = service.importance_rule_add(sender_address=a.get("sender_address", ""),
+                recipient_address=a.get("recipient_address", ""),
+                subject=a.get("subject", ""), subject_match=a.get("subject_match", "contains"),
+                importance=a.get("importance", "important"), name=a.get("name", ""))
+            rule = result["rule"]
+            criterion = f"отправитель {rule['sender_address']}" if rule["sender_address"] else (
+                f"адресат {rule['recipient_address']}" if rule.get("recipient_address") else
+                f"тема {'точно равна' if rule['subject_match'] == 'exact' else 'содержит'} «{rule['subject']}»")
+            return (f"Правило важности сохранено и применено к уже загруженным письмам и новым поступлениям: "
+                f"{criterion} → {'важное' if rule['importance'] == 'important' else 'обычная важность'}. "
+                f"ID правила: {rule['id']}. Заголовки писем не открывались.")
+        if action == "remove":
+            service.importance_rule_remove(a.get("rule_id", ""))
+            return "Правило удалено. Загруженные письма пересчитаны по оставшимся правилам."
+        raise ToolError("Действие должно быть list, add или remove.")
+    except (ValueError, OSError) as e:
+        raise ToolError(str(e)) from e
+
+
 def _format_mail_draft(draft):
     return (f"Черновик {draft['id']} · версия {draft['revision']} · состояние: {draft['state']}\n"
             f"От: {draft['from']}\nКому: {', '.join(draft['to'])}\nКопия: {', '.join(draft['cc']) or '—'}\n"
@@ -2645,6 +2680,23 @@ TOOLS = {
                 "limit": {"type": "integer"}, "refresh": {"type": "boolean"}, "important": {"type": "boolean"},
                 "unanswered": {"type": "boolean"}, "unread_only": {"type": "boolean"}}),
              "safe", t_mail, "Почта"),
+    "mail_importance": ("Создавать и удалять постоянные правила важности писем по точному адресу ОТПРАВИТЕЛЯ, по точному "
+                        "адресу АДРЕСАТА любого письма или по теме. "
+                        "Тема поддерживает subject_match=exact (тема целиком, без учёта регистра) и contains "
+                        "(тема содержит фразу, без учёта регистра). importance=important или normal. Правило сразу "
+                        "пересчитывает заголовки в локальном индексе и применяется к будущим письмам; текст писем не читает. "
+                        "Если пользователь просит разобрать письма и распределить важность, сначала просмотри заголовки "
+                        "через mail list/search, затем создай узкие правила по конкретным адресам или темам, которые "
+                        "соответствуют его задаче; тела писем для этого не открывай. action=list показывает правила, add создаёт или обновляет "
+                        "правило критерия, remove удаляет его по rule_id.",
+                        S({"action": {"type": "string", "enum": ["list", "add", "remove"]},
+                           "sender_address": {"type": "string", "description": "точный адрес отправителя; используй только один критерий"},
+                           "recipient_address": {"type": "string", "description": "точный адрес в Кому, Копия или получен на; используй только один критерий"},
+                           "subject": {"type": "string", "description": "точная тема или фраза в теме; используй только один критерий"},
+                           "subject_match": {"type": "string", "enum": ["exact", "contains"]},
+                           "importance": {"type": "string", "enum": ["important", "normal"]},
+                           "name": {"type": "string"}, "rule_id": {"type": "string"}}, ["action"]),
+                        "safe", t_mail_importance, "Правила важности писем"),
     "mail_reply": ("Подготовить, открыть, изменить или отправить ответ всем. prepare/revise/get не отправляют письмо. "
                    "Для send Dewiar показывает полный текст, отправителя, адресатов и тему и обязательно спрашивает подтверждение. "
                    "После любого изменения покажи пользователю новую полную версию и её id/revision.",
@@ -2860,7 +2912,7 @@ class Toolbox:
             return True, self.mcp.needs_confirm(name) if conf is None else bool(conf)
         if name not in TOOLS:
             return False, False
-        if name in ("send_email", "read_emails", "read_email", "mail", "mail_reply"):     # только когда почта подключена
+        if name in ("send_email", "read_emails", "read_email", "mail", "mail_reply", "mail_importance"):     # только когда почта подключена
             m = self.hooks.get("mail")
             if not (m and m.configured()):
                 return False, False

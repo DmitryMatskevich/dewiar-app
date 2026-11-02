@@ -1,5 +1,5 @@
 /* Почтовый центр: IMAP accounts, cached triage, editable rules and version-confirmed replies. */
-let mlAccounts = [], mlSelected = "", mlCurrentMessage = null, mlDraft = null;
+let mlAccounts = [], mlSelected = "", mlCurrentMessage = null, mlDraft = null, mlRulesData = {};
 let mlView = "all", mlAccountFilter = "", mlSelectedMessageId = "";
 document.querySelector('nav button[data-p="mail"]').addEventListener("click", () => {
   if (core.connected) mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
@@ -21,6 +21,48 @@ function mlRenderAccounts() {
   });
   const active = mlAccounts.filter(a => a.enabled).length;
   $("#ml-connection-summary").textContent = `${active} из ${mlAccounts.length} подключено`;
+}
+function mlRenderImportanceRules(rules) {
+  const box = $("#ml-importance-rules"); box.replaceChildren();
+  if (!rules.length) { box.textContent = "Правил по отправителям и темам пока нет."; box.className = "ml-importance-rules hint"; return; }
+  box.className = "ml-importance-rules";
+  rules.forEach(rule => {
+    const row = document.createElement("div"); row.className = "ml-importance-rule";
+    const label = document.createElement("span");
+    label.textContent = rule.sender_address ? "Письма от " + rule.sender_address : rule.recipient_address ?
+      "Письма на адрес " + rule.recipient_address :
+      "Тема " + (rule.subject_match === "exact" ? "совпадает с" : "содержит") + " «" + rule.subject + "»";
+    if (rule.name) label.textContent += " · " + rule.name;
+    const enabledLabel = document.createElement("label"), enabled = document.createElement("input");
+    enabled.type = "checkbox"; enabled.checked = rule.enabled !== false; enabled.setAttribute("aria-label", "Правило включено");
+    enabledLabel.append(enabled, document.createTextNode("Включено"));
+    enabled.onchange = () => mlChangeImportanceRule(rule.id, { enabled: enabled.checked });
+    const priority = document.createElement("select"); priority.setAttribute("aria-label", "Назначенная важность");
+    [["important", "Важное"], ["normal", "Обычное"]].forEach(([value, title]) => {
+      const option = document.createElement("option"); option.value = value; option.textContent = title; priority.appendChild(option);
+    });
+    priority.value = rule.importance || "important";
+    priority.onchange = () => mlChangeImportanceRule(rule.id, { importance: priority.value });
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "btn"; remove.textContent = "Удалить";
+    remove.onclick = () => mlRemoveImportanceRule(rule.id);
+    row.append(label, enabledLabel, priority, remove); box.appendChild(row);
+  });
+}
+async function mlSaveImportanceRules(nextRules) {
+  const state = $("#ml-ir-state");
+  try {
+    const rules = JSON.parse($("#ml-rules").value); rules.importance_rules = nextRules;
+    const result = await core.call("mail_rules_save", { rules });
+    mlRulesData = result.rules; $("#ml-rules").value = JSON.stringify(mlRulesData, null, 2);
+    mlRenderImportanceRules(mlRulesData.importance_rules || []); state.className = "res ok";
+    state.textContent = "Правило сохранено и применено к заголовкам писем."; await mlList();
+  } catch (e) { state.className = "res bad"; state.textContent = e.message; }
+}
+function mlChangeImportanceRule(id, patch) {
+  mlSaveImportanceRules((mlRulesData.importance_rules || []).map(rule => rule.id === id ? { ...rule, ...patch } : rule));
+}
+function mlRemoveImportanceRule(id) {
+  mlSaveImportanceRules((mlRulesData.importance_rules || []).filter(rule => rule.id !== id));
 }
 function mlSetView(view) {
   mlClearMessage();
@@ -68,7 +110,8 @@ async function mlLoad() {
   mlAccounts = await core.call("mail_accounts");
   if (!mlSelected || !mlAccounts.some(a => a.id === mlSelected)) mlSelected = (mlAccounts.find(a => a.enabled) || mlAccounts[0] || {}).id || "";
   mlRenderAccounts(); if (mlSelected) await mlSelect(mlSelected);
-  const r = await core.call("mail_rules_get"); $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
+  const r = await core.call("mail_rules_get"); mlRulesData = r.rules; $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
+  mlRenderImportanceRules(r.rules.importance_rules || []);
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
   if (new URLSearchParams(location.search).has("unread")) mlSetView("unread");
 }
@@ -179,9 +222,30 @@ $("#ml-draft-send").onclick = async ev => {
 };
 $("#ml-rules-save").onclick = async ev => { const r = $("#ml-rules-state"); ev.target.disabled = true;
   try { const result = await core.call("mail_rules_save", { rules: JSON.parse($("#ml-rules").value) });
-    $("#ml-rules").value = JSON.stringify(result.rules, null, 2); r.className = "res ok";
+    mlRulesData = result.rules; $("#ml-rules").value = JSON.stringify(result.rules, null, 2); mlRenderImportanceRules(result.rules.importance_rules || []); r.className = "res ok";
     r.textContent = "Правила проверены, сохранены и применены к индексу."; await mlLoad(); }
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
+
+$("#ml-ir-add").onclick = async ev => {
+  const sender = $("#ml-ir-sender").value.trim(), recipient = $("#ml-ir-recipient").value.trim();
+  const subject = $("#ml-ir-subject").value.trim(), state = $("#ml-ir-state");
+  if ([sender, recipient, subject].filter(Boolean).length !== 1) { state.className = "res bad"; state.textContent = "Заполните только одно поле: отправитель, адресат или тема."; return; }
+  ev.target.disabled = true;
+  try {
+    const rules = JSON.parse($("#ml-rules").value), current = rules.importance_rules || [];
+    const existing = current.find(rule => sender ? rule.sender_address?.toLowerCase() === sender.toLowerCase() :
+      recipient ? rule.recipient_address?.toLowerCase() === recipient.toLowerCase() :
+      !rule.sender_address && !rule.recipient_address && rule.subject?.trim().toLocaleLowerCase() === subject.toLocaleLowerCase() &&
+      rule.subject_match === $("#ml-ir-match").value);
+    const rule = { id: existing?.id || "priority-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7),
+      name: $("#ml-ir-name").value.trim(), sender_address: sender, recipient_address: recipient, subject,
+      subject_match: subject ? $("#ml-ir-match").value : "contains", importance: $("#ml-ir-importance").value, enabled: true };
+    const next = existing ? current.map(item => item.id === existing.id ? rule : item) : [...current, rule];
+    await mlSaveImportanceRules(next);
+    if ($("#ml-ir-state").classList.contains("ok")) { $("#ml-ir-sender").value = ""; $("#ml-ir-recipient").value = ""; $("#ml-ir-subject").value = ""; $("#ml-ir-name").value = ""; }
+  } catch (e) { state.className = "res bad"; state.textContent = e.message; }
+  finally { ev.target.disabled = false; }
+};
 
 // A bridge reconnect must not activate Mail while the user is in another section.
 function mlLoadIfVisible() {

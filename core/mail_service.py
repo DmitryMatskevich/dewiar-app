@@ -124,6 +124,38 @@ class MailService:
                     # A broad recipient-only form rule can classify ordinary correspondence.
                     if not (match.get("from_addresses") or match.get("subject_prefixes")):
                         raise MailServiceError(f"Форма {item['id']}: для включения укажите отправителя или начало темы.")
+        importance_rules = rules.setdefault("importance_rules", [])
+        if not isinstance(importance_rules, list):
+            raise MailServiceError("importance_rules должен быть списком.")
+        rule_ids = set()
+        for item in importance_rules:
+            if not isinstance(item, dict) or not re.fullmatch(r"[a-z0-9_-]{1,60}", str(item.get("id") or "")):
+                raise MailServiceError("В importance_rules найдено правило без корректного id.")
+            if item["id"] in rule_ids:
+                raise MailServiceError(f"В importance_rules повторяется id {item['id']}.")
+            rule_ids.add(item["id"])
+            sender = str(item.get("sender_address") or "").strip().lower()
+            recipient = str(item.get("recipient_address") or "").strip().lower()
+            subject = str(item.get("subject") or "").strip()
+            if sum(bool(x) for x in (sender, recipient, subject)) != 1:
+                raise MailServiceError(f"Правило {item['id']}: задайте ровно один критерий — отправитель, адресат или тема.")
+            for label, address in (("отправителя", sender), ("адресата", recipient)):
+                if address and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", address):
+                    raise MailServiceError(f"Правило {item['id']}: неверный адрес {label}.")
+            if subject and len(subject) > 200:
+                raise MailServiceError(f"Правило {item['id']}: тема или фраза не должна быть длиннее 200 символов.")
+            subject_match = item.get("subject_match", "contains")
+            if subject and subject_match not in ("exact", "contains"):
+                raise MailServiceError(f"Правило {item['id']}: subject_match должен быть exact или contains.")
+            if item.get("importance", "important") not in ("important", "normal"):
+                raise MailServiceError(f"Правило {item['id']}: importance должен быть important или normal.")
+            item["sender_address"] = sender
+            item["recipient_address"] = recipient
+            item["subject"] = subject
+            item["subject_match"] = subject_match
+            item["importance"] = item.get("importance", "important")
+            item["enabled"] = bool(item.get("enabled", True))
+            item["name"] = str(item.get("name") or "")[:80]
         prefs = rules.get("reply_preferences") or {}
         self_addresses = prefs.get("confirmed_self_addresses", [])
         if not isinstance(self_addresses, list) or any(not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", str(x)) for x in self_addresses):
@@ -134,7 +166,7 @@ class MailService:
         path = DATA_DIR / "mail-rules.default.json"
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
-        return {"schema_version": 2, "accounts": [], "important_contacts": [], "important_recipient_groups": [],
+        return {"schema_version": 2, "accounts": [], "important_contacts": [], "important_recipient_groups": [], "importance_rules": [],
                 "website_forms": [], "exclusions": {"skip_from_self": True, "skip_sent_by_dewiar": True, "test_markers": ["Test", "Codex"]},
                 "reply_preferences": {"mode": "reply_all", "confirmed_self_addresses": [], "reply_from": "received_address",
                                       "quote_original": True, "include_own_address": True},
@@ -166,6 +198,53 @@ class MailService:
             self._load_accounts()
             self._reclassify()
         return self.rules_public()
+
+    def importance_rule_add(self, sender_address="", recipient_address="", subject="", subject_match="contains", importance="important", name=""):
+        """Add or update one sender, recipient or subject rule and reclassify cached messages."""
+        sender = str(sender_address or "").strip().lower()
+        recipient = str(recipient_address or "").strip().lower()
+        phrase = str(subject or "").strip()
+        if sum(bool(x) for x in (sender, recipient, phrase)) != 1:
+            raise MailServiceError("Укажите ровно одно: отправитель, адресат или тема письма.")
+        for label, address in (("отправителя", sender), ("адресата", recipient)):
+            if address and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", address):
+                raise MailServiceError("Неверный адрес " + label + ".")
+        if phrase and len(phrase) > 200:
+            raise MailServiceError("Тема или фраза не должна быть длиннее 200 символов.")
+        if phrase and subject_match not in ("exact", "contains"):
+            raise MailServiceError("Для темы выберите точное совпадение или вхождение фразы.")
+        if importance not in ("important", "normal"):
+            raise MailServiceError("Важность должна быть important или normal.")
+        rules = json.loads(json.dumps(self.rules))
+        items = rules.setdefault("importance_rules", [])
+        match_key = ("sender", sender) if sender else ("recipient", recipient) if recipient else ("subject", phrase.casefold(), subject_match)
+        def same_criterion(item):
+            if sender:
+                return (str(item.get("sender_address") or "").strip().lower(),) == match_key[1:]
+            if recipient:
+                return (str(item.get("recipient_address") or "").strip().lower(),) == match_key[1:]
+            return (str(item.get("subject") or "").strip().casefold(), item.get("subject_match", "contains")) == match_key[1:]
+        existing = next((item for item in items if same_criterion(item)), None)
+        if existing:
+            existing.update({"importance": importance, "enabled": True, "name": str(name or existing.get("name") or "")[:80]})
+            rule = existing
+        else:
+            rule = {"id": "priority-" + uuid.uuid4().hex[:12], "name": str(name or "")[:80],
+                    "sender_address": sender, "recipient_address": recipient, "subject": phrase,
+                    "subject_match": subject_match if phrase else "contains", "importance": importance, "enabled": True}
+            items.append(rule)
+        self.save_rules(rules)
+        return {"rule": rule, "rules": self.rules.get("importance_rules", [])}
+
+    def importance_rule_remove(self, rule_id):
+        rules = json.loads(json.dumps(self.rules))
+        items = rules.setdefault("importance_rules", [])
+        kept = [item for item in items if item.get("id") != str(rule_id)]
+        if len(kept) == len(items):
+            raise MailServiceError("Правило важности не найдено.")
+        rules["importance_rules"] = kept
+        self.save_rules(rules)
+        return {"removed": str(rule_id), "rules": kept}
 
     # -- account setup ---------------------------------------------------------
     def _migrate_legacy(self):
@@ -448,6 +527,28 @@ class MailService:
         own = {x.lower() for x in (self.rules.get("reply_preferences") or {}).get("confirmed_self_addresses", [])}
         if (self.rules.get("exclusions") or {}).get("skip_from_self", True) and sender in own:
             return False, ["Собственное письмо — учитывается в цепочке, но не считается новым важным"]
+        subject = str(msg.get("subject") or "").strip().casefold()
+        for rule in reversed(self.rules.get("importance_rules", [])):
+            if not rule.get("enabled", True):
+                continue
+            address = str(rule.get("sender_address") or "").strip().lower()
+            recipient = str(rule.get("recipient_address") or "").strip().lower()
+            phrase = str(rule.get("subject") or "").strip().casefold()
+            if address:
+                matched = sender == address
+            elif recipient:
+                targets = set(_addresses(msg.get("to"))) | set(_addresses(msg.get("cc")))
+                targets |= set(_addresses(msg.get("delivered_to"))) | set(_addresses(msg.get("x_original_to")))
+                matched = recipient in targets
+            else:
+                matched = subject == phrase if rule.get("subject_match", "contains") == "exact" else phrase in subject
+            if matched:
+                detail = ("отправитель " + address) if address else ("адресат " + recipient) if recipient else (
+                    "тема точно «" + str(rule["subject"]) + "»" if rule.get("subject_match") == "exact" else
+                    "тема содержит «" + str(rule["subject"]) + "»")
+                label = rule.get("name") or detail
+                return rule.get("importance", "important") == "important", [
+                    ("Важно: " if rule.get("importance", "important") == "important" else "Обычная важность: ") + label]
         reasons = []
         for group in self.rules.get("important_recipient_groups", []):
             if not group.get("enabled", True):

@@ -543,7 +543,19 @@
             </div>
           </details>
           <details class="ml-settings"><summary>Настройки важности и исключений</summary>
-        <p class="hint">JSON проверяется до сохранения; пустое условие не превращается в совпадение со всей почтой. Образец уведомления формы dcnt.ru нужен, чтобы безопасно включить её правило.</p>
+        <p class="hint">Добавьте правило по адресу отправителя, адресу в поле «Кому/Копия» или по теме. Для темы можно выбрать совпадение со всей темой или наличие фразы. Правило пересчитывает загруженные письма и применяется к новым.</p>
+        <div class="ml-priority-editor" aria-label="Новое правило важности">
+          <label class="f">Адрес отправителя<input id="ml-ir-sender" type="email" placeholder="client@example.org" autocomplete="off"></label>
+          <label class="f">Или адресат<input id="ml-ir-recipient" type="email" placeholder="team@example.org" autocomplete="off"></label>
+          <label class="f">Или тема / фраза<input id="ml-ir-subject" type="text" maxlength="200" placeholder="Счёт или точная тема" autocomplete="off"></label>
+          <label class="f">Совпадение темы<select id="ml-ir-match"><option value="exact">Тема совпадает целиком</option><option value="contains" selected>Тема содержит фразу</option></select></label>
+          <label class="f">Назначить важность<select id="ml-ir-importance"><option value="important">Важное</option><option value="normal">Обычное</option></select></label>
+          <label class="f">Название правила <i>необязательно</i><input id="ml-ir-name" type="text" maxlength="80" placeholder="Например, счета от поставщика"></label>
+          <button class="btn primary" id="ml-ir-add" type="button">Добавить правило</button>
+        </div>
+        <div id="ml-importance-rules" class="ml-importance-rules" aria-live="polite"></div>
+        <p id="ml-ir-state" class="res" role="status" aria-live="polite"></p>
+        <p class="hint">Правила ниже имеют приоритет над старыми категориями важности. Если подходят несколько новых правил, действует последнее в списке. JSON позволяет редактировать остальные правила и исключения.</p>
         <label class="f">Правила почты<textarea id="ml-rules" rows="18" spellcheck="false" style="font-family:ui-monospace,monospace"></textarea></label>
         <button class="btn" id="ml-rules-save">Проверить и сохранить правила</button><p id="ml-rules-state" class="res" role="status"></p>
           </details>

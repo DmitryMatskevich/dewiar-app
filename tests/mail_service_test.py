@@ -14,6 +14,7 @@ os.environ["DEWIAR_STATE_DIR"] = str(TMP / "state")
 sys.path.insert(0, str(ROOT / "core"))
 
 from mail_service import MailService, MailServiceError  # noqa: E402
+from tools import TOOLS, t_mail_importance  # noqa: E402
 
 
 class FakeMail:
@@ -80,6 +81,41 @@ class MailServiceTests(unittest.TestCase):
         self.assertIn("Склад в Подольске", reasons)
         self.assertFalse(self.service.classify({"from": "client@example.org", "to": "d@dcnt.ru",
             "subject": "anything", "reply_to": "client@example.org"})[0])
+
+    def test_importance_rules_match_sender_and_exact_or_partial_subject(self):
+        self.service.importance_rule_add(sender_address="client@example.org", importance="important")
+        self.service.importance_rule_add(recipient_address="sales@example.org", importance="important")
+        self.service.importance_rule_add(subject="Счёт №42", subject_match="exact", importance="normal")
+        self.service.importance_rule_add(subject="оплата", subject_match="contains", importance="important")
+        self.assertTrue(self.service.classify({"from": "Client <client@example.org>", "subject": "Любая тема"})[0])
+        self.assertTrue(self.service.classify({"from": "other@example.org", "to": "Sales <sales@example.org>"})[0])
+        self.assertFalse(self.service.classify({"from": "other@example.org", "subject": "СЧЁТ №42"})[0])
+        self.assertTrue(self.service.classify({"from": "other@example.org", "subject": "Re: Оплата заказа"})[0])
+        self.assertFalse(self.service.classify({"from": "other@example.org", "subject": "Счёт №420"})[0],
+                         "Exact subject rule must not match a longer subject")
+        self.service.importance_rule_add(sender_address="tb@lanmaster.ru", importance="normal")
+        self.assertFalse(self.service.classify({"from": "tb@lanmaster.ru", "subject": "любой"})[0],
+                         "An explicit normal rule must override the built-in important sender list")
+
+    def test_importance_rule_update_remove_and_validation(self):
+        created = self.service.importance_rule_add(sender_address="client@example.org", importance="important")
+        updated = self.service.importance_rule_add(sender_address="CLIENT@example.org", importance="normal")
+        self.assertEqual(created["rule"]["id"], updated["rule"]["id"])
+        self.assertFalse(self.service.classify({"from": "client@example.org"})[0])
+        with self.assertRaisesRegex(MailServiceError, "ровно одно"):
+            self.service.importance_rule_add(sender_address="client@example.org", subject="Order")
+        self.service.importance_rule_remove(created["rule"]["id"])
+        self.assertFalse(self.service.classify({"from": "client@example.org"})[0])
+
+    def test_ai_mail_importance_tool_creates_and_removes_rules(self):
+        self.assertIn("mail_importance", TOOLS)
+        with patch.object(self.service, "configured", return_value=True):
+            response = t_mail_importance({"action": "add", "subject": "заказ", "subject_match": "contains",
+                                          "importance": "important"}, {"mail": self.service})
+            self.assertIn("применено к уже загруженным письмам", response)
+            rule_id = self.service.rules["importance_rules"][0]["id"]
+            self.assertTrue(self.service.classify({"from": "buyer@example.org", "subject": "Статус заказа"})[0])
+            self.assertIn("удалено", t_mail_importance({"action": "remove", "rule_id": rule_id}, {"mail": self.service}))
 
     def test_rules_reject_broad_enabled_form(self):
         rules = json.loads(json.dumps(self.service.rules))

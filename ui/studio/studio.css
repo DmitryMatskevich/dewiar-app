@@ -2208,6 +2208,15 @@ html.framed .py-drawer { top: 38px; }
 #ml-draft-meta { overflow-wrap:anywhere; }
 .ml-settings { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--field) 50%,transparent); }
 .ml-settings > summary,.ml-server-settings > summary { min-height:32px; display:flex; align-items:center; cursor:pointer; font-weight:650; }
+.ml-priority-editor { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; align-items:end; margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--field); }
+.ml-priority-editor .f { min-width:0; margin:0; }
+.ml-priority-editor #ml-ir-add { min-height:40px; }
+.ml-importance-rules { display:grid; gap:7px; margin:10px 0; }
+.ml-importance-rule { display:grid; grid-template-columns:minmax(150px,1fr) auto auto; gap:10px; align-items:center; padding:9px 10px; border:1px solid var(--line); border-radius:9px; background:var(--field); }
+.ml-importance-rule > span { min-width:0; overflow-wrap:anywhere; font-size:12px; }
+.ml-importance-rule label { display:flex; gap:5px; align-items:center; font-size:12px; white-space:nowrap; }
+.ml-importance-rule select { max-width:130px; }
+.ml-importance-rule button { white-space:nowrap; }
 .ml-connect { padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--field); }
 .ml-connect h3 { margin:0 0 6px; font-size:14px; }
 .ml-credentials { align-items:center; flex-wrap:wrap; }
@@ -2222,12 +2231,14 @@ html.framed .py-drawer { top: 38px; }
 @media(max-width:760px) {
   .ml-mail-app { grid-template-columns:minmax(0,1fr); }
   .ml-sidebar { padding:8px; }
-  .ml-nav-group { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .ml-nav-group { grid-template-columns:repeat(4,minmax(0,1fr)); }
   .ml-view-item { justify-content:center; padding-inline:5px; text-align:center; font-size:12px; }
   .ml-accounts { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
   .ml-split,.ml-split:has(#ml-detail[hidden]) { grid-template-columns:minmax(0,1fr); }
   .ml-list,.ml-detail { max-height:none; }
   .ml-detail { grid-row:2; }
+  .ml-importance-rule { grid-template-columns:minmax(0,1fr) auto; }
+  .ml-importance-rule > span { grid-column:1/-1; }
 }
 @media(max-width:520px) {
   .ml-toolbar { align-items:stretch; flex-direction:column; }

@@ -53,7 +53,7 @@ class ToolsMixin:
         on, need_confirm = self.toolbox.policy(name)
         title = self.toolbox.title(name)
         log_args = args
-        if name in ("mail", "mail_reply") and isinstance(args, dict):
+        if name in ("mail", "mail_reply", "mail_importance") and isinstance(args, dict):
             log_args = {k: ("[почтовый текст скрыт]" if k in ("body", "patch") else v) for k, v in args.items()}
         log.info("🛠  %s %s", name, redact(json.dumps(log_args, ensure_ascii=False))[:200])
         if not on:

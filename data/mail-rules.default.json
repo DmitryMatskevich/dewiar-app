@@ -85,6 +85,7 @@
       "note": "Найден в письме 27.11.2020; проверить актуальность."
     }
   ],
+  "importance_rules": [],
   "important_recipient_groups": [
     {
       "id": "podolsk_warehouse",
