@@ -1,13 +1,26 @@
 /* Почтовый центр: IMAP accounts, cached triage, editable rules and version-confirmed replies. */
 let mlAccounts = [], mlSelected = "", mlCurrentMessage = null, mlDraft = null, mlRulesData = {};
 let mlView = "all", mlAccountFilter = "", mlSelectedMessageId = "";
+let mlAttentionShown = false;
 document.querySelector('nav button[data-p="mail"]').addEventListener("click", () => {
   if (core.connected) mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
 });
 
+const ML_PASSWORD_STATE = {
+  needs_access: "Нет доступа к паролю в Связке ключей — введите пароль или разрешите доступ",
+  rejected: "Почта не приняла пароль — введите новый пароль приложения",
+  locked: "Связка ключей заблокирована — разблокируйте её",
+};
 function mlStatus(a) {
+  if (a.needs_password) return ML_PASSWORD_STATE[a.credential_state] || "Нужен пароль";
   const checked = a.last_checked ? " · проверено " + new Date(a.last_checked * 1000).toLocaleString() : "";
   return (a.enabled ? "Подключён" : a.configured ? "Требуется проверка" : "Нужно подключить") + checked + (a.last_error ? " · " + a.last_error : "");
+}
+/* Как в Apple Mail: ящик без рабочего пароля сразу показывает поле ввода, а не окно Связки ключей. */
+function mlAskPassword(a) {
+  const settings = document.querySelector(".ml-settings"); if (settings) settings.open = true;
+  const r = $("#ml-res"); r.className = "res bad"; r.textContent = a.address + ": " + (ML_PASSWORD_STATE[a.credential_state] || "нужен пароль");
+  $("#ml-pass").focus();
 }
 function mlRenderAccounts() {
   const box = $("#ml-accounts"); box.replaceChildren();
@@ -16,7 +29,7 @@ function mlRenderAccounts() {
     b.className = "ml-account" + (a.id === mlAccountFilter ? " selected" : ""); b.setAttribute("aria-pressed", String(a.id === mlAccountFilter));
     const name = document.createElement("b"), addr = document.createElement("span"), status = document.createElement("small");
     name.textContent = a.label; addr.textContent = a.address; status.textContent = mlStatus(a);
-    status.className = a.enabled ? "ml-ok" : a.last_error ? "ml-error" : "";
+    status.className = a.needs_password ? "ml-error" : a.enabled ? "ml-ok" : a.last_error ? "ml-error" : "";
     b.append(name, addr, status); b.onclick = () => mlChooseAccount(a.id); box.appendChild(b);
   });
   const active = mlAccounts.filter(a => a.enabled).length;
@@ -95,7 +108,9 @@ async function mlSelect(id) {
   $("#ml-name").value = a.name || ""; $("#ml-login").value = a.login || "";
   $("#ml-smtp").value = a.smtp_host || ""; $("#ml-sport").value = a.smtp_port || "";
   $("#ml-sec").value = a.smtp_security || "ssl"; $("#ml-imap").value = a.imap_host || ""; $("#ml-iport").value = a.imap_port || "";
-  $("#ml-pass").value = ""; $("#ml-pass").placeholder = a.has_password ? "пароль сохранён; введите новый только для замены" : "пароль приложения";
+  $("#ml-pass").value = ""; $("#ml-pass").placeholder = a.needs_password ? "введите пароль приложения заново" :
+    a.has_password ? "пароль сохранён; введите новый только для замены" : "пароль приложения";
+  const unlock = $("#ml-unlock"); if (unlock) unlock.hidden = a.credential_state !== "needs_access";
   $("#ml-on").style.display = a.configured ? "" : "none";
   $("#ml-state").textContent = a.enabled ? "Подключён: " + a.address : a.configured ? "Настройки сохранены" : "";
   mlRenderAccounts();
@@ -109,11 +124,17 @@ async function mlSelect(id) {
 async function mlLoad() {
   mlAccounts = await core.call("mail_accounts");
   if (!mlSelected || !mlAccounts.some(a => a.id === mlSelected)) mlSelected = (mlAccounts.find(a => a.enabled) || mlAccounts[0] || {}).id || "";
+  // Открыли по значку «!» — сразу ящик, который ждёт пароль (один раз за открытие страницы).
+  const waiting = !mlAttentionShown && new URLSearchParams(location.search).has("attention") && mlAccounts.find(a => a.needs_password);
+  if (waiting) { mlAttentionShown = true; mlSelected = waiting.id; }
   mlRenderAccounts(); if (mlSelected) await mlSelect(mlSelected);
+  if (waiting) mlAskPassword(waiting);
   const r = await core.call("mail_rules_get"); mlRulesData = r.rules; $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
   mlRenderImportanceRules(r.rules.importance_rules || []);
+  $("#ml-badge-mode").value = (typeof S !== "undefined" && S?.ui?.mail_badge_mode === "important") ? "important" : "unread";
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
-  if (new URLSearchParams(location.search).has("unread")) mlSetView("unread");
+  const params = new URLSearchParams(location.search);
+  if (params.has("important")) mlSetView("important"); else if (params.has("unread")) mlSetView("unread");
 }
 async function mlList() {
   try {
@@ -184,22 +205,46 @@ $("#ml-save").onclick = async ev => {
       imap_host: $("#ml-imap").value.trim(), imap_port: +$("#ml-iport").value || 993 }});
     $("#ml-pass").value = ""; await mlLoad();
     const ok = result.test.smtp === "ok" && result.test.imap === "ok";
+    if (result.test.auth_rejected) {   // новый пароль не принят — сохранённый не изменён, поле снова ждёт ввода
+      r.className = "res bad"; r.textContent = "Почта не приняла этот пароль, он не сохранён. Проверьте пароль приложения и введите его ещё раз.";
+      $("#ml-pass").focus(); return;
+    }
     r.className = ok ? "res ok" : "res bad";
     r.textContent = ok ? "IMAP и SMTP подключены. Запускаю синхронизацию заголовков." :
       [result.test.smtp !== "ok" ? "SMTP: " + result.test.smtp : "", result.test.imap !== "ok" ? "IMAP: " + result.test.imap : ""].filter(Boolean).join(" · ");
     if (ok) { await core.call("mail_sync"); await mlLoad(); }
   } catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; }
 };
+$("#ml-unlock") && ($("#ml-unlock").onclick = async ev => {
+  if (!mlSelected) return; const r = $("#ml-res"); ev.target.disabled = true; r.className = "res";
+  r.textContent = "macOS спросит пароль входа в систему. Нажмите «Разрешать всегда», чтобы Dewiar больше не спрашивал.";
+  try {
+    const x = await core.call("mail_account_unlock", { account_id: mlSelected });
+    const ok = x.test.smtp === "ok" && x.test.imap === "ok"; await mlLoad();
+    r.className = ok ? "res ok" : "res bad";
+    r.textContent = ok ? "Доступ получен, IMAP и SMTP подключены." : [x.test.smtp !== "ok" ? "SMTP: " + x.test.smtp : "", x.test.imap !== "ok" ? "IMAP: " + x.test.imap : ""].filter(Boolean).join(" · ");
+    if (ok) { await core.call("mail_sync"); await mlLoad(); }
+  } catch (e) { r.className = "res bad"; r.textContent = e.message + " Можно просто ввести пароль приложения заново."; $("#ml-pass").focus(); }
+  finally { ev.target.disabled = false; }
+});
 $("#ml-test").onclick = async ev => { ev.target.disabled = true; const r = $("#ml-res"); r.textContent = "Отправляю тестовое письмо в выбранный ящик…";
   try { const x = await core.call("mail_account_send_test", { account_id: mlSelected }); r.className = "res ok"; r.textContent = "Тест передан на " + x.to.join(", ") + "."; }
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
-$("#ml-off").onclick = async () => { if (!mlSelected || !confirm("Отключить ящик и удалить пароль из Связки ключей?")) return;
+$("#ml-off").onclick = async () => { if (!mlSelected || !await ask("Отключить ящик и удалить пароль из Связки ключей?")) return;
   try { await core.call("mail_account_forget", { account_id: mlSelected }); await mlLoad(); $("#ml-res").textContent = "Ящик отключён."; } catch (e) { toast(e.message); } };
 $("#ml-refresh").onclick = async ev => { ev.target.disabled = true; $("#ml-sync-state").textContent = "Проверяю подключённые ящики…";
   try { const r = await core.call("mail_sync"); await mlLoad(); const ok = r.accounts.filter(x => x.ok).length, bad = r.accounts.filter(x => !x.ok);
     $("#ml-sync-state").textContent = "Проверено ящиков: " + ok + "." + (bad.length ? " Ошибки: " + bad.map(x => x.account_id + ": " + x.error).join("; ") : " Ошибок нет.");
   } catch (e) { $("#ml-sync-state").textContent = e.message; } finally { ev.target.disabled = false; } };
 document.querySelectorAll("[data-ml-view]").forEach(b => b.onclick = () => mlSetView(b.dataset.mlView));
+$("#ml-badge-mode").onchange = async ev => {
+  const select = ev.target, previous = select.value === "important" ? "unread" : "important";
+  select.disabled = true;
+  try { S = await core.call("settings_save", { patch: { ui: { mail_badge_mode: select.value } } });
+    toast("Счётчик на значке обновлён."); }
+  catch (e) { select.value = previous; toast(e.message); }
+  finally { select.disabled = false; }
+};
 $("#ml-query").oninput = () => mlList();
 $("#ml-reply-prepare").onclick = async ev => { if (!mlCurrentMessage) return; ev.target.disabled = true;
   try { await mlShowDraft(await core.call("mail_reply_prepare", { message_id: mlCurrentMessage.id, body: $("#ml-reply-body").value })); }
@@ -214,7 +259,7 @@ $("#ml-draft-send").onclick = async ev => {
     await mlShowDraft(updated);
     const question = "Отправить эту точную версию?\n\nОт: " + updated.from + "\nКому: " + updated.to.join(", ") +
       "\nКопия: " + (updated.cc.join(", ") || "—") + "\nТема: " + updated.subject + "\nВерсия: " + updated.revision + "\n\n" + updated.body;
-    if (!confirm(question)) return;
+    if (!await ask(question, {title: "Отправка письма", ok: "Отправить"})) return;
     const sent = await core.call("mail_reply_send", { draft_id: updated.id, revision: updated.revision, confirmed: true });
     $("#ml-draft-state").textContent = "Отправлено с " + sent.from + ". Состояние копии: " + sent.sent_copy + "."; await mlList();
   } catch (e) { $("#ml-draft-state").textContent = e.message; }

@@ -36,7 +36,7 @@ with sync_playwright() as p:
     pg.evaluate("void (window.r1 = ask('Удалить заметку «Идея»? Она уйдёт в корзину — оттуда её можно вернуть.'))")
     pg.wait_for_timeout(300)
     d = pg.evaluate("() => ({ n: document.querySelectorAll('.dwq').length, yes: document.querySelector('.dwq .yes').textContent, "
-                    "danger: document.querySelector('.dwq .yes').classList.contains('danger'), no: document.querySelector('.dwq button').textContent, "
+                    "danger: document.querySelector('.dwq .yes').classList.contains('danger'), no: document.querySelector('.dwq .dw-actions button:not(.yes)').textContent, "
                     "focus: document.activeElement === document.querySelector('.dwq .yes'), text: document.querySelector('.dwq p').textContent })")
     ok(d["n"] == 1 and d["yes"] == "Удалить" and d["danger"] and d["no"] == "Отмена" and d["focus"] and "token" not in d["text"],
        f"«Удалить заметку…?» — кнопки «Отмена» и «Удалить» (красная), без адреса страницы: {d}")
@@ -53,6 +53,10 @@ with sync_playwright() as p:
     pg.evaluate("void (window.r4 = ask('Удалить?'))"); pg.wait_for_timeout(250)
     pg.mouse.click(10, 10); pg.wait_for_timeout(250)
     ok(pg.evaluate("r4") is False, "щелчок мимо — нет")
+    for control in ['.dw-close', '.dw-actions button:not(.yes)']:
+        pg.evaluate("void (window.cancelResult = ask('Удалить?'))")
+        pg.locator('.dwq ' + control).focus(); pg.keyboard.press('Enter')
+        ok(pg.evaluate('cancelResult') is False, f'Enter на {control} отменяет действие')
     # RAM management opens a native modal: confirmation must be above it and clickable.
     pg.evaluate("""() => {
       window.ramCalls = [];
@@ -83,7 +87,7 @@ with sync_playwright() as p:
       document.querySelector('#strata-memory-dlg').showModal();
     }""")
     pg.check('#strata-memory-list input'); pg.click('#strata-memory-close')
-    pg.click('.dwq button:not(.yes)'); pg.wait_for_timeout(200)
+    pg.click('.dwq .dw-actions button:not(.yes)'); pg.wait_for_timeout(200)
     ok(pg.evaluate("document.querySelector('#strata-memory-dlg').open && ramCalls.filter(c => c[0] === 'memory_close').length === 1"),
        "в Strata подтверждение тоже доступно, «Отмена» сохраняет исходное окно")
     pg.evaluate("document.querySelector('#strata-memory-dlg').close(); document.querySelector('#m-ram-dlg').showModal()")

@@ -1,25 +1,20 @@
 /* Context help is read-only and fully local. No model calls, external links or form changes. */
-let helpReturnFocus=null, helpArticleKey='';
+let helpArticleKey='', helpView=null;
 const HELP_SEARCH_LIMIT=80;
 function helpText(value){return String(value??'').replace(/\s+/g,' ').trim();}
 function helpCurrentSection(){return document.querySelector('main section.cur[id^="p-"]')?.id.slice(2)||'home';}
 function helpLayout(){
-  const panel=document.getElementById('help'),modal=!panel.hidden&&matchMedia('(max-width:600px)').matches;
-  panel.setAttribute('role',modal?'dialog':'complementary');
-  if(modal)panel.setAttribute('aria-modal','true');else panel.removeAttribute('aria-modal');
+  document.getElementById('help').setAttribute('aria-modal','true');
 }
 function helpClose(){
-  const panel=document.getElementById('help');panel.classList.remove('open');panel.hidden=true;
-  document.body.classList.remove('context-help-open');helpLayout();
-  document.querySelectorAll('[data-section-help]').forEach(b=>b.setAttribute('aria-expanded','false'));
-  const target=helpReturnFocus?.isConnected&&helpReturnFocus.getClientRects().length?helpReturnFocus:document.querySelector('main section.cur [data-section-help]');
-  target?.focus();
+  helpView?.close();
 }
 function helpRender(k){
   const h=window.DEWIAR_HELP[k];if(!h)return;helpArticleKey=k;
   const list=a=>(a||[]).map(x=>`<li>${escH(x)}</li>`).join('');
   const examples=(h.try||[]).map(x=>typeof x==='string'?{say:x}:x).filter(x=>x&&x.say);
-  document.getElementById('help-body').innerHTML=`<h2 id="help-heading">${escH(h.title)}</h2><h3>Для чего этот раздел</h3><p>${escH(h.what)}</p>`+
+  helpView?.setTitle(h.title);
+  document.getElementById('help-body').innerHTML=`<h3>Для чего этот раздел</h3><p>${escH(h.what)}</p>`+
     (h.how?.length?`<h3>Как пользоваться</h3><ol>${list(h.how)}</ol>`:'')+
     (examples.length?`<h3>Примеры запросов</h3><p class="hint">Примеры только для чтения: ничего не отправляется агенту.</p>${examples.map(x=>`<div class="help-example"><b>«${escH(x.say)}»</b>${x.get?`<p>${escH(x.get)}</p>`:''}</div>`).join('')}`:'')+
     (h.say?.length?`<h3>Что можно сказать</h3><ul>${list(h.say)}</ul>`:'')+
@@ -29,47 +24,41 @@ function helpRender(k){
   document.getElementById('help-results').hidden=true;
   document.getElementById('help-body').hidden=false;
   document.querySelectorAll('[data-section-help]').forEach(b=>b.setAttribute('aria-expanded',String(b.dataset.sectionHelp===k)));
-  document.getElementById('help').scrollTop=0;
+  if(helpView)helpView.body.scrollTop=0;
 }
 function showHelp(k){
   if(!window.DEWIAR_HELP?.[k])return;
-  const panel=document.getElementById('help');
-  if(panel.hidden||document.activeElement?.matches('[data-section-help]'))helpReturnFocus=document.activeElement;
   document.getElementById('help-search').value='';helpRender(k);
-  panel.hidden=false;panel.classList.add('open');document.body.classList.add('context-help-open');helpLayout();
+  helpView.show();document.body.classList.add('context-help-open');helpLayout();
   document.getElementById('help-x').focus();
 }
 function helpSearch(){
   const query=helpText(document.getElementById('help-search').value).toLocaleLowerCase('ru').replace(/ё/g,'е');
   const results=document.getElementById('help-results');
   if(!query){helpRender(helpArticleKey||helpCurrentSection());return;}
+  helpView?.setTitle('Поиск по справке');
   const terms=query.split(' ');
   const matches=Object.entries(window.DEWIAR_HELP).filter(([,h])=>{const corpus=JSON.stringify(h).toLocaleLowerCase('ru').replace(/ё/g,'е');return terms.every(t=>corpus.includes(t));}).slice(0,HELP_SEARCH_LIMIT);
   results.replaceChildren();document.getElementById('help-body').hidden=true;results.hidden=false;
   const summary=document.createElement('p');summary.className='hint';summary.setAttribute('role','status');summary.textContent=matches.length?`Найдено тем: ${matches.length}`:'Ничего не найдено. Попробуйте другое слово: «микрофон», «архив», «приоритет».';results.append(summary);
-  for(const [key,h] of matches){const button=document.createElement('button');button.type='button';button.className='btn help-result';button.textContent=h.title;button.title=`Открыть локальную статью «${h.title}». Текущие настройки и введённые данные останутся на месте.`;button.onclick=()=>{document.getElementById('help-search').value='';helpRender(key);document.getElementById('help-x').focus();};results.append(button);}
+  for(const [key,h] of matches){const button=document.createElement('button');button.type='button';button.className='dw-button help-result';button.textContent=h.title;button.title=`Открыть локальную статью «${h.title}». Текущие настройки и введённые данные останутся на месте.`;button.onclick=()=>{document.getElementById('help-search').value='';helpRender(key);document.getElementById('help-x').focus();};results.append(button);}
 }
 window.showHelp=showHelp;
 (() => {
-  const panel=document.getElementById('help');panel.hidden=true;panel.setAttribute('role','complementary');panel.setAttribute('aria-label','Помощь по интерфейсу Dewiar');
-  document.getElementById('help-x').onclick=helpClose;
+  const panel=document.getElementById('help');
+  helpView=DewiarDialogs.mount({root:panel,title:'Помощь',headingId:'help-heading',closeId:'help-x',persistent:true,
+    content:document.getElementById('help-content'),
+    copyText:()=>helpView.title.textContent+'\n\n'+document.getElementById(document.getElementById('help-body').hidden?'help-results':'help-body').innerText,
+    onClose:()=>{document.body.classList.remove('context-help-open');document.querySelectorAll('[data-section-help]').forEach(b=>b.setAttribute('aria-expanded','false'));}});
+  helpView.addAction('Понятно',helpClose,'dw-primary');
   document.getElementById('help-search').addEventListener('input',helpSearch);
   document.getElementById('help-current').onclick=()=>{document.getElementById('help-search').value='';helpRender(helpCurrentSection());};
   document.getElementById('help-all').onclick=()=>{
+    helpView.setTitle('Темы справки');
     const results=document.getElementById('help-results');results.replaceChildren();results.hidden=false;document.getElementById('help-body').hidden=true;document.getElementById('help-search').value='';
-    for(const [key,h] of Object.entries(window.DEWIAR_HELP)){const b=document.createElement('button');b.type='button';b.className='btn help-result';b.textContent=h.title;b.title=`Прочитать инструкцию «${h.title}» без изменения настроек.`;b.onclick=()=>{helpRender(key);document.getElementById('help-x').focus();};results.append(b);}
+    for(const [key,h] of Object.entries(window.DEWIAR_HELP)){const b=document.createElement('button');b.type='button';b.className='dw-button help-result';b.textContent=h.title;b.title=`Прочитать инструкцию «${h.title}» без изменения настроек.`;b.onclick=()=>{helpRender(key);document.getElementById('help-x').focus();};results.append(b);}
   };
   addEventListener('resize',helpLayout);
-  document.addEventListener('keydown',e=>{
-    if(panel.hidden)return;
-    if(e.key==='Escape'){e.preventDefault();helpClose();return;}
-    if(e.key==='Tab'&&panel.getAttribute('aria-modal')==='true'){
-      const controls=[...panel.querySelectorAll('button,input,a[href],select,textarea')].filter(n=>!n.disabled&&n.getClientRects().length);
-      const first=controls[0],last=controls.at(-1);
-      if(e.shiftKey&&(document.activeElement===first||!panel.contains(document.activeElement))){e.preventDefault();last?.focus();}
-      else if(!e.shiftKey&&(document.activeElement===last||!panel.contains(document.activeElement))){e.preventDefault();first?.focus();}
-    }
-  });
   document.querySelectorAll('nav button[data-p]').forEach(b=>b.addEventListener('click',()=>{
     if(!panel.hidden)setTimeout(()=>{document.getElementById('help-search').value='';helpRender(helpCurrentSection());},0);
   }));

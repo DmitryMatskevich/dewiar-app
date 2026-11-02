@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     shutil.copytree(ROOT / "ui", ui)
     (ui / "assets/dewiar.js").write_text('''window.calls=[];window.opens=[];
       window.api=()=>({open_settings:(...args)=>opens.push(args)});
-      window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){calls.push([cmd,args]);if(cmd==='mail_unread_count')return 3;return {};}};
+      window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){calls.push([cmd,args]);if(cmd==='mail_badge_counts')return {unread:3,important:8};return {};}};
       window.fire=(type,data)=>(core._on[type]||[]).forEach(fn=>fn(data));''')
     browser = getattr(pw, os.environ.get("DEWIAR_TEST_BROWSER", "chromium")).launch()
     page = browser.new_page(viewport={"width": 420, "height": 760})
@@ -20,14 +20,24 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.goto((ui / "hud.html").as_uri())
     assert page.locator("#link-messages .link-actions").count() == 0
     assert page.locator("#b-mail-count").is_hidden()
-    page.evaluate("refreshMailUnread()")
+    page.evaluate("refreshMailCounts()")
     page.wait_for_function("document.getElementById('b-mail-count').textContent==='3'")
     button = page.locator("#b-mail")
-    assert button.evaluate("e=>e.classList.contains('has-unread-mail')")
+    assert button.evaluate("e=>e.classList.contains('has-mail-count')")
     assert button.get_attribute("aria-label") == "Непрочитанных писем: 3. Открыть непрочитанные письма"
     button.click(force=True)
     assert page.evaluate("opens.at(-1)") == ["mail", "&unread=1"]
-    page.evaluate("fire('mail_unread',{count:0})")
+    page.evaluate("setMailBadgeMode('important')")
+    assert "Важных писем: 8" in button.get_attribute("aria-label")
+    assert button.evaluate("e=>e.classList.contains('has-mail-count')")
+    button.click(force=True)
+    assert page.evaluate("opens.at(-1)") == ["mail", "&important=1"]
+    page.evaluate("fire('mail_counts',{unread:0,important:0,attention:1})")
+    assert page.locator("#b-mail-count").text_content() == "!"
+    assert "ждёт пароль" in button.get_attribute("aria-label")
+    button.click(force=True)
+    assert page.evaluate("opens.at(-1)") == ["mail", "&attention=1"]
+    page.evaluate("fire('mail_counts',{unread:0,important:0,attention:0})")
     assert page.locator("#b-mail-count").is_hidden()
     help_button = page.locator("#b-help")
     hide_button = page.locator("#b-tray")

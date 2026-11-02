@@ -262,8 +262,8 @@
   #b-mail, #b-cal { position: relative; }
   #b-mail-count, #b-cal-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
   #b-mail-count[hidden], #b-cal-count[hidden] { display:none; }
-  #b-mail.has-unread-mail { color:var(--accent,#8b8cf7); background:rgba(139,140,247,.18); }
-  #bar:has(#b-mail.has-unread-mail) { opacity:1; }
+  #b-mail.has-mail-count { color:var(--accent,#8b8cf7); background:rgba(139,140,247,.18); }
+  #bar:has(#b-mail.has-mail-count) { opacity:1; }
   @keyframes taskPulse { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { #b-tasks.working, #task .spin { animation: none; } }
   @keyframes tspin { to { transform: rotate(360deg); } }
@@ -437,13 +437,6 @@
   #corner-l { right: auto; left: 10px; opacity: 1; }
   /* Управление образом помощника всегда видно в первой строке справа: его не нужно искать наведением. */
   #corner-r { opacity: 1; }
-  #hud-help { position:absolute; z-index:12; top:42px; right:10px; width:min(420px,calc(100vw - 28px)); max-height:calc(100% - 54px); overflow:auto; padding:16px 18px; border:1px solid rgba(130,150,185,.3); border-radius:18px; color:var(--ink); background:var(--skin-panel,rgba(20,30,48,.97)); box-shadow:0 12px 40px rgba(0,0,0,.28); user-select:text; -webkit-user-select:text; }
-  #hud-help[hidden] { display:none; }
-  #hud-help h2 { font-size:17px; margin:0 32px 12px 0; }
-  #hud-help h3 { font-size:13px; margin:12px 0 4px; }
-  #hud-help p, #hud-help li { font-size:12px; line-height:1.5; color:var(--muted); }
-  #hud-help ul { padding-left:18px; }
-  #hud-help-close { position:absolute; right:9px; top:9px; width:28px; height:28px; border:0; border-radius:50%; color:var(--ink); background:transparent; font-size:20px; cursor:pointer; }
   /* остальные правые действия раскрываются левее постоянной кнопки образа, не перекрывая её. */
   /* Верхние действия виджета доступны сразу после первого запуска, без
      обязательного наведения мыши: повторное открытие не должно менять
@@ -632,16 +625,15 @@
     <!-- «Досуг» остаётся доступен голосом и в окне блокнота, но не выводится в первой строке HUD. -->
     <button class="btn" id="b-play" hidden title="Досуг — милые игры на пару минут. Или скажите: «Лира, давай поиграем»"><svg viewBox="0 0 24 24"><path d="M7.5 7.5h9a4.5 4.5 0 0 1 4.3 5.8l-1.1 3.7a2.3 2.3 0 0 1-3.9.9L14 15.5h-4l-1.8 2.4a2.3 2.3 0 0 1-3.9-.9l-1.1-3.7a4.5 4.5 0 0 1 4.3-5.8z"/><path d="M8 10.5v3M6.5 12h3"/><path d="M15.5 11h.01M17.5 13h.01"/></svg></button>
   </div>
-  <section id="hud-help" role="dialog" aria-label="Справка по управлению ассистентом" hidden>
-    <button id="hud-help-close" type="button" aria-label="Закрыть справку">×</button>
-    <h2>Как пользоваться ассистентом</h2>
+  <dialog id="hud-help" hidden></dialog>
+  <template id="hud-help-content">
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире.</p>
     <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит текст в поле. Для завершения и отправки скажите в конце «Лира», «ввод» или «вот», либо отдельно «ввод» или «вот».</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
     <h3>Приватность</h3><p>Текст сообщения, ссылки и вложения могут передаваться выбранной модели для выполнения просьбы. Проверяйте содержимое перед отправкой.</p>
-  </section>
+  </template>
   <div id="bar">
     <!-- Старые быстрые кнопки сохранены в DOM для совместимости с клавиатурными сценариями, но убраны из панели:
          микрофон — в строке ввода, текст — всегда открыт, помощник — на круглой кнопке портрета. -->
@@ -663,6 +655,7 @@
 <script src="assets/skins.js"></script>
 <script src="assets/dewiar.js"></script>
 <script src="assets/calendar-badge.js"></script>
+<script src="assets/dialog.js"></script>
 <script src="assets/rich.js"></script>
 <link rel="stylesheet" href="assets/screenshot-card.css">
 <script src="assets/screenshot-card.js"></script>
@@ -1074,7 +1067,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
-.on("settings", e => { applyLook((e.settings || {}).ui); setCalendarBadgeSettings((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); featuresSet((e.settings || {}).features); setModelSettings((e.settings || {}).llm); setAskModel(null, (e.settings || {}).audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
+.on("settings", e => { const settings = e.settings || {}; applyLook(settings.ui); setMailBadgeMode((settings.ui || {}).mail_badge_mode); setCalendarBadgeSettings(settings.ui); setLocal((settings.privacy || {}).local_only); featuresSet(settings.features); setModelSettings(settings.llm); setAskModel(null, settings.audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") { const pct = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100); $("dict-level").firstElementChild.style.width = pct + "%"; $("dict-level").setAttribute("aria-valuenow", String(pct)); } })
@@ -1774,11 +1767,14 @@ window.padMark = (on, m) => { const play = !!on && m === "play"; $("b-play").cla
 $("b-tray").onclick = () => { const a = api(); if (!a || !a.to_tray) return; a.to_tray();
   core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); };
 const helpPanel = $("hud-help"), helpButton = $("b-help");
-function setHelp(open) { helpPanel.hidden = !open; helpButton.setAttribute("aria-expanded", String(open)); if (open) $("hud-help-close").focus(); }
-helpButton.onclick = e => { e.stopPropagation(); setHelp(helpPanel.hidden); };
-$("hud-help-close").onclick = () => { setHelp(false); helpButton.focus(); };
-document.addEventListener("click", e => { if (!helpPanel.hidden && !e.target.closest("#hud-help, #b-help")) setHelp(false); });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !helpPanel.hidden) { setHelp(false); helpButton.focus(); } });
+const hudHelpContent = document.createElement('div'); hudHelpContent.append($("hud-help-content").content.cloneNode(true));
+const hudHelpView = DewiarDialogs.mount({root:helpPanel, title:'Как пользоваться ассистентом', content:hudHelpContent,
+  closeId:'hud-help-close', persistent:true, copyText:()=> 'Как пользоваться ассистентом\n\n' + hudHelpContent.innerText,
+  onClose:()=>helpButton.setAttribute('aria-expanded','false')});
+hudHelpView.addAction('Понятно',()=>hudHelpView.close(),'dw-primary');
+function setHelp(open) { if(open)hudHelpView.show();else hudHelpView.close(); helpButton.setAttribute('aria-expanded',String(open)); }
+helpButton.onclick = e => { e.stopPropagation(); setHelp(!helpPanel.open); };
+
 let calendarBadgePrefs=CalendarBadge.config({}), calendarBadgeRevision=0;
 function setCalendarBadgeSettings(ui) { calendarBadgePrefs=CalendarBadge.config(ui || {}); refreshCalendarBadge(); }
 async function refreshCalendarBadge() {
@@ -1796,16 +1792,30 @@ core.on('hello',d=>setCalendarBadgeSettings((((d||{}).settings||{}).ui||{})));
 for(const event of ['reminders','calendars','money_saved','note_saved','tasks']) core.on(event,()=>refreshCalendarBadge());
 setInterval(()=>{if(!document.hidden) refreshCalendarBadge();},60000);
 window.addEventListener('focus',()=>refreshCalendarBadge());
-function setMailUnread(value) {
-  const n = Math.max(0, Number(value) || 0), button = $("b-mail"), badge = $("b-mail-count");
-  button.classList.toggle("has-unread-mail", n > 0); badge.hidden = n === 0; badge.textContent = n > 99 ? "99+" : String(n);
-  const label = n ? "Непрочитанных писем: " + n + ". Открыть непрочитанные письма" : "Открыть почту: непрочитанных писем нет";
+let mailBadgeMode = "unread", mailBadgeCounts = { unread: 0, important: 0 };
+function setMailBadgeMode(mode) {
+  mailBadgeMode = mode === "important" ? "important" : "unread";
+  setMailBadgeCounts(mailBadgeCounts);
+}
+function setMailBadgeCounts(counts) {
+  mailBadgeCounts = { ...mailBadgeCounts, ...(counts || {}) };
+  const n = Math.max(0, Number(mailBadgeCounts[mailBadgeMode]) || 0), button = $("b-mail"), badge = $("b-mail-count");
+  const attention = Math.max(0, Number(mailBadgeCounts.attention) || 0);
+  button.classList.toggle("has-mail-count", n > 0 || attention > 0); badge.hidden = n === 0 && !attention;
+  badge.textContent = attention ? "!" : n > 99 ? "99+" : String(n);
+  if (attention) {   // ящик ждёт пароль — как в Apple Mail, спрашиваем в самом приложении, а не окном Связки ключей
+    const label = attention === 1 ? "Почта: один ящик ждёт пароль. Открыть и ввести" : "Почта: ящиков ждут пароль — " + attention + ". Открыть и ввести";
+    button.title = label; button.setAttribute("aria-label", label); return;
+  }
+  const kind = mailBadgeMode === "important" ? "Важных писем" : "Непрочитанных писем";
+  const target = mailBadgeMode === "important" ? "важные письма" : "непрочитанные письма";
+  const label = n ? kind + ": " + n + ". Открыть " + target : "Открыть почту: " + (mailBadgeMode === "important" ? "важных писем нет" : "непрочитанных писем нет");
   button.title = label; button.setAttribute("aria-label", label);
 }
-async function refreshMailUnread() { try { setMailUnread(await core.call("mail_unread_count")); } catch (_) {} }
-$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", "&unread=1"); };
-core.on("mail_unread", e => setMailUnread(e.count));
-core.on("hello", () => setTimeout(refreshMailUnread, 700));
+async function refreshMailCounts() { try { setMailBadgeCounts(await core.call("mail_badge_counts")); } catch (_) {} }
+$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : mailBadgeMode === "important" ? "&important=1" : "&unread=1"); };
+core.on("mail_counts", counts => setMailBadgeCounts(counts));
+core.on("hello", d => { setMailBadgeMode((((d || {}).settings || {}).ui || {}).mail_badge_mode); setTimeout(refreshMailCounts, 700); });
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */
 core.on("window", e => { const a = api(); if (!a || mode !== "card") return;
   if (e.do === "tray" && a.to_tray) { a.to_tray(); core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); }

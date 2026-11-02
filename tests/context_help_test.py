@@ -58,7 +58,7 @@ def main():
         page.evaluate('helpClose()')
         page.evaluate("""() => {document.querySelectorAll('main section').forEach(s=>s.classList.toggle('cur',s.id==='p-brain'));document.querySelector('[data-f=name]').value='Unsaved fixture';}""")
         page.locator('#p-brain [data-section-help]').click()
-        assert page.locator('#help-body').inner_text().startswith('Модели')
+        assert page.locator('#help-heading').inner_text()=='Модели'
         page.keyboard.press('Escape')
         assert not page.locator('#help').is_visible()
         assert page.locator('[data-f=name]').input_value()=='Unsaved fixture'
@@ -119,10 +119,10 @@ def main():
                 assert page.locator('#help').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1'),(skin,width)
         page.wait_for_timeout(50)
         assert page.locator('#help').get_attribute('aria-modal')=='true'
-        page.locator('#help-all').focus();page.keyboard.press('Tab')
+        page.locator('#help .dw-actions button').last.focus();page.keyboard.press('Tab')
         assert page.evaluate("document.activeElement.id")=='help-x'
         page.keyboard.press('Shift+Tab')
-        assert page.evaluate("document.activeElement.id")=='help-all'
+        assert page.locator('#help .dw-actions button').last.evaluate('(e)=>e===document.activeElement')
         # Reopen/close remains idempotent and does not rebuild user fields.
         for _ in range(8):page.evaluate("showHelp('brain');helpClose()")
         assert page.locator('[data-f=name]').input_value()=='Fixture model' # Last deliberate profile rerender, not help.

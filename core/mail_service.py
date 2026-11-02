@@ -18,12 +18,17 @@ from urllib.parse import urlparse
 
 from settings import CONFIG_DIR, DATA_DIR, STATE_DIR
 from mail import Mail, MailError, guess
+import mail_keychain as keychain
 
 log = logging.getLogger("dewiar.mail.service")
 RULES_PATH = CONFIG_DIR / "mail-rules.json"
 INDEX_PATH = STATE_DIR / "mail-index.sqlite3"
 ACCOUNT_DIR = CONFIG_DIR / "mail-accounts"
 
+
+# Состояния пароля ящика, при которых пользователю нужно ввести пароль или разрешить доступ (значок «!»).
+ATTENTION_STATES = {keychain.NEEDS_ACCESS, keychain.LOCKED, "rejected"}
+STARTUP_SYNC_DELAY = 15     # секунд: дать окну и модели запуститься, потом проверить почту
 
 class MailServiceError(ValueError):
     pass
@@ -197,6 +202,12 @@ class MailService:
             self._rules_error = ""
             self._load_accounts()
             self._reclassify()
+        callback = getattr(self, "on_counts_change", None)
+        if callback:
+            try:
+                callback(self.badge_counts())
+            except Exception:
+                log.exception("Не удалось обновить счётчик значка почты")
         return self.rules_public()
 
     def importance_rule_add(self, sender_address="", recipient_address="", subject="", subject_match="contains", importance="important", name=""):
@@ -291,6 +302,8 @@ class MailService:
             out.append({"id": spec["id"], "address": spec["address"], "label": spec.get("label") or spec["address"],
                         "enabled": bool(spec.get("enabled")) and bool(public.get("configured")),
                         "configured": bool(public.get("configured")), "has_password": bool(public.get("has_password")),
+                        "credential_state": public.get("credential_state", ""),
+                        "needs_password": public.get("credential_state", "") in ATTENTION_STATES,
                         "smtp_host": public.get("smtp_host") or spec.get("smtp_host", ""), "smtp_port": public.get("smtp_port") or spec.get("smtp_port", ""),
                         "smtp_security": public.get("smtp_security", "ssl"), "imap_host": public.get("imap_host", ""),
                         "imap_port": public.get("imap_port") or spec.get("imap_port", ""), "login": public.get("login", ""),
@@ -308,15 +321,38 @@ class MailService:
         spec = next(x for x in self.rules["accounts"] if x["id"] == account_id)
         if str((patch or {}).get("address") or spec["address"]).strip().lower() != spec["address"]:
             raise MailServiceError("Адрес аккаунта закреплён в правилах; выберите нужный ящик из списка.")
-        result = box.save({**(patch or {}), "address": spec["address"]})
-        test = box.test()
+        patch = dict(patch or {})
+        secret = str(patch.pop("password", "") or "")
+        result = box.save({**patch, "address": spec["address"]})
+        # Как в Apple Mail: новый пароль сначала проверяется на сервере. Не принят — прежний не затираем.
+        test = box.test(candidate=secret or None)
+        password_saved = bool(secret) and not test.get("auth_rejected")
+        if password_saved:
+            result = box.save({"password": secret, "address": spec["address"]})
         if test.get("smtp") == "ok" and test.get("imap") == "ok":
             candidate = json.loads(json.dumps(self.rules))
             next(x for x in candidate["accounts"] if x["id"] == account_id)["enabled"] = True
             self.save_rules(candidate)
             # The old config remains as a recoverable copy; don't silently delete it.
+        self._notify_counts()
         return {"account": next(x for x in self.accounts() if x["id"] == account_id), "test": test,
-                "saved": result.get("configured", False)}
+                "saved": result.get("configured", False), "password_saved": password_saved}
+
+    def account_unlock(self, account_id):
+        """«Разрешить доступ к Связке ключей»: одно окно macOS по действию пользователя, затем проверка ящика."""
+        box = self.account_get(account_id)
+        box.unlock()
+        test = box.test()
+        self._notify_counts()
+        return {"account": next(x for x in self.accounts() if x["id"] == account_id), "test": test}
+
+    def _notify_counts(self):
+        callback = getattr(self, "on_counts_change", None)
+        if callback:
+            try:
+                callback(self.badge_counts())
+            except Exception:
+                log.exception("Не удалось обновить значок почты")
 
     def account_forget(self, account_id):
         box = self.account_get(account_id)
@@ -590,6 +626,13 @@ class MailService:
 
     def start_background(self, stop_event):
         interval = max(180, int((self.rules.get("sync") or {}).get("interval_minutes", 5)) * 60)
+        # Как Apple Mail: почта проверяется с запуска, без открытия студии. Пароли читаются без окон macOS
+        # (mail_keychain): если доступа нет, ящик помечается «нужен пароль», а запуск ничем не блокируется.
+        if not stop_event.wait(STARTUP_SYNC_DELAY):
+            try:
+                self.activate()
+            except Exception:
+                log.exception("Не удалось включить почту при запуске")
         while not stop_event.is_set():
             if not self._activated.wait(0.5):
                 continue
@@ -598,10 +641,10 @@ class MailService:
             except Exception:
                 log.exception("Почтовая синхронизация завершилась ошибкой")
             finally:
-                callback = getattr(self, "on_unread_change", None)
+                callback = getattr(self, "on_counts_change", None)
                 if callback:
                     try:
-                        callback(self.unread_count())
+                        callback(self.badge_counts())
                     except Exception:
                         log.exception("Не удалось обновить счётчик непрочитанных писем")
             stop_event.wait(interval)
@@ -613,6 +656,22 @@ class MailService:
                 "account_id || ':' || uidvalidity || ':' || uid)) "
                 "FROM messages WHERE folder='INBOX' AND unread=1").fetchone()
         return int(row[0] or 0)
+
+    def important_count(self):
+        """Count cached important inbox messages, deduplicating copies in several accounts."""
+        with self._db() as db:
+            row = db.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), "
+                "account_id || ':' || uidvalidity || ':' || uid)) "
+                "FROM messages WHERE folder='INBOX' AND importance='important' AND from_self=0").fetchone()
+        return int(row[0] or 0)
+
+    def attention_count(self):
+        """Сколько ящиков ждут пароль. Связку ключей не читает: только то, что выяснилось при входе на сервер."""
+        enabled = [x["id"] for x in self.rules.get("accounts", []) if x.get("enabled")]
+        return sum(1 for aid in enabled if getattr(self._accounts.get(aid), "_secret_state", "") in ATTENTION_STATES)
+
+    def badge_counts(self):
+        return {"unread": self.unread_count(), "important": self.important_count(), "attention": self.attention_count()}
 
     def check(self, force=False):
         if force:

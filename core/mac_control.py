@@ -52,9 +52,18 @@ def running():
     from AppKit import NSWorkspace
     result=[]
     for app in NSWorkspace.sharedWorkspace().runningApplications():
-        if app.activationPolicy()!=0 or app.isTerminated():continue
-        result.append({'name':str(app.localizedName() or ''),'id':str(app.bundleIdentifier() or ''),
-                       'pid':int(app.processIdentifier()),'_app':app})
+        try:
+            if app.activationPolicy()!=0 or app.isTerminated():continue
+            # A localized name can fail to bridge for one process (PyObjC has
+            # raised codec errors here). Keep that process searchable by its
+            # stable bundle id and continue enumerating the rest of the apps.
+            bundle_id=str(app.bundleIdentifier() or '')
+            try:name=str(app.localizedName() or '')
+            except Exception:name=''
+            result.append({'name':name or bundle_id,'id':bundle_id,
+                           'pid':int(app.processIdentifier()),'_app':app})
+        except Exception:
+            continue
     return result
 
 
@@ -317,17 +326,33 @@ def execute(args, alias_config=None):
     if action not in ('screens','list','open','quit','focus','minimize','move','cursor','windows','inspect','click','type','key','scroll'):
         raise ValueError('Неизвестное действие с приложением')
     if action=='screens':return {'screens':screens()}
-    # Opening an application does not require Accessibility or a snapshot of
-    # running windows.  In the frozen Mac build AppKit can bridge a localized
-    # application name through an unavailable codec (``utf-16be``) while
-    # enumerating runningApplications(); that used to make the harmless
-    # command «Открой календарь» fail before /usr/bin/open was reached.
-    # Resolve the installed bundle from its plist and launch it directly.
+    # Prefer an already-running app: it may be installed outside the standard
+    # bundle search paths, and `open -a` alone does not reliably raise its UI.
     if action=='open':
-        row=resolve(query,applications(),alias_config)
-        p=subprocess.run(['/usr/bin/open','-a',row['path']],capture_output=True,text=True,timeout=15)
-        if p.returncode:raise ValueError('macOS не открыла приложение: '+row['name'])
-        return {'message':'Приложение «'+row['name']+'» открыто.'}
+        try:
+            active_rows=running()
+        except Exception:  # AppKit enumeration can fail on localized names/builds.
+            active_rows=[]
+        try:
+            row=resolve(query,active_rows,alias_config)
+        except AppNotFound:
+            row=resolve(query,applications(),alias_config)
+            p=subprocess.run(['/usr/bin/open','-a',row['path']],capture_output=True,text=True,timeout=15)
+            if p.returncode:raise ValueError('macOS не открыла приложение: '+row['name'])
+            # Resolve the newly launched process by bundle id and explicitly
+            # activate it so the command's contract includes moving focus.
+            for _ in range(20):
+                row=next((app for app in running() if app.get('id')==row.get('id')),None)
+                if row:break
+                time.sleep(.1)
+            if not row:
+                return {'message':'Приложение открыто. macOS пока не предоставила доступ к его окну.'}
+        from AppKit import NSApplicationActivateIgnoringOtherApps
+        app=row['_app']
+        app.unhide()
+        if not app.activateWithOptions_(NSApplicationActivateIgnoringOtherApps):
+            raise ValueError('Приложение «'+row['name']+'» открыто, но macOS не приняла переключение фокуса')
+        return {'message':'Фокус переведён на приложение «'+row['name']+'».'}
     rows=running()
     if action=='list':return {'applications':[{k:v for k,v in row.items() if k!='_app'} for row in rows]}
     row=resolve(query,rows,alias_config);app=row['_app']

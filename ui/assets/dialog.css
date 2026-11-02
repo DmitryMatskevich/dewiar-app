@@ -1,0 +1,36 @@
+/* One modal template for Help, messages and confirmation. Paired colors never inherit skin text. */
+.dw-dialog { --dw-bg:#1d2534; --dw-text:#edf2ff; --dw-muted:#b7c2d8; --dw-line:#46516a; --dw-field:#2a3446; --dw-accent:#5362d4;
+  position:fixed; inset:0; width:100%; height:100%; max-width:none; max-height:none; margin:0; padding:12px; box-sizing:border-box; border:0;
+  background:transparent; color:var(--dw-text); display:grid; place-items:center; font:14px/1.55 Manrope,"Segoe UI",sans-serif; text-align:left; text-shadow:none; }
+.dw-dialog[hidden], .dw-dialog:not([open]) { display:none; }
+.dw-dialog::backdrop { background:rgba(8,12,22,.55); backdrop-filter:blur(3px); }
+body.light .dw-dialog, html.st-light .dw-dialog { --dw-bg:#f4f7fc; --dw-text:#24324a; --dw-muted:#526179; --dw-line:#c4cede; --dw-field:#e4ebf5; --dw-accent:#4656c8; }
+.dw-dialog .dw-panel { position:relative; inset:auto; display:flex; flex-direction:column; width:min(680px,100%); max-height:calc(100vh - 24px); max-height:calc(100dvh - 24px); min-height:0; box-sizing:border-box; padding:0; margin:0; border:1px solid var(--dw-line); border-radius:18px; background:var(--dw-bg); color:var(--dw-text); overflow:hidden; box-shadow:0 24px 70px -24px rgba(0,0,0,.55); transform:none; }
+.dw-dialog .dwq { width:min(440px,100%); }
+.dw-dialog .dw-header { flex:none; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px 12px 20px; border-bottom:1px solid var(--dw-line); }
+.dw-dialog .dw-title { margin:0; min-width:0; font:600 18px/1.3 Manrope,"Segoe UI",sans-serif; color:var(--dw-text); overflow-wrap:anywhere; }
+.dw-dialog .dw-close { flex:none; width:44px; height:44px; padding:10px; }
+.dw-dialog .dw-close svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; }
+.dw-dialog .dw-body { flex:1 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; padding:16px 20px; color:var(--dw-text); user-select:text; -webkit-user-select:text; overflow-wrap:anywhere; }
+.dw-dialog .dw-body p { margin:0 0 12px; color:var(--dw-text); line-height:1.55; }
+.dw-dialog .dwq .dw-body p, .dw-dialog .dwm-text { white-space:pre-wrap; }
+.dw-dialog .dw-body p:last-child { margin-bottom:0; }
+.dw-dialog .dw-body h3 { margin:20px 0 8px; font:600 15px/1.4 Manrope,"Segoe UI",sans-serif; color:var(--dw-text); }
+.dw-dialog .dw-body h3:first-child { margin-top:0; }
+.dw-dialog .dw-body ol, .dw-dialog .dw-body ul { padding-left:22px; margin:8px 0 14px; color:var(--dw-text); }
+.dw-dialog .dw-body li { margin:7px 0; }
+.dw-dialog .dw-body .hint, .dw-dialog .dw-note { color:var(--dw-muted); font-size:13px; }
+.dw-dialog .dw-body input, .dw-dialog .dw-body textarea { box-sizing:border-box; width:100%; min-height:44px; margin:8px 0; padding:10px 12px; border:1px solid var(--dw-line); border-radius:10px; background:var(--dw-field); color:var(--dw-text); font:inherit; box-shadow:none; }
+.dw-dialog .dw-body input::placeholder, .dw-dialog .dw-body textarea::placeholder { color:var(--dw-muted); opacity:1; }
+.dw-dialog .dw-footer { flex:none; padding:12px 20px 16px; border-top:1px solid var(--dw-line); }
+.dw-dialog .dw-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.dw-dialog .dw-button { display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:44px; padding:9px 14px; margin:0; border:1px solid var(--dw-line); border-radius:10px; background:var(--dw-field); color:var(--dw-text); font:600 14px/1.4 Manrope,"Segoe UI",sans-serif; cursor:pointer; box-shadow:none; transform:none; text-decoration:none; }
+.dw-dialog .dw-button:hover { filter:brightness(1.06); transform:none; }
+.dw-dialog .dw-button:disabled { opacity:.55; cursor:default; }
+.dw-dialog .dw-primary { background:var(--dw-accent); color:#fff; border-color:transparent; }
+.dw-dialog .dw-primary.danger { background:#c92f3d; }
+.dw-dialog .dw-button:focus-visible, .dw-dialog .dw-body input:focus-visible, .dw-dialog .dw-body summary:focus-visible { outline:2px solid var(--dw-accent); outline-offset:2px; }
+.dw-dialog .dw-status { margin:0 0 8px; color:var(--dw-text); font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
+.dw-dialog .dw-status:empty { display:none; }
+.dw-dialog .dw-clipboard { position:fixed; left:-9999px; top:0; }
+@media(max-width:420px) { .dw-dialog { padding:8px; } .dw-dialog .dw-panel { max-height:calc(100vh - 16px); max-height:calc(100dvh - 16px); } .dw-dialog .dw-header { padding-left:14px; } .dw-dialog .dw-body { padding:14px; } .dw-dialog .dw-footer { padding:10px 14px 14px; } .dw-dialog .dw-actions .dw-button { flex:1 1 120px; } }

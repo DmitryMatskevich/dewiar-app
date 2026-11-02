@@ -668,7 +668,8 @@ class CommandsMixin:
         if cmd.startswith("mail_"):              # почта: настройки, проверка, тестовое письмо
             from mail import MailError, guess
             try:
-                self.mail.activate()
+                if cmd not in ("mail_badge_counts", "mail_unread_count", "mail_guess"):   # счётчики — из индекса
+                    self.mail.activate()
                 if cmd == "mail_accounts":
                     return self.mail.accounts()
                 if cmd == "mail_account_save":
@@ -677,6 +678,8 @@ class CommandsMixin:
                     return self.mail.account_get(a.get("account_id", "")).test()
                 if cmd == "mail_account_send_test":
                     return self.mail.send_test(a.get("account_id", ""))
+                if cmd == "mail_account_unlock":         # по кнопке пользователя: одно окно macOS
+                    return self.mail.account_unlock(a.get("account_id", ""))
                 if cmd == "mail_account_forget":
                     return self.mail.account_forget(a.get("account_id", ""))
                 if cmd == "mail_rules_get":
@@ -684,7 +687,9 @@ class CommandsMixin:
                 if cmd == "mail_rules_save":
                     return self.mail.save_rules(a.get("rules") or {})
                 if cmd == "mail_sync":
-                    return self.mail.sync_all(force=True)
+                    result = self.mail.sync_all(force=True)
+                    self.emit("mail_counts", **self.mail.badge_counts())
+                    return result
                 if cmd == "mail_check":
                     return self.mail.check(force=bool(a.get("refresh", True)))
                 if cmd == "mail_list":
@@ -693,6 +698,8 @@ class CommandsMixin:
                                                account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")))
                 if cmd == "mail_unread_count":
                     return self.mail.unread_count()
+                if cmd == "mail_badge_counts":
+                    return self.mail.badge_counts()
                 if cmd == "mail_open":
                     return self.mail.open_mail(a.get("message_id", ""))
                 if cmd == "mail_reply_prepare":

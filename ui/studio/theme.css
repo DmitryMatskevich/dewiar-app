@@ -140,7 +140,6 @@ html.st-light .cchip { background: var(--soft); }
 /* выдвижные панели, подсказки, рамка окна */
 html.st-light :is(.drawer) { background: linear-gradient(rgba(255,255,255,.72), rgba(255,255,255,.72)), var(--scene); }
 
-html.st-light :is(#help) { background: linear-gradient(rgba(255,255,255,.72), rgba(255,255,255,.72)), var(--scene); }
 html.st-light .drawer.open { box-shadow: -30px 0 80px rgba(20,30,60,.18); }
 html.st-light #f-body th { background: #eef0f6; }
 html.st-light .card .disc { background: radial-gradient(circle at 50% 35%, #ffffff, #e3e7ef 70%); box-shadow: 0 10px 26px -12px rgba(20,30,60,.35); }
@@ -226,7 +225,6 @@ html.st-neu :is(#upd-bar) { background: var(--sk-glass); box-shadow: inset 2px 2
 html.st-neu :is(.dw-bar i, .cc-bar i, .tbar b, .tprog .bar b) { background: var(--brand); }
 html.st-neu :is(#upd-bar b) { background: var(--brand); }
 html.st-neu :is(.drawer) { background: var(--sk-glass); }
-html.st-neu :is(#help) { background: var(--sk-glass); }
 html.st-neu .drawer.open { box-shadow: -14px 0 30px var(--nd); }
 html.st-neu .card .disc { background: var(--sk-glass); box-shadow: var(--press); }
 html.st-neu.framed #tbar { background: var(--sk-glass); box-shadow: 0 4px 10px -6px var(--nd); }

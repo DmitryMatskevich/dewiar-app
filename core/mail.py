@@ -23,6 +23,7 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from pathlib import Path
 
+import mail_keychain as keychain
 from settings import CONFIG_DIR
 
 log = logging.getLogger("dewiar.mail")
@@ -30,54 +31,37 @@ PATH = CONFIG_DIR / "mail.json"
 KEYCHAIN_SERVICE = "dewiar-mail"
 
 
-def _keychain_get(account):
-    if sys.platform != "darwin" or not account:
-        return ""
-    try:
-        import Security
-        query = {Security.kSecClass: Security.kSecClassGenericPassword, Security.kSecAttrService: KEYCHAIN_SERVICE,
-                 Security.kSecAttrAccount: str(account), Security.kSecReturnData: True,
-                 Security.kSecMatchLimit: Security.kSecMatchLimitOne}
-        status, value = Security.SecItemCopyMatching(query, None)
-        if isinstance(status, tuple):
-            status, value = status
-        return bytes(value).decode("utf-8") if status == Security.errSecSuccess else ""
-    except (ImportError, AttributeError, TypeError, ValueError):
-        return ""
+def _keychain_get(account, interactive=False):
+    """Пароль из Связки ключей или "" — без окон macOS, если interactive не задан (см. mail_keychain)."""
+    state, secret = keychain.read(account, KEYCHAIN_SERVICE, interactive=interactive)
+    return secret if state == keychain.OK else ""
 
 
 def _keychain_set(account, secret):
+    """Сохранить пароль -> ключ записи (обычно сам адрес) или "" не на macOS. Окон macOS не показывает."""
     if sys.platform != "darwin":
-        return False
+        return ""
     try:
-        import Security
-        query = {Security.kSecClass: Security.kSecClassGenericPassword, Security.kSecAttrService: KEYCHAIN_SERVICE,
-                 Security.kSecAttrAccount: str(account)}
-        attributes = {Security.kSecValueData: str(secret).encode("utf-8"),
-                      Security.kSecAttrAccessible: Security.kSecAttrAccessibleAfterFirstUnlock}
-        status = Security.SecItemAdd({**query, **attributes}, None)
-        if isinstance(status, tuple):
-            status = status[0]
-        if status == Security.errSecDuplicateItem:
-            status = Security.SecItemUpdate(query, attributes)
-            if isinstance(status, tuple):
-                status = status[0]
-        if status != Security.errSecSuccess:
-            raise MailError(f"macOS не сохранила пароль почты в Связку ключей (код {status}).")
-        return True
-    except ImportError as e:
-        raise MailError("Компонент Связки ключей macOS не установлен; обновите зависимости Dewiar.") from e
+        return keychain.write(account, secret, KEYCHAIN_SERVICE,
+                              label=f"Dewiar — почта {str(account).split('#', 1)[0]}")
+    except keychain.KeychainError as e:
+        raise MailError(str(e)) from e
 
 
 def _keychain_delete(account):
     if sys.platform == "darwin" and account:
-        try:
-            import Security
-            query = {Security.kSecClass: Security.kSecClassGenericPassword, Security.kSecAttrService: KEYCHAIN_SERVICE,
-                     Security.kSecAttrAccount: str(account)}
-            Security.SecItemDelete(query)
-        except (ImportError, AttributeError, TypeError):
-            pass
+        keychain.delete(account, KEYCHAIN_SERVICE)
+
+
+# Что сказать пользователю, если пароль из Связки ключей не получен (состояния — mail_keychain).
+CREDENTIAL_MESSAGES = {
+    keychain.MISSING: "пароль ящика не сохранён — введите пароль приложения в Студия → Почта",
+    keychain.NEEDS_ACCESS: "нет доступа к паролю в Связке ключей (Dewiar обновился) — введите пароль заново "
+                           "или нажмите «Разрешить доступ» в Студия → Почта",
+    keychain.LOCKED: "Связка ключей заблокирована — разблокируйте её и повторите",
+    keychain.UNAVAILABLE: "Связка ключей macOS недоступна",
+    "rejected": "почта не приняла сохранённый пароль — введите новый пароль приложения в Студия → Почта",
+}
 
 # почтовая служба → (smtp, порт, защита: ssl — TLS сразу, starttls — по команде; imap, порт; где взять пароль приложения)
 # DOMAINS ниже: домен адреса → служба.
@@ -99,6 +83,18 @@ DOMAINS = {"yandex.ru": "yandex", "ya.ru": "yandex", "yandex.com": "yandex", "ya
 
 class MailError(Exception):
     pass
+
+
+class MailAuthError(MailError):
+    """Сервер не принял логин или пароль."""
+
+
+class MailCredentialError(MailError):
+    """Пароль не получен из Связки ключей (или известно, что сервер его не принимает); на сервер не ходили."""
+
+    def __init__(self, state):
+        super().__init__(CREDENTIAL_MESSAGES.get(state) or CREDENTIAL_MESSAGES[keychain.UNAVAILABLE])
+        self.state = state
 
 
 def guess(address):
@@ -154,6 +150,9 @@ class Mail:
     def __init__(self, path=PATH, workspace=None, migrate_keychain=True):
         self.path, self.ws = path, workspace
         self._lock = threading.Lock()
+        # Пароль читается из Связки ключей один раз за запуск — при первом входе на сервер, как у Apple Mail.
+        self._secret = ""
+        self._secret_state = ""        # "" — нет проблем; иначе состояние mail_keychain или "rejected"
         try:
             self.data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -161,7 +160,9 @@ class Mail:
         legacy = self.data.get("password")
         if migrate_keychain and legacy and sys.platform == "darwin":
             try:
-                if _keychain_set(self.data.get("address"), legacy):
+                # Не записывать промежуточный JSON с паролем: при аварии между записью
+                # в Keychain и очисткой файла секрет иначе остался бы в открытом виде.
+                if self._store_secret(legacy, persist=False):
                     self.data.pop("password", None)
                     self._write_config()
             except MailError:
@@ -170,11 +171,85 @@ class Mail:
     # ---------- настройки ----------
 
     def configured(self):
+        """Адрес, сервер и пароль есть. Пароль при этом не читается — только проверяется наличие записи."""
         d = self.data
-        return bool(d.get("address") and self._password() and d.get("smtp_host"))
+        return bool(d.get("address") and d.get("smtp_host") and self._has_secret())
+
+    def _ref(self):
+        """Ключ записи в Связке ключей: адрес или адрес#время, если прежняя запись недоступна этой сборке."""
+        return self.data.get("keychain_account") or self.data.get("address")
+
+    def _has_secret(self):
+        if self.data.get("password") or self._secret:
+            return True
+        if sys.platform != "darwin" or not self.data.get("address"):
+            return False
+        # Заблокированная Связка ключей — запись, скорее всего, есть; причину покажет credential_state().
+        return keychain.exists(self._ref(), KEYCHAIN_SERVICE) in (keychain.OK, keychain.LOCKED)
+
+    def credential_state(self):
+        """ok — пароль работает в этом запуске; saved — сохранён, ещё не читался; missing; needs_access — macOS
+        не отдаёт запись без разрешения; locked; rejected — сервер не принял пароль; unavailable."""
+        if self._secret_state:
+            return self._secret_state
+        if self.data.get("password") or self._secret:
+            return keychain.OK
+        if not self.data.get("address") or sys.platform != "darwin":
+            return keychain.MISSING
+        found = keychain.exists(self._ref(), KEYCHAIN_SERVICE)
+        return "saved" if found == keychain.OK else found
 
     def _password(self):
-        return self.data.get("password") or _keychain_get(self.data.get("address"))
+        """Пароль для входа. Из Связки ключей — без окон macOS; не получилось — MailCredentialError, на сервер
+        не идём (пустой или заведомо неверный пароль только увеличит счётчик неудачных входов у почты)."""
+        if self._secret_state == "rejected":
+            raise MailCredentialError("rejected")
+        if self.data.get("password"):
+            return self.data["password"]
+        if self._secret:
+            return self._secret
+        if sys.platform != "darwin":
+            raise MailCredentialError(keychain.MISSING)
+        state, secret = keychain.read(self._ref(), KEYCHAIN_SERVICE)
+        if state == keychain.OK and secret:
+            self._secret, self._secret_state = secret, ""
+            return secret
+        self._secret_state = state
+        raise MailCredentialError(state)
+
+    def _store_secret(self, secret, persist=True):
+        """Записать пароль в Связку ключей (без окон) и запомнить ключ записи -> False не на macOS."""
+        old = self._ref()
+        ref = _keychain_set(old, secret)
+        if not ref:
+            return False
+        if ref != old:
+            _keychain_delete(old)                  # обычно macOS не даёт удалить чужую запись — это не ошибка
+        if ref == self.data.get("address"):
+            self.data.pop("keychain_account", None)
+        else:
+            self.data["keychain_account"] = ref
+        self._secret, self._secret_state = secret, ""
+        if persist:
+            self._write_config()
+        return True
+
+    def unlock(self):
+        """Явное действие пользователя: прочитать пароль с окном macOS («Разрешить» / «Разрешать всегда»)
+        и переложить его в запись этой сборки, чтобы следующий запуск прочитал её без окна."""
+        if sys.platform != "darwin":
+            raise MailError("Связка ключей есть только в macOS")
+        with self._lock:
+            state, secret = keychain.read(self._ref(), KEYCHAIN_SERVICE, interactive=True)
+            if state != keychain.OK or not secret:
+                self._secret_state = state
+                raise MailCredentialError(state)
+            self._secret, self._secret_state = secret, ""
+            try:
+                self._store_secret(secret)
+            except MailError:
+                log.exception("Не удалось пересохранить пароль почты в Связку ключей")
+        return self.public()
 
     def _write_config(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,8 +263,11 @@ class Mail:
 
     def public(self):
         d = dict(self.data)
-        d["has_password"] = bool(d.pop("password", "") or _keychain_get(d.get("address")))
-        d["configured"] = self.configured()
+        d.pop("password", None)
+        d.pop("keychain_account", None)
+        d["has_password"] = self._has_secret()
+        d["configured"] = bool(d.get("address") and d.get("smtp_host") and d["has_password"])
+        d["credential_state"] = self.credential_state()
         if d.get("address") and not d.get("help"):
             d["help"] = guess(d["address"]).get("help", "")
         return d
@@ -205,25 +283,29 @@ class Mail:
                 raise MailError("это не похоже на адрес почты")
             if addr != self.data.get("address") and not patch.get("smtp_host"):
                 patch = {**guess(addr), **patch}                 # новый адрес — подставляем серверы сами
-            previous_address = self.data.get("address")
+            previous_address, previous_ref = self.data.get("address"), self._ref()
             secret = patch.pop("password", None)
             self.data.update({k: v for k, v in patch.items() if k in (
                 "address", "name", "login", "smtp_host", "smtp_port", "smtp_security", "imap_host",
                 "imap_port", "help", "provider")})
-            if secret and _keychain_set(addr, secret):
+            self.data["address"] = addr
+            if previous_address and previous_address != addr:
+                _keychain_delete(previous_ref)
+                self.data.pop("keychain_account", None)
+                self._secret, self._secret_state = "", ""
+            if secret and self._store_secret(secret):
                 self.data.pop("password", None)
             elif secret:
-                self.data["password"] = secret
-            if previous_address and previous_address != addr:
-                _keychain_delete(previous_address)
-            self.data["address"] = addr
+                self.data["password"] = secret          # не macOS: файл 0600, как раньше
+                self._secret, self._secret_state = "", ""
             self._write_config()
         return self.public()
 
     def forget(self):
         with self._lock:
-            account = self.data.get("address")
+            account = self._ref()
             self.data = {}
+            self._secret, self._secret_state = "", ""
             _keychain_delete(account)
             try:
                 self.path.unlink()
@@ -237,9 +319,19 @@ class Mail:
         # Логин обычно совпадает с адресом; отдельное поле — для своих серверов, где это не так.
         return self.data.get("login") or self.data.get("address")
 
-    def _smtp(self):
+    def _auth_rejected(self, candidate):
+        """Сервер не принял пароль. Сохранённый пароль больше не пробуем, пока пользователь не введёт новый."""
+        if candidate is None:
+            self._secret, self._secret_state = "", "rejected"
+
+    def _auth_ok(self, candidate):
+        if candidate is None and self._secret_state == "rejected":
+            self._secret_state = ""
+
+    def _smtp(self, candidate=None):
         d = self.data
         host, port, sec = d.get("smtp_host"), int(d.get("smtp_port") or 465), d.get("smtp_security") or "ssl"
+        password = self._password() if candidate is None else candidate
         try:
             if sec == "ssl":
                 s = smtplib.SMTP_SSL(host, port, timeout=25, context=ssl.create_default_context())
@@ -249,18 +341,21 @@ class Mail:
                 if sec == "starttls":
                     s.starttls(context=ssl.create_default_context())
                     s.ehlo()
-            s.login(self._login(), self._password())
+            s.login(self._login(), password)
+            self._auth_ok(candidate)
             return s
         except smtplib.SMTPAuthenticationError as e:
-            raise MailError("почта не приняла логин или пароль — нужен «пароль приложения», не обычный пароль") from e
+            self._auth_rejected(candidate)
+            raise MailAuthError("почта не приняла логин или пароль — нужен «пароль приложения», не обычный пароль") from e
         except (OSError, smtplib.SMTPException) as e:
             raise MailError(f"не удалось подключиться к {host}:{port} — {e}") from e
 
-    def _imap(self):
+    def _imap(self, candidate=None):
         """Вход в IMAP. Порт 993 — TLS сразу; другой порт — STARTTLS, и без него не входим: пароль открытым текстом
         по сети не отправляем (исключение — свой сервер на этой же машине)."""
         d = self.data
         host, port = d.get("imap_host"), int(d.get("imap_port") or 993)
+        password = self._password() if candidate is None else candidate
         try:
             if port == 993:
                 m = imaplib.IMAP4_SSL(host, port, ssl_context=ssl.create_default_context(), timeout=25)
@@ -271,28 +366,45 @@ class Mail:
                         m.starttls(ssl.create_default_context())
                     except (imaplib.IMAP4.error, OSError) as e:
                         raise MailError(f"{host}:{port} не умеет STARTTLS — пароль открытым текстом не отправляю; укажите порт 993") from e
-            m.login(self._login(), self._password())
+        except imaplib.IMAP4.error as e:
+            raise MailError(f"{host}:{port}: {e}") from e
+        except OSError as e:
+            raise MailError(f"не удалось подключиться к {host}:{port} — {e}") from e
+        try:
+            m.login(self._login(), password)
+            self._auth_ok(candidate)
             return m
         except imaplib.IMAP4.error as e:
-            raise MailError("почта не приняла логин или пароль (IMAP) — нужен «пароль приложения»") from e
+            self._auth_rejected(candidate)
+            try:
+                m.shutdown()
+            except OSError:
+                pass
+            raise MailAuthError("почта не приняла логин или пароль (IMAP) — нужен «пароль приложения»") from e
         except OSError as e:
             raise MailError(f"не удалось подключиться к {host}:{port} — {e}") from e
 
-    def test(self):
-        """Проверить вход в SMTP и IMAP -> {"smtp": "ok" или текст ошибки, "imap": …} (IMAP — если указан)."""
-        if not self.configured():
+    def test(self, candidate=None):
+        """Проверить вход в SMTP и IMAP -> {"smtp": "ok" или текст ошибки, "imap": …, "auth_rejected": bool}.
+        candidate — новый пароль, который проверяется до сохранения (сохранённый при этом не трогается)."""
+        d = self.data
+        if not (d.get("address") and d.get("smtp_host") and (candidate or self._has_secret())):
             raise MailError("сначала укажите адрес и пароль приложения")
-        out = {"smtp": "", "imap": ""}
+        out = {"smtp": "", "imap": "", "auth_rejected": False}
         try:
-            self._smtp().quit()
+            self._smtp(candidate).quit()
             out["smtp"] = "ok"
+        except MailAuthError as e:
+            out["smtp"], out["auth_rejected"] = str(e), True
         except MailError as e:
             out["smtp"] = str(e)
         if self.data.get("imap_host"):
             try:
-                m = self._imap()
+                m = self._imap(candidate)
                 m.logout()
                 out["imap"] = "ok"
+            except MailAuthError as e:
+                out["imap"], out["auth_rejected"] = str(e), True
             except MailError as e:
                 out["imap"] = str(e)
         return out
