@@ -3,6 +3,7 @@ SMTP и IMAP серверы (без шифрования, на 127.0.0.1)."""
 import base64, email, os, socket, socketserver, sys, tempfile, threading
 from email.message import EmailMessage
 from pathlib import Path
+from unittest.mock import patch
 ROOT = Path(os.environ.get("DEWIAR_ROOT") or Path(__file__).resolve().parent.parent)
 tmp = Path(tempfile.mkdtemp())
 os.environ["DEWIAR_CONFIG_DIR"] = str(tmp / "cfg"); os.environ["DEWIAR_STATE_DIR"] = str(tmp / "st")
@@ -89,7 +90,7 @@ for P, H in ((sp, SMTP), (ip, IMAP)):
 
 from settings import Settings  # noqa: E402
 from workspace import Workspace  # noqa: E402
-from mail import Mail, MailError, guess  # noqa: E402
+from mail import Mail, MailError, guess, _imap_quote  # noqa: E402
 from tools import Toolbox, t_read_emails  # noqa: E402
 
 g = guess("ivan@yandex.ru")
@@ -111,6 +112,48 @@ pub = m.save({"password": PASS})
 ok(pub["configured"] and "password" not in pub and pub["has_password"], "пароль сохранён, наружу не отдаётся")
 ok(m.test() == {"smtp": "ok", "imap": "ok", "auth_rejected": False}, "проверка: отправка и чтение работают")
 ok(tb.policy("send_email") == (True, True) and tb.policy("read_emails") == (True, False), "отправка — с подтверждением, чтение — сразу")
+original_eml = b"From: client@example.org\r\nSubject: Original\r\n\r\nOriginal body\r\n"
+m.data["provider"] = "gmail"  # Gmail сохраняет отправленное на сервере.
+forward_result = m.send_reply({"to": ["client@example.org"], "cc": [], "subject": "Fwd: Original", "body": "Посмотрите.",
+                               "forward_eml_b64": base64.b64encode(original_eml).decode("ascii"),
+                               "forward_filename": "Fwd_Original.eml"})
+forwarded = email.message_from_bytes(SENT[-1])
+eml_part = next((part for part in forwarded.walk() if part.get_filename() == "Fwd_Original.eml"), None)
+ok(forward_result["accepted_by_smtp"] and eml_part and eml_part.get_payload(decode=True) == original_eml,
+   "пересылка отправляет исходное письмо MIME файлом .eml с вложениями")
+class MoveIMAP:
+    capabilities = (b"IMAP4rev1", b"MOVE")
+    def __init__(self): self.calls = []
+    def select(self, folder, readonly=False): self.calls.append(("select", folder, readonly)); return "OK", []
+    def uid(self, command, *args): self.calls.append((command, *args)); return "OK", [b"done"]
+    def logout(self): return "BYE", []
+moved_server = MoveIMAP()
+with patch.object(m, "special_folder", return_value="Удалённые письма"), patch.object(m, "_imap", return_value=moved_server):
+    moved = m.move_to_trash("42")
+move_call = moved_server.calls[-1]
+ok(moved["state"] == "moved" and move_call[0] == "MOVE" and move_call[1] == "42" and
+   all(ord(c) < 128 for c in move_call[2]) and not any(call[0] == "EXPUNGE" for call in moved_server.calls),
+   "удаление использует только UID MOVE в Корзину")
+class UidPlusIMAP(MoveIMAP):
+    capabilities = (b"IMAP4rev1", b"UIDPLUS")
+uidplus_server = UidPlusIMAP()
+with patch.object(m, "special_folder", return_value=""), patch.object(m, "_imap", return_value=uidplus_server):
+    deleted = m.move_to_trash("77")
+ok(deleted["state"] == "deleted" and uidplus_server.calls[-1] == ("EXPUNGE", "77"),
+   "без Корзины удаляется только UID, UID EXPUNGE не трогает другие помеченные письма")
+class UnsafeDeleteIMAP(MoveIMAP):
+    capabilities = (b"IMAP4rev1",)
+unsafe_server = UnsafeDeleteIMAP()
+with patch.object(m, "special_folder", return_value=""), patch.object(m, "_imap", return_value=unsafe_server):
+    try: m.move_to_trash("88"); safe_delete = False
+    except MailError: safe_delete = not any(call[0] == "STORE" for call in unsafe_server.calls)
+ok(safe_delete, "при отсутствии Корзины и UIDPLUS письмо не изменяется")
+class TrashListIMAP(MoveIMAP):
+    def list(self): return "OK", [f'(\\HasNoChildren) "/" {_imap_quote("Корзина")}'.encode()]
+trash_list_server = TrashListIMAP()
+with patch.object(m, "_imap", return_value=trash_list_server):
+    localized_trash = m.special_folder("\\Trash")
+ok(localized_trash == _imap_quote("Корзина")[1:-1], "локализованная папка Корзина найдена без SPECIAL-USE")
 (ws.root / "Заметки" / "Отчёт.md").write_text("# Отчёт\nВсё готово.", encoding="utf-8")
 res = m.send("", "Отчёт по задаче", "Привет! Отчёт во вложении.", ["Заметки/Отчёт.md"])
 msg = email.message_from_bytes(SENT[-1])

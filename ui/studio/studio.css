@@ -2186,7 +2186,10 @@ html.framed .py-drawer { top: 38px; }
 .ml-empty span { max-width:380px; color:var(--ink); opacity:.8; font-size:13px; }
 .ml-detail { min-width:0; max-height:min(68vh,760px); overflow:auto; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--field); }
 .ml-detail[hidden],#ml-draft-preview[hidden] { display:none; }
-.ml-detail-toolbar { display:flex; justify-content:flex-end; margin:-4px 0 8px; }
+.ml-detail-toolbar { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px; margin:-4px 0 8px; }
+.ml-detail-toolbar .btn { min-height:34px; padding:6px 10px; }
+#ml-forward-fields { display:grid; gap:8px; margin-bottom:12px; }
+#ml-forward-fields[hidden] { display:none; }
 #ml-message-subject { margin:0 0 10px; font-size:18px; overflow-wrap:anywhere; }
 #ml-message-head { margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--line); white-space:pre-wrap; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
 #ml-message-body,#ml-draft-original { max-height:360px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:13px; line-height:1.6; }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import email.utils
+import base64
 import ipaddress
 import json
 import logging
@@ -40,6 +41,20 @@ def _addr(value):
 
 def _addresses(value):
     return list(dict.fromkeys(a.lower() for _, a in email.utils.getaddresses([value or ""]) if a and "@" in a))
+
+
+def _draft_addresses(value, label):
+    parts = value if isinstance(value, list) else re.split(r"[;,\s]+", str(value or ""))
+    out = []
+    for item in parts:
+        address = str(item or "").strip().strip("<>").lower()
+        if not address:
+            continue
+        if not re.fullmatch(r"[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+", address):
+            raise MailServiceError(f"Проверьте адрес в поле «{label}»: {address}")
+        if address not in out:
+            out.append(address)
+    return out
 
 
 def _stamp(value):
@@ -741,18 +756,58 @@ class MailService:
                 "auth_warning": bool(row["auth_warning"]), "authentication_results": row["auth_results"]}
 
     def open_mail(self, message_key):
-        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+", message_key):
-            raise MailServiceError("Письмо выбирается по id из списка.")
-        account_id, validity, uid = message_key.split(":", 2)
+        account_id, validity, uid = self._parse_message_key(message_key)
         with self._db() as db:
             known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=? LIMIT 1",
                                (account_id, validity, uid)).fetchone()
         if not known:
             raise MailServiceError("Письмо отсутствует в локальном индексе. Обновите входящие.")
-        detail = self.account_get(account_id).read(uid)
+        box = self.account_get(account_id)
+        if str(box.uidvalidity("INBOX")) != validity:
+            raise MailServiceError("Папка входящих изменилась. Обновите список, чтобы открыть актуальное письмо.")
+        detail = box.read(uid, expected_uidvalidity=validity)
         detail.update(account_id=account_id, id=message_key,
                       account=next((a["address"] for a in self.rules["accounts"] if a["id"] == account_id), ""))
         return detail
+
+    def delete_mail(self, message_key):
+        """Move one selected inbox copy to the server Trash; leave other account copies untouched."""
+        account_id, validity, uid = self._parse_message_key(message_key)
+        with self._db() as db:
+            known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=?",
+                               (account_id, validity, uid)).fetchone()
+        if not known:
+            raise MailServiceError("Письмо уже удалено или отсутствует в текущей версии папки.")
+        box = self.account_get(account_id)
+        if str(box.uidvalidity("INBOX")) != validity:
+            raise MailServiceError("Папка входящих изменилась. Обновите список; удаление остановлено.")
+        try:
+            result = box.move_to_trash(uid, expected_uidvalidity=validity)
+        except MailError as exc:
+            raise MailServiceError(str(exc)) from exc
+        with self._db() as db:
+            db.execute("DELETE FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=?",
+                       (account_id, validity, uid))
+        self._notify_counts()
+        return {"state": result["state"], "folder": result.get("folder", ""), "id": message_key}
+
+    @staticmethod
+    def _parse_message_key(message_key):
+        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+", message_key):
+            raise MailServiceError("Письмо выбирается по id из списка.")
+        return tuple(message_key.split(":", 2))
+
+    @staticmethod
+    def _draft_view(draft_id, revision, state, payload):
+        public = {k: v for k, v in payload.items() if k != "forward_eml_b64"}
+        public["forwarded_original"] = bool(payload.get("forward_eml_b64") or payload.get("forwarded_original"))
+        return {"id": draft_id, "revision": revision, "state": state, **public}
+
+    @staticmethod
+    def _clear_forward_blob(payload):
+        if payload.pop("forward_eml_b64", None):
+            payload["forwarded_original"] = True
+        return payload
 
     # -- confirmed reply-all drafts -------------------------------------------
     def reply_prepare(self, message_key, body):
@@ -781,7 +836,7 @@ class MailService:
         if signature:
             text += "\n\n" + signature.strip()
         text += quoted
-        payload = {"from": box.data.get("address", ""), "to": to, "cc": cc, "subject": subject, "body": text,
+        payload = {"kind": "reply", "from": box.data.get("address", ""), "to": to, "cc": cc, "subject": subject, "body": text,
                    "in_reply_to": original.get("message_id", ""), "references": " ".join(x for x in
                      (original.get("references", ""), original.get("message_id", "")) if x), "attachments": [],
                    "original": {"from": original.get("from"), "to": original.get("to"), "cc": original.get("cc"),
@@ -791,7 +846,42 @@ class MailService:
         with self._db() as db:
             db.execute("INSERT INTO reply_drafts(id,revision,account_id,original_key,state,payload,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
                        (draft_id, 1, account_id, message_key, "draft", json.dumps(payload, ensure_ascii=False), now, now))
-        return {"id": draft_id, "revision": 1, "state": "draft", **payload}
+        return self._draft_view(draft_id, 1, "draft", payload)
+
+    def forward_prepare(self, message_key):
+        original = self.open_mail(message_key)
+        account_id = original["account_id"]
+        box = self.account_get(account_id)
+        try:
+            validity = message_key.split(":", 2)[1]
+            raw = box.read_raw(original["uid"], expected_uidvalidity=validity)
+        except MailError as exc:
+            raise MailServiceError(str(exc)) from exc
+        subject = str(original.get("subject") or "(без темы)").strip()
+        subject = subject if re.match(r"^\s*fwd?\s*:", subject, re.I) else "Fwd: " + subject
+        details = ["---------- Пересланное сообщение ----------",
+                   "От: " + str(original.get("from") or "—"),
+                   "Дата: " + str(original.get("date") or "—"),
+                   "Тема: " + str(original.get("subject") or "(без темы)"),
+                   "Кому: " + str(original.get("to") or "—")]
+        if original.get("cc"):
+            details.append("Копия: " + original["cc"])
+        forwarded_text = "\n".join(details) + "\n\n" + (original.get("text") or "")
+        signature = (self.rules.get("signature_by_account") or {}).get(account_id, "")
+        body = (signature.strip() + "\n\n" if signature.strip() else "") + forwarded_text
+        payload = {"kind": "forward", "from": box.data.get("address", ""), "to": [], "cc": [],
+                   "subject": subject, "body": body, "in_reply_to": "", "references": "", "attachments": [],
+                   "forward_eml_b64": base64.b64encode(raw).decode("ascii"),
+                   "forward_filename": re.sub(r'[\\/:*?"<>|\r\n]+', "_", subject)[:110] + ".eml",
+                   "original": {"from": original.get("from"), "to": original.get("to"), "cc": original.get("cc"),
+                                "subject": original.get("subject"), "date": original.get("date"),
+                                "text": original.get("text"), "files": original.get("files", [])}}
+        draft_id, now = uuid.uuid4().hex, time.time()
+        with self._db() as db:
+            db.execute("INSERT INTO reply_drafts(id,revision,account_id,original_key,state,payload,created_at,updated_at) "
+                       "VALUES(?,?,?,?,?,?,?,?)",
+                       (draft_id, 1, account_id, message_key, "draft", json.dumps(payload, ensure_ascii=False), now, now))
+        return self._draft_view(draft_id, 1, "draft", payload)
 
     def reply_revise(self, draft_id, revision, patch):
         with self._db() as db:
@@ -799,8 +889,19 @@ class MailService:
             if not row or row["state"] != "draft" or int(row["revision"]) != int(revision):
                 raise MailServiceError("Черновик уже изменён или закрыт. Откройте актуальную версию и проверьте её.")
             payload = json.loads(row["payload"])
+            if payload.get("kind") != "forward" and any(key in patch for key in ("to", "cc", "subject")):
+                raise MailServiceError("Адресатов и тему ответа нельзя изменить в этом черновике.")
             if "body" in patch:
                 payload["body"] = str(patch["body"] or "")[:30000]
+            if "to" in patch:
+                payload["to"] = _draft_addresses(patch["to"], "Кому")
+            if "cc" in patch:
+                payload["cc"] = _draft_addresses(patch["cc"], "Копия")
+            if "subject" in patch:
+                subject = str(patch["subject"] or "").strip()
+                if not subject or len(subject) > 200:
+                    raise MailServiceError("Тема письма должна содержать от 1 до 200 символов.")
+                payload["subject"] = subject
             if "from" in patch and str(patch["from"]).lower() != payload["from"].lower():
                 chosen = next((s for s in self.rules["accounts"] if s["address"] == str(patch["from"]).lower()), None)
                 if not chosen or not self._accounts[chosen["id"]].configured():
@@ -809,7 +910,7 @@ class MailService:
             new_revision = int(row["revision"]) + 1
             db.execute("UPDATE reply_drafts SET revision=?,payload=?,updated_at=? WHERE id=? AND revision=?",
                        (new_revision, json.dumps(payload, ensure_ascii=False), time.time(), draft_id, int(revision)))
-        return {"id": draft_id, "revision": new_revision, "state": "draft", **payload}
+        return self._draft_view(draft_id, new_revision, "draft", payload)
 
     def reply_confirmation(self, draft_id, revision):
         with self._db() as db:
@@ -817,7 +918,10 @@ class MailService:
         if not row or row["state"] != "draft" or int(row["revision"]) != int(revision):
             raise MailServiceError("Эта версия черновика уже неактуальна. Откройте черновик снова.")
         p = json.loads(row["payload"])
-        return (f"Отправить ответ с {p['from']}? Кому: {', '.join(p['to']) or '—'}; "
+        if not p.get("to"):
+            raise MailServiceError("Укажите хотя бы одного получателя, прежде чем подтверждать отправку.")
+        action = "пересылку" if p.get("kind") == "forward" else "ответ"
+        return (f"Отправить {action} с {p['from']}? Кому: {', '.join(p['to']) or '—'}; "
                 f"копия: {', '.join(p['cc']) or '—'}; тема: «{p['subject']}». "
                 f"Версия черновика {revision}. Будет отправлен именно этот текст:\n\n{p['body']}")
 
@@ -829,6 +933,8 @@ class MailService:
                 raise MailServiceError("Отправка отменена: подтверждённая версия уже изменена или использована.")
             payload = json.loads(row["payload"])
             account_id = row["account_id"]
+            if not payload.get("to"):
+                raise MailServiceError("Укажите хотя бы одного получателя перед отправкой.")
         original_id = payload.get("in_reply_to")
         if original_id:
             try:
@@ -850,23 +956,27 @@ class MailService:
                 raise MailServiceError("Черновик уже отправляется или закрыт.")
         account = next((s for s in self.rules["accounts"] if s["address"] == payload["from"].lower()), None)
         if not account:
+            self._clear_forward_blob(payload)
             with self._db() as db:
-                db.execute("UPDATE reply_drafts SET state='failed' WHERE id=?", (draft_id,))
+                db.execute("UPDATE reply_drafts SET state='failed',payload=? WHERE id=?",
+                           (json.dumps(payload, ensure_ascii=False), draft_id))
             raise MailServiceError("Ящик отправителя больше не подключён.")
         box = self.account_get(account["id"])
         try:
             result = box.send_reply(payload)
         except Exception as exc:
+            self._clear_forward_blob(payload)
             with self._db() as db:
-                db.execute("UPDATE reply_drafts SET state='unknown',result=?,updated_at=? WHERE id=?",
-                           (str(exc)[:500], time.time(), draft_id))
+                db.execute("UPDATE reply_drafts SET state='unknown',payload=?,result=?,updated_at=? WHERE id=?",
+                           (json.dumps(payload, ensure_ascii=False), str(exc)[:500], time.time(), draft_id))
             raise MailServiceError("Результат передачи письма неизвестен. Повторно не отправляю — сначала проверьте «Отправленные».") from exc
+        self._clear_forward_blob(payload)
         with self._db() as db:
-            db.execute("UPDATE reply_drafts SET state='sent',result=?,updated_at=? WHERE id=?",
-                       (json.dumps(result, ensure_ascii=False), time.time(), draft_id))
+            db.execute("UPDATE reply_drafts SET state='sent',payload=?,result=?,updated_at=? WHERE id=?",
+                       (json.dumps(payload, ensure_ascii=False), json.dumps(result, ensure_ascii=False), time.time(), draft_id))
             original_key = row["original_key"]
             parts = original_key.split(":", 2)
-            if len(parts) == 3:
+            if len(parts) == 3 and payload.get("kind") != "forward":
                 db.execute("UPDATE messages SET answered=1,updated_at=? WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=?",
                            (time.time(), parts[0], parts[1], parts[2]))
         return {"state": "sent", "from": payload["from"], "to": payload["to"], "cc": payload["cc"],
@@ -877,4 +987,4 @@ class MailService:
             row = db.execute("SELECT * FROM reply_drafts WHERE id=?", (draft_id,)).fetchone()
         if not row:
             raise MailServiceError("Черновик не найден.")
-        return {"id": row["id"], "revision": row["revision"], "state": row["state"], **json.loads(row["payload"])}
+        return self._draft_view(row["id"], row["revision"], row["state"], json.loads(row["payload"]))

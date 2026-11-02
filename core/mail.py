@@ -8,6 +8,7 @@
 
 import email
 import email.utils
+import base64
 import html
 import imaplib
 import json
@@ -142,6 +143,51 @@ def _text_of(msg, limit=20000):
         body = html.unescape(re.sub(r"<[^>]+>", " ", h))
         body = re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n+", "\n\n", body)).strip()
     return body[:limit], files
+
+
+def _imap_quote(value):
+    """Quote mailbox names, encoding Unicode as IMAP modified UTF-7."""
+    text = str(value)
+    if any(ord(char) > 0x7e for char in text):
+        encoded, run = [], []
+        def flush():
+            if run:
+                chunk = base64.b64encode("".join(run).encode("utf-16-be")).decode("ascii").rstrip("=").replace("/", ",")
+                encoded.append("&" + chunk + "-")
+                run.clear()
+        for char in text:
+            if 0x20 <= ord(char) <= 0x7e:
+                flush()
+                encoded.append("&-" if char == "&" else char)
+            else:
+                run.append(char)
+        flush()
+        text = "".join(encoded)
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _imap_decode_utf7(value):
+    """Decode a mailbox name from IMAP modified UTF-7 for matching localized Trash names."""
+    def replace(match):
+        token = match.group(1)
+        if not token:
+            return "&"
+        try:
+            encoded = token.replace(",", "/")
+            return base64.b64decode(encoded + "=" * ((4 - len(encoded) % 4) % 4)).decode("utf-16-be")
+        except (ValueError, UnicodeDecodeError):
+            return match.group(0)
+    return re.sub(r"&([^-]*)-", replace, str(value))
+
+
+def _mailbox_uidvalidity(connection):
+    try:
+        values = connection.response("UIDVALIDITY")[1]
+        if values and values[0] is not None:
+            return values[0].decode() if isinstance(values[0], bytes) else str(values[0])
+    except (IndexError, TypeError, AttributeError, imaplib.IMAP4.error):
+        pass
+    return "0"
 
 
 class Mail:
@@ -489,6 +535,18 @@ class Mail:
         msg.set_content(body)
         html_body = "<div>" + "<br>".join(html.escape(line) for line in body.splitlines()) + "</div>"
         msg.add_alternative(html_body, subtype="html")
+        forwarded = draft.get("forward_eml_b64")
+        if forwarded:
+            try:
+                raw_forward = base64.b64decode(forwarded, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise MailError("Вложение пересылаемого письма повреждено.") from exc
+            if len(raw_forward) > 18 * 1024 * 1024:
+                raise MailError("Исходное письмо больше 18 МБ и не помещается во вложение пересылки.")
+            filename = re.sub(r'[\\/:*?"<>|\r\n]+', "_", str(draft.get("forward_filename") or "Пересланное письмо.eml"))[:120]
+            if not filename.lower().endswith(".eml"):
+                filename += ".eml"
+            msg.add_attachment(raw_forward, maintype="application", subtype="octet-stream", filename=filename)
         s = self._smtp()
         try:
             refused = s.send_message(msg)
@@ -530,11 +588,7 @@ class Mail:
             typ, _ = m.select(folder, readonly=True)
             if typ != "OK":
                 raise MailError(f"нет папки {folder}")
-            try:
-                val = m.response("UIDVALIDITY")[1]
-                return (val[0].decode() if val and isinstance(val[0], bytes) else str(val[0])) if val else "0"
-            except (IndexError, TypeError, AttributeError):
-                return "0"
+            return _mailbox_uidvalidity(m)
         finally:
             try:
                 m.logout()
@@ -548,16 +602,25 @@ class Mail:
             typ, rows = m.list()
             if typ != "OK":
                 return ""
+            candidates = []
             for row in rows or []:
                 raw = row.decode("utf-8", errors="replace") if isinstance(row, bytes) else str(row)
-                if special_use.casefold() not in raw.casefold():
-                    continue
                 match = re.search(r'"((?:\\.|[^"])*)"\s*$', raw)
                 if match:
-                    return match.group(1).replace('\\"', '"').replace('\\\\', '\\')
-                # IMAP permits an unquoted final mailbox token.
-                tail = raw.rsplit(" ", 1)[-1]
-                return tail.strip('"')
+                    mailbox = match.group(1).replace('\\"', '"').replace('\\\\', '\\')
+                else:
+                    # IMAP permits an unquoted final mailbox token.
+                    mailbox = raw.rsplit(" ", 1)[-1].strip('"')
+                if special_use.casefold() in raw.casefold():
+                    return mailbox
+                candidates.append(mailbox)
+            if special_use.casefold() == "\\trash":
+                names = {"trash", "deleted", "deleted items", "deleted messages", "bin", "корзина", "удалённые", "удаленные"}
+                for mailbox in candidates:
+                    decoded = _imap_decode_utf7(mailbox).replace("\\", "/")
+                    leaf = re.split(r"[/.]", decoded)[-1].strip().casefold()
+                    if leaf in names:
+                        return mailbox
             return ""
         finally:
             try:
@@ -573,11 +636,13 @@ class Mail:
             typ, _ = m.select(folder, readonly=True)
             if typ != "OK":
                 raise MailError(f"нет папки {folder}")
-            crit = ["UNSEEN"] if unread else ["ALL"]
+            # Исключаем сообщения, уже отправленные в корзину (в том числе помеченные
+            # \Deleted на серверах без безопасной UID EXPUNGE).
+            crit = ["UNSEEN", "UNDELETED"] if unread else ["UNDELETED"]
             if since_days:
                 from datetime import datetime, timedelta
                 since = (datetime.now() - timedelta(days=max(1, int(since_days)))).strftime("%d-%b-%Y")
-                crit = ["SINCE", since] if not unread else ["UNSEEN", "SINCE", since]
+                crit += ["SINCE", since]
             typ, data = m.uid("search", None, *crit)
             uids = (data[0] or b"").split()[::-1]
             out, q = [], (query or "").lower().strip()
@@ -619,14 +684,18 @@ class Mail:
             except Exception:  # noqa: BLE001
                 pass
 
-    def read(self, uid, folder="INBOX"):
+    def read(self, uid, folder="INBOX", expected_uidvalidity=""):
         """Письмо целиком по uid из inbox() -> {uid, from, to, subject, date, text, files}."""
         uid = str(uid)
         if not re.fullmatch(r"[0-9]+", uid):
             raise MailError("Номер письма должен быть числовым UID.")
         m = self._imap()
         try:
-            m.select(folder, readonly=True)
+            typ, _ = m.select(folder, readonly=True)
+            if typ != "OK":
+                raise MailError(f"нет папки {folder}")
+            if expected_uidvalidity and _mailbox_uidvalidity(m) != str(expected_uidvalidity):
+                raise MailError("Папка входящих изменилась; обновите список писем.")
             typ, d = m.uid("fetch", uid.encode(), "(BODY.PEEK[])")
             raw = next((x[1] for x in d if isinstance(x, tuple)), b"")
             if not raw:
@@ -640,6 +709,77 @@ class Mail:
                     "x_original_to": msg.get("X-Original-To", ""), "authentication_results": _dec(msg.get("Authentication-Results", "")),
                     "subject": _dec(msg.get("Subject")),
                     "date": msg.get("Date", ""), "text": body, "files": files}
+        finally:
+            try:
+                m.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def read_raw(self, uid, folder="INBOX", expected_uidvalidity=""):
+        """Получить исходный MIME для пересылки как .eml, не раскрывая его в обычном письме UI."""
+        uid = str(uid)
+        if not re.fullmatch(r"[0-9]+", uid):
+            raise MailError("Номер письма должен быть числовым UID.")
+        m = self._imap()
+        try:
+            typ, _ = m.select(folder, readonly=True)
+            if typ != "OK":
+                raise MailError(f"нет папки {folder}")
+            if expected_uidvalidity and _mailbox_uidvalidity(m) != str(expected_uidvalidity):
+                raise MailError("Папка входящих изменилась; обновите список писем.")
+            typ, data = m.uid("fetch", uid.encode(), "(BODY.PEEK[])")
+            raw = next((part[1] for part in data if isinstance(part, tuple) and isinstance(part[1], bytes)), b"")
+            if typ != "OK" or not raw:
+                raise MailError("такого письма нет")
+            if len(raw) > 18 * 1024 * 1024:
+                raise MailError("Исходное письмо больше 18 МБ: переслать его с сохранением вложений нельзя.")
+            return raw
+        finally:
+            try:
+                m.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def move_to_trash(self, uid, folder="INBOX", expected_uidvalidity=""):
+        """Move one UID to Trash; never use global EXPUNGE, which could erase other deleted messages."""
+        uid = str(uid)
+        if not re.fullmatch(r"[0-9]+", uid):
+            raise MailError("Номер письма должен быть числовым UID.")
+        trash = self.special_folder("\\Trash")
+        m = self._imap()
+        try:
+            typ, _ = m.select(folder, readonly=False)
+            if typ != "OK":
+                raise MailError(f"нет папки {folder}")
+            if expected_uidvalidity and _mailbox_uidvalidity(m) != str(expected_uidvalidity):
+                raise MailError("Папка входящих изменилась; удаление остановлено.")
+            capabilities = {x.decode("ascii", errors="ignore").upper() if isinstance(x, bytes) else str(x).upper()
+                            for x in (getattr(m, "capabilities", ()) or ())}
+            if trash and "MOVE" in capabilities:
+                typ, data = m.uid("MOVE", uid, _imap_quote(trash))
+                if typ == "OK":
+                    return {"state": "moved", "folder": trash}
+                raise MailError("Сервер не переместил письмо в Корзину: " + str(data)[:300])
+            if trash:
+                typ, data = m.uid("COPY", uid, _imap_quote(trash))
+                if typ != "OK":
+                    raise MailError("Не удалось скопировать письмо в Корзину: " + str(data)[:300])
+                typ, data = m.uid("STORE", uid, "+FLAGS.SILENT", "(\\Deleted)")
+                if typ != "OK":
+                    raise MailError("Копия попала в Корзину, но сервер не пометил исходное письмо удалённым: " + str(data)[:300])
+                if "UIDPLUS" in capabilities:
+                    typ, data = m.uid("EXPUNGE", uid)
+                    if typ != "OK":
+                        raise MailError("Письмо в Корзине, но сервер не завершил удаление исходной копии: " + str(data)[:300])
+                return {"state": "moved", "folder": trash}
+            if "UIDPLUS" in capabilities:
+                typ, data = m.uid("STORE", uid, "+FLAGS.SILENT", "(\\Deleted)")
+                if typ == "OK":
+                    typ, data = m.uid("EXPUNGE", uid)
+                if typ == "OK":
+                    return {"state": "deleted", "folder": ""}
+                raise MailError("Сервер не удалил письмо: " + str(data)[:300])
+            raise MailError("На сервере не найдена Корзина и нет безопасного удаления одного письма. Ничего не изменено.")
         finally:
             try:
                 m.logout()

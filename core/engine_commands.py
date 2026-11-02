@@ -702,6 +702,10 @@ class CommandsMixin:
                     return self.mail.badge_counts()
                 if cmd == "mail_open":
                     return self.mail.open_mail(a.get("message_id", ""))
+                if cmd == "mail_delete":
+                    return self.mail.delete_mail(a.get("message_id", ""))
+                if cmd == "mail_forward_prepare":
+                    return self.mail.forward_prepare(a.get("message_id", ""))
                 if cmd == "mail_reply_prepare":
                     return self.mail.reply_prepare(a.get("message_id", ""), a.get("body", ""))
                 if cmd == "mail_reply_revise":

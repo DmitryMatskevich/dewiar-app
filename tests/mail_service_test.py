@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "core"))
 
 from mail_service import MailService, MailServiceError  # noqa: E402
 from tools import TOOLS, t_mail_importance  # noqa: E402
+import mail as mail_module  # noqa: E402
+import mail_keychain  # noqa: E402
 
 
 class FakeMail:
@@ -23,6 +25,7 @@ class FakeMail:
                      "imap_host": "localhost", "imap_port": 1143, "provider": "test"}
         self.sent = []
         self.latest = []
+        self.trashed = []
 
     def configured(self):
         return True
@@ -33,7 +36,7 @@ class FakeMail:
     def inbox(self, **kwargs):
         return self.latest
 
-    def read(self, uid):
+    def read(self, uid, expected_uidvalidity=""):
         return {"uid": uid, "from": "Client <client@example.org>", "reply_to": "reply@example.org",
                 "to": "Dmitry <d@dcnt.ru>", "cc": "Colleague <colleague@example.org>, dm@sklad-podolsk.ru",
                 "subject": "Новая заявка", "date": "Mon, 02 Nov 2026 10:00:00 +0300",
@@ -41,8 +44,15 @@ class FakeMail:
                 "text": "Здравствуйте!\nПодскажите цену.", "files": ["brief.pdf"]}
 
     def send_reply(self, payload):
-        self.sent.append(payload)
+        self.sent.append(dict(payload))
         return {"sent_copy": "appended"}
+
+    def read_raw(self, uid, expected_uidvalidity=""):
+        return b"From: client@example.org\r\nSubject: Original\r\n\r\nOriginal body\r\n"
+
+    def move_to_trash(self, uid, expected_uidvalidity=""):
+        self.trashed.append(str(uid))
+        return {"state": "moved", "folder": "Trash"}
 
     def uidvalidity(self, folder="INBOX"):
         return "77"
@@ -50,6 +60,8 @@ class FakeMail:
 
 class MailServiceTests(unittest.TestCase):
     def setUp(self):
+        self.keychain_patch = patch.object(mail_module.keychain, "exists", return_value=mail_keychain.MISSING)
+        self.keychain_patch.start()
         self.tmp = tempfile.TemporaryDirectory(prefix="mail-service-")
         root = Path(self.tmp.name)
         self.service = MailService(rules_path=root / "rules.json", index_path=root / "index.sqlite3",
@@ -62,6 +74,7 @@ class MailServiceTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+        self.keychain_patch.stop()
 
     def test_account_defaults_include_user_servers_without_password(self):
         accounts = self.initial_accounts
@@ -136,6 +149,44 @@ class MailServiceTests(unittest.TestCase):
         self.assertEqual(detail["text"], "Здравствуйте!\nПодскажите цену.")
         with self.assertRaises(MailServiceError):
             self.service.open_mail("dcnt:76:42")
+
+    def _index_action_message(self, uid="42"):
+        row = {"uid": uid, "from": "Client <client@example.org>", "to": "d@dcnt.ru", "cc": "",
+               "subject": "Заявка", "date": "Mon, 02 Nov 2026 10:00:00 +0300", "message_id": "<m-action>"}
+        with self.service._db() as db:
+            self.service._store_message(db, self.service.rules["accounts"][0], row, "77", "INBOX")
+
+    def test_delete_moves_only_selected_copy_and_removes_local_index_after_success(self):
+        self._index_action_message()
+        result = self.service.delete_mail("dcnt:77:42")
+        self.assertEqual(result, {"state": "moved", "folder": "Trash", "id": "dcnt:77:42"})
+        self.assertEqual(self.box.trashed, ["42"])
+        self.assertEqual(self.service.list_mail(account_id="dcnt"), [])
+        with self.assertRaisesRegex(MailServiceError, "уже удалено"):
+            self.service.delete_mail("dcnt:77:42")
+
+    def test_forward_draft_is_editable_and_keeps_original_eml_private(self):
+        self._index_action_message()
+        draft = self.service.forward_prepare("dcnt:77:42")
+        self.assertEqual(draft["kind"], "forward")
+        self.assertTrue(draft["forwarded_original"])
+        self.assertNotIn("forward_eml_b64", draft)
+        self.assertIn("Здравствуйте!", draft["body"])
+        with self.assertRaisesRegex(MailServiceError, "Кому"):
+            self.service.reply_revise(draft["id"], draft["revision"], {"to": "not-an-address"})
+        updated = self.service.reply_revise(draft["id"], draft["revision"],
+            {"to": "client@example.org", "cc": "copy@example.org", "subject": "Fwd: Изменённая тема",
+             "body": "Пожалуйста, посмотрите."})
+        self.assertEqual(updated["to"], ["client@example.org"])
+        self.assertEqual(updated["cc"], ["copy@example.org"])
+        self.assertNotIn("forward_eml_b64", self.service.draft_get(draft["id"]))
+        sent = self.service.reply_send(updated["id"], updated["revision"])
+        self.assertEqual(sent["state"], "sent")
+        self.assertTrue(self.box.sent[0]["forward_eml_b64"])
+        self.assertEqual(self.box.sent[0]["to"], ["client@example.org"])
+        with self.service._db() as db:
+            stored = db.execute("SELECT payload FROM reply_drafts WHERE id=?", (updated["id"],)).fetchone()[0]
+        self.assertNotIn("forward_eml_b64", stored, "drop large forwarded source after one-shot send")
 
     def test_unread_count_deduplicates_copies_across_accounts(self):
         first = self.service.rules["accounts"][0]

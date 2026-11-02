@@ -186,13 +186,63 @@ async function mlOpen(id) {
   } catch (e) { toast(e.message); }
 }
 $("#ml-close-message").onclick = () => { mlClearMessage(); mlList(); };
+$("#ml-copy-message").onclick = async ev => {
+  if (!mlCurrentMessage) return;
+  const m = mlCurrentMessage;
+  const value = `От: ${m.from || "—"}\nКому: ${m.to || "—"}\nКопия: ${m.cc || "—"}\nТема: ${m.subject || "(без темы)"}\nДата: ${m.date || "—"}\n\n${m.text || ""}`;
+  ev.target.disabled = true;
+  try {
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(value); copied = true; } catch (_) { /* webview may deny clipboard API */ }
+    }
+    if (!copied) {
+      const input = document.createElement("textarea"); input.value = value; input.style.position = "fixed"; input.style.opacity = "0";
+      document.body.appendChild(input); input.select();
+      try { copied = document.execCommand("copy"); } finally { input.remove(); }
+    }
+    if (!copied) throw new Error("Не удалось скопировать письмо в буфер обмена.");
+    toast("Письмо скопировано в буфер обмена.");
+  } catch (e) { toast(e.message || "Не удалось скопировать письмо."); }
+  finally { ev.target.disabled = false; }
+};
+$("#ml-delete-message").onclick = async ev => {
+  if (!mlCurrentMessage) return;
+  const m = mlCurrentMessage; ev.target.disabled = true;
+  try {
+    if (!await ask(`Переместить письмо «${m.subject || "(без темы)"}» из ${m.account} в Корзину?`,
+      { title: "Удалить письмо", ok: "В Корзину", danger: true })) return;
+    await core.call("mail_delete", { message_id: m.id });
+    mlClearMessage(); await mlList(); toast("Письмо перемещено в Корзину.");
+  } catch (e) { toast(e.message); }
+  finally { ev.target.disabled = false; }
+};
+$("#ml-forward-message").onclick = async ev => {
+  if (!mlCurrentMessage) return; ev.target.disabled = true;
+  try { await mlShowDraft(await core.call("mail_forward_prepare", { message_id: mlCurrentMessage.id })); }
+  catch (e) { toast(e.message); } finally { ev.target.disabled = false; }
+};
 async function mlShowDraft(d) {
   mlDraft = d; $("#ml-draft-preview").hidden = false;
+  const forward = d.kind === "forward";
+  $("#ml-forward-fields").hidden = !forward;
+  if (forward) {
+    $("#ml-draft-to").value = (d.to || []).join(", "); $("#ml-draft-cc").value = (d.cc || []).join(", ");
+    $("#ml-draft-subject").value = d.subject || "";
+    $("#ml-forward-attachments").textContent = d.forwarded_original ? "Исходное письмо и его вложения будут приложены файлом .eml." : "";
+  }
   $("#ml-draft-meta").textContent = "Версия " + d.revision + " · От: " + d.from + " · Кому: " + d.to.join(", ") +
     " · Копия: " + (d.cc.join(", ") || "—") + " · Тема: " + d.subject;
   $("#ml-draft-original").textContent = "Исходное письмо: " + d.original.from + " · " + d.original.subject + "\n\n" + (d.original.text || "");
   $("#ml-draft-body").value = d.body;
   $("#ml-draft-state").textContent = "Проверьте адреса, тему и весь текст. Каждая правка создаёт новую версию.";
+}
+function mlDraftPatch() {
+  const patch = { body: $("#ml-draft-body").value };
+  if (mlDraft?.kind === "forward") {
+    patch.to = $("#ml-draft-to").value; patch.cc = $("#ml-draft-cc").value; patch.subject = $("#ml-draft-subject").value;
+  }
+  return patch;
 }
 
 $("#ml-save").onclick = async ev => {
@@ -250,12 +300,12 @@ $("#ml-reply-prepare").onclick = async ev => { if (!mlCurrentMessage) return; ev
   try { await mlShowDraft(await core.call("mail_reply_prepare", { message_id: mlCurrentMessage.id, body: $("#ml-reply-body").value })); }
   catch (e) { toast(e.message); } finally { ev.target.disabled = false; } };
 $("#ml-draft-update").onclick = async ev => { if (!mlDraft) return; ev.target.disabled = true;
-  try { await mlShowDraft(await core.call("mail_reply_revise", { draft_id: mlDraft.id, revision: mlDraft.revision, patch: { body: $("#ml-draft-body").value } })); }
+  try { await mlShowDraft(await core.call("mail_reply_revise", { draft_id: mlDraft.id, revision: mlDraft.revision, patch: mlDraftPatch() })); }
   catch (e) { toast(e.message); } finally { ev.target.disabled = false; } };
 $("#ml-draft-send").onclick = async ev => {
   if (!mlDraft) return; const d = mlDraft; ev.target.disabled = true;
   try {
-    const updated = await core.call("mail_reply_revise", { draft_id: d.id, revision: d.revision, patch: { body: $("#ml-draft-body").value } });
+    const updated = await core.call("mail_reply_revise", { draft_id: d.id, revision: d.revision, patch: mlDraftPatch() });
     await mlShowDraft(updated);
     const question = "Отправить эту точную версию?\n\nОт: " + updated.from + "\nКому: " + updated.to.join(", ") +
       "\nКопия: " + (updated.cc.join(", ") || "—") + "\nТема: " + updated.subject + "\nВерсия: " + updated.revision + "\n\n" + updated.body;

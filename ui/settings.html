@@ -509,7 +509,12 @@
           <div class="ml-split">
             <div id="ml-list" class="ml-list" role="listbox" aria-label="Список писем"></div>
             <article id="ml-detail" class="ml-detail" aria-label="Выбранное письмо" hidden>
-              <div class="ml-detail-toolbar"><button class="btn" type="button" id="ml-close-message">Закрыть письмо</button></div>
+              <div class="ml-detail-toolbar">
+                <button class="btn" type="button" id="ml-copy-message">Скопировать</button>
+                <button class="btn" type="button" id="ml-forward-message">Переслать</button>
+                <button class="btn danger" type="button" id="ml-delete-message">Удалить</button>
+                <button class="btn" type="button" id="ml-close-message">Закрыть письмо</button>
+              </div>
               <h3 id="ml-message-subject"></h3>
               <div id="ml-message-head"></div>
               <pre id="ml-message-body"></pre>
@@ -517,6 +522,12 @@
               <button class="btn primary" id="ml-reply-prepare">Подготовить ответ всем</button>
               <div id="ml-draft-preview" hidden>
                 <p id="ml-draft-meta" class="hint"></p>
+                <div id="ml-forward-fields" hidden>
+                  <label class="f">Кому<input id="ml-draft-to" type="text" autocomplete="off" placeholder="адрес@example.com"></label>
+                  <label class="f">Копия<input id="ml-draft-cc" type="text" autocomplete="off" placeholder="необязательно"></label>
+                  <label class="f">Тема<input id="ml-draft-subject" type="text" maxlength="200"></label>
+                  <p class="hint" id="ml-forward-attachments"></p>
+                </div>
                 <pre id="ml-draft-original"></pre>
                 <label class="f">Точная версия к отправке<textarea id="ml-draft-body" rows="8"></textarea></label>
                 <div class="actions"><button class="btn" id="ml-draft-update">Обновить версию</button><button class="btn primary" id="ml-draft-send">Подтвердить и отправить</button></div>
