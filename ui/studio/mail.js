@@ -182,8 +182,11 @@ $("#ml-rules-save").onclick = async ev => { const r = $("#ml-rules-state"); ev.t
     r.textContent = "Правила проверены, сохранены и применены к индексу."; await mlLoad(); }
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
 
-// Wait for the bridge handshake before loading accounts; core.call() rejects immediately while the WebSocket is still opening.
-core.on("hello", () => {
-  mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
-});
-if (core.connected) mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
+// A bridge reconnect must not activate Mail while the user is in another section.
+function mlLoadIfVisible() {
+  if (core.connected && document.querySelector('#p-mail.cur')) {
+    mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
+  }
+}
+core.on("hello", mlLoadIfVisible);
+mlLoadIfVisible();

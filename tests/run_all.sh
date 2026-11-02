@@ -82,6 +82,7 @@ run "музыка: Яндекс, кнопки плеера, контекст" $P
 run "«стоп» — сон, нажатия"            $PY "$T/sleep_test.py"
 run "вложения и почта"                  $PY "$T/mail_test.py"
 run "запуск: почта не читает Keychain до открытия" $PY "$T/mail_activation_test.py"
+run "студия: почта загружается только в своём разделе" $PY "$T/mail_activation_ui_test.py"
 run "радио, вложения, YouTube"          $PY "$T/radio_test.py"
 run "граф памяти"                      $PY "$T/graph_test.py"
 run "Telegram"                          $PY "$T/telegram_test.py"
