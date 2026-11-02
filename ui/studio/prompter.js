@@ -19,12 +19,48 @@
     finally { button.disabled = false; }
   }
   $("#pr-audio-apps-refresh")?.addEventListener("click", loadAudioApps);
+  async function loadCaptureApps() {
+    const select = $("#pr-capture-application"), button = $("#pr-capture-apps-refresh"), out = $("#pr-capture-test-result");
+    if (!select || !button) return;
+    const selected = select.value || get("prompter.capture_application") || "";
+    button.disabled = true;
+    try {
+      const result = await core.call("prompter_capture_apps");
+      const apps = Array.isArray(result.apps) ? result.apps : [];
+      select.replaceChildren(new Option(apps.length ? "Выберите видимое окно" : "Видимые окна не найдены", ""));
+      apps.forEach(app => select.add(new Option(app.title ? `${app.name} — ${app.title}` : app.name, app.key)));
+      if (selected && !apps.some(app => app.key === selected)) select.add(new Option(`${selected} · сейчас не найдено`, selected));
+      select.value = selected;
+      if (!result.supported) out.textContent = "Выбор окна приложения доступен в версии для macOS.";
+      else if (!apps.length) out.textContent = "Откройте нужное окно и обновите список.";
+      else if (!out.textContent || out.textContent.includes("доступен")) out.textContent = `Найдено окон: ${apps.length}`;
+    } catch (e) { out.textContent = e.message; }
+    finally { button.disabled = false; }
+  }
+  $("#pr-capture-apps-refresh")?.addEventListener("click", loadCaptureApps);
+  $("#pr-capture-test")?.addEventListener("click", async () => {
+    const button = $("#pr-capture-test"), out = $("#pr-capture-test-result");
+    button.disabled = true; out.className = "res"; out.textContent = "Проверяю разрешение и захват…";
+    try {
+      const result = await core.call("prompter_capture_test");
+      out.className = "res ok"; out.textContent = `Захват работает · ${result.width} × ${result.height} · файл не сохранён`;
+    } catch (e) { out.className = "res bad"; out.textContent = e.message; }
+    finally { button.disabled = false; }
+  });
   function renderCaptureFields() {
     const source = $("#pr-capture-source")?.value || "screen";
     $("#pr-region-fields")?.classList.toggle("hidden", source !== "region");
     $("#pr-app-field")?.classList.toggle("hidden", source !== "application");
   }
   $("#pr-capture-source")?.addEventListener("change", renderCaptureFields);
+  function renderVideoState() {
+    const enabled = !!$("#pr-frame-video")?.checked;
+    const out = $("#pr-video-state");
+    if (out) out.textContent = enabled
+      ? "Сборка видео включена. Включите «Автоматические кадры» и запись аудио в окне встречи; MP4 появится после остановки."
+      : "Сборка видео выключена. Кадры и аудио можно записывать отдельно.";
+  }
+  $("#pr-frame-video")?.addEventListener("change", renderVideoState);
   $("#pr-stt-download")?.addEventListener("click", async () => {
     const model = $("#pr-stt-model").value;
     const out = $("#pr-stt-result"); const b = $("#pr-stt-download");
@@ -75,8 +111,8 @@
     } catch (e) { out.className = "res bad"; out.textContent = e.message; }
   });
   const oldRefresh = window.refreshStatic;
-  window.refreshStatic = function () { oldRefresh(); renderCaptureFields(); };
+  window.refreshStatic = function () { oldRefresh(); renderCaptureFields(); renderVideoState(); };
   $("#pr-stt-model")?.addEventListener("change", loadMeetingModel);
-  core.on("hello", () => { renderCaptureFields(); loadSchedules(); loadMeetingModel(); loadAudioApps(); });
+  core.on("hello", () => { renderCaptureFields(); renderVideoState(); loadSchedules(); loadMeetingModel(); loadAudioApps(); loadCaptureApps(); });
   core.on("prompter", e => { if (e.kind === "schedule") loadSchedules(); });
 })();

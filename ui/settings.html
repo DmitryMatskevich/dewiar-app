@@ -390,19 +390,19 @@
           <option value="system">Звук звонка и приложений</option>
           <option value="microphone">Микрофон MacBook или выбранный в «Звук»</option>
         </select><span class="hint">Локальный WAV используется для полной транскрибации и сборки видео.</span></label>
-        <div class="switch"><div>Предлагать запись аудио по умолчанию<span>Переключатель «Записать аудио» будет включён в новом окне встречи. Перед записью предупредите участников.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_audio_default"><i></i></label></div>
+        <div class="switch"><div>Записывать звук по умолчанию<span>Можно выключить отдельно в окне встречи. Перед записью предупредите участников.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_audio_default"><i></i></label></div>
       </div>
       <div class="row" style="margin-top:10px">
         <label class="f">Способ записи звука приложений<select data-k="prompter.system_audio" id="pr-system-audio" title="Автоматически: нативная запись Core Audio, при ошибке — установленный BlackHole/Loopback. Принудительный Core Audio не подменяется другим источником.">
           <option value="auto">Автоматически (Core Audio → BlackHole)</option><option value="tap">Core Audio — без виртуального драйвера</option><option value="blackhole">BlackHole / Loopback</option>
         </select></label>
-        <label class="f">Приложение звонка<select data-k="prompter.tap_target" id="pr-tap-target" title="При Core Audio записывать весь звук или только выбранное приложение. Выбор относится к звуку, а не к кадрам экрана."><option value="all">Весь системный звук</option></select></label>
+        <label class="f">Звук приложения<select data-k="prompter.tap_target" id="pr-tap-target" title="При Core Audio записывать весь звук или только выбранное приложение. Выбор относится к звуку, а не к кадрам экрана."><option value="all">Весь системный звук</option></select></label>
       </div>
       <div class="actions" style="margin-top:8px"><button class="btn small" id="pr-audio-apps-refresh" title="Обновить приложения, подключённые к системному звуку. Эта проверка не начинает запись.">Обновить приложения со звуком</button><span class="res" id="pr-audio-apps-result" role="status"></span></div>
       <div class="switch" style="margin-top:8px"><div>Записывать и мой микрофон<span>Для системного звука сохраняются «Вы», «Собеседник» и общий WAV. Выключите, если ваш голос уже включён в общий микс.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_me" title="Добавить отдельную дорожку выбранного микрофона при записи звука приложений"><i></i></label></div>
       <div class="actions" style="margin-top:10px"><button class="btn small" id="pr-stt-download">Скачать выбранную модель</button><span class="res" id="pr-stt-result"></span></div>
       <div class="row" style="margin-top:14px">
-        <label class="f">Источник кадров<select data-k="prompter.capture_source" id="pr-capture-source">
+        <label class="f">Что захватывать<select data-k="prompter.capture_source" id="pr-capture-source">
           <option value="screen">Весь экран (по умолчанию)</option><option value="region">Часть экрана по координатам</option><option value="application">Окно приложения</option>
         </select></label>
         <label class="f">Кнопка снимка<input type="text" data-k="prompter.capture_hotkey" placeholder="Ctrl+Shift+S" title="Сочетание действует в окне встречи; например Ctrl+Alt+S"></label>
@@ -415,12 +415,14 @@
           <option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option>
         </select><span class="hint">Выше качество — крупнее файлы.</span></label>
       </div>
-      <div class="switch" style="margin-top:8px"><div>Собрать видео из кадров<span>После остановки встречи собрать локальный MP4-таймлапс из всех сохранённых кадров.</span></div><label class="tg"><input type="checkbox" data-k="prompter.frame_video" id="pr-frame-video"><i></i></label></div>
+      <div class="switch" style="margin-top:8px"><div>Собирать видео из кадров<span>После остановки встречи создать локальный MP4 из сохранённых кадров и аудиозаписи. Работает, когда включены кадры и запись аудио.</span></div><label class="tg"><input type="checkbox" data-k="prompter.frame_video" id="pr-frame-video"><i></i></label></div>
+      <p class="hint" id="pr-video-state" role="status" style="margin:6px 0 0"></p>
       <div class="row" style="margin-top:10px" id="pr-region-fields">
         <label class="f">X<input type="number" data-k="prompter.capture_region.x" min="0"></label><label class="f">Y<input type="number" data-k="prompter.capture_region.y" min="0"></label>
         <label class="f">Ширина<input type="number" data-k="prompter.capture_region.width" min="2"></label><label class="f">Высота<input type="number" data-k="prompter.capture_region.height" min="2"></label>
       </div>
-      <label class="f" style="margin-top:10px" id="pr-app-field">Приложение или заголовок окна<input type="text" data-k="prompter.capture_application" placeholder="например, Microsoft Teams" title="Ищется среди видимых окон macOS по имени приложения или заголовку"></label>
+      <div class="row" style="margin-top:10px;align-items:end" id="pr-app-field"><label class="f">Окно приложения<select data-k="prompter.capture_application" id="pr-capture-application"><option value="">Сначала обновите список окон</option></select><span class="hint">Захватываются только окна, видимые на экране.</span></label><button class="btn small" id="pr-capture-apps-refresh" title="Показать видимые окна приложений. Проверка не начинает запись.">Обновить список окон</button></div>
+      <div class="actions" style="margin-top:8px"><button class="btn small" id="pr-capture-test">Проверить захват экрана</button><span class="res" id="pr-capture-test-result" role="status"></span></div>
       <div class="switch" style="margin-top:8px"><div>Первый снимок при начале записи<span>Включено по умолчанию: фиксирует экран до первой реплики. Можно отключить.</span></div><label class="tg"><input type="checkbox" data-k="prompter.auto_first_frame"><i></i></label></div>
     </div>
     <div class="prof on" style="padding:16px 18px;margin-bottom:18px" id="pr-schedule-settings">

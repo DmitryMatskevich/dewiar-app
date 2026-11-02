@@ -172,6 +172,9 @@ DEFAULTS = {
         "capture_source": "screen",    # screen | region | application
         "capture_region": {"x": 0, "y": 0, "width": 0, "height": 0},
         "capture_application": "",
+        "frame_interval": 1.0,
+        "frame_quality": 85,
+        "frame_video": False,
     },
     "tts": {
         "engine": "vosk",           # vosk | piper | remote | elevenlabs | espeak | off

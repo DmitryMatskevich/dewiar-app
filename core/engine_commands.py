@@ -457,6 +457,37 @@ class CommandsMixin:
             if cmd == "prompter_audio_apps":
                 from audio_io import audio_tap_supported, list_audio_apps
                 return {"supported": audio_tap_supported(), "apps": list_audio_apps()}
+            if cmd == "prompter_capture_apps":
+                from platform_info import MAC
+                if not MAC:
+                    return {"supported": False, "apps": []}
+                from screenshot_sources import visible_windows
+                rows = visible_windows()
+                # Return selectable visible windows, using a window title as the
+                # capture key when available (otherwise the owning application).
+                apps = []
+                seen = set()
+                for row in rows:
+                    key = str(row.get("title") or row.get("name") or "").strip()
+                    if not key or key.casefold() in seen:
+                        continue
+                    seen.add(key.casefold())
+                    apps.append({"key": key, "name": row.get("name") or "Приложение",
+                                 "title": row.get("title") or ""})
+                return {"supported": True, "apps": apps}
+            if cmd == "prompter_capture_test":
+                from eyes import capture_screen
+                from tools import desktop_env
+                from PIL import Image
+                import io
+                cfg = self.s.get("prompter", {})
+                source = str(cfg.get("capture_source") or "screen")
+                data = capture_screen(desktop_env(), source=source,
+                                      region=cfg.get("capture_region") or {},
+                                      application=cfg.get("capture_application") or "")
+                with Image.open(io.BytesIO(data)) as image:
+                    width, height = image.size
+                return {"ok": True, "width": width, "height": height, "source": source}
             if cmd == "prompter_voice":                    # голос владельца: start — записать, stop — сохранить, forget
                 act = a.get("action", "start")
                 if act == "start":
