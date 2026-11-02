@@ -74,8 +74,9 @@ class IMAP(socketserver.StreamRequestHandler):
             elif cmd.startswith("UID FETCH"):
                 uid = int(rest.split(" ")[2]); raw, seen = BOX.get(uid, (b"", False))
                 if raw:
-                    flags = "\\\\Seen" if seen else ""
-                    self.w(f"* {uid} FETCH (UID {uid} FLAGS ({flags}) BODY[] {{{len(raw)}}}".encode() + b"\r\n" + raw + b")\r\n")
+                    flags = r"\Seen" if seen else ""
+                    structure = ' BODYSTRUCTURE ("APPLICATION" "PDF" ("NAME" "счёт.pdf") NIL NIL "BASE64" 5)' if uid == 1 else ""
+                    self.w(f"* {uid} FETCH (UID {uid} FLAGS ({flags}){structure} BODY[] {{{len(raw)}}}".encode() + b"\r\n" + raw + b")\r\n")
                 self.w(f"{tag} OK done")
             elif cmd.startswith("LOGOUT"): self.w("* BYE"); self.w(f"{tag} OK bye"); return
             else: self.w(f"{tag} OK")

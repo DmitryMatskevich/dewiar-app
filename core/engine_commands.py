@@ -279,7 +279,7 @@ class CommandsMixin:
                 "settings": self.s.snapshot(), "status": self.status, "muted": self.muted,
                 "presets": LLM_PRESETS, "piper_voices": PIPER_VOICES, "voice_fx": voicefx.catalog(), "workspace": str(self.workspace.root), "tools": self.toolbox.catalog(),
                 "version": VERSION, "update": self.updater.public(), "tasks": self.tasks.list(),
-                "skills": self.skills.catalog(), "mcp": self.mcp.status(), "account": self.account.status(), "mail": self.mail.public(), "telegram": self.telegram.public(), "max": self.max.public(), "obsidian": self.obsidian.public(),
+                "skills": self.skills.catalog(), "mcp": self.mcp.status(), "account": self.account.status(), "mail": {"configured": False, "accounts": []}, "telegram": self.telegram.public(), "max": self.max.public(), "obsidian": self.obsidian.public(),
                 "reminders": self.reminders_list(), "alarm": self._alarm_public(),
                 "radio": self.radio.status(),
                 "pending_import": provision.preview(self.pending_import, self.s.snapshot()) if self.pending_import else None}
@@ -666,6 +666,43 @@ class CommandsMixin:
         if cmd.startswith("mail_"):              # почта: настройки, проверка, тестовое письмо
             from mail import MailError, guess
             try:
+                self.mail.activate()
+                if cmd == "mail_accounts":
+                    return self.mail.accounts()
+                if cmd == "mail_account_save":
+                    return self.mail.account_save(a.get("account_id", ""), a.get("patch") or {})
+                if cmd == "mail_account_test":
+                    return self.mail.account_get(a.get("account_id", "")).test()
+                if cmd == "mail_account_send_test":
+                    return self.mail.send_test(a.get("account_id", ""))
+                if cmd == "mail_account_forget":
+                    return self.mail.account_forget(a.get("account_id", ""))
+                if cmd == "mail_rules_get":
+                    return self.mail.rules_public()
+                if cmd == "mail_rules_save":
+                    return self.mail.save_rules(a.get("rules") or {})
+                if cmd == "mail_sync":
+                    return self.mail.sync_all(force=True)
+                if cmd == "mail_check":
+                    return self.mail.check(force=bool(a.get("refresh", True)))
+                if cmd == "mail_list":
+                    return self.mail.list_mail(limit=a.get("limit", 50), unread=bool(a.get("unread")),
+                                               query=a.get("query", ""), important=bool(a.get("important")),
+                                               account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")))
+                if cmd == "mail_open":
+                    return self.mail.open_mail(a.get("message_id", ""))
+                if cmd == "mail_reply_prepare":
+                    return self.mail.reply_prepare(a.get("message_id", ""), a.get("body", ""))
+                if cmd == "mail_reply_revise":
+                    return self.mail.reply_revise(a.get("draft_id", ""), a.get("revision", 0), a.get("patch") or {})
+                if cmd == "mail_draft_get":
+                    return self.mail.draft_get(a.get("draft_id", ""))
+                if cmd == "mail_reply_send":
+                    draft_id, revision = a.get("draft_id", ""), a.get("revision", 0)
+                    question = self.mail.reply_confirmation(draft_id, revision)
+                    if not a.get("confirmed"):
+                        raise ValueError("Перед отправкой требуется отдельное подтверждение. " + question)
+                    return self.mail.reply_send(draft_id, revision)
                 if cmd == "mail_save":
                     r = self.mail.save(a.get("patch") or {})
                     self.emit("tools", tools=self.toolbox.catalog())
@@ -684,7 +721,7 @@ class CommandsMixin:
                     self.emit("tools", tools=self.toolbox.catalog())
                     return r
                 return self.mail.public()
-            except MailError as e:
+            except (MailError, ValueError, OSError) as e:
                 raise ValueError(str(e)) from e
         if cmd == "recall":                     # поиск по записям (страница «Память»)
             return self.recall.search(a.get("query", ""), limit=int(a.get("limit") or 10))

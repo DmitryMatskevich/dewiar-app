@@ -75,6 +75,7 @@
   <button data-p="close" title="Переписка с помощниками близких людей">Близкие<i class="ndot" id="close-dot"></i></button>
   <button data-p="ref" title="Приглашённые друзья: созвездие, ссылка, награды">Рефералы</button>
   <button data-p="tasks">Задачи</button>
+  <button data-p="mail" title="Входящие письма, ответы всем и настройки важности">Почта</button>
   <button data-p="prompter" title="Запись встреч, аудио, экрана и протоколы">Встречи</button>
   <div class="ng">Знания</div>
   <button data-p="memory">Память</button>
@@ -470,6 +471,86 @@
     <div class="switch"><div>Учиться на прошлых задачах<span>Раз в несколько задач ассистент делает выводы из своих ошибок — короткие правила в «Память/Уроки задач.md» (их можно править) — и соблюдает их дальше. А на ваших поправках в разговоре («нет, я же просил…») учится всегда: правила — в «Память/Уроки.md», их тоже можно править.</span></div><label class="tg"><input type="checkbox" data-k="tasks.learn"><i></i></label></div>
   </section>
 
+  <section id="p-mail" class="wide">
+    <h1>Почта</h1>
+    <p class="lead">Входящие по всем ящикам, важные письма и ответы всем. Подключения и правила важности настраиваются здесь же.</p>
+    <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
+      <div class="ml-mail-app">
+        <aside class="ml-sidebar" aria-label="Ящики и представления">
+          <div class="ml-nav-group" role="group" aria-label="Представления писем">
+            <button type="button" class="ml-view-item selected" data-ml-view="all" aria-pressed="true"><span>Все входящие</span></button>
+            <button type="button" class="ml-view-item" data-ml-view="important" aria-pressed="false"><span>Важные</span></button>
+            <button type="button" class="ml-view-item" data-ml-view="unanswered" aria-pressed="false"><span>Без ответа</span></button>
+          </div>
+          <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
+          <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>
+          <p class="ml-sidebar-note">Заголовки обновляются каждые пять минут. Пароли хранятся в Связке ключей macOS.</p>
+        </aside>
+        <div class="ml-workspace" role="region" aria-label="Почта">
+          <header class="ml-toolbar">
+            <div><h2 id="ml-view-title">Все входящие</h2><p id="ml-view-subtitle" class="hint">Выберите письмо, чтобы прочитать его</p></div>
+            <div class="ml-toolbar-actions">
+              <input id="ml-query" type="search" aria-label="Поиск писем по отправителю или теме" placeholder="Поиск">
+              <button class="btn" id="ml-refresh">Проверить сейчас</button>
+            </div>
+          </header>
+          <p class="hint ml-sync-state" id="ml-sync-state" role="status" aria-live="polite"></p>
+          <div class="ml-split">
+            <div id="ml-list" class="ml-list" role="listbox" aria-label="Список писем"></div>
+            <article id="ml-detail" class="ml-detail" aria-label="Выбранное письмо" hidden>
+              <div class="ml-detail-toolbar"><button class="btn" type="button" id="ml-close-message">Закрыть письмо</button></div>
+              <h3 id="ml-message-subject"></h3>
+              <div id="ml-message-head"></div>
+              <pre id="ml-message-body"></pre>
+              <label class="f">Текст ответа<textarea id="ml-reply-body" rows="5" placeholder="Краткий ответ по делу"></textarea></label>
+              <button class="btn primary" id="ml-reply-prepare">Подготовить ответ всем</button>
+              <div id="ml-draft-preview" hidden>
+                <p id="ml-draft-meta" class="hint"></p>
+                <pre id="ml-draft-original"></pre>
+                <label class="f">Точная версия к отправке<textarea id="ml-draft-body" rows="8"></textarea></label>
+                <div class="actions"><button class="btn" id="ml-draft-update">Обновить версию</button><button class="btn primary" id="ml-draft-send">Подтвердить и отправить</button></div>
+                <p class="hint" id="ml-draft-state" role="status" aria-live="polite"></p>
+              </div>
+            </article>
+          </div>
+          <details class="ml-settings">
+            <summary>Подключение и управление ящиками</summary>
+            <p class="hint">Выберите ящик слева, затем введите пароль приложения для этого адреса. Сохранение проверит IMAP и SMTP.</p>
+            <div class="ml-connect">
+              <h3>Подключение выбранного ящика</h3>
+              <p id="ml-selected-address" class="hint"></p>
+              <div class="actions ml-credentials">
+                <input type="password" id="ml-pass" placeholder="пароль приложения" autocomplete="new-password" aria-label="Пароль приложения выбранного ящика">
+                <button class="btn primary" id="ml-save">Сохранить и проверить</button>
+              </div>
+              <p class="hint" id="ml-help"></p>
+              <details class="ml-server-settings"><summary>Дополнительные параметры сервера</summary>
+                <div class="row" style="margin-top:10px">
+                  <label class="f">Имя отправителя<input type="text" id="ml-name" placeholder="Dewiar"></label>
+                  <label class="f">Логин (если не совпадает с адресом)<input type="text" id="ml-login" autocomplete="username"></label>
+                  <label class="f">SMTP — отправка<input type="text" id="ml-smtp"></label>
+                  <label class="f">Порт и защита<span style="display:flex;gap:6px"><input type="number" id="ml-sport" style="width:90px"><select id="ml-sec"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option></select></span></label>
+                  <label class="f">IMAP — чтение<input type="text" id="ml-imap"></label>
+                  <label class="f">Порт IMAP<input type="number" id="ml-iport" style="width:90px"></label>
+                </div>
+              </details>
+              <div class="actions" id="ml-on" style="display:none;margin-top:10px">
+                <span class="res ok" id="ml-state"></span><span style="flex:1"></span>
+                <button class="btn" id="ml-test">Отправить тест себе</button><button class="btn" id="ml-off">Отключить ящик</button>
+              </div>
+              <p class="res" id="ml-res" role="status" aria-live="polite"></p>
+            </div>
+          </details>
+          <details class="ml-settings"><summary>Настройки важности и исключений</summary>
+        <p class="hint">JSON проверяется до сохранения; пустое условие не превращается в совпадение со всей почтой. Образец уведомления формы dcnt.ru нужен, чтобы безопасно включить её правило.</p>
+        <label class="f">Правила почты<textarea id="ml-rules" rows="18" spellcheck="false" style="font-family:ui-monospace,monospace"></textarea></label>
+        <button class="btn" id="ml-rules-save">Проверить и сохранить правила</button><p id="ml-rules-state" class="res" role="status"></p>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="p-folder" class="wide">
     <h1>Папка</h1>
     <p class="lead">Всё, что ассистент делает для вас, — обычные файлы: заметки, дневник, лаборатория со скриптами и
@@ -779,31 +860,6 @@
         <div id="acc-answer" class="hint" style="margin-top:10px;white-space:pre-wrap"></div>
       </div>
       <p class="res" id="acc-res" style="margin-top:8px"></p>
-    </div>
-    <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
-      <h3 style="font-size:15px;margin-bottom:6px">Почта</h3>
-      <p class="hint" style="margin-bottom:12px">Ассистент сможет прислать вам результат («пришли мне это на почту»), отправить письмо по вашей просьбе (всегда спросит «отправить?») и рассказать, что нового во входящих.</p>
-      <div class="actions" style="margin:0;flex-wrap:wrap">
-        <input type="email" id="ml-addr" placeholder="ваш адрес, например ivan@yandex.ru" autocomplete="email" style="flex:1;min-width:200px">
-        <input type="password" id="ml-pass" placeholder="пароль приложения" autocomplete="off" style="flex:1;min-width:170px">
-        <button class="btn primary" id="ml-save">Подключить</button>
-      </div>
-      <p class="hint" id="ml-help" style="margin-top:8px"></p>
-      <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Серверы почты (подставляются сами)</summary>
-        <div class="row" style="margin-top:10px">
-          <label class="f">Имя отправителя<input type="text" id="ml-name" placeholder="Dewiar"></label>
-          <label class="f">Логин (если не совпадает с адресом)<input type="text" id="ml-login"></label>
-          <label class="f">SMTP — отправка<input type="text" id="ml-smtp" placeholder="smtp.yandex.ru"></label>
-          <label class="f">Порт и защита<span style="display:flex;gap:6px"><input type="number" id="ml-sport" style="width:90px"><select id="ml-sec"><option value="ssl">SSL</option><option value="starttls">STARTTLS</option><option value="none">без шифрования</option></select></span></label>
-          <label class="f">IMAP — чтение<input type="text" id="ml-imap" placeholder="imap.yandex.ru"></label>
-          <label class="f">Порт IMAP<input type="number" id="ml-iport" style="width:90px"></label>
-        </div>
-      </details>
-      <div class="actions" id="ml-on" style="display:none;margin-top:10px">
-        <span class="res ok" id="ml-state"></span><span style="flex:1"></span>
-        <button class="btn" id="ml-test">Письмо себе</button><button class="btn" id="ml-off">Отключить</button>
-      </div>
-      <p class="res" id="ml-res" style="margin-top:6px"></p>
     </div>
     <div class="prof on" id="tg-box" style="padding:16px 18px;margin-bottom:22px">
       <h3 style="font-size:15px;margin-bottom:6px">Telegram — ассистент в телефоне</h3>
@@ -1846,6 +1902,7 @@
 <script src="studio/icons.js"></script>
 <script src="studio/memory.js"></script>
 <script src="studio/links.js"></script>
+<script src="studio/mail.js"></script>
 <script src="studio/safety.js"></script>
 <script src="studio/folder.js"></script>
 <script src="studio/soul.js"></script>

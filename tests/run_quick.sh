@@ -33,6 +33,8 @@ run "версия: окно читает верно"     $PY "$T/version_read_te
 run "мозг: форматы серверов"        $PY "$T/llm_compat_test.py"
 run "размышления и код не в ответе" $PY "$T/reasoning_test.py"
 run "руки: модули"                  $PY "$T/tools_unit_test.py"
+run "почта: SMTP/IMAP и Keychain"   $PY "$T/mail_test.py"
+run "почта: разбор, ответы, правила" $PY "$T/mail_service_test.py"
 run "снимок: документ и локальный OCR" $PY "$T/screen_document_test.py"
 run "снимок: команда и разрешения"   $PY "$T/screen_command_test.py"
 run "руки без флагов на сервере"    $PY "$T/prompt_tools_test.py"

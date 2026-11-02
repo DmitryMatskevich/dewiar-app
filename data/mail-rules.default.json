@@ -1,0 +1,200 @@
+{
+  "schema_version": 2,
+  "status": "runtime_defaults",
+  "updated_at": "2026-11-02",
+  "timezone": "Europe/Moscow",
+  "accounts": [
+    {
+      "id": "dcnt",
+      "address": "d@dcnt.ru",
+      "label": "DCNT",
+      "secret_ref": "keychain:dewiar-mail/d@dcnt.ru",
+      "sent_copy": "auto",
+      "sync_folders": [
+        "INBOX",
+        "special:sent"
+      ],
+      "enabled": false,
+      "note": "Серверы IMAP/SMTP взять из Apple Mail → Настройки → Учётные записи.",
+      "smtp_host": "smtp.beget.com",
+      "smtp_port": 25,
+      "smtp_security": "starttls",
+      "imap_host": "imap.beget.com",
+      "imap_port": 143
+    },
+    {
+      "id": "podolsk",
+      "address": "dm@sklad-podolsk.ru",
+      "label": "Склад Подольск",
+      "secret_ref": "keychain:dewiar-mail/dm@sklad-podolsk.ru",
+      "sent_copy": "auto",
+      "sync_folders": [
+        "INBOX",
+        "special:sent"
+      ],
+      "enabled": false,
+      "note": "Адрес подтверждён пользователем 01.11.2026. Серверы IMAP/SMTP взять из Apple Mail → Настройки → Учётные записи.",
+      "smtp_host": "smtp.beget.com",
+      "smtp_port": 465,
+      "smtp_security": "ssl",
+      "imap_host": "imap.beget.com",
+      "imap_port": 143
+    },
+    {
+      "id": "mailru",
+      "address": "dmatskevich@mail.ru",
+      "label": "Mail.ru",
+      "secret_ref": "keychain:dewiar-mail/dmatskevich@mail.ru",
+      "sent_copy": "auto",
+      "sync_folders": [
+        "INBOX",
+        "special:sent"
+      ],
+      "enabled": false,
+      "note": "Адрес подтверждён пользователем 02.11.2026; параметры сервера подставляются автоматически.",
+      "smtp_host": "smtp.mail.ru",
+      "smtp_port": 465,
+      "smtp_security": "ssl",
+      "imap_host": "imap.mail.ru",
+      "imap_port": 143
+    }
+  ],
+  "important_contacts": [
+    {
+      "id": "timofey_barsukov",
+      "name": "Тимофей Барсуков",
+      "addresses": [
+        "tb@lanmaster.ru"
+      ],
+      "match_fields": [
+        "from"
+      ],
+      "enabled": true,
+      "note": "Подтверждён свежей перепиской AIM LANMASTER для ВТБ, 27.10.2026."
+    },
+    {
+      "id": "leonid_sayapin",
+      "name": "Леонид Саяпин",
+      "addresses": [
+        "leo@alas.ru"
+      ],
+      "match_fields": [
+        "from"
+      ],
+      "enabled": true,
+      "note": "Найден в письме 27.11.2020; проверить актуальность."
+    }
+  ],
+  "important_recipient_groups": [
+    {
+      "id": "podolsk_warehouse",
+      "name": "Склад в Подольске",
+      "addresses": [
+        "dm@sklad-podolsk.ru"
+      ],
+      "account_ids": [
+        "podolsk"
+      ],
+      "match_fields": [
+        "account",
+        "delivery_address",
+        "to",
+        "cc"
+      ],
+      "enabled": true,
+      "note": "Адрес подтверждён пользователем 01.11.2026."
+    }
+  ],
+  "website_forms": [
+    {
+      "id": "dcnt_site_form",
+      "site": "dcnt.ru",
+      "enabled": false,
+      "match": {
+        "from_addresses": [],
+        "recipient_any": [
+          "d@dcnt.ru"
+        ],
+        "subject_prefixes": [],
+        "reply_to_required": true
+      },
+      "client_address_from": "reply_to",
+      "note": "Единственный источник заявок по словам пользователя. Заполнить по свежему образцу уведомления формы и включить."
+    },
+    {
+      "id": "dcnt_contact_legacy",
+      "site": "dcnt.ru / ockc.ru — историческая контактная форма (2016)",
+      "enabled": false,
+      "match": {
+        "from_addresses": [
+          "domatskevich@gmail.com"
+        ],
+        "recipient_any": [
+          "d@dcnt.ru",
+          "t@ockc.ru"
+        ],
+        "subject_prefixes": [
+          "Форма контакт с Дмитрием Мацкевичем"
+        ],
+        "reply_to_required": true
+      },
+      "client_address_from": "reply_to",
+      "note": "From — собственный Gmail, поэтому правило без темы и Reply-To совпало бы со всеми своими письмами. Заменить свежими образцами форм."
+    }
+  ],
+  "exclusions": {
+    "skip_from_self": true,
+    "skip_sent_by_dewiar": true,
+    "test_markers": [
+      "Test",
+      "Codex"
+    ],
+    "note": "Свои письма и копии своих ответов не считаются новыми и важными, но остаются в цепочке."
+  },
+  "reply_preferences": {
+    "mode": "reply_all",
+    "include_own_address": true,
+    "confirmed_self_addresses": [
+      "d@dcnt.ru",
+      "dmatskevich@mail.ru",
+      "dm@sklad-podolsk.ru"
+    ],
+    "candidate_self_addresses": [],
+    "reply_from": "received_address",
+    "reply_from_priority": [
+      "podolsk",
+      "dcnt",
+      "mailru"
+    ],
+    "self_copy_address_by_account": {},
+    "quote_original": true,
+    "attach_original_files_automatically": false,
+    "confirmation_required_for_each_version": true,
+    "reply_from_note": "Решение пользователя 01.11.2026: отвечать с адреса, на который пришло письмо. При нескольких своих адресах — адрес, по которому письмо стало важным, затем reply_from_priority."
+  },
+  "signature_by_account": {
+    "dcnt": "",
+    "podolsk": "",
+    "mailru": ""
+  },
+  "reply_style": {
+    "language": "ru",
+    "tone": "Кратко, по делу; обращение по имени, конкретный вопрос или следующий шаг.",
+    "exclude_automatic_replies_from_style_examples": true,
+    "copy_historical_prices_or_dates": false
+  },
+  "sync": {
+    "interval_minutes": 5,
+    "initial_days": 7
+  },
+  "notifications": {
+    "enabled": false,
+    "important_only": true,
+    "repeat_unchanged": false,
+    "unanswered_reminder_hours": 24
+  },
+  "privacy": {
+    "allow_cloud_model": true,
+    "note": "Разрешено пользователем 01.11.2026."
+  }
+}

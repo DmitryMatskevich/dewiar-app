@@ -156,8 +156,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.mic_voice_t = 0.0                             # когда микрофон последний раз слышал речь (monotonic)
         self.prompter = Prompter(self)                     # суфлёр на встречах (core/prompter.py, окно ui/prompter.html)
         self.toolbox.hooks["prompter"] = self.prompter
-        from mail import Mail
-        self.mail = Mail(workspace=self.workspace)
+        from mail_service import MailService
+        self.mail = MailService(workspace=self.workspace)
         self.toolbox.hooks["mail"] = self.mail
         from recall import Recall
         from obsidian import Obsidian
@@ -278,6 +278,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
             threading.Thread(target=self._memory_watch, name="memory", daemon=True).start()
         self.mcp.reconcile()
         threading.Thread(target=self.updater.loop, args=(self.stopping,), name="updates", daemon=True).start()
+        threading.Thread(target=self.mail.start_background, args=(self.stopping,), name="mail-sync", daemon=True).start()
         threading.Thread(target=self.obsidian.loop, args=(self.stopping,), name="obsidian", daemon=True).start()
         if self.s.get("sync", "enabled") is not False and not self.wav_input:
             threading.Thread(target=self.sync.loop, args=(self.stopping,), name="sync", daemon=True).start()

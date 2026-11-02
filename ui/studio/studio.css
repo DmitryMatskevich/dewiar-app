@@ -2156,6 +2156,87 @@ html.framed .py-drawer { top: 38px; }
 .local-model-row:has(.local-model-details[open]) { align-items:flex-start; }
 @media(max-width:640px) { .local-model-details dl { grid-template-columns:1fr; gap:4px; } .local-model-details dd { margin-bottom:8px; } }
 
+/* Почта: адаптивная трёхпанельная схема, знакомая по macOS Mail, в токенах Dewiar. */
+.ml-mail-app { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
+.ml-sidebar { min-width:0; padding:10px; border:1px solid var(--line); border-radius:14px; background:color-mix(in srgb,var(--field) 62%,transparent); }
+.ml-nav-group { display:grid; gap:3px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.ml-view-item { min-height:42px; display:flex; align-items:center; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.ml-view-item:hover,.ml-view-item:focus-visible,.ml-view-item.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
+.ml-view-item.selected { font-weight:700; }
+.ml-mailboxes-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin:14px 4px 6px; }
+.ml-mailboxes-head h3 { margin:0; font-size:13px; letter-spacing:.02em; }
+.ml-mailboxes-head .hint { font-size:11px; }
+.ml-accounts { display:grid; gap:3px; }
+.ml-account { width:100%; min-width:0; display:grid; gap:2px; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.ml-account:hover,.ml-account:focus-visible,.ml-account.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
+.ml-account b { font-size:13px; overflow-wrap:anywhere; }
+.ml-account span { font-size:12px; overflow-wrap:anywhere; }
+.ml-account small { color:var(--ink); opacity:.78; line-height:1.35; overflow-wrap:anywhere; }
+.ml-account .ml-ok { color:#17663f; opacity:1; } .ml-account .ml-error { color:#9c2530; opacity:1; }
+.ml-sidebar-note { margin:14px 6px 2px; color:var(--ink); opacity:.78; font-size:11px; line-height:1.45; }
+.ml-workspace { min-width:0; }
+.ml-toolbar { display:flex; align-items:center; justify-content:space-between; gap:14px; margin:0 0 8px; }
+.ml-toolbar h2 { margin:0; font-size:20px; }
+.ml-toolbar-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; min-width:0; }
+.ml-toolbar-actions #ml-query { width:min(280px,32vw); min-width:150px; min-height:42px; }
+.ml-sync-state { min-height:0; margin:0 0 6px; }
+.ml-sync-state:empty { display:none; }
+.ml-split { display:grid; grid-template-columns:minmax(250px,.82fr) minmax(330px,1.18fr); gap:12px; align-items:start; }
+.ml-split:has(#ml-detail[hidden]) { grid-template-columns:minmax(0,1fr); }
+.ml-list { min-width:0; max-height:min(68vh,760px); overflow:auto; border:1px solid var(--line); border-radius:12px; background:var(--field); }
+.ml-message { width:100%; min-width:0; min-height:72px; display:grid; grid-template-columns:minmax(0,1fr); gap:4px; padding:10px 12px; border:0; border-bottom:1px solid var(--line); border-radius:0; background:transparent; color:var(--ink); text-align:left; font:inherit; cursor:pointer; }
+.ml-message:last-child { border-bottom:0; }
+.ml-message:hover,.ml-message:focus-visible { background:color-mix(in srgb,var(--accent) 8%,var(--field)); outline:2px solid var(--accent); outline-offset:-2px; }
+.ml-message.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); box-shadow:inset 3px 0 var(--accent); }
+.ml-message.important .ml-message-subject::before { content:"◆ "; color:var(--accent); font-size:10px; }
+.ml-message-top { display:flex; min-width:0; justify-content:space-between; align-items:baseline; gap:8px; }
+.ml-message-sender,.ml-message-subject { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ml-message-sender { font-size:13px; font-weight:500; }
+.ml-message.unread .ml-message-sender,.ml-message.unread .ml-message-subject { font-weight:750; }
+.ml-message-date { flex:none; color:var(--ink); opacity:.78; font-size:11px; }
+.ml-message-subject { font-size:12px; }
+.ml-message-meta { color:var(--ink); opacity:.78; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.ml-empty { min-height:150px; display:grid; place-content:center; gap:7px; padding:24px; text-align:center; }
+.ml-empty span { max-width:380px; color:var(--ink); opacity:.8; font-size:13px; }
+.ml-detail { min-width:0; max-height:min(68vh,760px); overflow:auto; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--field); }
+.ml-detail[hidden],#ml-draft-preview[hidden] { display:none; }
+.ml-detail-toolbar { display:flex; justify-content:flex-end; margin:-4px 0 8px; }
+#ml-message-subject { margin:0 0 10px; font-size:18px; overflow-wrap:anywhere; }
+#ml-message-head { margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--line); white-space:pre-wrap; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+#ml-message-body,#ml-draft-original { max-height:360px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:13px; line-height:1.6; }
+#ml-draft-preview { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+#ml-draft-meta { overflow-wrap:anywhere; }
+.ml-settings { margin-top:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:color-mix(in srgb,var(--field) 50%,transparent); }
+.ml-settings > summary,.ml-server-settings > summary { min-height:32px; display:flex; align-items:center; cursor:pointer; font-weight:650; }
+.ml-connect { padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--field); }
+.ml-connect h3 { margin:0 0 6px; font-size:14px; }
+.ml-credentials { align-items:center; flex-wrap:wrap; }
+.ml-credentials input { flex:1; min-width:210px; }
+.ml-server-settings { margin-top:8px; }
+.ml-server-settings .row { display:flex; flex-wrap:wrap; gap:10px; }
+#ml-rules { max-width:100%; }
+@media(max-width:1050px) {
+  .ml-mail-app { grid-template-columns:minmax(170px,205px) minmax(0,1fr); }
+  .ml-split { grid-template-columns:minmax(220px,.8fr) minmax(280px,1.2fr); gap:8px; }
+}
+@media(max-width:760px) {
+  .ml-mail-app { grid-template-columns:minmax(0,1fr); }
+  .ml-sidebar { padding:8px; }
+  .ml-nav-group { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .ml-view-item { justify-content:center; padding-inline:5px; text-align:center; font-size:12px; }
+  .ml-accounts { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .ml-split,.ml-split:has(#ml-detail[hidden]) { grid-template-columns:minmax(0,1fr); }
+  .ml-list,.ml-detail { max-height:none; }
+  .ml-detail { grid-row:2; }
+}
+@media(max-width:520px) {
+  .ml-toolbar { align-items:stretch; flex-direction:column; }
+  .ml-toolbar-actions { justify-content:stretch; }
+  .ml-toolbar-actions #ml-query { flex:1; width:auto; }
+  .ml-toolbar-actions .btn { white-space:nowrap; }
+  .ml-accounts { grid-template-columns:minmax(0,1fr); }
+}
+
 .model-prices-filters { flex-wrap:wrap; align-items:end; }
 .model-prices-filters .f { flex:1; min-width:180px; }
 .model-prices-table { overflow:auto; max-height:520px; margin:16px 0; }
