@@ -191,6 +191,25 @@ def request_screen_capture_permission():
     return bool(CGPreflightScreenCaptureAccess())
 
 
+def copy_image_data(url, board=None):
+    """Write actual PNG bytes to the pasteboard, never a path or data-URL string."""
+    import base64
+    import io
+    from PIL import Image
+    from Foundation import NSData
+    from AppKit import NSPasteboard
+    if not isinstance(url, str) or not url.startswith('data:image/png;base64,') or len(url) > 90_000_000:
+        raise ValueError('Нужен снимок в формате PNG')
+    data = base64.b64decode(url.split(',', 1)[1], validate=True)
+    with Image.open(io.BytesIO(data)) as image:
+        image.verify()
+    board = board if board is not None else NSPasteboard.generalPasteboard()
+    board.clearContents()
+    if not board.setData_forType_(NSData.dataWithBytes_length_(data, len(data)), 'public.png'):
+        raise ValueError('macOS не смогла скопировать картинку')
+    return True
+
+
 def clipboard_image(board=None):
     """PNG from the native pasteboard; a copied filename is not an image attachment."""
     import base64

@@ -604,6 +604,10 @@ def make_api(app):
                 self._hud.resize(*app.SIZES["card"])
             return self.get_pos()
 
+        def copy_image_data(self, url):
+            from macsys import copy_image_data
+            return copy_image_data(url)
+
         def clipboard_image(self):
             if os.environ.get("DEWIAR_MAC_SMOKE_FEATURES") and os.environ.get("DEWIAR_MAC_SMOKE_REPORT"):
                 return ""  # GUI probes must not copy personal pasteboard contents into their fixture.

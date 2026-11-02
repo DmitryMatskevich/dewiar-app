@@ -29,6 +29,12 @@ function chatBubble(x, lastWho) {
   // имя персонажа — над его первым ответом за день и когда отвечает другой персонаж (не над каждым ответом)
   const head = !out && lastWho !== (x.who || "")
     ? `<div class="ch-who"><i style="background:${escH((p && p.color) || "#8A9BFF")}"></i>${escH((p && p.name) || "Ассистент")}</div>` : "";
+  if (window.DewiarScreenshots?.fromMessage(x)) {
+    return `${head}<div class="cl-m" data-id="${escH(x.id)}"><div data-screenshot-slot="${escH(x.id)}"></div><time>${hm}</time></div>`;
+  }
+  if (window.DewiarLinks?.fromMessage(x)) {
+    return `${head}<div class="cl-m" data-id="${escH(x.id)}"><div data-link-slot="${escH(x.id)}"></div><time>${hm}</time></div>`;
+  }
   const body = !x.text ? "" : out ? `<div class="tx">${escH(x.text)}</div>` : `<div class="tx md">${md(x.text)}</div>`;
   // вложения: картинки — миниатюрами, файлы — плашками; нажать — открыть из «Входящих» папки ассистента
   // картинки к рассказу (show_images) — миниатюры со ссылкой на источник, лентой; свои вложения — из «Входящих»
@@ -70,6 +76,15 @@ function chatRender(keep) {
   else if (keep !== "stay" || atBottom) box.scrollTop = box.scrollHeight;
   const o = $("#ch-older"); if (o) o.onclick = chatOlder;
   if (window.DewiarRich) DewiarRich.diagrams(box);      // ```mermaid в ответах — схемами
+  $$("#ch-msgs [data-screenshot-slot]").forEach(slot => {
+    const item = CH.items.find(x=>x.id===slot.dataset.screenshotSlot);
+    const value = DewiarScreenshots.fromMessage(item);
+    if (value) slot.append(DewiarScreenshots.card(value, {copyText:chatCopyText, readOnly:CH.archived}));
+  });
+  $$("#ch-msgs [data-link-slot]").forEach(slot => {
+    const item=CH.items.find(x=>x.id===slot.dataset.linkSlot), value=DewiarLinks.fromMessage(item);
+    if(value)slot.append(DewiarLinks.card(value,{readOnly:CH.archived}));
+  });
   $$("#ch-msgs [data-path]").forEach(b => b.onclick = () => {
     if (b.dataset.key) core.call("knowledge_open_file", { key: b.dataset.key }).catch(e => { $("#ch-res").textContent = e.message; });   // источник ответа
     else if (b.dataset.path) core.call("ws_open", { path: b.dataset.path }).catch(e => { $("#ch-res").textContent = e.message; }); });
@@ -217,6 +232,7 @@ function chatSend() {
   const files = chAtts.map(a => ({ name: a.name, b64: a.b64 }));
   const atts = chAtts;
   t.value = ""; t.style.height = ""; chAtts = []; chatAttsRender(); $("#ch-res").textContent = "";
+  DewiarLinks.refresh(t);
   if (!core.connected) $("#ch-res").textContent = "Нет связи с ядром — сообщение не потеряется: отправлю, как только ядро вернётся";
   core.sendLater("say", { text: q, files }).then(() => { if (/отправлю, как только/.test($("#ch-res").textContent)) $("#ch-res").textContent = ""; })
     .catch(e => {   // не дошло — текст обратно в поле, набирать заново не нужно (№200)
@@ -245,6 +261,7 @@ async function chatClipImage() {
   box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("over"); });
   box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("over"); chatAddFiles([...(e.dataTransfer.files || [])]); }); }
 $("#ch-go").onclick = chatSend;
+DewiarLinks.bind($("#ch-text"));
 $("#ch-text").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); chatSend(); } });
 $("#ch-text").addEventListener("input", (e) => { const t = e.target; t.style.height = ""; t.style.height = Math.min(160, t.scrollHeight) + "px"; });
 core.on("hello", () => { if ($("#p-chat").classList.contains("cur")) loadChat(); });

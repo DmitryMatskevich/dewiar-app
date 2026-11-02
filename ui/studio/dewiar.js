@@ -516,7 +516,6 @@ core.on("hello", d => {
   if (curNav && ["skills", "hands", "sound", "about", "folder", "voice", "tasks", "me", "memory", "reminders", "calendar", "safety", "close"].includes(curNav.dataset.p)) curNav.click();
   renderUpdate(d.update);
   renderAccount(d.account);
-  mlFill(d.mail);
   tgFill(d.telegram); mxFill(d.max);
   DW.acc = d.account; DW.tg = d.telegram; DW.mx = d.max; DW.upd = d.update;
   core.call("device").then(x => { DW.dev = x; dwRender(); }).catch(() => {});

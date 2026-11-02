@@ -52,7 +52,10 @@ class ToolsMixin:
         name, args = call["name"], call["args"]
         on, need_confirm = self.toolbox.policy(name)
         title = self.toolbox.title(name)
-        log.info("🛠  %s %s", name, redact(json.dumps(args, ensure_ascii=False))[:200])
+        log_args = args
+        if name in ("mail", "mail_reply") and isinstance(args, dict):
+            log_args = {k: ("[почтовый текст скрыт]" if k in ("body", "patch") else v) for k, v in args.items()}
+        log.info("🛠  %s %s", name, redact(json.dumps(log_args, ensure_ascii=False))[:200])
         if not on:
             return f"Инструмент {name} выключен пользователем."
         asked = getattr(turn, "asked", None)
@@ -111,7 +114,10 @@ class ToolsMixin:
             if name in FACT_TOOLS and out.strip():          # что узнала — коротко в историю разговора (engine_answer)
                 turn.facts = (getattr(turn, "facts", []) + [fact_line(name, args, out)])[-FACTS_PER_TURN:]
             self.emit("tool", name=name, title=title, status="done", detail=detail, result=out[:1500])
-            log.info("   ↳ %s", (res["text"] if isinstance(res, dict) else res)[:160].replace("\n", " "))
+            if name in ("mail", "mail_reply"):
+                log.info("   ↳ результат почтового инструмента (текст скрыт)")
+            else:
+                log.info("   ↳ %s", (res["text"] if isinstance(res, dict) else res)[:160].replace("\n", " "))
             return res
         except (ToolError, SkillError, MCPError) as e:
             self.emit("tool", name=name, title=title, status="error", error=str(e))
@@ -1140,7 +1146,7 @@ class ToolsMixin:
         self._say_quick(msg, said, via)
         return True
 
-    def _say_quick(self, msg, said, via=None, then=None, note=None, acts=None):
+    def _say_quick(self, msg, said, via=None, then=None, note=None, acts=None, sources=None):
         """Ответить одной фразой без модели (поставил напоминание, записал заметку) и запомнить в разговоре.
         then() — когда фраза сказана (и если её не перебили): «спрячься» прячет виджет уже после «Прячусь».
         note — как получен ответ (расчёт с числами): только в историю, чтобы на «как ты посчитал?» модель знала."""
@@ -1154,7 +1160,7 @@ class ToolsMixin:
             self._conv_after()
             return
         self.emit("heard", text=said)
-        self.emit("answer", text=msg, done=True)
+        self.emit("answer", text=msg, done=True, **({'sources': sources} if sources else {}))
         q = queue.Queue()
         q.put(msg)
         q.put(None)

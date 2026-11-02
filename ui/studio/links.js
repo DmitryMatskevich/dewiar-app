@@ -99,45 +99,6 @@ $("#kn-go").onclick = async () => {
 };
 $("#kn-q").onkeydown = (e) => { if (e.key === "Enter") $("#kn-go").click(); };
 
-/* ---------- почта ---------- */
-const HELP = { yandex: "Яндекс", mailru: "Mail.ru", gmail: "Google", outlook: "Microsoft", icloud: "Apple" };
-function mlHelp(g) {
-  $("#ml-help").innerHTML = g && g.help ? `Обычный пароль почта сторонним программам не даёт — нужен <b>пароль приложения</b>: <a href="${g.help}" target="_blank">создать в ${HELP[g.provider] || "настройках почты"}</a> (тип «Почта»), затем вставьте его сюда.`
-    : "Нужен пароль приложения (в настройках безопасности вашей почты) или обычный пароль, если почта его разрешает.";
-}
-function mlFill(m) {
-  if (!m) return;
-  if (m.address && !$("#ml-addr").value) $("#ml-addr").value = m.address;
-  $("#ml-name").value = m.name || ""; $("#ml-login").value = m.login || "";
-  $("#ml-smtp").value = m.smtp_host || ""; $("#ml-sport").value = m.smtp_port || ""; $("#ml-sec").value = m.smtp_security || "ssl";
-  $("#ml-imap").value = m.imap_host || ""; $("#ml-iport").value = m.imap_port || "";
-  $("#ml-pass").placeholder = m.has_password ? "пароль сохранён — впишите, чтобы сменить" : "пароль приложения";
-  $("#ml-on").style.display = m.configured ? "" : "none";
-  $("#ml-state").textContent = m.configured ? `Подключена: ${m.address}` : "";
-  mlHelp(m);
-}
-$("#ml-addr").onchange = () => { const v = $("#ml-addr").value.trim(); if (!v.includes("@")) return;
-  core.call("mail_guess", { address: v }).then(g => { $("#ml-smtp").value = g.smtp_host; $("#ml-sport").value = g.smtp_port; $("#ml-sec").value = g.smtp_security;
-    $("#ml-imap").value = g.imap_host; $("#ml-iport").value = g.imap_port; mlHelp(g); }).catch(() => {}); };
-$("#ml-save").onclick = async (ev) => {
-  const r = $("#ml-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "проверяю вход в почту…";
-  const patch = { address: $("#ml-addr").value.trim(), password: $("#ml-pass").value, name: $("#ml-name").value.trim(), login: $("#ml-login").value.trim(),
-                  smtp_host: $("#ml-smtp").value.trim(), smtp_port: +$("#ml-sport").value || 465, smtp_security: $("#ml-sec").value,
-                  imap_host: $("#ml-imap").value.trim(), imap_port: +$("#ml-iport").value || 993 };
-  try {
-    const m = await core.call("mail_save", { patch }); $("#ml-pass").value = ""; mlFill(m);
-    const tr = await core.call("mail_test");
-    const ok = tr.smtp === "ok" && (!patch.imap_host || tr.imap === "ok");
-    r.className = ok ? "res ok" : "res bad";
-    r.textContent = ok ? "Готово: отправка и чтение работают. Скажите: «пришли мне на почту список дел»." :
-      [tr.smtp !== "ok" ? "Отправка: " + tr.smtp : "", tr.imap && tr.imap !== "ok" ? "Чтение: " + tr.imap : ""].filter(Boolean).join(" · ");
-  } catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; }
-};
-$("#ml-test").onclick = async (ev) => { const r = $("#ml-res"); ev.target.disabled = true; r.className = "res"; r.textContent = "отправляю…";
-  try { const x = await core.call("mail_send_test"); r.className = "res ok"; r.textContent = `Письмо отправлено на ${x.to.join(", ")} — проверьте ящик.`; }
-  catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; } };
-$("#ml-off").onclick = () => core.call("mail_forget").then(m => { $("#ml-addr").value = ""; mlFill(m); $("#ml-res").textContent = "Почта отключена."; }).catch(e => toast(e.message));
-
 /* ---------- Telegram ---------- */
 let tgTimer = null;
 let tgWas = null, tgMode = "";   // tgWas: был ли привязан владелец в прошлый раз — чтобы поздравить ровно в момент привязки
@@ -515,7 +476,7 @@ async function loadReportDelivery() {
     });
   } catch(_) { $('#report-delivery').textContent='Не удалось проверить доставку отчётов.'; }
 }
-$('#report-mail-setup').onclick=()=>document.querySelector('nav button[data-p="connect"]').click();
+$('#report-mail-setup').onclick=()=>document.querySelector('nav button[data-p="mail"]').click();
 document.querySelector('nav button[data-p="about"]').addEventListener('click',loadReportDelivery);
 core.on('hello',()=>{if(document.querySelector('#p-about.cur'))loadReportDelivery();});
 function bugRender(v) {

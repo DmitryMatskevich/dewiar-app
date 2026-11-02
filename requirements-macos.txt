@@ -18,6 +18,7 @@ truststore>=0.10
 sounddevice>=0.5
 psutil>=7.0
 pyobjc-framework-Cocoa>=11
+pyobjc-framework-Security>=12.2.2
 pyobjc-framework-Quartz>=11
 pyobjc-framework-AVFoundation>=12.2.2
 pyobjc-framework-ApplicationServices>=12.2.2

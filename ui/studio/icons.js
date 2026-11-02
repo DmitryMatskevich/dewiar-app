@@ -6,6 +6,7 @@
    только $/$$ (core.js); escH (folder.js) и SVG (welcome.js) — при открытии справки. */
 /* ---------- иконки ---------- */
 const ICONS = {
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   contacts: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M7.5 17c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4"/>',
   home: '<rect x="4" y="4" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="2"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="2"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="2"/>',
   chat: '<path d="M20.5 11.5a7.5 7.5 0 0 1-11.2 6.5L4 19.5l1.6-4.6A7.5 7.5 0 1 1 20.5 11.5z"/><path d="M8.5 10.5h7M8.5 13.5h4.5"/>',

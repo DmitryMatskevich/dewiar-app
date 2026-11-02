@@ -550,6 +550,7 @@
     <svg id="tarc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span id="tmini"></span></div>
   <div id="mid">
     <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div class="bot" id="bot"></div><div id="media"></div><button id="more">Открыть целиком</button></div>
+    <div id="screenshot-messages" aria-label="Снимки в сообщениях ассистента"></div>
     <div id="yn"><button class="yes" id="y">Да</button><button id="n">Нет</button></div>
     <div id="note"></div><div id="ldbar"><i></i></div>
     <div id="health" title="Что сейчас с ассистентом"></div>
@@ -561,12 +562,13 @@
     <div id="annb" role="button" tabindex="0"><span id="annb-t"></span><button id="annb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
     <div id="clb" role="button" tabindex="0" title="Открыть переписку"><span id="clb-t"></span><em id="clb-n" hidden></em><button id="clb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
     <div id="ask">
+      <div id="link-messages" aria-label="Ссылки в сообщениях ассистента"></div>
       <div class="askbox" id="askbox">
         <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода скажите в конце фразы имя помощника, «ввод» или «вот», либо отдельно «ввод» или «вот»." autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
           <div class="ask-tools">
           <button class="ab" id="a-att" title="Добавить файлы или папку" aria-label="Добавить файлы или папку"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-          <button class="ab" id="a-shot" title="Снимок экрана: сохранить в заметки, распознать текст и приложить к сообщению" aria-label="Снимок экрана в заметки с распознаванием текста"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
+          <button class="ab" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
@@ -636,6 +638,10 @@
 <script src="assets/skins.js"></script>
 <script src="assets/dewiar.js"></script>
 <script src="assets/rich.js"></script>
+<link rel="stylesheet" href="assets/screenshot-card.css">
+<script src="assets/screenshot-card.js"></script>
+<link rel="stylesheet" href="assets/link-actions.css">
+<script src="assets/link-actions.js"></script>
 <script src="assets/zoom.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -1061,9 +1067,9 @@ core.on("hello", d => {
 })
 .on("answer", e => {
   showCap(null, capText(e.text)); if (e.done) hideCapLater(Math.min(20000, 5000 + e.text.length * 60));
-  if (e.done && e.sources && e.sources.length) {   // ответ по документам — источники кнопками: нажать — открыть файл
+  if (e.done && e.sources && e.sources.some(x=>x.kind!=='link_actions')) {   // источники документов, отдельно от меню ссылок
     const box = document.createElement("div"); box.className = "srcs";
-    e.sources.forEach(x => { const b = document.createElement("button"); b.title = "Открыть: " + (x.label || x.name);
+    e.sources.filter(x=>x.kind!=='link_actions').forEach(x => { const b = document.createElement("button"); b.title = "Открыть: " + (x.label || x.name);
       b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5"/></svg><span></span>';
       b.querySelector("span").textContent = x.name;
       b.onclick = (ev) => { ev.stopPropagation(); core.call("knowledge_open_file", { key: x.key }).catch(showErr); }; box.appendChild(b); });
@@ -1801,7 +1807,26 @@ $("att-files").onclick = () => { attMenu.classList.remove("on"); $("a-file").cli
 $("att-folder").onclick = () => { attMenu.classList.remove("on"); $("a-folder").click(); };
 $("a-file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
 $("a-folder").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
-$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(url => { atts.push({ kind: "image", name: "Снимок экрана", url }); renderAtts(); }).catch(showErr), () => "Сохраняю снимок в заметки и распознаю текст локально…");
+const screenshotCards = new Map();
+function screenshotLayout() { $('card').classList.toggle('has-screenshots', screenshotCards.size > 0); requestAnimationFrame(fitCap); }
+function showScreenshotMessage(value) {
+  if (screenshotCards.has(value.id)) return;
+  const card = DewiarScreenshots.card(value, {copyText:writeClipboardText, removed:id=>{screenshotCards.delete(id);screenshotLayout();}});
+  screenshotCards.set(value.id, card); $('screenshot-messages').append(card);
+  $('screenshot-messages').scrollTop = $('screenshot-messages').scrollHeight; screenshotLayout();
+}
+async function loadScreenshotMessages() {
+  try {
+    const rows = await core.call('screenshot_messages');
+    if (!Array.isArray(rows)) return;
+    screenshotCards.clear(); $('screenshot-messages').replaceChildren(); rows.forEach(showScreenshotMessage); screenshotLayout();
+  } catch (_) { /* A reconnect will retry; do not replace an in-progress reply with an error. */ }
+}
+core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
+  .on('screenshot_removed', e=>{screenshotCards.get(e.id)?.remove();screenshotCards.delete(e.id);screenshotLayout();})
+  .on('hello', loadScreenshotMessages).on('chat_changed', loadScreenshotMessages);
+new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
+$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(showScreenshotMessage).catch(showErr), () => "Делаю снимок и распознаю текст локально…");
 document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
 document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
@@ -1847,6 +1872,7 @@ function sendAsk() {
    сначала сбросить старую высоту: при сужении окна scrollHeight должен пересчитаться по новым переносам. */
 function fitAsk() {
   const t = $("askin"); if (!t) return;
+  window.DewiarLinks?.refresh(t);
   t.style.height = "24px";
   const available = Math.max(120, Math.min(260, Math.floor(innerHeight * .36)));
   const longText = $("card").classList.contains("long") || t.value.length > 60 || t.value.includes("\n");
@@ -2005,6 +2031,22 @@ $("askin").addEventListener("keydown", (e) => {
 <script src="assets/transcribe-panel.js"></script>
 <script src="assets/translate-panel.js"></script>
 <script>
+DewiarLinks.bind(document.getElementById('askin'), {parent:'#askbox',before:true});
+const linkMessages = document.getElementById('link-messages');
+function showLinkMessage(value) {
+  linkMessages.replaceChildren(DewiarLinks.card(value));
+  document.getElementById('card').classList.add('has-links');requestAnimationFrame(()=>{fitCap();linkMessages.scrollIntoView({block:'nearest'});});
+}
+async function loadLinkMessages() {
+  try { const rows=await core.call('link_choices'); if (!Array.isArray(rows)) return;
+    linkMessages.replaceChildren();document.getElementById('card').classList.toggle('has-links',!!rows.length);
+    rows.forEach(showLinkMessage);requestAnimationFrame(fitCap);
+  } catch (_) {}
+}
+core.on('chat',e=>{const v=DewiarLinks.fromMessage(e.item);if(v)showLinkMessage(v);})
+  .on('hello',loadLinkMessages).on('chat_changed',loadLinkMessages);
+new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe(linkMessages);
+new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe(document.querySelector('.link-draft-actions'));
 window.getTranscriptionAttachments = () => atts.filter(a => a.kind === 'file');
 window.consumeTranscriptionAttachments = files => { atts = atts.filter(a => !files.includes(a)); renderAtts(); };
 document.addEventListener('media-task-started', e => { tasks[e.detail.id] = e.detail; renderTask(); });

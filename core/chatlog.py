@@ -7,6 +7,7 @@
 Ответ модели в одном ходе приходит одной репликой; если подряд пришло продолжение того же ответа (текст начинается с
 прежнего) — запись обновляется, а не дублируется. Продиктованные для сейфа секреты маскируются, как в журнале."""
 import json
+import copy
 import gzip
 import hashlib
 import threading
@@ -86,6 +87,26 @@ class ChatLog:
             key = item.get("chat_id", "legacy")
             groups.setdefault(key, []).append(item)
         return groups
+
+    def screenshot(self, message_id, note_path=None, dismiss=False):
+        """Read/update only a screenshot message, retaining originals after dismissal."""
+        with self._lock:
+            item = next((x for x in self.items if x['id'] == message_id and not x.get('dismissed')
+                         and x.get('att') and x['att'][0].get('capture')), None)
+            if item is None:
+                raise ValueError('Сообщение со снимком не найдено; для архивного чата сначала восстановите переписку')
+            previous = copy.deepcopy(item)
+            if note_path is not None:
+                item['att'][0]['note_path'] = note_path
+            if dismiss:
+                item['dismissed'] = True
+            if note_path is not None or dismiss:
+                try:
+                    self._write_all()
+                except Exception:
+                    item.clear(); item.update(previous)
+                    raise
+            return copy.deepcopy(item)
 
     def context_path(self, chat_id=None):
         chat_id = self.active if chat_id is None else chat_id
@@ -198,6 +219,7 @@ class ChatLog:
                 items.sort(key=lambda x: (x["ts"], x["id"]))
             else:
                 items = [dict(x, dialog_id=key) for key, rows in self._groups(self.items).items() for x in rows]
+            items = [x for x in items if not x.get('dismissed')]
             if chat_id is not None:
                 items = [x for x in items if x.get('chat_id', 'legacy') == chat_id]
             total = len(items)

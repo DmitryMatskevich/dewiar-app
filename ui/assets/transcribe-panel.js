@@ -126,11 +126,12 @@
       finally { sending = false; render(); }
     };
   }
-  window.openTranscription = () => {
+  window.openTranscription = (sourcesToAdd) => {
     init();
     uploads = window.getTranscriptionAttachments?.() || [];
     by('mt-error').textContent = '';
     by('mt-import-status').textContent = '';
+    if (Array.isArray(sourcesToAdd)) appendSources(sourcesToAdd.join('\n'));
     render(); panel.showModal(); by('mt-links').focus(); loadBrowsers();
   };
   document.querySelectorAll('[data-transcribe-open]').forEach(button => {

@@ -1034,24 +1034,11 @@ class CommandsMixin:
             self.ask(text, images)
             return True
         if cmd == "screenshot_attach":               # кнопка «снимок экрана» в поле вопроса
-            from eyes import prepare
-            from screen_document import create
-            # An explicit click requests this local capture, but never bypasses
-            # the disabled screen/tool policy. Save and OCR the SAME image that
-            # is attached to the draft; do not capture a second, different screen.
-            if not self.toolbox.policy("save_screenshot")[0]:
-                raise ValueError("Снимок экрана отключён. Проверьте «Экран» в «Безопасности» и «Скриншот» в «Руки → Умения».")
-            def progress(**event):
-                self.note(event["message"])
-                if event["stage"] in ("ocr", "done"):
-                    self.emit("note_saved", kind="note", title=event["title"], path=event["path"],
-                              text=event["message"])
-            try:
-                result = create(self.workspace, progress)
-                b64, _, _ = prepare(self.workspace.safe(result["image"]).read_bytes())
-            except Exception as e:
-                raise ValueError(str(e)) from e
-            return "data:image/jpeg;base64," + b64
+            from screenshot_messages import capture
+            return capture(self)
+        if cmd in ('screenshot_messages', 'screenshot_image', 'screenshot_to_note', 'screenshot_dismiss'):
+            from screenshot_messages import command
+            return command(self, cmd, a)
         if cmd == "calib_start":
             pid = a.get("persona") or self.s.get("persona")
             p = self.personas.get(pid)
@@ -1627,6 +1614,13 @@ class CommandsMixin:
             return self.updater.public()
         if cmd == "tasks_list":
             return self.tasks.list()
+        if cmd == 'link_action':
+            from link_actions import start
+            return start(self, a)
+        if cmd == 'link_choices':
+            rows = self.chatlog.page(limit=500, chat_id=self.chatlog.active)['items']
+            return [dict(row['att'][0], id=row['id']) for row in rows
+                    if row.get('att') and row['att'][0].get('kind') == 'link_actions'][-1:]
         if cmd == "task_get":
             return self.tasks.detail(a.get("id"))
         if cmd == "task_create":

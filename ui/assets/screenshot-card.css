@@ -1,0 +1,17 @@
+.ss-card { flex:none; min-width:0; margin:6px 0; padding:10px; border-radius:14px; background:var(--glass,rgba(128,140,180,.12)); color:var(--ink); text-align:left; }
+.ss-head { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.ss-head b { min-width:0; font-size:12px; font-weight:600; }
+.ss-card button { flex:none; display:grid; place-items:center; width:34px; height:34px; border:0; border-radius:9px; background:transparent; color:inherit; cursor:pointer; }
+.ss-card button:hover { background:rgba(128,140,180,.18); }
+.ss-card button:focus-visible { outline:2px solid var(--accent,#797df1); outline-offset:1px; }
+.ss-card button:disabled { opacity:.4; cursor:default; }
+.ss-card svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.ss-preview { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ss-image { display:block; flex:none; width:72px; height:56px; object-fit:contain; border-radius:6px; margin:4px 0; }
+.ss-actions { display:flex; align-items:center; gap:4px; }
+.ss-status { font-size:11px; line-height:1.4; margin-top:3px; overflow-wrap:anywhere; }
+.ss-card details { font-size:12px; margin:6px 0; }
+.ss-card pre { max-height:140px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace,monospace; }
+#screenshot-messages { flex:0 1 auto; min-height:0; max-height:38vh; overflow-y:auto; scrollbar-width:thin; }
+#screenshot-messages:empty { display:none; }
+#card.has-screenshots #orb { width:calc(84px * var(--ok,1)); height:calc(84px * var(--ok,1)); }

@@ -420,6 +420,25 @@ class TaskManager:
             self.start(tid)
         return t
 
+    def create_link_download(self, urls, action):
+        from media_transcription import unique_sources
+        urls = unique_sources(urls)
+        if action not in ('video', 'audio') or not urls:
+            raise ValueError('Выберите видео или звук и укажите ссылку')
+        with self._lock:
+            for existing in self.tasks.values():
+                if (existing.data.get('workflow') == 'link-download' and existing.data.get('link_urls') == urls
+                        and existing.data.get('link_action') == action and existing.status in ALIVE):
+                    return existing
+            task = self.create('Скачать видео' if action == 'video' else 'Извлечь звук из видео', '\n'.join(urls), start=False)
+            task.data.update(workflow='link-download', link_urls=urls, link_action=action)
+            task.save()
+            return self.start(task.id)
+
+    def _run_link_download(self, task):
+        from link_download import run
+        run(self, task)
+
     def create_transcription(self, sources, goal='', language='ru'):
         """A persisted native workflow: no LLM call is needed to start or perform ASR."""
         from media_transcription import unique_sources, source_key, seed_cache
@@ -864,7 +883,7 @@ class TaskManager:
         import time as _t
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
-        runner = (self._run_media if t.data.get('workflow') == 'media-transcription'
+        runner = (self._run_link_download if t.data.get('workflow') == 'link-download' else self._run_media if t.data.get('workflow') == 'media-transcription'
                   else self._run_media_translation if t.data.get('workflow') == 'video-translation' else self._run)
         t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
@@ -1636,7 +1655,7 @@ class TaskManager:
             rel = p.relative_to(t.dir).as_posix()
             outs = [o for o in t.data.get("outputs") or [] if o.get("path") != rel]
             outs.append({"path": rel, "title": (args.get("title") or p.stem)[:120], "time": dt.datetime.now().isoformat(timespec="seconds")})
-            t.data["outputs"] = outs[-1000:] if t.data.get('workflow') == 'media-transcription' else outs[-30:]
+            t.data["outputs"] = outs[-1000:] if t.data.get('workflow') in ('media-transcription', 'link-download') else outs[-30:]
             t.save()
             self._emit(t)
             t.journal(f"👁 Показал пользователю: {rel}")

@@ -8,6 +8,7 @@ ctx обработчика — настройки, напоминания, на�
 """
 
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ import urllib.parse
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -1240,19 +1242,128 @@ def t_read_emails(a, ctx):
         raise ToolError(str(e)) from e
     if not items:
         return "Писем не нашлось."
-    return "\n".join(f"[{x['uid']}] {'● ' if x['unread'] else ''}{x['date'][:22]} · {x['from']} · «{x['subject']}» — {x['snippet'][:160]}"
-                     + (f" (вложения: {', '.join(x['files'])})" if x["files"] else "") for x in items) + \
-        "\n\nЦеликом письмо — read_email с номером в скобках."
+    return "\n".join(f"[{x.get('id', x['uid'])}] {'● ' if x['unread'] else ''}{x['date'][:22]} · {x['from']} · «{x['subject']}»"
+                     + (f" · на {x.get('account','')}" if x.get("account") else "")
+                     + (" · " + ", ".join(x.get("reasons", [])) if x.get("reasons") else "")
+                     + (f" (вложения: {', '.join(x['files'])})" if x.get("files") else "") for x in items) + \
+        "\n\nСписок загружен только по заголовкам. Чтобы прочитать текст, вызовите read_email с точным id письма в скобках."
 
 
 def t_read_email(a, ctx):
     from mail import MailError
     try:
+        if not _mail_text_allowed(ctx):
+            raise ToolError("Текст письма разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы его открыть.")
         m = _mail(ctx).read(a.get("uid", ""))
-    except MailError as e:
+    except (MailError, ValueError) as e:
         raise ToolError(str(e)) from e
-    return (f"От: {m['from']}\nКому: {m['to']}\nТема: {m['subject']}\nДата: {m['date']}\n"
+    return (f"От: {m['from']}\nКому: {m['to']}\nКопия: {m.get('cc','')}\nТема: {m['subject']}\nДата: {m['date']}\n"
+            + (f"Получено на: {m['account']}\n" if m.get("account") else "")
             + (f"Вложения: {', '.join(m['files'])}\n" if m["files"] else "") + "\n" + m["text"][:8000])
+
+
+def t_mail(a, ctx):
+    """Cached mail triage interface; full message bodies are returned only for explicit open."""
+    service = _mail(ctx)
+    action = a.get("action", "list")
+    try:
+        if action == "check":
+            result = service.check(force=bool(a.get("refresh", True)))
+            important = result["important"]
+            return (f"Новых писем с предыдущей проверки: {result['new']}. Важных без ответа: {len(important)}.\n" +
+                    ("\n".join(f"[{m['id']}] {m['from']} · «{m['subject']}» · на {m['account']} — {', '.join(m['reasons'])}"
+                               for m in important[:20]) if important else "Важных писем без ответа нет.") +
+                    ("\nПроблемы ящиков: " + "; ".join(f"{x['address']}: {x['error']}" for x in result['unavailable'])
+                     if result['unavailable'] else ""))
+        if action in ("list", "search"):
+            items = service.list_mail(limit=a.get("limit", 20), unread=bool(a.get("unread_only")),
+                                      query=a.get("query", "") if action == "search" else "",
+                                      important=bool(a.get("important")), account_id=a.get("account_id", ""),
+                                      unanswered=bool(a.get("unanswered")))
+            if not items:
+                return "В почтовом индексе ничего не найдено. Для обновления скажите «проверь почту сейчас»."
+            return "\n".join(f"[{m['id']}] {'● ' if m['unread'] else ''}{m['date'][:22]} · {m['from']} · «{m['subject']}» · на {m['account']}"
+                             + (" · важно: " + ", ".join(m['reasons']) if m['reasons'] else "")
+                             + (" · уже отвечено" if m['answered'] else "") for m in items)
+        if action == "open":
+            if not _mail_text_allowed(ctx):
+                raise ToolError("Текст письма разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы его открыть.")
+            msg = service.open_mail(a.get("message_id", ""))
+            return (f"От: {msg['from']}\nКому: {msg.get('to','')}\nКопия: {msg.get('cc','')}\n"
+                    f"Ответить: {msg.get('reply_to','')}\nТема: {msg.get('subject','')}\nДата: {msg.get('date','')}\n"
+                    f"Получено на: {msg.get('account','')}\n"
+                    + ("ВНИМАНИЕ: сервер аутентификации письма сообщил SPF/DKIM/DMARC fail.\n" if re.search(r"(?:spf|dkim|dmarc)\s*=\s*fail\b", msg.get("authentication_results", ""), re.I) else "")
+                    + f"Вложения: {', '.join(msg.get('files', [])) or 'нет'}\n\n{msg.get('text','')[:10000]}")
+        raise ToolError("Действие почты должно быть check, list, open или search.")
+    except (ValueError, OSError) as e:
+        raise ToolError(str(e)) from e
+
+
+def _format_mail_draft(draft):
+    return (f"Черновик {draft['id']} · версия {draft['revision']} · состояние: {draft['state']}\n"
+            f"От: {draft['from']}\nКому: {', '.join(draft['to'])}\nКопия: {', '.join(draft['cc']) or '—'}\n"
+            f"Тема: {draft['subject']}\n\n{draft['body']}\n\nИсходное письмо: {draft['original']['from']} · "
+            f"«{draft['original']['subject']}»\nДля отправки пользователь должен подтвердить именно эту версию.")
+
+
+def _mail_text_allowed(ctx):
+    service = ctx.get("mail")
+    if (getattr(service, "rules", {}).get("privacy") or {}).get("allow_cloud_model", True):
+        return True
+    settings = ctx.get("settings")
+    try:
+        profile = settings.active_llm()
+    except (AttributeError, TypeError):
+        return False
+    if not profile:
+        return False
+    for candidate in profile.get("_route_candidates") or [profile]:
+        host = urlparse(str(candidate.get("base_url") or "")).hostname or ""
+        if host.casefold() in ("localhost", "::1"):
+            continue
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_loopback or ip.is_private:
+                continue
+        except ValueError:
+            pass
+        return False
+    return True
+
+
+def t_mail_reply(a, ctx):
+    service = _mail(ctx)
+    try:
+        action = a.get("action", "prepare")
+        if action in ("prepare", "revise", "get") and not _mail_text_allowed(ctx):
+            raise ToolError("Текст письма разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы подготовить ответ.")
+        if action == "prepare":
+            return _format_mail_draft(service.reply_prepare(a.get("message_id", ""), a.get("body", "")))
+        if action == "revise":
+            draft = service.reply_revise(a.get("draft_id", ""), a.get("revision", 0), a.get("patch") or {})
+            return _format_mail_draft(draft)
+        if action == "get":
+            return _format_mail_draft(service.draft_get(a.get("draft_id", "")))
+        if action == "send":
+            result = service.reply_send(a.get("draft_id", ""), a.get("revision", 0))
+            return (f"Ответ передан SMTP с {result['from']} кому {', '.join(result['to'])}; "
+                    f"копия: {', '.join(result['cc']) or 'нет'}, тема «{result['subject']}». Копия: {result.get('sent_copy', 'не проверена')}.")
+        raise ToolError("Действие ответа должно быть prepare, revise, get или send.")
+    except (ValueError, OSError) as e:
+        raise ToolError(str(e)) from e
+
+
+def t_mail_reply_send(a, ctx):
+    try:
+        result = _mail(ctx).reply_send(a.get("draft_id", ""), a.get("revision", 0))
+    except (ValueError, OSError) as e:
+        raise ToolError(str(e)) from e
+    return (f"Ответ передан SMTP с {result['from']} кому {', '.join(result['to'])}; "
+            f"копия: {', '.join(result['cc']) or 'нет'}, тема «{result['subject']}». "
+            + ("Копия сохранена в «Отправленных»." if result.get("sent_copy") == "appended" else
+               "Проверьте копию в папке «Отправленные»." if result.get("sent_copy") == "not_found" else
+               "Сервер сохраняет копию автоматически." if result.get("sent_copy") == "server" else
+               "Письмо передано, но копию в «Отправленные» не удалось сохранить."))
 
 
 def t_search_documents(a, ctx):
@@ -1311,6 +1422,10 @@ def pictures_dir():
 
 
 def t_save_screenshot(a, ctx):
+    if ctx.get('engine'):
+        from screenshot_messages import capture
+        value = capture(ctx['engine'])
+        return 'Снимок экрана готов: ' + value['summary'] + ' Картинка и текст — в сообщении ассистента; в заметки можно перенести кнопкой.'
     from screen_document import create
     workspace = ctx.get("workspace")
     if not workspace:
@@ -2515,12 +2630,27 @@ TOOLS = {
                       S({"text": {"type": "string"}, "files": {"type": "array", "items": {"type": "string"}},
                          "to": {"type": "string", "enum": ["telegram", "max"]}}),
                       "safe", t_send_telegram, "Прислать в Telegram или MAX"),
-    "read_emails": ("Посмотреть почту пользователя: последние письма (кто, тема, начало). unread_only — только "
-                    "непрочитанные, query — слово для поиска (отправитель, тема, текст). Письма не помечаются прочитанными.",
+    "read_emails": ("Посмотреть почту пользователя: последние письма (кто, тема, адрес получения). unread_only — только "
+                    "непрочитанные, query — слово для поиска по отправителю и теме. Письма не помечаются прочитанными.",
                     S({"limit": {"type": "integer"}, "unread_only": {"type": "boolean"}, "query": {"type": "string"}}),
                     "safe", t_read_emails, "Проверить почту"),
-    "read_email": ("Прочитать одно письмо целиком по номеру из read_emails.", S({"uid": {"type": "string"}}, ["uid"]),
+    "read_email": ("Прочитать одно письмо целиком по точному id в скобках из read_emails.",
+                   S({"uid": {"type": "string", "description": "id вида account:uidvalidity:uid из списка почты"}}, ["uid"]),
                    "safe", t_read_email, "Прочитать письмо"),
+    "mail": ("Почтовая сводка и заголовки из локального индекса. action=check проверяет ящики сейчас; list/search показывают список, "
+             "open читает полное письмо только по его id [account:uid]. Фильтры: important, unanswered, unread_only, account_id, query.",
+             S({"action": {"type": "string", "enum": ["check", "list", "open", "search"]},
+                "message_id": {"type": "string"}, "query": {"type": "string"}, "account_id": {"type": "string"},
+                "limit": {"type": "integer"}, "refresh": {"type": "boolean"}, "important": {"type": "boolean"},
+                "unanswered": {"type": "boolean"}, "unread_only": {"type": "boolean"}}),
+             "safe", t_mail, "Почта"),
+    "mail_reply": ("Подготовить, открыть, изменить или отправить ответ всем. prepare/revise/get не отправляют письмо. "
+                   "Для send Dewiar показывает полный текст, отправителя, адресатов и тему и обязательно спрашивает подтверждение. "
+                   "После любого изменения покажи пользователю новую полную версию и её id/revision.",
+                   S({"action": {"type": "string", "enum": ["prepare", "revise", "get", "send"]},
+                      "message_id": {"type": "string"}, "body": {"type": "string"}, "draft_id": {"type": "string"},
+                      "revision": {"type": "integer"}, "patch": {"type": "object"}}),
+                   "safe", t_mail_reply, "Черновик ответа всем"),
     "search_documents": ("Найти в документах пользователя на этом компьютере (папка «Знания» и его папки, выбранные для "
                          "поиска: инструкции, договоры, регламенты, книги, конспекты, рабочие файлы). Вызывай, когда вопрос "
                          "про его документы или файлы, «что написано в…», «найди в моих документах». "
@@ -2532,8 +2662,9 @@ TOOLS = {
                       S({"question": {"type": "string"}, "base": {"type": "string", "description": "необязательно: название "
                          "папки или раздела публичной библиотеки, если пользователь его назвал («в Библии», «в истории РФ»)"}},
                         ["question"]), "safe", t_ask_knowledge, "Знания с сайта"),
-    "save_screenshot": ("Сделать снимок основного экрана (на Mac без окон Dewiar), вставить в новый Markdown-документ "
-                        "в «Заметки/Снимки экрана», локально распознать текст и добавить туда же. PNG и TXT лежат рядом с документом. "
+    "save_screenshot": ("Сделать снимок основного экрана (на Mac без окон Dewiar), локально распознать текст и показать "
+                        "сообщением ассистента с картинкой. В заметки автоматически не добавляется: на сообщении есть кнопки "
+                        "копирования картинки, копирования текста, переноса в заметки и удаления карточки. "
                         "Вызывай для «сделай снимок экрана», «скриншот экрана», «сфотографируй экран». Модель со зрением не требуется. "
                         "При сбое OCR снимок остаётся сохранён. Не запускай распознавание повторно после успешного результата.",
                         S({}, []), "safe", t_save_screenshot, "Скриншот"),
@@ -2690,7 +2821,7 @@ TOOLS = {
 }
 # Этим умениям нужен интернет из самого Dewiar — при стоп-кране (студия → «Безопасность») модель о них не узнаёт.
 # Открыть сайт, музыку или карту в браузере человека — можно: это его браузер и его просьба.
-NET_TOOLS = {"web_search", "weather", "read_webpage", "send_email", "read_emails", "read_email", "send_telegram", "close_send",
+NET_TOOLS = {"web_search", "weather", "read_webpage", "send_email", "read_emails", "read_email", "mail", "mail_reply", "send_telegram", "close_send",
              "close_call", "close_read", "ask_knowledge", "play_radio", "smart_home", "show_images", "server_run", "app_update"}
 DEFAULT_OFF = set()          # команды терминала включены, но каждая — только после «Выполнить?»
 # «Только безопасное» (студия → «Безопасность», отзыв 18.10: «лучше чтоб пользователь мог выбрать, что можно делать, а не
@@ -2728,7 +2859,7 @@ class Toolbox:
             return True, self.mcp.needs_confirm(name) if conf is None else bool(conf)
         if name not in TOOLS:
             return False, False
-        if name in ("send_email", "read_emails", "read_email"):     # только когда почта подключена
+        if name in ("send_email", "read_emails", "read_email", "mail", "mail_reply"):     # только когда почта подключена
             m = self.hooks.get("mail")
             if not (m and m.configured()):
                 return False, False
@@ -2823,6 +2954,16 @@ class Toolbox:
         Опасное подтверждается, даже если в настройках подтверждение для инструмента выключено."""
         import guard
         s = getattr(self, "s", None)
+        if name == "mail_reply" and (args or {}).get("action") == "send":
+            mail = self.hooks.get("mail")
+            if not mail:
+                return "Почта не подключена.", False, None
+            try:
+                question = mail.reply_confirmation((args or {}).get("draft_id", ""), (args or {}).get("revision", 0))
+            except Exception as e:
+                return str(e), False, None
+            # Mandatory confirmation survives user settings that disable generic tool prompts.
+            return None, True, question
         if name == 'voice_command_apply':
             from voice_command_help import pending
             engine = self.hooks.get('engine')
@@ -2926,6 +3067,12 @@ class Toolbox:
             to = args.get("to") or "вам самим"
             att = args.get("attachments") or []
             return f"Отправить письмо «{args.get('subject', '')}» → {to}" + (f" с вложениями ({len(att)})" if att else "") + "?"
+        if name == "mail_reply" and args.get("action") == "send":
+            m = self.hooks.get("mail")
+            try:
+                return m.reply_confirmation(args.get("draft_id", ""), args.get("revision", 0))
+            except Exception as e:
+                raise ToolError(str(e)) from e
         return f"Выполнить действие «{self.title(name)}»?"
 
     def run(self, name, args):

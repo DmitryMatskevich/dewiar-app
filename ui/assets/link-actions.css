@@ -1,0 +1,16 @@
+.link-actions{font:inherit;color:inherit;padding:12px;border:1px solid #8193b14d;border-radius:14px;background:#ffffff18;min-width:0;margin:8px 0;text-align:left}
+.link-actions header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.link-actions button{font:inherit;color:inherit;cursor:pointer;border:1px solid #8193b15e;border-radius:9px;background:#ffffff22;padding:7px 10px;line-height:1.3}
+.link-actions button:disabled{opacity:.5;cursor:default}.link-actions button:focus-visible{outline:2px solid #7376ff;outline-offset:2px}
+.link-actions .la-close{border:0;font-size:22px;padding:0 6px;background:none}
+.la-source{font-size:.8em;opacity:.7;overflow-wrap:anywhere;margin:5px 0 9px}
+.la-buttons{display:flex;flex-wrap:wrap;gap:6px}.link-actions .la-mode{border:0;font-size:.8em;opacity:.75}
+.la-status{font-size:.8em;overflow-wrap:anywhere;margin-top:6px}.la-status:empty{display:none}
+.link-draft-actions:empty,#link-messages:empty{display:none}#link-messages{max-height:34vh;overflow:auto;padding:0 12px;flex-shrink:1}
+.link-draft-actions{max-height:32vh;overflow:auto}
+#card.has-links #orb,#card.has-link-draft #orb{width:calc(84px * var(--ok,1));height:calc(84px * var(--ok,1))}
+#card.has-links #mid{overflow-y:auto;scrollbar-width:thin}
+#card.has-links #mid>*{flex-shrink:0}
+#card.has-links #link-messages{flex:0 0 auto;max-height:none;overflow:visible}
+#card.has-links #ask{position:sticky;bottom:0;z-index:2;background:var(--skin-bg,#0a0a0f);border-radius:18px}
+#card.has-link-draft #link-messages{display:none}

@@ -1,8 +1,4 @@
-"""Click the actual HUD button through the real command → note/OCR pipeline.
-
-Only desktop pixels and OCR are fixtures; workspace files, image preparation,
-core dispatch, HUD handlers and unread-note acknowledgement are real.
-"""
+"""Real capture dispatch, assistant chat persistence and four card actions; no network."""
 import base64
 import io
 import os
@@ -14,85 +10,81 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from PIL import Image
 from playwright.sync_api import sync_playwright
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "core"))
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'core'))
+from chatlog import ChatLog
 from engine_commands import CommandsMixin
 from workspace import Workspace
 from settings import Settings
 
-with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
-    root = Path(folder)
-    settings = Settings(root / "settings.json")
-    settings.update({"workspace": {"path": str(root / "workspace")}})
-    ws = Workspace(settings)
-    image = io.BytesIO()
-    Image.new("RGB", (700, 400), "white").save(image, "PNG")
-    png = image.getvalue()
-    events = []
-    engine = SimpleNamespace(workspace=ws, toolbox=SimpleNamespace(policy=Mock(return_value=(True, False))),
-                             note=Mock(), emit=lambda event_type, **data: events.append([event_type, data]))
-    allowed = True
-    def screenshot():
+with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
+    root=Path(folder);settings=Settings(root/'settings.json')
+    settings.update({'workspace':{'path':str(root/'workspace')}});ws=Workspace(settings)
+    image=io.BytesIO();Image.new('RGB',(700,400),'white').save(image,'PNG');png=image.getvalue()
+    text='Решение 42\nProject Alpha 123\n<script>bad()</script>\n' * 500
+    events=[]
+    engine=SimpleNamespace(workspace=ws,s=settings,chatlog=ChatLog(root/'chat.jsonl'),
+        toolbox=SimpleNamespace(policy=Mock(return_value=(True,False))),note=Mock(),
+        emit=lambda event_type,**data:events.append([event_type,data]))
+    def call(cmd,args):
         events.clear()
-        engine.toolbox.policy.return_value = (allowed, False)
-        with patch("eyes.capture_screen", return_value=png) as capture, patch("ocr.recognize_result", return_value={
-                "status": "done", "engine": "fixture", "text": "Решение 42\nProject Alpha 123", "lines": []}):
-            try:
-                url = CommandsMixin.command(engine, "screenshot_attach", {})
-            except ValueError as error:
-                if allowed:
-                    raise
-                assert capture.call_count == 0
-                return {"error": str(error)}
-            capture.assert_called_once()
-        return {"url": url, "events": list(events)}
-
-    ui = root / "ui"
-    shutil.copytree(ROOT / "ui", ui)
-    (ui / "assets/dewiar.js").write_text('''
-      window.opens=[];window.sent=[];
-      window.api=()=>({async open_settings(...args){opens.push(args);return true;}});
-      window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},
-        async call(cmd,args){if(cmd!=='screenshot_attach'){sent.push([cmd,args]);return {}};
-          const result=await nativeScreenshot();if(result.error)throw Error(result.error);
-          for(const [kind,data] of result.events)fire(kind,data);return result.url;}};
+        with patch('eyes.capture_screen',return_value=png),patch('ocr.recognize_result',return_value={
+                'status':'done','engine':'fixture','text':text,'lines':[]}):
+            result=CommandsMixin.command(engine,cmd,args or {})
+        return {'result':result,'events':list(events)}
+    ui=root/'ui';shutil.copytree(ROOT/'ui',ui)
+    (ui/'assets/dewiar.js').write_text('''
+      window.opens=[];window.copiedImages=[];window.copiedTexts=[];
+      window.api=()=>({async open_settings(...args){opens.push(args);return true;},
+        async copy_image_data(url){copiedImages.push(url);return true;}});
+      window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
+        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_to_note','screenshot_dismiss'].includes(cmd))return {};
+        const r=await nativeCommand(cmd,args);for(const [kind,data] of r.events)fire(kind,data);return r.result;}};
       window.fire=(type,data)=>(core._on[type]||[]).forEach(fn=>fn(data));
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{async writeText(t){copiedTexts.push(t)}}});
     ''')
-    browser = getattr(pw, os.environ.get("DEWIAR_TEST_BROWSER", "chromium")).launch()
-    page = browser.new_page(viewport={"width": 420, "height": 850})
-    page.expose_function("nativeScreenshot", screenshot)
-    page.goto((ui / "hud.html").as_uri())
-    page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
-    page.locator("#a-shot").click()
-    try:
-        page.wait_for_function("atts.length===1 && unreadNotes.size===1", timeout=5000)
-    except Exception:
-        print("Screenshot failure:", page.locator("#bot").inner_text(), "events:", events)
-        raise
-    notes = list(ws.root.glob("Заметки/Снимки экрана/*.md"))
-    assert len(notes) == 1
-    doc = notes[0].read_text()
-    assert "Решение 42\nProject Alpha 123" in doc
-    assert "Экран.png" in doc and "Распознанный текст.txt" in doc
-    saved = [data for kind, data in events if kind == "note_saved"]
-    assert len(saved) == 2 and saved[0]["path"] == saved[1]["path"]
-    assert next(ws.root.glob("Заметки/**/Экран.png")).read_bytes() == png
-    data_url = page.evaluate("atts[0].url")
-    assert Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[1]))).size == (700, 400)
-    button = page.locator("#b-notes")
-    assert button.evaluate("e=>e.classList.contains('has-new-notes')")
-    button.click(force=True)
-    assert page.evaluate("opens.at(-1)[0]") == "notes"
-    assert page.evaluate("opens.at(-1)[1]").startswith("&note=")
-    page.evaluate("path=>fire('notes_seen',{path})", saved[0]["path"])
-    assert page.locator("#b-notes-dot").is_hidden()
-    # A disabled screen policy must neither take a new screenshot nor create a note.
-    allowed = False
-    page.locator("#a-shot").click(force=True)
-    page.wait_for_function("document.querySelector('#bot').textContent.includes('Снимок экрана отключён')")
-    assert len(list(ws.root.glob("Заметки/Снимки экрана/*.md"))) == 1
-    assert page.evaluate("atts.length") == 1
-    assert not page.evaluate("sent.some(([cmd])=>cmd==='say')")
+    browser=getattr(pw,os.environ.get('DEWIAR_TEST_BROWSER','chromium')).launch()
+    page=browser.new_page(viewport={'width':420,'height':850});page.expose_function('nativeCommand',call)
+    errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+    page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
+    page.locator('#a-shot').click()
+    card=page.locator('#screenshot-messages .ss-card');card.wait_for()
+    assert page.evaluate('atts.length')==0,'Assistant result must not be a user attachment'
+    assert not list(ws.root.glob('Заметки/Снимки экрана/*.md'))
+    assert page.locator('#b-notes-dot').is_hidden()
+    item=engine.chatlog.page()['items'][0]
+    assert item['role']=='assistant' and item['att'][0]['capture']['text']==text
+    assert not any(kind=='note_saved' for kind,_ in events)
+    assert card.locator('pre').text_content()==text
+    card.locator('[data-ss-action="image"]').click()
+    page.wait_for_function('copiedImages.length===1')
+    assert base64.b64decode(page.evaluate('copiedImages[0]').split(',',1)[1])==png
+    card.locator('[data-ss-action="text"]').click();page.wait_for_function('copiedTexts.length===1')
+    assert page.evaluate('copiedTexts[0]')==text
+    card.locator('[data-ss-action="note"]').click()
+    page.wait_for_function('unreadNotes.size===1')
+    notes=list(ws.root.glob('Заметки/Снимки экрана/*.md'));assert len(notes)==1
+    assert text in notes[0].read_text()
+    assert next(ws.root.glob('Заметки/**/Экран.png')).read_bytes()==png
+    # Repeat commands are idempotent and persisted across a ChatLog reload.
+    result=CommandsMixin.command(engine,'screenshot_to_note',{'id':item['id']})
+    assert len(list(ws.root.glob('Заметки/Снимки экрана/*.md')))==1
+    engine.chatlog=ChatLog(root/'chat.jsonl')
+    assert engine.chatlog.screenshot(item['id'])['att'][0]['note_path']==result['path']
+    page.evaluate("loadScreenshotMessages()")
+    page.wait_for_function("document.querySelector('[data-ss-action=note]').disabled")
+    for skin in ['neusky','neudark']:
+        page.evaluate('(skin)=>applyLook({skin})',skin)
+        for width in [340,420,640]:
+            page.set_viewport_size({'width':width,'height':850})
+            for b in card.locator('button').all():
+                box=b.bounding_box();assert 0<=box['x'] and box['x']+box['width']<=width
+    shot=ROOT/'work/screenshot-message-card.png';page.screenshot(path=str(shot))
+    card.locator('[data-ss-action="close"]').click();card.wait_for(state='detached')
+    assert not engine.chatlog.page()['items']
+    assert notes[0].is_file(),'Dismissal must not delete a saved note'
+    engine.chatlog=ChatLog(root/'chat.jsonl')
+    assert not engine.chatlog.page()['items']
+    assert not errors,errors
     browser.close()
-print("ALL OK: real screenshot button saves one OCR note, attaches same image, lights Notes, opens note, respects disabled policy")
+print('ALL OK: assistant message, no auto-note, PNG/text clipboard, explicit idempotent transfer, restart persistence, dismissal and layout')

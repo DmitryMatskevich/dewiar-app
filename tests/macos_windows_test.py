@@ -46,6 +46,13 @@ class MacClipboard(unittest.TestCase):
         self.assertEqual(result.format, "PNG")
         self.assertEqual(result.size, (5, 6))
 
+    def test_copy_screenshot_writes_image_bytes_not_a_url(self):
+        from PIL import Image
+        data = io.BytesIO(); Image.new('RGB', (11, 7), 'blue').save(data, 'PNG')
+        url = 'data:image/png;base64,' + base64.b64encode(data.getvalue()).decode()
+        self.assertTrue(macsys.copy_image_data(url, board=self.board))
+        self.assertEqual(macsys.clipboard_image(self.board), url)
+
     def test_text_is_not_image(self):
         self.board.setString_forType_("file:///private/example.png", "public.utf8-plain-text")
         self.assertEqual(macsys.clipboard_image(self.board), "")
