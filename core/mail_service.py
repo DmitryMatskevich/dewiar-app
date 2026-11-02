@@ -255,6 +255,10 @@ class MailService:
 
     # Backward-compatible transport API for existing Dewiar tools.
     def configured(self):
+        # Tool catalogs and the initial UI handshake query this before Mail opens.
+        # accounts() calls Mail.public(), which may require an interactive Keychain grant.
+        if not self._is_activated:
+            return False
         return any(x["enabled"] for x in self.accounts())
 
     def public(self):
