@@ -212,7 +212,8 @@ DEFAULTS = {
                "sig": "",         # для какого «железа» (память/ядра) уже решали — если пользователь выключил, сами не включаем
                "told": False,
                "mem_warn": True},  # предупреждать, когда памяти не хватает (открыто много других программ) — engine_brain._memory_watch
-    "ui": {"hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
+    "ui": {"calendar_badge_types": ["birthday", "event"], "calendar_badge_days": 1,
+           "hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
            "hud_w": None, "hud_h": None,    # свой размер карточки виджета (растянули за угол), px при масштабе 100 %
            "hud_show_orb": True,              # показывать большой круглый образ агента в окне
            "hud_smooth": True,              # Linux с композитором: прозрачное окно и гладкие скругления (ui/app.py)

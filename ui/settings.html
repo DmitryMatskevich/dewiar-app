@@ -146,6 +146,13 @@
     <h1>Календарь</h1>
     <p class="lead">Ваш день, деньги и дела — в одном месте. Скажите «купил кофе за 8 рублей», «получил зарплату 3000»,
       «напомни в пятницу в 15:00 позвонить Лёше» — всё появится здесь. «Сколько я потратил за неделю?» — ответит голосом.</p>
+    <details style="margin-bottom:16px"><summary>Число на кнопке календаря</summary>
+      <p class="hint">Сумма записей выбранных типов за указанный период, включая сегодня. Завершённые и приостановленные напоминания не учитываются. При нуле число скрыто. Снимите все отметки, чтобы выключить счётчик.</p>
+      <label class="f">Период<select id="cal-badge-days"><option value="1">Сегодня</option><option value="7">Ближайшие 7 дней</option><option value="30">Ближайшие 30 дней</option></select></label>
+      <fieldset id="cal-badge-types" style="border:0;display:flex;flex-wrap:wrap;gap:12px;padding:12px 0"><legend>Что учитывать</legend></fieldset>
+      <p class="hint">Дни рождения — записи календаря и напоминания с названием «День рождения…». Они учитываются отдельно от встреч и обычных напоминаний. Несколько напоминаний об одном дне рождения считаются отдельными записями.</p>
+      <p class="hint" id="cal-badge-preview" aria-live="polite"></p>
+    </details>
     <div class="tabs" id="cal-tabs"><button data-ct="month" class="on">Календарь</button><button data-ct="money">Деньги</button><button data-ct="feed">Список</button></div>
 
     <div id="ct-month">
@@ -1902,6 +1909,7 @@
 <script src="assets/codes.js"></script>
 <script src="assets/refnet.js"></script>
 <script src="assets/dewiar.js"></script>
+<script src="assets/calendar-badge.js"></script>
 <script src="assets/dialog.js"></script>
 <script src="assets/qrcode.js"></script>
 <script src="assets/help.js"></script>

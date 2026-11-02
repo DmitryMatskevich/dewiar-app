@@ -259,9 +259,9 @@
   #b-notes-dot[hidden] { display: none; }
   #b-notes.has-new-notes { color: var(--accent, #8b8cf7); background: rgba(139,140,247,.18); }
   #bar:has(#b-notes.has-new-notes) { opacity: 1; }
-  #b-mail { position: relative; }
-  #b-mail-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
-  #b-mail-count[hidden] { display:none; }
+  #b-mail, #b-cal { position: relative; }
+  #b-mail-count, #b-cal-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
+  #b-mail-count[hidden], #b-cal-count[hidden] { display:none; }
   #b-mail.has-unread-mail { color:var(--accent,#8b8cf7); background:rgba(139,140,247,.18); }
   #bar:has(#b-mail.has-unread-mail) { opacity:1; }
   @keyframes taskPulse { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
@@ -649,7 +649,7 @@
     <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
     <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
-    <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
+    <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания" aria-label="Открыть календарь"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg><span id="b-cal-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <!-- чат — в нижней панели рядом с «Встречами»; из строки ввода убран, чтобы не дублировать навигацию -->
     <button class="btn" id="b-chat" title="Сообщения (Чат) — вся переписка: голосом и текстом" aria-label="Открыть сообщения"><svg viewBox="0 0 24 24"><path d="M6.5 4h8a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-2.5 2.5H10l-3.5 3v-3A2.5 2.5 0 0 1 4 11.5v-5A2.5 2.5 0 0 1 6.5 4z"/><path d="M17 9.5h.5A2.5 2.5 0 0 1 20 12v4.5a2.5 2.5 0 0 1-2 2.45V21l-3-2.5h-2.5a2.5 2.5 0 0 1-2.4-1.8"/></svg></button>
@@ -662,6 +662,7 @@
 <script src="assets/entities.js"></script>
 <script src="assets/skins.js"></script>
 <script src="assets/dewiar.js"></script>
+<script src="assets/calendar-badge.js"></script>
 <script src="assets/rich.js"></script>
 <link rel="stylesheet" href="assets/screenshot-card.css">
 <script src="assets/screenshot-card.js"></script>
@@ -1073,7 +1074,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
-.on("settings", e => { applyLook((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); featuresSet((e.settings || {}).features); setModelSettings((e.settings || {}).llm); setAskModel(null, (e.settings || {}).audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
+.on("settings", e => { applyLook((e.settings || {}).ui); setCalendarBadgeSettings((e.settings || {}).ui); setLocal(((e.settings || {}).privacy || {}).local_only); featuresSet((e.settings || {}).features); setModelSettings((e.settings || {}).llm); setAskModel(null, (e.settings || {}).audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") { const pct = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100); $("dict-level").firstElementChild.style.width = pct + "%"; $("dict-level").setAttribute("aria-valuenow", String(pct)); } })
@@ -1778,6 +1779,23 @@ helpButton.onclick = e => { e.stopPropagation(); setHelp(helpPanel.hidden); };
 $("hud-help-close").onclick = () => { setHelp(false); helpButton.focus(); };
 document.addEventListener("click", e => { if (!helpPanel.hidden && !e.target.closest("#hud-help, #b-help")) setHelp(false); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !helpPanel.hidden) { setHelp(false); helpButton.focus(); } });
+let calendarBadgePrefs=CalendarBadge.config({}), calendarBadgeRevision=0;
+function setCalendarBadgeSettings(ui) { calendarBadgePrefs=CalendarBadge.config(ui || {}); refreshCalendarBadge(); }
+async function refreshCalendarBadge() {
+  const revision=++calendarBadgeRevision, prefs=calendarBadgePrefs;
+  try {
+    const n=await CalendarBadge.load(core,prefs);
+    if(revision!==calendarBadgeRevision) return;
+    const badge=$("b-cal-count"), button=$("b-cal");
+    badge.hidden=n===0; badge.textContent=n>99?'99+':String(n);
+    const label=`Календарь: ${n} записей · ${prefs.days===1?'сегодня':'ближайшие '+prefs.days+' дней'}. ${prefs.types.map(k=>CalendarBadge.labels[k]).join(', ') || 'Счётчик выключен'}. Открыть календарь`;
+    button.title=label; button.setAttribute('aria-label',label);
+  } catch (_) { if(revision===calendarBadgeRevision) $("b-cal-count").hidden=true; }
+}
+core.on('hello',d=>setCalendarBadgeSettings((((d||{}).settings||{}).ui||{})));
+for(const event of ['reminders','calendars','money_saved','note_saved','tasks']) core.on(event,()=>refreshCalendarBadge());
+setInterval(()=>{if(!document.hidden) refreshCalendarBadge();},60000);
+window.addEventListener('focus',()=>refreshCalendarBadge());
 function setMailUnread(value) {
   const n = Math.max(0, Number(value) || 0), button = $("b-mail"), badge = $("b-mail-count");
   button.classList.toggle("has-unread-mail", n > 0); badge.hidden = n === 0; badge.textContent = n > 99 ? "99+" : String(n);

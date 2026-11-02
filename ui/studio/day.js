@@ -414,3 +414,29 @@ $("#cs-add").onclick = async (ev) => {
   catch (e) { r.className = "res bad"; r.textContent = e.message; } finally { ev.target.disabled = false; }
 };
 core.on("calendars", e => csFill(e));
+
+// Calendar icon preferences are independent of month-grid filters.
+let calBadgePreviewRevision = 0;
+function renderCalendarBadgeSettings() {
+  const prefs = CalendarBadge.config((S || {}).ui || {}), box = $("#cal-badge-types");
+  if (!box.querySelector('input')) {
+    for (const [key,label] of Object.entries(CalendarBadge.labels)) {
+      const row = document.createElement('label'), input = document.createElement('input');
+      input.type='checkbox'; input.value=key; row.append(input,document.createTextNode(' '+label)); box.append(row);
+    }
+  }
+  box.querySelectorAll('input').forEach(i=>i.checked=prefs.types.includes(i.value));
+  $("#cal-badge-days").value=String(prefs.days);
+  const revision = ++calBadgePreviewRevision;
+  CalendarBadge.load(core,prefs).then(n=>{if(revision===calBadgePreviewRevision) $("#cal-badge-preview").textContent=`На кнопке: ${n || 'число скрыто'}`;}).catch(()=>{if(revision===calBadgePreviewRevision) $("#cal-badge-preview").textContent='Не удалось обновить число';});
+}
+async function saveCalendarBadgeSettings() {
+  const box=$("#cal-badge-types"), period=$("#cal-badge-days");
+  const patch={calendar_badge_types:[...box.querySelectorAll('input:checked')].map(i=>i.value),calendar_badge_days:Number(period.value)};
+  box.disabled=true; period.disabled=true;
+  try { S=await core.call('settings_save',{patch:{ui:patch}}); renderCalendarBadgeSettings(); }
+  catch(e) { renderCalendarBadgeSettings(); toast(e.message || 'Не удалось сохранить счётчик'); }
+  finally { box.disabled=false; period.disabled=false; }
+}
+$("#cal-badge-types").onchange=saveCalendarBadgeSettings;
+$("#cal-badge-days").onchange=saveCalendarBadgeSettings;

@@ -376,6 +376,7 @@ function bindFields() {
   $("#ttsextra").onchange = () => { try { save({ tts: { remote: { extra: JSON.parse($("#ttsextra").value || "{}") } } }); } catch (e) { toast("Это не JSON"); } };
 }
 function refreshStatic() {
+  renderCalendarBadgeSettings();
   const vendorDisabled = !S?.privacy?.dewiar_services;
   $("#p-dw").classList.toggle("services-disabled", vendorDisabled);
   $("#dw-disabled").hidden = !vendorDisabled;
