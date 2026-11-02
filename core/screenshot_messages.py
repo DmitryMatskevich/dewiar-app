@@ -4,6 +4,7 @@ import io
 import re
 import threading
 import uuid
+import time
 from datetime import datetime
 
 LOCK = threading.RLock()
@@ -16,7 +17,50 @@ def public(item):
                 image=att['path'], note_path=att.get('note_path', ''))
 
 
-def capture(engine):
+def sources():
+    from platform_info import MAC
+    if not MAC:return {'windows': [], 'message': 'Список окон приложений доступен на macOS. Можно снять весь экран или выбрать область.'}
+    from screenshot_sources import visible_windows
+    return {'windows': visible_windows(), 'message': ''}
+
+
+def prepare_region(engine):
+    """A private in-memory preview; no chat, files or OCR until explicit confirmation."""
+    from eyes import capture_screen
+    from platform_info import MAC
+    from tools import desktop_env
+    from PIL import Image
+    if not engine.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
+    data = capture_screen(desktop_env(), exclude_dewiar=True) if MAC else capture_screen(desktop_env())
+    with Image.open(io.BytesIO(data)) as image:width, height = image.size
+    token = uuid.uuid4().hex
+    with LOCK:
+        engine._screenshot_drafts = {token: {'data': data, 'width': width, 'height': height,
+                                           'created': time.monotonic(), 'chat_id': engine.chatlog.active}}
+    def expire():
+        with LOCK:getattr(engine, '_screenshot_drafts', {}).pop(token, None)
+    timer = threading.Timer(600, expire); timer.daemon = True; timer.start()
+    return {'id': token}
+
+
+def draft(engine, token, region=None, consume=False):
+    from PIL import Image
+    with LOCK:
+        item = getattr(engine, '_screenshot_drafts', {}).get(str(token))
+        if not item or time.monotonic()-item['created'] > 600:raise ValueError('Предварительный снимок устарел. Выберите область заново.')
+        if item['chat_id'] != engine.chatlog.active:raise ValueError('Чат изменился. Выберите область заново в нужном чате.')
+        if region is None:return {'id': token, 'url': 'data:image/png;base64,' + base64.b64encode(item['data']).decode('ascii'), 'width': item['width'], 'height': item['height']}
+        try:x,y,w,h = [region[k] for k in ('x','y','width','height')]
+        except (TypeError, KeyError):raise ValueError('Выделите область снимка') from None
+        if any(isinstance(v, bool) or not isinstance(v, int) for v in (x,y,w,h)) or x < 0 or y < 0 or w < 2 or h < 2 or x+w > item['width'] or y+h > item['height']:
+            raise ValueError('Область выходит за границы снимка или слишком мала')
+        with Image.open(io.BytesIO(item['data'])) as image:
+            output = io.BytesIO(); image.crop((x,y,x+w,y+h)).save(output, 'PNG'); data = output.getvalue()
+        if consume:getattr(engine, '_screenshot_drafts', {}).pop(token, None)
+        return data
+
+
+def capture(engine, source='screen', application='', window_id=None, draft_id='', region=None):
     from eyes import capture_screen, prepare
     from tools import desktop_env
     from platform_info import MAC
@@ -28,7 +72,16 @@ def capture(engine):
         raise ValueError('Снимок уже обрабатывается. Дождитесь готовой карточки.')
     try:
         engine.note('Делаю снимок экрана и распознаю текст локально…')
-        data = capture_screen(desktop_env(), exclude_dewiar=True) if MAC else capture_screen(desktop_env())
+        if draft_id:
+            if region is None:raise ValueError('Выделите область и подтвердите снимок')
+            data = draft(engine, draft_id, region, consume=True)
+        elif source == 'application':
+            if not MAC:raise ValueError('Снимок отдельного окна пока доступен на macOS')
+            from screenshot_sources import capture_window
+            data = capture_window(application, window_id, engine.s.get('voice_commands'))
+        elif source == 'screen':
+            data = capture_screen(desktop_env(), exclude_dewiar=True) if MAC else capture_screen(desktop_env())
+        else:raise ValueError('Выберите весь экран, область или окно приложения')
         image = Image.open(io.BytesIO(data)); image.load()
         png = io.BytesIO(); image.save(png, 'PNG'); data = png.getvalue()
         title = f'Снимок экрана {datetime.now():%Y-%m-%d %H-%M-%S} {uuid.uuid4().hex[:6]}'

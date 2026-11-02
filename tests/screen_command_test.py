@@ -75,6 +75,14 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(CommandsMixin._screenshot_cmd(e,'Как сделать снимок экрана?'))
         e.toolbox.policy.assert_not_called()
 
+    def test_named_application_is_passed_to_capture_and_confirmation(self):
+        e=self.engine((True,True))
+        with patch('tools.t_save_screenshot',return_value='Снимок готов') as run:
+            self.assertTrue(CommandsMixin._screenshot_cmd(e,'Лира, снимок экрана приложения Клод'))
+            self.assertTrue(e.finished.wait(3))
+        self.assertEqual(run.call_args.args[0],{'source':'application','application':'Клод'})
+        self.assertIn('Клод',e._confirm.call_args.args[1])
+
     def test_text_only_mac_can_capture_but_headless_server_cannot(self):
         import tools
         class S:

@@ -22,13 +22,14 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     settings.update({'workspace':{'path':str(root/'workspace')}});ws=Workspace(settings)
     image=io.BytesIO();Image.new('RGB',(700,400),'white').save(image,'PNG');png=image.getvalue()
     text='Решение 42\nProject Alpha 123\n<script>bad()</script>\n' * 500
-    events=[]
+    events=[]; calls=[]
     engine=SimpleNamespace(workspace=ws,s=settings,chatlog=ChatLog(root/'chat.jsonl'),
         toolbox=SimpleNamespace(policy=Mock(return_value=(True,False))),note=Mock(),
         emit=lambda event_type,**data:events.append([event_type,data]))
     def call(cmd,args):
+        calls.append((cmd,args))
         events.clear()
-        with patch('eyes.capture_screen',return_value=png),patch('ocr.recognize_result',return_value={
+        with patch('eyes.capture_screen',return_value=png),patch('screenshot_sources.visible_windows',return_value=[{'window_id':42,'name':'Fixture','title':'Окно','id':'test','pid':1}]),patch('screenshot_sources.capture_window',return_value=png),patch('ocr.recognize_result',return_value={
                 'status':'done','engine':'fixture','text':text,'lines':[]}):
             result=CommandsMixin.command(engine,cmd,args or {})
         return {'result':result,'events':list(events)}
@@ -38,7 +39,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
       window.api=()=>({async open_settings(...args){opens.push(args);return true;},
         async copy_image_data(url){copiedImages.push(url);return true;}});
       window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
-        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_to_note','screenshot_dismiss'].includes(cmd))return {};
+        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
         const r=await nativeCommand(cmd,args);for(const [kind,data] of r.events)fire(kind,data);return r.result;}};
       window.fire=(type,data)=>(core._on[type]||[]).forEach(fn=>fn(data));
       Object.defineProperty(navigator,'clipboard',{configurable:true,value:{async writeText(t){copiedTexts.push(t)}}});
@@ -48,6 +49,9 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
     page.locator('#a-shot').click()
+    assert page.locator('.ss-source-menu').is_visible()
+    assert not engine.chatlog.page()['items'],'Opening the menu must not capture'
+    page.locator('[data-ss-source="screen"]').click()
     card=page.locator('#screenshot-messages .ss-card');card.wait_for()
     assert page.evaluate('atts.length')==0,'Assistant result must not be a user attachment'
     assert not list(ws.root.glob('Заметки/Снимки экрана/*.md'))
@@ -56,6 +60,10 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     assert item['role']=='assistant' and item['att'][0]['capture']['text']==text
     assert not any(kind=='note_saved' for kind,_ in events)
     assert card.locator('pre').text_content()==text
+    card.locator('[data-ss-open]').click()
+    page.locator('.ss-full-image').wait_for()
+    assert base64.b64decode(page.locator('.ss-full-image').get_attribute('src').split(',',1)[1])==png
+    page.locator('.ss-dialog-bar button').click()
     card.locator('[data-ss-action="image"]').click()
     page.wait_for_function('copiedImages.length===1')
     assert base64.b64decode(page.evaluate('copiedImages[0]').split(',',1)[1])==png
@@ -85,6 +93,43 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     assert notes[0].is_file(),'Dismissal must not delete a saved note'
     engine.chatlog=ChatLog(root/'chat.jsonl')
     assert not engine.chatlog.page()['items']
+    # The picker captures only a private preview. No message/OCR until confirmation.
+    page.set_viewport_size({'width':640,'height':900})
+    page.locator('#a-shot').click();page.locator('[data-ss-source="region"]').click()
+    page.locator('.ss-region-stage canvas').wait_for()
+    assert not engine.chatlog.page()['items']
+    assert not any(cmd=='screenshot_attach' and args.get('draft_id') for cmd,args in calls)
+    for label,value in [('Слева','100'),('Сверху','50'),('Ширина','250'),('Высота','125')]:
+        page.get_by_label(label,exact=True).fill(value);page.get_by_label(label,exact=True).press('Tab')
+    canvas=page.locator('.ss-region-stage canvas');box=canvas.bounding_box();scale=box['width']/700
+    x=box['x']+225*scale;y=box['y']+110*scale
+    page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+20*scale,y+10*scale);page.mouse.up()
+    moved=int(page.get_by_label('Слева',exact=True).input_value());assert 118<=moved<=122,moved
+    canvas.focus();page.keyboard.press('ArrowLeft')
+    assert int(page.get_by_label('Слева',exact=True).input_value())==moved-1
+    # Resize using the bottom-right handle, then restore the exact test crop.
+    left=int(page.get_by_label('Слева',exact=True).input_value());top=int(page.get_by_label('Сверху',exact=True).input_value())
+    x=box['x']+(left+250)*scale;y=box['y']+(top+125)*scale
+    page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+25*scale,y+15*scale);page.mouse.up()
+    assert int(page.get_by_label('Ширина',exact=True).input_value())>=270
+    for label,value in [('Слева','100'),('Сверху','50'),('Ширина','250'),('Высота','125')]:
+        page.get_by_label(label,exact=True).fill(value);page.get_by_label(label,exact=True).press('Tab')
+    selection=ROOT/'work/screenshot-region-picker.png';page.screenshot(path=str(selection))
+    page.locator('[data-ss-confirm="region"]').click()
+    page.locator('.ss-region-stage').wait_for(state='detached')
+    current=engine.chatlog.page()['items'][-1]
+    captured=Image.open(ws.safe(current['att'][0]['path']))
+    assert captured.size==(250,125),captured.size
+    page.locator('#screenshot-messages [data-ss-action="close"]').click()
+    page.locator('#screenshot-messages .ss-card').wait_for(state='detached')
+    page.locator('#a-shot').click();page.locator('[data-ss-source="region"]').click()
+    page.locator('.ss-region-stage canvas').wait_for();page.get_by_role('button',name='Отмена',exact=True).click()
+    page.wait_for_function("!document.querySelector('.ss-region-stage')")
+    assert not engine.chatlog.page()['items']
+    # Visible application target is selected by stable window id, not by a guessed title.
+    page.locator('#a-shot').click();page.locator('[data-window-id="42"]').click()
+    page.locator('#screenshot-messages .ss-card').wait_for()
+    assert any(cmd=='screenshot_attach' and args.get('window_id')==42 for cmd,args in calls)
     assert not errors,errors
     browser.close()
 print('ALL OK: assistant message, no auto-note, PNG/text clipboard, explicit idempotent transfer, restart persistence, dismissal and layout')

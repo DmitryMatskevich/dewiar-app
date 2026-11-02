@@ -640,6 +640,8 @@
 <script src="assets/rich.js"></script>
 <link rel="stylesheet" href="assets/screenshot-card.css">
 <script src="assets/screenshot-card.js"></script>
+<link rel="stylesheet" href="assets/screenshot-picker.css">
+<script src="assets/screenshot-picker.js"></script>
 <link rel="stylesheet" href="assets/link-actions.css">
 <script src="assets/link-actions.js"></script>
 <script src="assets/zoom.js"></script>
@@ -1826,7 +1828,9 @@ core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
   .on('screenshot_removed', e=>{screenshotCards.get(e.id)?.remove();screenshotCards.delete(e.id);screenshotLayout();})
   .on('hello', loadScreenshotMessages).on('chat_changed', loadScreenshotMessages);
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
-$("a-shot").onclick = guard($("a-shot"), () => core.call("screenshot_attach").then(showScreenshotMessage).catch(showErr), () => "Делаю снимок и распознаю текст локально…");
+$("a-shot").title = 'Снимок экрана: весь экран, выбор области или окно приложения';
+$("a-shot").setAttribute('aria-haspopup', 'dialog');
+$("a-shot").onclick = () => DewiarCapture.menu($("a-shot"), showScreenshotMessage, showErr);
 document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
 document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });

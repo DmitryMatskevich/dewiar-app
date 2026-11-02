@@ -9,13 +9,24 @@ from datetime import datetime
 LOCK = threading.Lock()
 
 
-def is_command(text):
+def parse_command(text):
     """Only explicit, standalone capture commands; questions/negations stay untouched."""
-    value = str(text or "").strip().casefold().replace("ё", "е")
-    value = re.sub(r"^(?:лира|агент|ассистент)[, ]+", "", value)
-    return bool(re.fullmatch(
+    value = str(text or "").strip()
+    value = re.sub(r"^(?:лира|агент|ассистент)[, ]+", "", value, flags=re.I)
+    named = re.fullmatch(r'(?:пожалуйста[, ]+)?(?:(?:сделай|сделайте|создай|сохрани)\s+(?:мне\s+)?)?'
+                         r'(?:снимок\s+экрана|скриншот(?:\s+экрана)?)\s+(?:приложения|программы|окна)\s+(.+?)(?:\s+пожалуйста)?[.!]*', value, re.I)
+    if named:
+        name = named[1].strip(' «»".!')
+        if name and '?' not in name:return {'source': 'application', 'application': name}
+        return None
+    matched = re.fullmatch(
         r"(?:пожалуйста[, ]+)?(?:(?:сделай|сделайте|создай|сохрани)\s+(?:мне\s+)?(?:снимок\s+экрана|скриншот(?:\s+экрана)?)"
-        r"|сфотографируй\s+экран|снимок\s+экрана|скриншот(?:\s+экрана)?)(?:\s+пожалуйста)?[.!]*", value))
+        r"|сфотографируй\s+экран|снимок\s+экрана|скриншот(?:\s+экрана)?)(?:\s+пожалуйста)?[.!]*", value, re.I)
+    return {'source': 'screen'} if matched else None
+
+
+def is_command(text):
+    return parse_command(text) is not None
 
 
 def create(workspace, progress=None, cancelled=None):

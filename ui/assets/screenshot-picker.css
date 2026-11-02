@@ -1,0 +1,30 @@
+.ss-dialog { width:min(500px,calc(100% - 24px)); max-height:calc(100% - 24px); box-sizing:border-box; padding:18px; border:1px solid var(--line,rgba(128,140,180,.25)); border-radius:16px; color:var(--ink,#eef2ff); background:var(--panel,#20232e); font:14px/1.5 Manrope,"Segoe UI",sans-serif; overflow:auto; }
+.ss-dialog::backdrop { background:rgba(0,0,0,.55); }
+.light .ss-dialog, .st-light .ss-dialog { background:#f4f7fc; color:var(--ink,#24324a); }
+.ss-dialog-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.ss-dialog-bar h2 { font-size:18px; margin:0; }
+.ss-dialog button, .ss-window button { min-height:44px; padding:9px 14px; border:1px solid var(--line,rgba(128,140,180,.25)); border-radius:10px; background:var(--glass,rgba(128,140,180,.15)); color:inherit; font:inherit; cursor:pointer; }
+.ss-dialog button:focus-visible, .ss-window button:focus-visible, .ss-region-stage canvas:focus-visible { outline:2px solid var(--accent,#858dff); outline-offset:2px; }
+.ss-dialog button:disabled, .ss-window button:disabled { opacity:.5; cursor:default; }
+.ss-source-menu > button, .ss-source-list button { width:100%; text-align:left; margin-top:8px; overflow-wrap:anywhere; }
+.ss-source-list { display:grid; gap:6px; }
+.ss-source-menu h3 { font-size:14px; margin:20px 0 6px; }
+.ss-info { color:var(--muted,#b8c1d7); font-size:13px; margin:12px 0; overflow-wrap:anywhere; }
+.ss-info:empty { display:none; }
+.ss-large { position:fixed; inset:0; margin:auto; width:calc(100% - 16px); height:calc(100% - 16px); max-width:none; max-height:none; }
+.ss-large[open] { display:flex; flex-direction:column; gap:10px; }
+.ss-view-stage { flex:1; min-height:0; overflow:auto; text-align:center; }
+.ss-full-image { max-width:100%; max-height:100%; object-fit:contain; }
+.ss-full-image.ss-actual { display:block; max-width:none; max-height:none; margin:0; }
+.ss-region-stage { min-height:120px; height:50vh; flex:1 1 300px; display:flex; align-items:center; justify-content:center; background:#10131b; overflow:hidden; }
+.ss-region-stage canvas { display:block; max-width:100%; max-height:100%; width:auto; height:auto; touch-action:none; cursor:crosshair; }
+.ss-region-fields { display:flex; flex-wrap:wrap; gap:8px; }
+.ss-region-fields label { display:flex; flex-direction:column; flex:1 1 70px; min-width:0; font-size:12px; }
+.ss-region-fields input { box-sizing:border-box; min-width:0; width:100%; min-height:38px; padding:8px; border-radius:8px; border:1px solid var(--line,rgba(128,140,180,.25)); background:var(--field,rgba(128,140,180,.15)); color:inherit; font:inherit; }
+.ss-region-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.ss-dialog .ss-primary, .ss-window .ss-primary { background:var(--accent,#626ce3); color:white; }
+.ss-card .ss-open { width:auto; height:auto; min-width:76px; min-height:60px; padding:2px; background:none; cursor:zoom-in; }
+.ss-window { margin:0; padding:18px; box-sizing:border-box; height:100vh; display:flex; flex-direction:column; gap:10px; color:var(--ink); background:var(--panel); font:14px/1.5 Manrope,"Segoe UI",sans-serif; }
+.ss-window #ss-content { display:flex; flex-direction:column; gap:10px; flex:1; min-height:0; }
+.ss-window h1 { font-size:20px; margin:0; }
+@media (max-width:480px) { .ss-dialog { padding:12px; } .ss-dialog-bar { flex-wrap:wrap; } .ss-region-stage { min-height:80px; } .ss-info { font-size:12px; } }

@@ -644,6 +644,30 @@ class Api:
         base = ui_http_base() if WIN or MAC or os.environ.get("DEWIAR_UI_HTTP") else None
         return (base + page if base else (HERE / page).as_uri()) + f"?token={self.token}&port={WS_PORT}{extra}"
 
+    def open_screenshot_window(self, mode, identifier):
+        """Open a large image/selection surface without resizing the user's HUD."""
+        import re
+        import webview
+        if mode not in ('view', 'region') or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(identifier)):
+            raise ValueError('Неверный снимок')
+        url = self._url('screenshot-window.html', '&mode=' + mode + '&id=' + str(identifier))
+        window = getattr(self, '_screenshot_window', None)
+        if window is not None:
+            window.load_url(url); window.show(); window.restore()
+            return True
+        window = webview.create_window('Dewiar — Снимок экрана', url, width=1100, height=780,
+                                       min_size=(500, 400), js_api=self, background_color='#12131b')
+        self._screenshot_window = window
+        def closed():
+            if getattr(self, '_screenshot_window', None) is window:self._screenshot_window = None
+        window.events.closed += closed
+        return True
+
+    def close_screenshot_window(self):
+        window = getattr(self, '_screenshot_window', None)
+        if window is not None:window.destroy()
+        return True
+
     # ---------- окна виджета: карточка и значок ----------
 
     def _gw(self, mode):

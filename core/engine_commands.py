@@ -13,8 +13,9 @@ class CommandsMixin:
 
     def _screenshot_cmd(self, text):
         """Two local steps without invoking an LLM, with normal screen permission policy."""
-        from screen_document import is_command
-        if not is_command(text):
+        from screen_document import parse_command
+        request = parse_command(text)
+        if not request:
             return False
         on, confirm = self.toolbox.policy("save_screenshot")
         if not on:
@@ -36,7 +37,8 @@ class CommandsMixin:
             speaker.start()
             msg = "Создание снимка отменено."
             try:
-                if confirm and not self._confirm(turn, "Сделать снимок экрана без окон Dewiar и распознать текст локально?", sentences):
+                question = ('Сделать снимок окна приложения «' + request['application'] + '» и распознать текст локально?' if request['source'] == 'application' else 'Сделать снимок экрана без окон Dewiar и распознать текст локально?')
+                if confirm and not self._confirm(turn, question, sentences):
                     return
                 if turn.cancel.is_set():
                     return
@@ -45,11 +47,11 @@ class CommandsMixin:
                     msg = "Снимок не сделан: доступ к экрану отключён в Dewiar."
                 else:
                     self.emit("tool", name="save_screenshot", title="Скриншот", status="run")
-                    msg = t_save_screenshot({}, {"workspace": self.workspace, "engine": self,
+                    msg = t_save_screenshot(request, {"workspace": self.workspace, "engine": self,
                                                 "screenshot_cancelled": turn.cancel.is_set})
                     self.emit("tool", name="save_screenshot", title="Скриншот", status="done", result=msg)
             except Exception as exc:
-                msg = "Не удалось создать документ со снимком: " + str(exc)
+                msg = "Не удалось сделать снимок: " + str(exc)
                 self.emit("tool", name="save_screenshot", title="Скриншот", status="error", error=str(exc))
             finally:
                 if not turn.cancel.is_set():
@@ -1035,7 +1037,22 @@ class CommandsMixin:
             return True
         if cmd == "screenshot_attach":               # кнопка «снимок экрана» в поле вопроса
             from screenshot_messages import capture
-            return capture(self)
+            return capture(self, source=a.get('source', 'screen'), application=a.get('application', ''),
+                           window_id=a.get('window_id'), draft_id=a.get('draft_id', ''), region=a.get('region'))
+        if cmd == 'screenshot_sources':
+            from screenshot_messages import sources
+            if not self.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
+            return sources()
+        if cmd == 'screenshot_prepare':
+            from screenshot_messages import prepare_region
+            return prepare_region(self)
+        if cmd == 'screenshot_draft':
+            from screenshot_messages import draft
+            return draft(self, a.get('id'))
+        if cmd == 'screenshot_draft_cancel':
+            from screenshot_messages import LOCK
+            with LOCK:getattr(self, '_screenshot_drafts', {}).pop(str(a.get('id')), None)
+            return True
         if cmd in ('screenshot_messages', 'screenshot_image', 'screenshot_to_note', 'screenshot_dismiss'):
             from screenshot_messages import command
             return command(self, cmd, a)

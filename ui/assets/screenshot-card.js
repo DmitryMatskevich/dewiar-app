@@ -12,6 +12,9 @@
     const head = document.createElement('div'); head.className = 'ss-head';
     const label = document.createElement('b'); label.textContent = 'Ассистент · Снимок экрана'; head.append(label);
     const image = document.createElement('img'); image.className = 'ss-image'; image.src = value.url; image.alt = value.title;
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'ss-open'; open.setAttribute('aria-label', 'Открыть исходный снимок экрана'); open.title = 'Открыть снимок экрана'; open.dataset.ssOpen = value.id;
+    open.append(image);
+    open.onclick = async () => { open.disabled = true; try { await DewiarCapture.openImage(value); } catch (e) { status.textContent = e.message || String(e); } finally { open.disabled = false; } };
     const status = document.createElement('div'); status.className = 'ss-status'; status.setAttribute('role', 'status');
     status.textContent = value.note_path ? 'В заметках' : value.summary;
     const actions = document.createElement('div'); actions.className = 'ss-actions';
@@ -51,7 +54,7 @@
       await core.call('screenshot_dismiss', {id:value.id}); root.remove(); options.removed?.(value.id);
     });
     head.append(close); // close belongs at the message's top-right, not in the copy toolbar
-    const preview = document.createElement('div'); preview.className = 'ss-preview'; preview.append(image, actions);
+    const preview = document.createElement('div'); preview.className = 'ss-preview'; preview.append(open, actions);
     root.append(head, preview);
     if (value.text) {
       const details = document.createElement('details'), summary = document.createElement('summary'), text = document.createElement('pre');
