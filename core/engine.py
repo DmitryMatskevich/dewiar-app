@@ -158,6 +158,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.toolbox.hooks["prompter"] = self.prompter
         from mail_service import MailService
         self.mail = MailService(workspace=self.workspace)
+        self.mail.on_unread_change = lambda count: self.emit("mail_unread", count=count)
         self.toolbox.hooks["mail"] = self.mail
         from recall import Recall
         from obsidian import Obsidian

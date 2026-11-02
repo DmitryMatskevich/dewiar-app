@@ -101,6 +101,18 @@ class MailServiceTests(unittest.TestCase):
         with self.assertRaises(MailServiceError):
             self.service.open_mail("dcnt:76:42")
 
+    def test_unread_count_deduplicates_copies_across_accounts(self):
+        first = self.service.rules["accounts"][0]
+        second = next(x for x in self.service.rules["accounts"] if x["id"] != first["id"])
+        unread = {"uid": "42", "from": "Client <client@example.org>", "to": "d@dcnt.ru",
+                  "subject": "Новое", "date": "Mon, 02 Nov 2026 10:00:00 +0300", "message_id": "<same>", "unread": True}
+        with self.service._db() as db:
+            self.service._store_message(db, first, unread, "77", "INBOX")
+            self.service._store_message(db, second, {**unread, "uid": "91"}, "88", "INBOX")
+            self.service._store_message(db, first, {**unread, "uid": "43", "message_id": "<other>"}, "77", "INBOX")
+            self.service._store_message(db, first, {**unread, "uid": "44", "message_id": "<read>", "unread": False}, "77", "INBOX")
+        self.assertEqual(self.service.unread_count(), 2)
+
     def test_reply_all_addresses_signature_revision_confirmation_and_one_shot(self):
         self.service.rules["signature_by_account"]["dcnt"] = "С уважением, Дмитрий"
         key = "dcnt:77:42"

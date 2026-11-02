@@ -259,6 +259,11 @@
   #b-notes-dot[hidden] { display: none; }
   #b-notes.has-new-notes { color: var(--accent, #8b8cf7); background: rgba(139,140,247,.18); }
   #bar:has(#b-notes.has-new-notes) { opacity: 1; }
+  #b-mail { position: relative; }
+  #b-mail-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
+  #b-mail-count[hidden] { display:none; }
+  #b-mail.has-unread-mail { color:var(--accent,#8b8cf7); background:rgba(139,140,247,.18); }
+  #bar:has(#b-mail.has-unread-mail) { opacity:1; }
   @keyframes taskPulse { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { #b-tasks.working, #task .spin { animation: none; } }
   @keyframes tspin { to { transform: rotate(360deg); } }
@@ -432,12 +437,20 @@
   #corner-l { right: auto; left: 10px; opacity: 1; }
   /* Управление образом помощника всегда видно в первой строке справа: его не нужно искать наведением. */
   #corner-r { opacity: 1; }
+  #hud-help { position:absolute; z-index:12; top:42px; right:10px; width:min(420px,calc(100vw - 28px)); max-height:calc(100% - 54px); overflow:auto; padding:16px 18px; border:1px solid rgba(130,150,185,.3); border-radius:18px; color:var(--ink); background:var(--skin-panel,rgba(20,30,48,.97)); box-shadow:0 12px 40px rgba(0,0,0,.28); user-select:text; -webkit-user-select:text; }
+  #hud-help[hidden] { display:none; }
+  #hud-help h2 { font-size:17px; margin:0 32px 12px 0; }
+  #hud-help h3 { font-size:13px; margin:12px 0 4px; }
+  #hud-help p, #hud-help li { font-size:12px; line-height:1.5; color:var(--muted); }
+  #hud-help ul { padding-left:18px; }
+  #hud-help-close { position:absolute; right:9px; top:9px; width:28px; height:28px; border:0; border-radius:50%; color:var(--ink); background:transparent; font-size:20px; cursor:pointer; }
   /* остальные правые действия раскрываются левее постоянной кнопки образа, не перекрывая её. */
   /* Верхние действия виджета доступны сразу после первого запуска, без
      обязательного наведения мыши: повторное открытие не должно менять
      состав панели. */
   #corner { right: 40px; }
   #corner { opacity: 1; }
+  #corner[hidden] { display:none; }
   #card:hover #corner, #corner:focus-within, #card:hover #corner-l, #corner-l:focus-within { opacity: 1; }
   #corner .btn, #corner-r .btn, #corner-l .btn { width: 26px; height: 26px; color: rgba(255,255,255,.55); }
   #corner .btn:hover, #corner-r .btn:hover, #corner-l .btn:hover { color: #fff; background: rgba(255,255,255,.1); }
@@ -611,19 +624,31 @@
   <div id="corner-r">
     <!-- Глаз всегда доступен справа в первой строке: скрыть/вернуть большой образ помощника. -->
     <button class="btn" id="b-orb" title="Скрыть большой образ Лиры и освободить место для ответа" aria-label="Скрыть большой образ Лиры" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+    <button class="btn" id="b-tray" title="Спрятать ассистента" aria-label="Спрятать ассистента"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+    <button class="btn" id="b-help" title="Справка по вводу и управлению" aria-label="Открыть справку" aria-haspopup="dialog" aria-expanded="false" aria-controls="hud-help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.4 2.4 0 1 1 4.4 1.3c-.9 1.2-2.1 1.4-2.1 3.2M12 17h.01"/></svg></button>
   </div>
-  <div id="corner">
+  <div id="corner" hidden>
     <!-- блокнот у виджета (20.10): вкладки, ссылки, картинки, таблицы, задачи — выезжает рядом, синхронизируется (ui/pad.html) -->
     <!-- «Досуг» остаётся доступен голосом и в окне блокнота, но не выводится в первой строке HUD. -->
     <button class="btn" id="b-play" hidden title="Досуг — милые игры на пару минут. Или скажите: «Лира, давай поиграем»"><svg viewBox="0 0 24 24"><path d="M7.5 7.5h9a4.5 4.5 0 0 1 4.3 5.8l-1.1 3.7a2.3 2.3 0 0 1-3.9.9L14 15.5h-4l-1.8 2.4a2.3 2.3 0 0 1-3.9-.9l-1.1-3.7a4.5 4.5 0 0 1 4.3-5.8z"/><path d="M8 10.5v3M6.5 12h3"/><path d="M15.5 11h.01M17.5 13h.01"/></svg></button>
-    <button class="btn" id="b-tray" title="Спрятать — появлюсь сам, когда позовёте по имени или придёт напоминание"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
   </div>
+  <section id="hud-help" role="dialog" aria-label="Справка по управлению ассистентом" hidden>
+    <button id="hud-help-close" type="button" aria-label="Закрыть справку">×</button>
+    <h2>Как пользоваться ассистентом</h2>
+    <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире.</p>
+    <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит текст в поле. Для завершения и отправки скажите в конце «Лира», «ввод» или «вот», либо отдельно «ввод» или «вот».</p>
+    <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
+    <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
+    <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
+    <h3>Приватность</h3><p>Текст сообщения, ссылки и вложения могут передаваться выбранной модели для выполнения просьбы. Проверяйте содержимое перед отправкой.</p>
+  </section>
   <div id="bar">
     <!-- Старые быстрые кнопки сохранены в DOM для совместимости с клавиатурными сценариями, но убраны из панели:
          микрофон — в строке ввода, текст — всегда открыт, помощник — на круглой кнопке портрета. -->
     <button class="btn" id="b-mic" hidden title="Выключить микрофон"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
     <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+    <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <!-- чат — в нижней панели рядом с «Встречами»; из строки ввода убран, чтобы не дублировать навигацию -->
@@ -1747,6 +1772,22 @@ window.padMark = (on, m) => { const play = !!on && m === "play"; $("b-play").cla
   $("corner").classList.toggle("pinned", !!on); };
 $("b-tray").onclick = () => { const a = api(); if (!a || !a.to_tray) return; a.to_tray();
   core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); };
+const helpPanel = $("hud-help"), helpButton = $("b-help");
+function setHelp(open) { helpPanel.hidden = !open; helpButton.setAttribute("aria-expanded", String(open)); if (open) $("hud-help-close").focus(); }
+helpButton.onclick = e => { e.stopPropagation(); setHelp(helpPanel.hidden); };
+$("hud-help-close").onclick = () => { setHelp(false); helpButton.focus(); };
+document.addEventListener("click", e => { if (!helpPanel.hidden && !e.target.closest("#hud-help, #b-help")) setHelp(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !helpPanel.hidden) { setHelp(false); helpButton.focus(); } });
+function setMailUnread(value) {
+  const n = Math.max(0, Number(value) || 0), button = $("b-mail"), badge = $("b-mail-count");
+  button.classList.toggle("has-unread-mail", n > 0); badge.hidden = n === 0; badge.textContent = n > 99 ? "99+" : String(n);
+  const label = n ? "Непрочитанных писем: " + n + ". Открыть непрочитанные письма" : "Открыть почту: непрочитанных писем нет";
+  button.title = label; button.setAttribute("aria-label", label);
+}
+async function refreshMailUnread() { try { setMailUnread(await core.call("mail_unread_count")); } catch (_) {} }
+$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", "&unread=1"); };
+core.on("mail_unread", e => setMailUnread(e.count));
+core.on("hello", () => setTimeout(refreshMailUnread, 700));
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */
 core.on("window", e => { const a = api(); if (!a || mode !== "card") return;
   if (e.do === "tray" && a.to_tray) { a.to_tray(); core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); }
@@ -2047,8 +2088,7 @@ async function loadLinkMessages() {
     rows.forEach(showLinkMessage);requestAnimationFrame(fitCap);
   } catch (_) {}
 }
-core.on('chat',e=>{const v=DewiarLinks.fromMessage(e.item);if(v)showLinkMessage(v);})
-  .on('hello',loadLinkMessages).on('chat_changed',loadLinkMessages);
+core.on('chat',e=>{const v=DewiarLinks.fromMessage(e.item);if(v)showLinkMessage(v);});
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe(linkMessages);
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe(document.querySelector('.link-draft-actions'));
 window.getTranscriptionAttachments = () => atts.filter(a => a.kind === 'file');

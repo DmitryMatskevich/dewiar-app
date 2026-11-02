@@ -25,7 +25,7 @@ function mlRenderAccounts() {
 function mlSetView(view) {
   mlClearMessage();
   mlView = view; mlAccountFilter = "";
-  const names = { all: "Все входящие", important: "Важные", unanswered: "Без ответа" };
+  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", unanswered: "Без ответа" };
   document.querySelectorAll("[data-ml-view]").forEach(b => {
     const selected = b.dataset.mlView === view;
     b.classList.toggle("selected", selected); b.setAttribute("aria-pressed", String(selected));
@@ -70,13 +70,14 @@ async function mlLoad() {
   mlRenderAccounts(); if (mlSelected) await mlSelect(mlSelected);
   const r = await core.call("mail_rules_get"); $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
+  if (new URLSearchParams(location.search).has("unread")) mlSetView("unread");
 }
 async function mlList() {
   try {
     const important = mlView === "important" || mlView === "unanswered";
     const unanswered = mlView === "unanswered";
     const items = await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
-      account_id: mlAccountFilter, important, unanswered });
+      account_id: mlAccountFilter, important, unanswered, unread: mlView === "unread" });
     const box = $("#ml-list"); box.replaceChildren();
     if (!items.length) {
       const empty = document.createElement("div"); empty.className = "ml-empty";

@@ -691,6 +691,8 @@ class CommandsMixin:
                     return self.mail.list_mail(limit=a.get("limit", 50), unread=bool(a.get("unread")),
                                                query=a.get("query", ""), important=bool(a.get("important")),
                                                account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")))
+                if cmd == "mail_unread_count":
+                    return self.mail.unread_count()
                 if cmd == "mail_open":
                     return self.mail.open_mail(a.get("message_id", ""))
                 if cmd == "mail_reply_prepare":

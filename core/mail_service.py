@@ -496,7 +496,22 @@ class MailService:
                 self.sync_all()
             except Exception:
                 log.exception("Почтовая синхронизация завершилась ошибкой")
+            finally:
+                callback = getattr(self, "on_unread_change", None)
+                if callback:
+                    try:
+                        callback(self.unread_count())
+                    except Exception:
+                        log.exception("Не удалось обновить счётчик непрочитанных писем")
             stop_event.wait(interval)
+
+    def unread_count(self):
+        """Count cached unread inbox messages, deduplicating copies in several accounts."""
+        with self._db() as db:
+            row = db.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), "
+                "account_id || ':' || uidvalidity || ':' || uid)) "
+                "FROM messages WHERE folder='INBOX' AND unread=1").fetchone()
+        return int(row[0] or 0)
 
     def check(self, force=False):
         if force:

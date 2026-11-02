@@ -12,13 +12,14 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
       window.api=()=>({open_settings:(...a)=>opens.push(a)});
       window.core={_on:{},async sendLater(){},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
         if(cmd==='link_action'){calls.push({cmd,args});if(fail)throw Error('Fixture: no model');return {id:'fixture-task',status:'running'};}
-        if(cmd==='link_choices')return [];return {};}};
+        if(cmd==='link_choices'){calls.push({cmd,args});return [];}return {};}};
       window.fire=(kind,data)=>(core._on[kind]||[]).forEach(fn=>fn(data));
     ''')
     browser=getattr(pw,os.environ.get('DEWIAR_TEST_BROWSER','chromium')).launch()
     page=browser.new_page(viewport={'width':420,'height':850});errors=[]
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'})")
+    assert page.evaluate("calls.some(x=>x.cmd==='link_choices')") is False,'Startup must not restore stale link cards'
     field=page.locator('#askin');draft=page.locator('.link-draft-actions')
     field.fill('https://example.org/article')
     assert draft.locator('[data-link-action="seo-page"]').is_visible()
