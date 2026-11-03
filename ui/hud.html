@@ -1515,8 +1515,13 @@ function copyDraftByVoice(action) {
   const text = !$("background-dictation").hidden && !backgroundState ? $("background-draft").value : $("askin").value;
   if (!text.trim()) { $("ask-feedback").textContent = "Нет текста для копирования."; return; }
   core.call("dictation_copy_text", {text, copy_only: action === "copy"}).then(result => {
-    $("ask-feedback").textContent = result.inserted ? "Текст скопирован и вставлен." : "Текст скопирован. Его можно вставить в нужное поле.";
+    $("ask-feedback").textContent = pasteMessage(result, action);
   }).catch(showErr);
+}
+function pasteMessage(r, action) {
+  if (r.inserted) return "Команда вставки отправлена в «" + (r.app || "активное приложение") + "». Проверьте поле.";
+  if (action === "copy" || !r.reason) return "Текст скопирован. Его можно вставить в нужное поле.";
+  return "Текст скопирован, но не вставлен. " + r.reason;
 }
 core.on("draft_command", e => { if (e.action === "clear") clearDraftByVoice(); else copyDraftByVoice(e.action); });
 let backgroundState = null, backgroundSaving = false, backgroundDirty = false, backgroundPending = null;
@@ -1552,8 +1557,8 @@ function renderBackgroundDictation(e) {
   backgroundState = {session: e.session, revision: e.revision, text: e.text || ""};
   box.hidden = false; openAsk();
   if (!backgroundDirty && editor.value !== (e.text || "")) editor.value = e.text || "";
-  if (e.state === "copied") $("background-dictation-status").textContent = "Текст скопирован. Его можно вставить в нужное поле.";
-  else if (e.state === "inserted") $("background-dictation-status").textContent = "Текст скопирован и вставлен. Продолжаю слушать.";
+  if (e.state === "copied") $("background-dictation-status").textContent = pasteMessage({reason: e.reason}, e.reason ? "insert" : "copy");
+  else if (e.state === "inserted") $("background-dictation-status").textContent = pasteMessage({inserted: true, app: e.app}) + " Продолжаю слушать.";
   else if (e.state === "error") $("background-dictation-status").textContent = e.error || "Не удалось скопировать текст.";
   else if (!backgroundDirty) $("background-dictation-status").textContent = "Лира слушает. Скажите «Лира, текст», чтобы скопировать и вставить.";
 }

@@ -6,6 +6,7 @@ import uuid
 from urllib.parse import urlparse
 
 import httpx
+import egress
 
 
 def _input_image(value):

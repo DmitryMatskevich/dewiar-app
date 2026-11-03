@@ -1,4 +1,5 @@
 """Background voice commands and draft persistence, without devices or real app mutation."""
+import itertools
 import sys
 import threading
 import unittest
@@ -6,7 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'core'))
-from background_dictation import parse, insert_at_focus
+import background_dictation
+from background_dictation import parse, paste_into_focus
 from engine_audio import AudioMixin
 
 class Engine(AudioMixin):
@@ -107,7 +109,7 @@ class Background(unittest.TestCase):
         def put(text, kind): board.contents=text; return True
         board.setString_forType_ = put
         appkit=SimpleNamespace(NSPasteboard=SimpleNamespace(generalPasteboard=lambda:board), NSPasteboardTypeString='text')
-        with patch.dict(sys.modules, AppKit=appkit), patch('background_dictation.insert_at_focus', side_effect=RuntimeError('Нет поля')):
+        with patch.dict(sys.modules, AppKit=appkit), patch('background_dictation.paste_into_focus', side_effect=RuntimeError('Нет поля')):
             result=copy_and_insert('Текст вместо изображения')
         self.assertEqual(board.contents, 'Текст вместо изображения')
         self.assertEqual(result, {'copied':True,'inserted':False,'reason':'Нет поля'})
@@ -145,12 +147,12 @@ class Background(unittest.TestCase):
         with patch('background_dictation.copy_and_insert', return_value={'copied':True,'inserted':True}) as insert:
             e._dictation_result('Лира, добавить', 'test', 3)
             insert.assert_called_once_with('Добрый день. Как дела?')
-        self.assertEqual(e._background_draft, [])
+        self.assertEqual(e._background_draft, ['Добрый день.', 'Как дела?'])
         self.assertTrue(e.dictation_active)
         e._dictation_result('Ещё текст', 'test', 3)
         e._dictation_result('Лира', 'test', 3)
         self.assertIn(('window', {'do':'show'}), e.events)
-        self.assertEqual(e._background_draft, ['Ещё текст'])
+        self.assertEqual(e._background_draft, ['Добрый день.', 'Как дела?', 'Ещё текст'])
         e._dictation_result('Лира, отмена', 'test', 3)
         self.assertEqual(e._background_draft, [])
     def test_named_command_runs_without_dropping_draft(self):
@@ -172,60 +174,107 @@ class Background(unittest.TestCase):
             e.background_dictation_edit('не потерять', 3, state['revision'], 'другой текст')
         self.assertEqual(e.background_dictation_state()['text'], 'Здравствуйте как дела')
 
-    def test_insertion_rechecks_focus_and_rejects_secure_fields(self):
-        app = SimpleNamespace(bundleIdentifier=lambda: 'org.example.editor', processIdentifier=lambda: 17)
-        workspace = SimpleNamespace(frontmostApplication=lambda: app)
-        appkit = SimpleNamespace(NSWorkspace=SimpleNamespace(sharedWorkspace=lambda: workspace))
-        focus = object()
-        values = {'AXFocusedUIElement': focus, 'AXRole': 'AXTextArea', 'AXSubrole': ''}
-        writes = []
-        ax = SimpleNamespace(AXIsProcessTrusted=lambda: True, AXUIElementCreateSystemWide=lambda: 'system',
-            AXUIElementCopyAttributeValue=lambda obj, key, out: (0, values.get(key)),
-            AXUIElementIsAttributeSettable=lambda obj, key, out: (0, True),
-            AXUIElementSetAttributeValue=lambda obj, key, value: writes.append((obj,key,value)) or 0)
-        with patch.dict(sys.modules, ApplicationServices=ax, AppKit=appkit):
-            insert_at_focus('Привет')
-            self.assertEqual(writes, [(focus, 'AXSelectedText', 'Привет')])
-            values['AXSubrole'] = 'AXSecureTextField'
-            with self.assertRaisesRegex(RuntimeError, 'защищённое'): insert_at_focus('secret')
-            self.assertEqual(len(writes), 1)
-            values['AXSubrole'] = ''
-            calls = iter([focus, object()])
-            ax.AXUIElementCopyAttributeValue = lambda obj, key, out: (0, next(calls) if key == 'AXFocusedUIElement' else values.get(key))
-            with self.assertRaisesRegex(RuntimeError, 'Фокус изменился'): insert_at_focus('wrong')
-            self.assertEqual(len(writes), 1)
+    def test_paste_runs_outside_lock_and_keeps_new_words(self):
+        e = Engine()
+        e._dictation_result('Добрый день.', 'test', 3)
+        def paste(text):
+            free = []
+            t = threading.Thread(target=lambda: free.append(e._dictation_lock.acquire(timeout=.5) and (e._dictation_lock.release() or True)))
+            t.start(); t.join()
+            self.assertEqual(free, [True])      # другой поток может работать с диктовкой во время ⌘V
+            e._background_draft.append('Новое.')   # правка из окна во время вставки
+            return {'copied':True, 'inserted':True, 'app':'Заметки'}
+        with patch('background_dictation.copy_and_insert', side_effect=paste):
+            e._dictation_result('Лира, вставить', 'test', 3)
+        self.assertEqual(e._background_draft, ['Добрый день.', 'Новое.'])
+        self.assertEqual(e.events[-1][1]['state'], 'inserted')
+        self.assertEqual(e.events[-1][1]['app'], 'Заметки')
 
-    def test_clipboard_fallback_preserves_newer_clipboard(self):
-        from background_dictation import insert_at_focus
-        focus = object()
-        app = SimpleNamespace(bundleIdentifier=lambda:'test.app', processIdentifier=lambda:7)
-        board = SimpleNamespace(revision=0, value='before')
-        board.pasteboardItems = lambda: []
-        board.changeCount = lambda: board.revision
-        def clear(): board.revision += 1; board.value = ''
-        def put(value, kind): board.revision += 1; board.value = value; return True
-        board.clearContents = clear
+    def mac(self, focused, windows, trusted=True, role='AXTextArea', subrole='', switches=True):
+        """Fake ApplicationServices and Quartz: AX knows the active pid, the window list goes front to back."""
+        state = SimpleNamespace(focused=focused, raised=[], prompts=0)
+        def copy(obj, key, out):
+            if key == 'AXFocusedApplication':return (0, ('app', state.focused)) if state.focused else (-25212, None)
+            return (0, {'AXFocusedUIElement':'field', 'AXRole':role, 'AXSubrole':subrole}.get(key))
+        def set_value(obj, key, value):
+            state.raised.append((obj, key, value))
+            if switches and key == 'AXFrontmost':state.focused = obj[1]
+            return 0
+        def prompt(options):state.prompts += 1; return False
+        ax = SimpleNamespace(AXIsProcessTrusted=lambda:trusted, AXIsProcessTrustedWithOptions=prompt,
+            AXUIElementCreateSystemWide=lambda:'system', AXUIElementCreateApplication=lambda pid:('app', pid),
+            AXUIElementCopyAttributeValue=copy, AXUIElementGetPid=lambda element, out:(0, element[1]),
+            AXUIElementSetAttributeValue=set_value)
+        keys = []
+        quartz = SimpleNamespace(CGEventCreateKeyboardEvent=lambda source, key, down:[key, down],
+            CGEventSetFlags=lambda event, flags:event.append(flags), CGEventPost=lambda tap, event:keys.append(tuple(event)),
+            kCGEventFlagMaskCommand=8, kCGHIDEventTap=0, kCGWindowListOptionOnScreenOnly=1,
+            kCGWindowListExcludeDesktopElements=16, kCGNullWindowID=0,
+            CGWindowListCopyWindowInfo=lambda options, window:[{'kCGWindowLayer':layer, 'kCGWindowOwnerPID':pid,
+                'kCGWindowOwnerName':name, 'kCGWindowBounds':{'Width':800, 'Height':600}} for pid, name, layer in windows])
+        clock = SimpleNamespace(monotonic=itertools.count(0, .5).__next__, sleep=lambda seconds:None)
+        background_dictation._prompted = False
+        ctx = [patch.dict(sys.modules, ApplicationServices=ax, Quartz=quartz, AppKit=SimpleNamespace()),
+               patch.object(background_dictation, 'time', clock),
+               patch.object(background_dictation, '_dewiar_pids', lambda:{100})]
+        for c in ctx:c.start(); self.addCleanup(c.stop)
+        return state, keys
+
+    PASTE = [(55, True, 8), (9, True, 8), (9, False, 8), (55, False, 0)]
+
+    def test_paste_goes_to_the_active_application(self):
+        state, keys = self.mac(42, [(100, 'Dewiar', 3), (42, 'Заметки', 0)])
+        self.assertEqual(paste_into_focus(), 'Заметки')
+        self.assertEqual(keys, self.PASTE)
+        self.assertEqual(state.raised, [])
+
+    def test_dewiar_active_returns_to_the_application_behind_it(self):
+        state, keys = self.mac(100, [(100, 'Dewiar', 0), (1, 'Window Server', 0), (77, 'Telegram', 0), (42, 'Заметки', 0)])
+        self.assertEqual(paste_into_focus(), 'Telegram')
+        self.assertEqual(state.raised, [(('app', 77), 'AXFrontmost', True)])
+        self.assertEqual(keys, self.PASTE)
+
+    def test_no_keys_when_switch_fails_or_field_is_secret(self):
+        state, keys = self.mac(100, [(100, 'Dewiar', 0), (77, 'Telegram', 0)], switches=False)
+        with self.assertRaisesRegex(RuntimeError, 'перейти в «Telegram»'):paste_into_focus()
+        state2, keys2 = self.mac(77, [(77, 'Safari', 0)], subrole='AXSecureTextField')
+        with self.assertRaisesRegex(RuntimeError, 'пароля'):paste_into_focus()
+        self.assertEqual(keys + keys2, [])
+        state3, keys3 = self.mac(0, [(100, 'Dewiar', 0)])
+        with self.assertRaisesRegex(RuntimeError, 'активное приложение'):paste_into_focus()
+        self.assertEqual(keys3, [])
+
+    def test_missing_accessibility_is_explained_and_prompted_once(self):
+        state, keys = self.mac(42, [(42, 'Заметки', 0)], trusted=False)
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, 'Универсальный доступ'):paste_into_focus()
+        self.assertEqual(state.prompts, 1)
+        self.assertEqual(keys, [])
+
+    def test_unknown_focused_field_does_not_post_keys(self):
+        state, keys = self.mac(42, [(42, 'Chrome', 0)])
+        import ApplicationServices as ax
+        original = ax.AXUIElementCopyAttributeValue
+        ax.AXUIElementCopyAttributeValue = lambda obj, key, out: (-25212, None) if key == 'AXFocusedUIElement' else original(obj, key, out)
+        with self.assertRaisesRegex(RuntimeError, 'активное поле'):
+            paste_into_focus()
+        self.assertEqual(keys, [])
+
+    def test_unknown_active_application_does_not_guess_another_window(self):
+        state, keys = self.mac(0, [(100, 'Dewiar', 0), (77, 'Telegram', 0)])
+        with self.assertRaisesRegex(RuntimeError, 'активное приложение'):
+            paste_into_focus()
+        self.assertEqual(keys, [])
+
+    def test_copy_and_insert_leaves_text_on_clipboard(self):
+        from background_dictation import copy_and_insert
+        board = SimpleNamespace(contents='старое')
+        board.clearContents = lambda:setattr(board, 'contents', None)
+        def put(text, kind):board.contents = text; return True
         board.setString_forType_ = put
-        board.writeObjects_ = lambda old: True
-        appkit = SimpleNamespace(NSWorkspace=SimpleNamespace(sharedWorkspace=lambda:SimpleNamespace(frontmostApplication=lambda:app)),
-            NSPasteboard=SimpleNamespace(generalPasteboard=lambda:board), NSPasteboardItem=None, NSPasteboardTypeString='text')
-        vals = {'AXFocusedUIElement':focus, 'AXRole':'AXTextArea', 'AXSubrole':''}
-        ax = SimpleNamespace(AXIsProcessTrusted=lambda:True, AXUIElementCreateSystemWide=lambda:'system',
-            AXUIElementCopyAttributeValue=lambda obj,key,out:(0,vals.get(key)),
-            AXUIElementIsAttributeSettable=lambda obj,key,out:(0,key == 'AXValue'),
-            AXUIElementSetAttributeValue=lambda *args:0)
-        events=[]; timers=[]
-        quartz = SimpleNamespace(CGEventCreateKeyboardEvent=lambda source,key,down:down,
-            CGEventSetFlags=lambda event,flags:None, CGEventPost=lambda target,event:events.append(event),
-            kCGEventFlagMaskCommand=1, kCGHIDEventTap=0)
-        def timer(delay, fn):
-            t=SimpleNamespace(daemon=False, start=lambda:timers.append(fn)); return t
-        with patch.dict(sys.modules, ApplicationServices=ax, AppKit=appkit, Quartz=quartz), patch('background_dictation.threading.Timer', timer):
-            insert_at_focus('Фраза')
-            self.assertEqual(events, [True,False])
-            self.assertEqual(board.value, 'Фраза')
-            put('Новая копия', 'text')
-            timers[0]()
-            self.assertEqual(board.value, 'Новая копия')
+        appkit = SimpleNamespace(NSPasteboard=SimpleNamespace(generalPasteboard=lambda:board), NSPasteboardTypeString='text')
+        with patch.dict(sys.modules, AppKit=appkit), patch('background_dictation.paste_into_focus', return_value='TextEdit'):
+            self.assertEqual(copy_and_insert('Фраза'), {'copied':True, 'inserted':True, 'app':'TextEdit'})
+        self.assertEqual(board.contents, 'Фраза')
 
 if __name__ == '__main__': unittest.main()

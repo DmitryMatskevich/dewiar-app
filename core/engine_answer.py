@@ -15,6 +15,11 @@ INFO_TOOLS = {"web_search", "weather", "read_webpage", "find_notes", "read_file"
               "read_emails", "read_email", "search_documents", "ask_knowledge", "system_status", "task_status", "look_at_screen",
               "look_through_camera", "app_update"}
 
+IMAGE_ACTION_RX = re.compile(r"(?:нарис\w*|сгенерир\w*|созда\w*|сдела\w*|обработ\w*|редактир\w*|измен\w*|поменя\w*|замен\w*|"
+                             r"убер\w*|добав\w*|оформ\w*|подготов\w*|преврат\w*|визуализир\w*)", re.I)
+IMAGE_SUBJECT_RX = re.compile(r"(?:изображени\w*|картинк\w*|рисунк\w*|фото\w*|фотографи\w*|иллюстраци\w*|визуал\w*|"
+                              r"обложк\w*|баннер\w*|постер\w*|кадр\w*|надпис\w*)", re.I)
+
 
 
 def team_window(hist, me, name_of):
@@ -143,13 +148,17 @@ class AnswerMixin:
         """Роль маршрутизации модели для персонажа и типа свободной просьбы."""
         pid = self.s.get("persona")
         p = self.personas.get(pid) or {}
-        if pid == "artist" or has_images or re.search(
-                r"(?i)(?:нарис\w*|сгенерир\w*|созда\w*|обработ\w*|редактир\w*|измени\w*|замени\w*|убери\w*|добавь\w*|"
-                r"оформи\w*|иллюстраци\w*|обложк\w*|баннер\w*|постер\w*|фотографи\w*|фото\w*|картинк\w*|"
-                r"изображени\w*|визуал\w*|кадр\w*).{0,80}(?:изображени\w*|картинк\w*|фото\w*|фотографи\w*|"
-                r"иллюстраци\w*|визуал\w*|кадр\w*)|(?:изображени\w*|картинк\w*|фото\w*|фотографи\w*|"
-                r"иллюстраци\w*|визуал\w*|кадр\w*).{0,80}(?:нарис\w*|сгенерир\w*|созда\w*|обработ\w*|"
-                r"редактир\w*|измени\w*|замени\w*|убери\w*|добавь\w*|оформи\w*)", str(text or "")):
+        visual_action = IMAGE_ACTION_RX.search(str(text or ""))
+        visual_subject = IMAGE_SUBJECT_RX.search(str(text or ""))
+        # Generation/editing is an action handled by image_generate. The chat model must
+        # remain in a text-capable queue so it can invoke the tool; Codex's native image
+        # generation is selected separately by imagegen.py. Photo understanding still
+        # goes to an explicitly vision-capable chat profile.
+        if visual_action and (visual_subject or has_images or pid == "artist") or pid == "artist" and not has_images:
+            return "communication"
+        if has_images or visual_subject and re.search(
+                r"(?i)(?:что\s+(?:на|изображено)|опиши|рассмотр\w*|прочитай|распознай|проанализир\w*|"
+                r"определи|видно|покажи|объясни)", str(text or "")):
             return "images"
         if pid == "agent" or str(p.get("role", "")).lower().find("програм") >= 0 or str(p.get("name", "")).lower() == "кодер":
             return "coding"
@@ -1430,6 +1439,19 @@ class AnswerMixin:
         turn.images = list(images or [])
         role = self._conversation_model_role(text, has_images=bool(images))
         prof = self.s.active_llm(role)
+        visual_task = bool(IMAGE_ACTION_RX.search(text) and (IMAGE_SUBJECT_RX.search(text) or images))
+        if role == "communication" and (visual_task or self.s.get("persona") == "artist"):
+            # A Codex subscription is the actual image provider. Select its text chat
+            # adapter to understand the request and call the guarded image tool; imagegen
+            # then invokes Codex's native image tool. This avoids an empty vision queue
+            # (subscription chat profiles cannot accept image blocks).
+            try:
+                import imagegen
+                image_profile = imagegen._codex_profile(self.s.snapshot())
+                if image_profile:
+                    prof = self.s.apply_llm_role_limit(image_profile, role)
+            except Exception as e:  # noqa: BLE001
+                log.info("Художник: профиль подписки пока недоступен: %s", e)
         self._turn_text = text                       # read_webpage: длинная страница — куски по словам вопроса
         sentences = queue.Queue()
         silent = bool(turn.via) and not turn.via.get("speak")
@@ -1450,6 +1472,15 @@ class AnswerMixin:
                 raise LLMError("я пока не подключён к языковой модели — откройте настройки, раздел «Модели»"
                                + (": войдите в аккаунт dewiar.pro — модели Dewiar подключатся сами" if not self.account.logged_in() else ""))
             msgs = self._messages(text, images, prof)
+            if visual_task and images and str(prof.get("kind", "")).endswith("_subscription"):
+                # The subscription's text adapter cannot consume image blocks. Keep the
+                # user's instruction in the chat request; the image tool receives the
+                # original attachments directly from turn.images for the edit.
+                for message in msgs:
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        message["content"] = "\n".join(str(part.get("text") or "") for part in content
+                                                       if part.get("type") == "text")
             from llm import wants_think
             if role == "analytics" and prof.get("think") != "off":
                 # Аналитическая очередь по умолчанию использует reasoning-модель/режим.

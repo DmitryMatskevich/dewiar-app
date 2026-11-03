@@ -1015,12 +1015,19 @@ class AudioMixin:
 
     def _dictation_result(self, text, by, sid):
         """Фрагменты идут по порядку; имя текущего помощника в конце отправляет черновик."""
+        paste = None
         with self._dictation_lock:
             if not self.dictation_active or sid != self._dictation_session:
                 return
             if getattr(self, "_background_dictation", False):
-                self._background_dictation_result(text)
-                return
+                paste = self._background_dictation_result(text)
+            else:
+                self._foreground_dictation_result(text, by, sid)
+        if paste:
+            paste()    # переход в приложение и ⌘V занимают до 1,5 с — не под блокировкой диктовки
+
+    def _foreground_dictation_result(self, text, by, sid):
+        with self._dictation_lock:
             aliases = self.aliases.get(self.s.get("persona"), [])
             from background_dictation import parse
             words, command = parse(text, aliases)
@@ -1055,7 +1062,9 @@ class AudioMixin:
                 self.dictation_finish(submit=True)
 
     def _background_dictation_result(self, text):
-        from background_dictation import parse, copy_and_insert, copy_text
+        """Разбор фрагмента фоновой диктовки. Для «вставить»/«скопировать» возвращает действие,
+        которое вызывающий выполнит после снятия блокировки."""
+        from background_dictation import parse
         aliases = self.aliases.get(self.s.get("persona"), [])
         words, command = parse(text, aliases)
         if words:
@@ -1077,28 +1086,12 @@ class AudioMixin:
                 self._background_state("clear_requested")
             return
         if action in ("insert", "copy"):
-            draft = " ".join(self._background_draft).strip()
+            pasted = list(self._background_draft)
+            draft = " ".join(pasted).strip()
             if not draft:
                 self.note("Нет текста для вставки. Продолжаю слушать.")
-                return
-            try:
-                if action == "copy":
-                    copy_text(draft)
-                    result = {"copied": True, "inserted": False}
-                else:
-                    result = copy_and_insert(draft)
-            except Exception as exc:
-                # Preserve the dictated text until insertion succeeds or the user cancels.
-                self.note("Текст сохранён в диктовке. " + str(exc))
-                self.emit("background_dictation", state="error", error=str(exc))
-                return
-            if result['inserted']:
-                self._background_draft.clear()
-                self._background_revision += 1
-                self._background_state("inserted")
-            else:
-                self.note("Текст скопирован." if action == "copy" else "Текст скопирован. Откройте нужное поле и вставьте его.")
-                self._background_state("copied", reason=result.get('reason', ''))
+                return None
+            return lambda: self._background_paste(action, draft, pasted)
         elif action == "show":
             self.emit("window", do="show")
         elif action == "cancel":
@@ -1110,6 +1103,35 @@ class AudioMixin:
             self.dictation_cancel()
         elif action == "command":
             self._run_dictation_voice_command(argument)
+
+    def _background_paste(self, action, draft, words):
+        """«Скопировать» — как ⌘C; «вставить» — ⌘C и ⌘V в поле, где стоит курсор."""
+        from background_dictation import copy_and_insert, copy_text
+        try:
+            if action == "copy":
+                copy_text(draft)
+                result = {"copied": True, "inserted": False}
+            else:
+                result = copy_and_insert(draft)
+        except Exception as exc:
+            # Preserve the dictated text until insertion succeeds or the user cancels.
+            log.warning("Диктовка: не удалось скопировать текст: %s", exc)
+            self.note("Текст сохранён в диктовке. " + str(exc))
+            self.emit("background_dictation", state="error", error=str(exc))
+            return
+        with self._dictation_lock:
+            if result["inserted"]:
+                # Posting ⌘V does not prove the target accepted it. Keep the
+                # draft available until the user explicitly clears it.
+                log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
+                self._background_state("inserted", app=result.get("app", ""))
+                return
+            reason = result.get("reason", "")
+            if reason:
+                log.warning("Диктовка: текст скопирован, но не вставлен: %s", reason)
+            self.note("Текст скопирован." if action == "copy" else
+                      "Текст скопирован, но не вставлен. " + (reason or "Откройте нужное поле и вставьте его."))
+            self._background_state("copied", reason=reason)
 
     def _run_dictation_voice_command(self, argument):
         # Dispatch existing commands outside the STT lock; keep the draft intact.

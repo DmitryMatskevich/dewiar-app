@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     (ui/'assets/dewiar.js').write_text('''
 window.calls=[];window.api=()=>({});
 window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},
- async call(cmd,a){calls.push([cmd,a]);if(cmd==='background_dictation_edit')return {active:true,session:a.session,revision:a.revision+1,text:a.text};if(cmd==='dictation_copy_text')return {copied:true,inserted:false};return {active:false}},
+ async call(cmd,a){calls.push([cmd,a]);if(cmd==='background_dictation_edit')return {active:true,session:a.session,revision:a.revision+1,text:a.text};if(cmd==='dictation_copy_text')return window.pasteResult||{copied:true,inserted:false};return {active:false}},
  async sendLater(){return {}}};window.fire=(t,d)=>(core._on[t]||[]).forEach(f=>f(d));
 ''')
     browser=pw.chromium.launch();page=browser.new_page(viewport={'width':640,'height':850})
@@ -49,6 +49,14 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     assert field.is_visible() and field.input_value() == 'Сохранённый текст'
     page.evaluate("fire('draft_command',{action:'copy'})")
     page.wait_for_function("calls.filter(x=>x[0]==='dictation_copy_text').at(-1)[1].text==='Сохранённый текст'")
+    # The reason for a failed paste and the receiving application are shown, not a generic phrase.
+    page.evaluate("fire('background_dictation',{active:true,state:'copied',session:8,revision:1,text:'Т',reason:'Нет разрешения «Универсальный доступ»'})")
+    status=page.locator('#background-dictation-status').inner_text()
+    assert 'не вставлен' in status and 'Универсальный доступ' in status, status
+    page.evaluate("fire('background_dictation',{active:true,state:'inserted',session:8,revision:2,text:'',app:'Заметки'})")
+    assert 'вставки отправлена в «Заметки»' in page.locator('#background-dictation-status').inner_text()
+    page.evaluate("fire('background_dictation',{active:false,state:'stopped',session:9,revision:3,text:'Готовый текст'});pasteResult={copied:true,inserted:true,app:'Telegram'};fire('draft_command',{action:'insert'})")
+    page.wait_for_function("document.getElementById('ask-feedback').textContent.includes('«Telegram»')")
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')

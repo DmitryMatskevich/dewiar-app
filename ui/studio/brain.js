@@ -30,7 +30,7 @@ const MODEL_ROLE_DEFS = {
   },
   images: {
     label: "Изображения",
-    description: "Изображение, картинки и фотографии. Добавляйте сюда модели со зрением для анализа вложений. Художник использует Codex по подписке для создания и правки; если подписка недоступна, при подтверждении запроса можно перейти на OpenAI API, который оплачивается отдельно."
+    description: "Изображение, картинки и фотографии. Добавляйте сюда модели со зрением для анализа вложений. Запросы Художника на создание и правку обрабатывает Codex по подписке; если подписка недоступна, после подтверждения можно перейти на OpenAI API, который оплачивается отдельно."
   }
 };
 const profileModelLists = new Map();
@@ -228,7 +228,7 @@ function renderProfiles() {
     <div class="body"><div class="row" style="margin-top:12px">
       <label class="f">Название<input type="text" data-f="name"></label>
       <label class="f">Приоритет (1 — наивысший)<input type="number" data-f="priority" min="1" max="9" step="1"></label>
-      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><label><input type="checkbox" data-role="analytics"> Аналитика</label><label><input type="checkbox" data-role="images"> Изображения</label><span class="hint">Для «Изображений» назначайте модели, которые принимают изображения на вход. Для API редактирования нужен профиль OpenAI с ключом API.</span></fieldset>
+      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><label><input type="checkbox" data-role="analytics"> Аналитика</label><label><input type="checkbox" data-role="images"> Изображения</label><span class="hint">Для анализа фото назначайте сюда модели со зрением. Художник использует Codex по подписке для создания и редактирования; OpenAI API с ключом — резервный платный вариант.</span></fieldset>
       <label class="f"><span><input type="checkbox" data-f="routing_enabled"> Участвует в автовыборе</span></label>
       <label class="f"><span><input type="checkbox" data-f="schedule_enabled"> Ограничить часы работы</span></label>
       <label class="f">Работает с<input type="time" data-f="schedule_start"></label>

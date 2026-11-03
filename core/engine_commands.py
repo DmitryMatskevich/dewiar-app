@@ -1225,7 +1225,12 @@ class CommandsMixin:
             if a.get("copy_only"):
                 copy_text(text)
                 return {"copied": True, "inserted": False}
-            return copy_and_insert(text)
+            result = copy_and_insert(text)
+            if result.get("inserted"):
+                log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
+            else:
+                log.warning("Диктовка: текст скопирован, но не вставлен: %s", result.get("reason", ""))
+            return result
         if cmd == "dictation_cancel":
             return self.dictation_cancel()
         if cmd == "dictation_finish":
