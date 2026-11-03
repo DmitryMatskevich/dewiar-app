@@ -312,7 +312,7 @@
   .askbox:focus-within { background: rgba(255,255,255,.115); }
   #ask textarea { width: 100%; padding: 2px 6px 4px 0; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13.5px;
     line-height: 1.45; outline: none; resize: none; display: block; height: 24px; min-height: 24px; max-height: min(260px, 36vh); overflow-y: hidden;
-    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; user-select: text; -webkit-user-select: text; cursor: text; }
   #ask textarea::placeholder { color: rgba(255,255,255,.4); }
   #ask textarea.scroll { overflow-y: auto; }
   .askrow { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; margin-left: -7px; }
@@ -1298,7 +1298,7 @@ card.addEventListener("pointerdown", async (ev) => {
   // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
   // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
   // строки «ИИ-баланс…» и объявления — тоже кнопки (24.10: щелчок по #cloudlow уходил в перетаскивание и студия не открывалась)
-  if (ev.button !== 0 || ev.target.closest("button, input, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
+  if (ev.button !== 0 || ev.target.closest("button, input, textarea, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
@@ -2134,13 +2134,23 @@ function updateDraftActions() {
   clear.setAttribute("aria-label", clear.title);
 }
 // Keep the textarea selection when the pointer moves to the eraser (including WebKit).
-$("a-clear").addEventListener("mousedown", e => { if (e.button === 0) e.preventDefault(); });
+let draftClearSelection = null;
+$("a-clear").addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  const t = $("askin"), start = t.selectionStart, end = t.selectionEnd;
+  draftClearSelection = start !== end ? {start, end, value: t.value} : null;
+  e.preventDefault();
+});
 $("askin").addEventListener("select", updateDraftActions);
 $("a-clear").onclick = () => {
   if (dictationCancelling) return;
   if (dictating) return cancelDictation();
-  const t = $("askin"), selected = t.selectionStart !== t.selectionEnd;
-  if (selected) t.setRangeText("", t.selectionStart, t.selectionEnd, "start");
+  const t = $("askin"), saved = draftClearSelection;
+  draftClearSelection = null;
+  const liveSelected = t.selectionStart !== t.selectionEnd;
+  const range = saved?.value === t.value ? [saved.start, saved.end] : liveSelected ? [t.selectionStart, t.selectionEnd] : null;
+  const selected = !!range;
+  if (range) t.setRangeText("", range[0], range[1], "start");
   else t.value = "";
   fitAsk(); t.focus();
   $("ask-feedback").textContent = selected ? "Выделенный текст удалён" : "Текст ввода очищен";
