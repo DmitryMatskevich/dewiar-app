@@ -3,6 +3,15 @@ import re
 import threading
 
 
+def draft_command(text):
+    value = ' '.join(str(text or '').casefold().replace('ё', 'е').strip(' ,.;:!?—–-').split())
+    if value in ('скопировать', 'скопируй', 'копировать', 'копируй'):
+        return 'copy'
+    if value in ('вставить', 'вставь', 'добавить', 'добавь', 'текст'):
+        return 'insert'
+    return None
+
+
 def copy_text(text):
     """An explicit voice command replaces the clipboard with the dictated text."""
     from AppKit import NSPasteboard, NSPasteboardTypeString
@@ -31,8 +40,9 @@ def parse(text, aliases):
     for match in rx.finditer(text):
         before = text[:match.start()].rstrip(' ,;:—–-')
         after = text[match.end():].strip(' ,.;:!?—–-').casefold().replace('ё', 'е')
-        if after in ('вставить', 'вставь', 'добавить', 'добавь', 'текст'):
-            return before, ('insert', '')
+        action = draft_command(after)
+        if action:
+            return before, (action, '')
         if not before and after in ('появись', 'появиться', 'покажись', 'покажи себя', ''):
             return before, ('show', '')
         if after in ('отмена', 'отмени'):

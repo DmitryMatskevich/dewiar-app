@@ -29,6 +29,10 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     assert page.evaluate("calls.filter(x=>x[0]==='dictation_copy_text').at(-1)[1].text").endswith('диктовка')
     assert page.evaluate('dictating')
     assert page.locator('#background-draft').is_hidden()
+    page.evaluate("fire('dictation',{state:'done',session:5,submit:false});fire('draft_command',{action:'copy'})")
+    page.wait_for_function("calls.some(x=>x[0]==='dictation_copy_text'&&x[1].copy_only===true)")
+    assert page.evaluate("calls.filter(x=>x[0]==='dictation_copy_text').at(-1)[1].text").endswith('диктовка')
+    assert not page.evaluate('dictating')
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')

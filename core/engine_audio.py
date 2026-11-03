@@ -1024,10 +1024,10 @@ class AudioMixin:
             aliases = self.aliases.get(self.s.get("persona"), [])
             from background_dictation import parse
             words, command = parse(text, aliases)
-            if command and command[0] == "insert":
+            if command and command[0] in ("insert", "copy"):
                 if words:
                     self.emit("dictation", state="partial", text=words, by=by, session=sid)
-                self.emit("dictation", state="copy_requested", session=sid)
+                self.emit("dictation", state="copy_requested", action=command[0], session=sid)
                 return
             endings = "|".join(re.escape(a) for a in sorted(filter(None, aliases), key=len, reverse=True))
             match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I) if endings else None
@@ -1039,7 +1039,7 @@ class AudioMixin:
                 self.dictation_finish(submit=True)
 
     def _background_dictation_result(self, text):
-        from background_dictation import parse, copy_and_insert
+        from background_dictation import parse, copy_and_insert, copy_text
         aliases = self.aliases.get(self.s.get("persona"), [])
         words, command = parse(text, aliases)
         if words:
@@ -1049,13 +1049,17 @@ class AudioMixin:
         if command is None:
             return
         action, argument = command
-        if action == "insert":
+        if action in ("insert", "copy"):
             draft = " ".join(self._background_draft).strip()
             if not draft:
                 self.note("Нет текста для вставки. Продолжаю слушать.")
                 return
             try:
-                result = copy_and_insert(draft)
+                if action == "copy":
+                    copy_text(draft)
+                    result = {"copied": True, "inserted": False}
+                else:
+                    result = copy_and_insert(draft)
             except Exception as exc:
                 # Preserve the dictated text until insertion succeeds or the user cancels.
                 self.note("Текст сохранён в диктовке. " + str(exc))
@@ -1066,7 +1070,7 @@ class AudioMixin:
                 self._background_revision += 1
                 self._background_state("inserted")
             else:
-                self.note("Текст скопирован. Откройте нужное поле и вставьте его.")
+                self.note("Текст скопирован." if action == "copy" else "Текст скопирован. Откройте нужное поле и вставьте его.")
                 self._background_state("copied", reason=result.get('reason', ''))
         elif action == "show":
             self.emit("window", do="show")
@@ -1518,6 +1522,12 @@ class AudioMixin:
             # имя уже узнано по звуку и отрезано; если распознаватель всё же написал его — уберём
             pid, end = find_name(text, self.aliases) if text else (None, 0)
             rest = text[end:].lstrip(" ,.!?:;—-").strip() if pid else text.strip()
+            from background_dictation import draft_command
+            action = draft_command(rest)
+            if action:
+                self.emit("draft_command", action=action)
+                self.set_state("idle")
+                return
             if re.fullmatch(r"(?:слушай|записывай)[\s.!?]*", rest, re.I):
                 self.dictation_start(background=True)
                 return
@@ -1553,6 +1563,12 @@ class AudioMixin:
             if pid != self.s.get("persona"):
                 self.switch_persona(pid)
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
+            from background_dictation import draft_command
+            action = draft_command(rest)
+            if action:
+                self.emit("draft_command", action=action)
+                self.set_state("idle")
+                return
             if re.fullmatch(r"(?:слушай|записывай)[\s.!?]*", rest, re.I):
                 self.dictation_start(background=True)
                 return

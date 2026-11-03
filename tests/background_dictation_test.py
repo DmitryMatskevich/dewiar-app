@@ -54,6 +54,9 @@ class Background(unittest.TestCase):
         self.assertEqual(e.events[0][1]['text'], 'Последняя фраза')
         self.assertEqual(e.events[1][1]['state'], 'copy_requested')
         self.assertTrue(e.dictation_active)
+        e.events.clear()
+        e._dictation_result('Лира, скопировать', 'test', 3)
+        self.assertEqual(e.events[0][1]['action'], 'copy')
 
     def test_copy_command_replaces_image_even_without_focused_field(self):
         from background_dictation import copy_and_insert
@@ -66,6 +69,28 @@ class Background(unittest.TestCase):
             result=copy_and_insert('Текст вместо изображения')
         self.assertEqual(board.contents, 'Текст вместо изображения')
         self.assertEqual(result, {'copied':True,'inserted':False,'reason':'Нет поля'})
+
+    def test_voice_copy_does_not_paste_in_background(self):
+        e = Engine()
+        e._dictation_result('Тестовый текст', 'test', 3)
+        with patch('background_dictation.copy_text') as copy, patch('background_dictation.copy_and_insert') as insert:
+            e._dictation_result('Лира, скопировать', 'test', 3)
+        copy.assert_called_once_with('Тестовый текст')
+        insert.assert_not_called()
+        self.assertEqual(e._background_draft, ['Тестовый текст'])
+
+    def test_commands_also_work_after_dictation_stops(self):
+        e = Engine()
+        e.dictation_active = False
+        e._intro_ear = None
+        e._is_self_echo = lambda text: False
+        e.pending_confirm = None
+        e.tasks = SimpleNamespace(waiting=lambda:None)
+        e.set_state = lambda state: None
+        AudioMixin.handle_text(e, 'Лира, вставить', True, False)
+        AudioMixin.handle_text(e, 'Лира, скопировать', True, False)
+        AudioMixin.handle_text(e, 'скопировать', True, False, forced='lira')
+        self.assertEqual(e.events, [('draft_command', {'action':'insert'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'copy'})])
     def test_insert_continues_listening_and_keeps_text_on_error(self):
         e = Engine()
         e._dictation_result('Добрый день.', 'test', 3)
