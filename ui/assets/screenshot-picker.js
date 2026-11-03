@@ -109,7 +109,18 @@
     }
     d.addEventListener('close', () => anchor?.focus(), {once: true}); full.focus(); load();
   }
-  async function regionEditor(host, id, close, done) {
+  async function selectRegion(done, failed) {
+    try {
+      const preview = await core.call('screenshot_prepare');
+      const editor = modal('Выберите часть экрана'); editor.classList.add('ss-large');
+      const sx = Number(preview.scale_x) || 1, sy = Number(preview.scale_y) || 1;
+      await regionEditor(editor, preview.id, () => editor.close(), null, region => done?.({
+        x:Math.round(region.x*sx), y:Math.round(region.y*sy),
+        width:Math.max(2,Math.round(region.width*sx)), height:Math.max(2,Math.round(region.height*sy))
+      }));
+    } catch (e) { failed?.(e); }
+  }
+  async function regionEditor(host, id, close, done, onSelect) {
     const status = make('p', 'Загружаю предварительное изображение…', 'ss-info'); status.setAttribute('role', 'status'); host.append(status);
     let finished = false, cleaned = false, rect = null, image = null, observer = null;
     const cleanup = () => { if (cleaned) return; cleaned = true; observer?.disconnect(); window.removeEventListener('pagehide', cleanup); host.removeEventListener('close', cleanup); if (!finished) core.call('screenshot_draft_cancel', {id}).catch(() => {}); };
@@ -133,6 +144,11 @@
       const confirm = button('Сделать снимок', async () => {
         if (confirm.disabled) return; confirm.disabled = true; cancel.disabled = true;
         try {
+          if (onSelect) {
+            const selected = {...rect};
+            await core.call('screenshot_draft_cancel', {id});
+            finished = true; onSelect(selected); close(); return;
+          }
           const result = await core.call('screenshot_attach', {draft_id: id, region: {...rect}});
           finished = true; done?.(result); close();
         } catch (e) { status.textContent = e.message || String(e); confirm.disabled = false; cancel.disabled = false; }
@@ -180,5 +196,5 @@
     } catch (e) { status.textContent = e.message || String(e); }
     return cleanup;
   }
-  window.DewiarCapture = {menu, openImage, viewer, regionEditor};
+  window.DewiarCapture = {menu, openImage, viewer, regionEditor, selectRegion};
 })();

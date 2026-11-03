@@ -44,6 +44,14 @@ def prepare_region(engine):
     if not engine.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
     data = capture_screen(desktop_env(), exclude_dewiar=True) if MAC else capture_screen(desktop_env())
     with Image.open(io.BytesIO(data)) as image:width, height = image.size
+    scale_x = scale_y = 1.0
+    if MAC:
+        try:
+            from AppKit import NSScreen
+            frame = NSScreen.mainScreen().frame()
+            scale_x, scale_y = float(frame.size.width) / width, float(frame.size.height) / height
+        except Exception:
+            pass
     token = uuid.uuid4().hex
     with LOCK:
         engine._screenshot_drafts = {token: {'data': data, 'width': width, 'height': height,
@@ -51,7 +59,7 @@ def prepare_region(engine):
     def expire():
         with LOCK:getattr(engine, '_screenshot_drafts', {}).pop(token, None)
     timer = threading.Timer(600, expire); timer.daemon = True; timer.start()
-    return {'id': token}
+    return {'id': token, 'scale_x': scale_x, 'scale_y': scale_y}
 
 
 def draft(engine, token, region=None, consume=False):

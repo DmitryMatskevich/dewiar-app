@@ -292,7 +292,7 @@
       <label class="opt"><div>Снимок при начале записи<small>первый кадр фиксирует, что было на экране в момент старта; можно отменить</small></div><span class="sw"><input type="checkbox" id="m-first-shot" checked title="Сделать первый снимок при запуске записи"><i></i></span></label>
       <div class="frame-settings hidden" id="m-frame-settings">
         <label>Проверять экран<select id="m-frame-interval" title="Как часто проверять экран"><option value="0.5" selected>каждые 0,5 с</option><option value="1">каждую 1 с</option><option value="2">каждые 2 с</option><option value="5">каждые 5 с</option></select></label>
-        <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">максимум · 95%</option></select></label>
+        <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">95%</option><option value="100">максимум · 100%</option></select></label>
         <label style="grid-column:1/-1"><span style="display:flex;align-items:center;gap:8px;color:var(--ink);font-size:13px;font-weight:500"><input type="checkbox" id="m-frame-video" title="Собрать видео из всех кадров" style="width:16px;height:16px"> Собрать видео из кадров (таймлапс)</span></label>
       </div>
       <p class="hint hidden" id="m-frame-help">Автокадры и первый снимок используют «Запись экрана» macOS. Если доступа нет, встреча всё равно начнётся: звук и расшифровка продолжатся, а кадры можно включить после разрешения в настройках.</p>
@@ -327,7 +327,7 @@
     <div id="capture-live" class="blk" title="Настройки автоматических кадров можно менять прямо во время фоновой записи">
       <span id="capture-live-status">Автокадры выключены</span>
       <select id="live-frame-interval" title="Частота проверки экрана"><option value="0.5">0,5 с</option><option value="1" selected>1 с</option><option value="2">2 с</option><option value="5">5 с</option></select>
-      <select id="live-frame-quality" title="Качество JPEG"><option value="60">60%</option><option value="75">75%</option><option value="85" selected>85%</option><option value="95">95%</option></select>
+      <select id="live-frame-quality" title="Качество JPEG"><option value="60">60%</option><option value="75">75%</option><option value="85" selected>85%</option><option value="95">95%</option><option value="100">100%</option></select>
       <button class="ghost blk" id="capture-live-apply" title="Включить автоматические снимки экрана с выбранной частотой и качеством. Нужен доступ macOS к записи экрана.">Включить автокадры</button>
       <button class="ghost blk hidden" id="capture-live-settings" title="Открыть настройки macOS → Конфиденциальность и безопасность → Запись экрана">Открыть настройки записи экрана</button>
       <span class="capture-live-error hidden" id="capture-live-error"></span>
