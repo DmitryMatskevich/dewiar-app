@@ -128,6 +128,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
             # разовый перенос: перебивать можно просто речью, а не только именем; метка barge_v2 — сделано один раз
             self.s.update({"audio": {"barge_in": "smart", "barge_v2": True}})
         self.toolbox.hooks["call_persona"] = self._tool_call_persona
+        self.toolbox.hooks["turn_images"] = lambda: list(getattr(getattr(self, "turn", None), "images", []) or [])
         self.workspace = Workspace(settings)
         self.pad = Pad(self.workspace, settings, emit=self.emit, share=lambda rel, paths: self.note_files_out(rel, paths))   # блокнот у виджета
         self.toolbox.hooks["workspace"] = self.workspace

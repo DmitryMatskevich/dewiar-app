@@ -1055,8 +1055,11 @@ class TaskManager:
              f"в «Входящие» там же). Папка этой задачи: {t.dir}.\n\n"
              "МАСТЕРСКАЯ. Если результат — файл (страница, дашборд, презентация, калькулятор, игра, таблица, документ, "
              "расшифровка), делай его сам: write_file в outputs/ (HTML — один самодостаточный файл, CSS и JS внутри), "
-             "run_python — расчёты и сборка файлов, transcribe — расшифровка аудио/видео, download — скачать. Сначала "
-             "загляни в подходящий навык (use_skill: slides, html-app, html-viz, data-report, media-transcribe, research…). "
+             "run_python — расчёты и сборка файлов, transcribe — расшифровка аудио/видео, download — скачать. "
+             "Если задача включает статью с иллюстрациями или видео с визуальными сценами, используй image_generate: "
+             "одно изображение на каждый смысловой раздел или кадр, единый стиль для серии. Инструмент сохраняет файлы в "
+             "outputs/images/; включай нужные картинки в готовый материал или показывай их через show. "
+             "Сначала загляни в подходящий навык (use_skill: slides, html-app, html-viz, data-report, media-transcribe, research…). "
              "Длина одного твоего ответа ограничена: файл длиннее ~120 строк пиши за несколько шагов — write_file с первой частью, "
              "потом write_file с append=true. Перед finish проверь файл (read_file) и покажи его пользователю (show). Ответ в finish — коротко: что "
              "получилось и как пользоваться; содержимое файла не пересказывай.\n\nТЕКУЩИЙ ПЛАН:\n{t.plan()}")
@@ -1584,7 +1587,8 @@ class TaskManager:
             if not okd:
                 return why
         try:
-            return self.host.toolbox.run(name, args)
+            extra = {"image_output_dir": t.dir / "outputs" / "images"} if name == "image_generate" else None
+            return self.host.toolbox.run(name, args, context=extra)
         except Exception as e:  # noqa: BLE001
             return f"Ошибка: {e}"
 

@@ -33,6 +33,7 @@ async function loadPayPage() {
 function pyTabs() { $$("#py-tabs button").forEach(b => { const on = b.dataset.t === PY.tab; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); }); }
 async function pyRender() {
   const box = $("#py-body"); if (!box || !PY.ov) return;
+  if (PY.tab === "debts") { box.innerHTML = '<p class="hint">Загружаю долги…</p>'; const d = await core.call("pay_debts"); pyDebts(box, d); return; }
   if (!PY.ov.bills.length) {
     box.innerHTML = `<div class="py-empty"><div class="py-empty-ic">🧾</div><h3>Здесь будут ваши обязательные платежи</h3>
       <p>Газ, свет, вода, интернет, кредит — у каждого реквизиты, срок и история оплат с показаниями. Лира напомнит накануне срока,
@@ -46,6 +47,21 @@ async function pyRender() {
   if (PY.tab === "month") pyMonth(box);
   else if (PY.tab === "year") { box.innerHTML = '<p class="hint">Собираю таблицу…</p>'; PY.grid = await core.call("pay_grid", { year: PY.year }).catch(() => null); pyYear(box); }
   else { box.innerHTML = '<p class="hint">Считаю…</p>'; PY.stats = await core.call("pay_stats", { year: PY.year }).catch(() => null); pyStats(box); }
+}
+
+function pyDebts(box, ov) {
+  const live = (ov.debts || []).filter(d => !d.closed);
+  box.innerHTML = `<div class="py-sum glass"><div><small>Долги между людьми</small><b>Взято ${pyMoney(ov.borrowed)} · выдано ${pyMoney(ov.lent)}</b><span>План возврата в месяц: ${pyMoney(ov.monthly_borrowed)} по вашим долгам · ${pyMoney(ov.monthly_lent)} по выданным вами</span></div></div>
+    ${live.length ? `<div class="py-cards">${live.map(d => `<article class="py-card glass"><div class="py-top"><span class="py-ic">${d.direction === "borrowed" ? "↙️" : "↗️"}</span><b>${escH(d.name)}</b></div>
+      <span class="py-st">${d.direction === "borrowed" ? "Вы взяли" : "Вы дали"}${d.person ? ` · ${escH(d.person)}` : ""}</span>
+      <small>Сумма ${pyMoney(d.principal)} · возвращено ${pyMoney(d.returned)} · ставка ${pyNum(d.rate)}% годовых</small>
+      <small>Остаток ${pyMoney(d.remaining)} основной долг + ${pyMoney(Math.max(0, d.accrued_interest - d.interest_paid))} процентов</small>
+      <small>${d.monthly_payment ? `План: ${pyMoney(d.monthly_payment)} в месяц · ` : ""}${d.due_date ? `вернуть до ${pyDate(d.due_date)}` : "Срок не указан"}</small>
+      <div class="py-foot"><span>К возврату ${pyMoney(d.amount_due)}</span><button class="btn small" data-debt-pay="${escH(d.id)}">Записать возврат</button></div></article>`).join("")}</div>` : `<div class="py-empty glass"><h3>Долгов пока нет</h3><p>Запишите деньги, взятые или выданные в долг. Частичные возвраты будут уменьшать остаток.</p><button class="btn primary" id="py-debt-first">Добавить долг</button></div>`}
+    ${(ov.debts || []).filter(d => d.closed).length ? `<details class="py-arch"><summary>Закрытые: ${ov.debts.filter(d => d.closed).length}</summary>${ov.debts.filter(d => d.closed).map(d => `<p>${escH(d.name)} — закрыт, возвращено ${pyMoney(d.returned)}</p>`).join("")}</details>` : ""}`;
+  const add = () => pyDebtForm();
+  if (box.querySelector("#py-debt-first")) box.querySelector("#py-debt-first").onclick = add;
+  box.querySelectorAll("[data-debt-pay]").forEach(b => b.onclick = () => pyDebtPaymentForm(ov.debts.find(d => d.id === b.dataset.debtPay)));
 }
 
 /* ---------- «Месяц»: карточки ---------- */
@@ -289,6 +305,38 @@ function pyDrawerWire(b, pays) {
 async function pyReload() { PY.ov = await core.call("pay_overview").catch(() => PY.ov); if ($("#p-pay").classList.contains("cur")) pyRender(); }
 
 /* ---------- формы: новый платёж и запись оплаты ---------- */
+function pyDebtForm() {
+  const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  const [o, close] = pyModal(`<h2>Новый долг</h2>
+    <label class="py-f"><span>Название или человек</span><input id="pd-name" placeholder="Долг у Ивана / Ивану на ремонт"></label>
+    <label class="py-f"><span>Человек</span><input id="pd-person" placeholder="Иван"></label>
+    <label class="py-f"><span>Направление</span><select id="pd-dir"><option value="borrowed">Я взял(а) в долг</option><option value="lent">Я дал(а) в долг</option></select></label>
+    <div class="py-two"><label class="py-f"><span>Сумма</span><input id="pd-amount" type="number" min="0.01" step="0.01"></label><label class="py-f"><span>Ставка, % годовых (0 — без процентов)</span><input id="pd-rate" type="number" min="0" step="0.01" value="0"></label></div>
+    <div class="py-two"><label class="py-f"><span>Дата получения/выдачи</span><input id="pd-date" type="date" value="${today}"></label><label class="py-f"><span>Вернуть до</span><input id="pd-due" type="date"></label></div>
+    <label class="py-f"><span>Плановый ежемесячный платёж</span><input id="pd-month" type="number" min="0" step="0.01" placeholder="если договорились"></label>
+    <div class="py-mact"><button class="btn" id="pd-no">Отмена</button><button class="btn primary" id="pd-ok">Сохранить долг</button></div>`);
+  o.querySelector("#pd-name").focus(); o.querySelector("#pd-no").onclick = close;
+  o.querySelector("#pd-ok").onclick = async () => { try {
+    const d = await core.call("pay_debt_save", { debt: { name: o.querySelector("#pd-name").value || o.querySelector("#pd-person").value, person: o.querySelector("#pd-person").value,
+      direction: o.querySelector("#pd-dir").value, principal: o.querySelector("#pd-amount").value, rate: o.querySelector("#pd-rate").value,
+      start_date: o.querySelector("#pd-date").value, due_date: o.querySelector("#pd-due").value, monthly_payment: o.querySelector("#pd-month").value } });
+    close(); await pyReload(); PY.tab = "debts"; pyTabs(); pyRender(); toast(`Долг «${d.name}» сохранён`);
+  } catch (e) { toast(e.message); } };
+}
+function pyDebtPaymentForm(d) {
+  if (!d) return;
+  const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+  const [o, close] = pyModal(`<h2>Возврат долга</h2><p class="hint">${escH(d.name)} · к возврату ${pyMoney(d.amount_due)}</p>
+    <div class="py-two"><label class="py-f"><span>Сумма возврата</span><input id="dp-amount" type="number" min="0.01" step="0.01" autofocus></label><label class="py-f"><span>Дата</span><input id="dp-date" type="date" value="${today}"></label></div>
+    <label class="py-f"><span>Заметка</span><input id="dp-note" placeholder="частичный возврат"></label>
+    <p class="hint">Проценты будут учтены отдельно; оставшаяся сумма уменьшит основной долг.</p>
+    <div class="py-mact"><button class="btn" id="dp-no">Отмена</button><button class="btn primary" id="dp-ok">Записать возврат</button></div>`);
+  o.querySelector("#dp-no").onclick = close;
+  o.querySelector("#dp-ok").onclick = async () => { try {
+    const r = await core.call("pay_debt_payment", { payment: { debt: d.id, amount: o.querySelector("#dp-amount").value, date: o.querySelector("#dp-date").value, note: o.querySelector("#dp-note").value } });
+    close(); await pyReload(); PY.tab = "debts"; pyTabs(); pyRender(); toast(`Возврат записан. Остаток ${pyMoney(r.debt.amount_due)}`);
+  } catch (e) { toast(e.message); } };
+}
 function pyModal(html) {
   const o = document.createElement("div"); o.className = "py-modal"; o.innerHTML = `<div class="py-mbox glass" role="dialog" aria-modal="true">${html}</div>`;
   document.body.appendChild(o); requestAnimationFrame(() => o.classList.add("on"));
@@ -393,6 +441,7 @@ function pyImport() {
 if ($("#p-pay")) {
   $$("#py-tabs button").forEach(b => b.onclick = () => { PY.tab = b.dataset.t; pyTabs(); pyRender(); });
   $("#py-add").onclick = () => pyBillForm();
+  $("#py-debt-add").onclick = () => pyDebtForm();
   $("#py-imp").onclick = pyImport;
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && PY.cur && !document.querySelector(".py-modal")) pyClose(); });
 }

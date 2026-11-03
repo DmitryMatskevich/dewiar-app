@@ -98,16 +98,14 @@ class ToolsMixin:
                 return "Пользователь отказался. Ничего не делай и коротко подтверди отказ."
         detail = _tool_detail(name, args)
         self.emit("tool", name=name, title=title, status="run", args=args, detail=detail)
+        if name == "show_images" and asked and GEN_IMG_RX.search(asked):
+            self.emit("tool", name=name, title=title, status="done", detail=detail,
+                      result="Для генерации нужно вызвать image_generate; поиск не запускался.")
+            return ("Для создания или редактирования изображения не ищи готовые картинки. Вызови image_generate с "
+                    "описанием результата; если к сообщению приложено фото, инструмент передаст его как исходник.")
         try:
             res = self.toolbox.run(name, args)
             turn.tools_ok = getattr(turn, "tools_ok", []) + [name]
-            if name == "show_images" and asked and GEN_IMG_RX.search(asked):
-                # отчёт 70: «сгенерь картинку „Жека-пулемёт“» — показали найденные в интернете и выдали за ответ; рисовать
-                # картинки Dewiar не умеет — пусть модель скажет это честно
-                note = ("\n\nВАЖНО: это картинки, найденные в интернете, а не нарисованные. Рисовать (генерировать) картинки "
-                        "Dewiar пока не умеет — скажи об этом честно одной фразой и предложи найденные как похожие. "
-                        "Не говори «нарисовала» и «сгенерировала».")
-                res = dict(res, text=str(res.get("text", "")) + note) if isinstance(res, dict) else str(res) + note
             if name == "set_reminder" and asked and "\n\nВложения:" in asked and isinstance(res, str):
                 res = self._reminder_link_files(turn, res)
             out = res["text"] if isinstance(res, dict) else str(res)
@@ -974,7 +972,7 @@ class ToolsMixin:
         if not cur.get("main"):
             return None
         low = _norm(text)
-        order = ["agent", "lira", "jarvis", "eva", "patrik"]
+        order = ["artist", "agent", "lira", "jarvis", "eva", "patrik"]
         others = sorted((p for p in self.personas.all() if p.get("route") and p["id"] != cur["id"]),
                         key=lambda p: order.index(p["id"]) if p["id"] in order else -1)   # свои и из галереи — первыми
         for p in others:

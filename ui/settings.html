@@ -214,8 +214,8 @@
     <div class="py-title"><div><h1>Платежи</h1>
       <p class="lead">Обязательные оплаты: что, когда и сколько — с реквизитами, показаниями и квитанциями. Голосом:
         «Лира, оплатил газ 47,84, показания 28135», «что у меня не оплачено?»</p></div>
-      <div class="py-act"><button class="btn" id="py-imp">Перенести из органайзера</button><button class="btn primary" id="py-add">Новый платёж</button></div></div>
-    <div class="py-tabs" id="py-tabs" role="tablist"><button role="tab" data-t="month" class="on">Этот месяц</button><button role="tab" data-t="year">Год</button><button role="tab" data-t="stats">Аналитика</button></div>
+      <div class="py-act"><button class="btn" id="py-imp">Перенести из органайзера</button><button class="btn primary" id="py-add">Новый платёж</button><button class="btn" id="py-debt-add">Новый долг</button></div></div>
+    <div class="py-tabs" id="py-tabs" role="tablist"><button role="tab" data-t="month" class="on">Этот месяц</button><button role="tab" data-t="year">Год</button><button role="tab" data-t="stats">Аналитика</button><button role="tab" data-t="debts">Долги</button></div>
     <div id="py-body"></div>
     <aside id="py-drawer" class="py-drawer glass" hidden aria-label="Платёж"></aside>
   </section>
@@ -1141,20 +1141,21 @@
         </dl>
       </details>
     </div>
-    <p class="lead">Настройте отдельные очереди моделей для трёх типов работы. «Общение» используется по умолчанию для всех задач, кроме планирования и программирования.</p>
+    <p class="lead">Настройте отдельные очереди моделей для разных типов работы. «Общение» используется по умолчанию, а профиль из специализированной очереди — для подходящей задачи.</p>
     <div class="card model-routing">
       <div class="model-role-tabs" id="model-role-tabs" role="tablist" aria-label="Назначение моделей">
         <button class="model-role-tab on" type="button" role="tab" aria-selected="true" aria-controls="model-role-panel" data-model-role="communication" title="Модели для обычного общения, вопросов и всех задач без отдельного назначения">Общение</button>
         <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="planning" title="Модели для планирования, обсуждения и совета участников">Планирование</button>
         <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="coding" title="Модели для программирования, проекта, тестов и ревью кода">Программирование</button>
         <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="analytics" title="Модели для глубокого анализа документов, поручений, данных и длинных запросов">Аналитика</button>
+        <button class="model-role-tab" type="button" role="tab" aria-selected="false" aria-controls="model-role-panel" data-model-role="images" title="Модели со зрением для изображений и фотографий; профиль OpenAI также можно использовать для генерации и редактирования изображений">Изображения</button>
       </div>
       <div id="model-role-panel" role="tabpanel" aria-live="polite">
         <h2 id="model-role-title">Общение</h2>
         <p class="hint" id="model-role-description">Обычные ответы, вопросы и задачи, которым не назначено планирование, программирование или аналитика.</p>
         <label class="f role-token-limit" title="Порция ответа на один запрос модели. Если сервер сообщает об обрыве по лимиту токенов, разговор автоматически продолжается. Общая длина разговорного ответа не ограничена этой порцией.">Токенов на один запрос для этой очереди
           <input id="model-role-max-tokens" type="number" min="128" max="32768" step="128" inputmode="numeric" aria-label="Токенов на один запрос для текущей очереди" title="Размер одной порции ответа выбранной очереди. В разговоре обрыв по токенам автоматически продолжается без общего ограничения длины. Это не лимит средств и не размер контекста.">
-          <span class="hint">Порция одного запроса, а не длина всего разговора. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192, Аналитика — 32768. Длинный разговорный ответ автоматически продолжается после лимита; «Стоп» прекращает ответ. Ограничения сервера, контекста и подписки сохраняются.</span>
+          <span class="hint">Порция одного запроса, а не длина всего разговора. По умолчанию: Общение — 1024, Планирование — 16384, Программирование — 8192, Аналитика — 32768, Изображения — 4096. Длинный разговорный ответ автоматически продолжается после лимита; «Стоп» прекращает ответ. Ограничения сервера, контекста и подписки сохраняются.</span>
         </label>
         <div class="model-role-add actions" id="model-role-add" hidden>
           <label class="f">Добавить уже подключённую модель в эту очередь<select id="model-role-add-select" aria-label="Выбор подключённой модели для очереди"></select></label>
@@ -1170,7 +1171,7 @@
       <h2>Модели по подписке</h2>
       <p class="hint">Codex и Claude Code через официальный вход. История запроса отправляется в OpenAI или Anthropic и расходует лимит вашего плана. API-ключ не нужен. В режиме «только локально» подключение заблокировано.</p>
       <div id="subscription-cards"></div>
-      <p class="hint">Codex использует отдельный вход Dewiar. Claude Code использует ваш вход в CLI. Встроенные инструменты CLI отключены; действия выполняются через обычные разрешения Dewiar. Изображения пока не поддерживаются.</p>
+      <p class="hint">Codex использует отдельный вход Dewiar. Claude Code использует ваш вход в CLI. Встроенные инструменты CLI отключены; действия выполняются через обычные разрешения Dewiar. Для изображений Художник может отдельно вызвать встроенный инструмент генерации Codex.</p>
     </div>
     <div class="cloudc" id="cloud-card" style="display:none">
       <div class="cc-h"><div><b>ИИ-баланс · модели Dewiar</b><span id="cc-sub"></span></div><div class="cc-pct" id="cc-pct"></div></div>

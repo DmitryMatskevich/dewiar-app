@@ -2,8 +2,10 @@
 
 Codex has a dedicated CLI home (vendor-owned login state, outside Dewiar backups).
 Claude uses its own credential store with settings, hooks, MCP and tools disabled.
-Only text is returned; Dewiar's existing guarded tool protocol handles actions.
+Text chats use a restricted adapter; Codex also exposes its native image-generation tool
+for explicitly confirmed image requests.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -50,10 +52,11 @@ def _env(provider):
 
 
 class Session:
-    def __init__(self, provider, extra=()):
+    def __init__(self, provider, extra=(), allow_image_generation=False):
         _check_network()
         cli = executable(provider)
         self.provider = provider
+        self.codex_home = None
         self.tmp = tempfile.TemporaryDirectory(prefix='dewiar-subscription-')
         self.q = queue.Queue()
         self.seq = 0
@@ -67,16 +70,23 @@ class Session:
                    '-c', 'permissions.dewiar_text.network.enabled=false',
                    '-c', 'default_permissions="dewiar_text"']
             for feature in ('shell_tool', 'unified_exec', 'apps', 'browser_use', 'computer_use',
-                            'plugins', 'hooks', 'image_generation', 'view_image', 'multi_agent', 'sleep_tool', 'tool_suggest'):
+                            'plugins', 'hooks', 'view_image', 'multi_agent', 'sleep_tool', 'tool_suggest'):
                 cmd += ['-c', f'features.{feature}=false']
+            if allow_image_generation:
+                cmd += ['-c', 'features.image_generation=true']
+            else:
+                cmd += ['-c', 'features.image_generation=false']
         else:
             cmd = [cli, '--safe-mode', '-p', '--input-format', 'stream-json', '--output-format',
                    'stream-json', '--verbose', '--include-partial-messages', '--tools', '',
                    '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '']
+        env = _env(provider)
+        if provider == 'codex':
+            self.codex_home = Path(env['CODEX_HOME']).resolve()
         try:
             self.proc = subprocess.Popen(cmd + list(extra), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                          stderr=subprocess.DEVNULL, text=True, encoding='utf-8',
-                                         cwd=self.tmp.name, env=_env(provider), start_new_session=True)
+                                         cwd=self.tmp.name, env=env, start_new_session=True)
         except Exception:
             self.tmp.cleanup()
             raise
@@ -413,3 +423,70 @@ def stream(p, system, messages, cancel=None):
                             raise RuntimeError('Claude Code завершил запрос без текстового ответа')
                         yield obj['result']
                     return
+
+
+def generate_image(p, prompt, input_images=(), cancel=None):
+    """Use Codex's built-in image tool under the signed-in ChatGPT/Codex subscription."""
+    if p.get('kind') != 'codex_subscription':
+        raise ValueError('Генерация по подписке доступна только для профиля Codex.')
+    model = p.get('model')
+    if not model:
+        raise RuntimeError('Выберите модель подписки в разделе «Модели».')
+    with Session('codex', allow_image_generation=True) as session:
+        session.deadline = time.monotonic() + max(180.0, float(p.get('timeout') or 180))
+        session.initialize()
+        account = session.rpc('account/read', {'refreshToken': False}).get('account') or {}
+        if account.get('type') != 'chatgpt':
+            raise RuntimeError('Войдите в подписку Codex через «Модели» → «Войти».')
+        refs = []
+        for index, value in enumerate(list(input_images or [])[:4]):
+            from imagegen import _input_image
+            raw, mime, ext = _input_image(value)
+            path = Path(session.tmp.name) / f'reference-{index + 1}.{ext}'
+            path.write_bytes(raw)
+            refs.append(str(path))
+        thread = session.rpc('thread/start', {
+            'model': model, 'cwd': session.tmp.name, 'ephemeral': True,
+            'permissions': 'dewiar_text', 'approvalPolicy': 'never',
+            'baseInstructions': 'Create exactly one image with the built-in image_generation tool. Do not use shell, network, browser, or any other tool. Return a short completion message after the image is generated.',
+            'developerInstructions': 'The user explicitly requested this image operation. Call image_generation exactly once. If reference image paths are provided, pass them in referenced_image_paths and follow the requested edit. Do not claim success unless the tool returns a completed image.'
+        })
+        request = prompt.strip()
+        if refs:
+            request += '\n\nUse these user-provided reference images for the requested edit: ' + json.dumps(refs, ensure_ascii=False)
+            request += '\nPass all of these exact paths in referenced_image_paths to image_generation.'
+        params = {'threadId': thread['thread']['id'], 'input': [{'type': 'text', 'text': request}],
+                  'permissions': 'dewiar_text'}
+        if p.get('reasoning_effort'):
+            params['effort'] = p['reasoning_effort']
+        session.rpc('turn/start', params)
+        deadline = session.deadline
+        image = None
+        while True:
+            obj = session.event(deadline, cancel)
+            method, data = obj.get('method'), obj.get('params', {})
+            if method in ('item/started', 'item/completed'):
+                item = data.get('item') or {}
+                if item.get('type') == 'imageGeneration' and item.get('status') == 'completed':
+                    image = item.get('result') or image
+                    saved = item.get('savedPath')
+                    if not image and saved:
+                        path = Path(str(saved)).resolve()
+                        root = Path(session.tmp.name).resolve()
+                        allowed = [root]
+                        if session.codex_home:
+                            allowed.append(session.codex_home / 'generated_images')
+                        if any(base == path or base in path.parents for base in allowed):
+                            try:
+                                image = base64.b64encode(path.read_bytes()).decode('ascii')
+                            except OSError:
+                                pass
+            if method == 'turn/completed':
+                turn = data.get('turn') or {}
+                if turn.get('status') != 'completed':
+                    raise RuntimeError('Codex: ' + str((turn.get('error') or {}).get('message') or turn.get('status'))[:400])
+                if not image:
+                    raise RuntimeError('Подписка Codex завершила запрос без готового изображения; проверьте модель и лимит.')
+                return image
+            if method == 'error':
+                raise RuntimeError('Codex: ' + str((data.get('error') or {}).get('message', 'ошибка'))[:400])

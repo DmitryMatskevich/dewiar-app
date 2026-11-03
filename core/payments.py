@@ -94,6 +94,7 @@ class Payments:
         self._lock = threading.RLock()
         d = self._load()
         self.bills, self.pays, self.marks = d.get("bills", []), d.get("pays", []), d.get("marks", {})
+        self.debts = d.get("debts", [])
 
     # ---------- хранение ----------
     def _load(self):
@@ -106,7 +107,7 @@ class Payments:
     def _save(self, bills=()):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"bills": self.bills, "pays": self.pays, "marks": self.marks}, ensure_ascii=False, indent=1),
+        tmp.write_text(json.dumps({"bills": self.bills, "pays": self.pays, "marks": self.marks, "debts": self.debts}, ensure_ascii=False, indent=1),
                        encoding="utf-8")
         tmp.replace(self.path)
         for bid in set(bills):
@@ -119,6 +120,88 @@ class Payments:
                 self.on_change()
             except Exception:  # noqa: BLE001
                 pass
+
+    # ---------- долги между людьми ----------
+    def debt(self, did):
+        with self._lock:
+            q = str(did or "").strip().lower()
+            return next((x for x in self.debts if x["id"] == did), None) or next(
+                (x for x in self.debts if q and q in (x.get("name", "").lower(), x.get("person", "").lower())), None) or next(
+                (x for x in self.debts if q and (q in x.get("name", "").lower() or q in x.get("person", "").lower()
+                                                  or (len(q) >= 4 and q[:4] in x.get("person", "").lower()))), None)
+
+    def debt_save(self, data):
+        """Создать или изменить долг. direction=borrowed (я взял) | lent (я дал)."""
+        with self._lock:
+            cur = self.debt(data.get("id")) if data.get("id") else None
+            if cur is None:
+                name = str(data.get("name") or "").strip()[:80]
+                if not name: raise ValueError("укажите название долга или человека")
+                cur = {"id": uuid.uuid4().hex[:8], "name": name, "person": "", "direction": "borrowed", "principal": 0,
+                       "rate": 0, "start_date": dt.date.today().isoformat(), "due_date": "", "monthly_payment": None,
+                       "payments": [], "closed": False, "created": dt.datetime.now().isoformat(timespec="seconds")}
+                self.debts.append(cur)
+            for k in ("name", "person", "direction", "start_date", "due_date"):
+                if k in data and data[k] is not None:
+                    v = str(data[k]).strip()
+                    if k == "direction" and v not in ("borrowed", "lent"): continue
+                    if k in ("start_date", "due_date") and v and not _date(v): continue
+                    cur[k] = v[:80]
+            for k in ("principal", "rate", "monthly_payment"):
+                if k in data: cur[k] = _num(data[k])
+            if not cur.get("principal") or cur["principal"] <= 0: raise ValueError("сумма долга должна быть больше нуля")
+            if cur.get("rate") is not None and cur["rate"] < 0: raise ValueError("ставка не может быть отрицательной")
+            if cur.get("monthly_payment") is not None and cur["monthly_payment"] < 0: raise ValueError("платёж не может быть отрицательным")
+            if "closed" in data: cur["closed"] = bool(data["closed"])
+            self._save()
+            return self.debt_summary(cur)
+
+    def debt_summary(self, d, today=None):
+        today = today or dt.date.today()
+        ps = d.get("payments", [])
+        principal = float(d.get("principal") or 0)
+        returned = round(sum(float(p.get("amount") or 0) for p in ps), 2)
+        interest_paid = round(sum(float(p.get("interest") or 0) for p in ps), 2)
+        remaining = round(max(0, principal - sum(float(p.get("principal") or 0) for p in ps)), 2)
+        rate = float(d.get("rate") or 0)
+        start = _date(d.get("start_date")) or today
+        end = today
+        balance, cursor, accrued = float(d.get("principal") or 0), start, 0.0
+        for p in sorted((p for p in ps if (_date(p.get("date")) or today) <= end), key=lambda p: p.get("date", "")):
+            pd = _date(p.get("date")) or cursor
+            accrued += max(0, balance) * rate / 100 * max(0, (pd - cursor).days) / 365
+            balance = max(0, balance - float(p.get("principal") or 0)); cursor = max(cursor, pd)
+        accrued = round(accrued + max(0, balance) * rate / 100 * max(0, (end - cursor).days) / 365, 2)
+        return dict(d, returned=returned, interest_paid=interest_paid, remaining=remaining,
+                    accrued_interest=accrued, amount_due=round(remaining + max(0, accrued - interest_paid), 2))
+
+    def debt_payment_save(self, data):
+        with self._lock:
+            d = self.debt(data.get("debt") or data.get("id"))
+            if not d: raise ValueError("не нашла этот долг")
+            amount = _num(data.get("amount"))
+            if not amount or amount <= 0: raise ValueError("укажите сумму возврата больше нуля")
+            day = _date(data.get("date")) or dt.date.today()
+            summary = self.debt_summary(d, day)
+            interest = min(amount, max(0, summary["accrued_interest"] - summary["interest_paid"]))
+            principal = round(amount - interest, 2)
+            if principal > summary["remaining"]:
+                principal = summary["remaining"]; amount = round(principal + interest, 2)
+            p = {"id": uuid.uuid4().hex[:8], "date": day.isoformat(), "amount": amount,
+                 "interest": round(interest, 2), "principal": round(principal, 2), "note": str(data.get("note") or "")[:200]}
+            d.setdefault("payments", []).append(p)
+            if self.debt_summary(d, day)["amount_due"] <= 0: d["closed"] = True
+            self._save()
+            return dict(p, debt=self.debt_summary(d, day))
+
+    def debts_overview(self):
+        with self._lock:
+            active = [d for d in self.debts if not d.get("closed")]
+            return {"debts": [self.debt_summary(d) for d in self.debts],
+                    "borrowed": round(sum(self.debt_summary(d)["amount_due"] for d in self.debts if d.get("direction") == "borrowed" and not d.get("closed")), 2),
+                    "lent": round(sum(self.debt_summary(d)["amount_due"] for d in self.debts if d.get("direction") == "lent" and not d.get("closed")), 2),
+                    "monthly_borrowed": round(sum(float(d.get("monthly_payment") or 0) for d in active if d.get("direction") == "borrowed"), 2),
+                    "monthly_lent": round(sum(float(d.get("monthly_payment") or 0) for d in active if d.get("direction") == "lent"), 2)}
 
     def bill(self, bid):
         """Счёт по id или по названию (без регистра, «за газ» → «Газ»). Нет — None."""
@@ -725,6 +808,37 @@ def match_bill(pm, text):
         if k > score:
             best, score = b, k
     return best
+
+
+def parse_debt_voice(text, pm):
+    """Распознаёт короткие команды о новых долгах и возвратах; не вмешивается в обычные расходы."""
+    t = " ".join((text or "").replace("ё", "е").split()).strip(" .!")
+    if not t or not re.search(r"\bдолг\w*|\bв долг\b|\bзайм\w*", t, re.I): return None
+    m = re.search(r"(\d[\d\s]*(?:[.,]\d{1,2})?)", t)
+    if not m: return None
+    amount = _num(m.group(1))
+    if not amount: return None
+    if re.search(r"возврат|вернул|вернула|возвраща|отдал|отдала|погасил|погасила|получил обратно", t, re.I):
+        q = re.sub(r".*?(?:по долгу|долг(?:у)?|займ(?:у)?)\s*", "", t, flags=re.I)
+        q = re.sub(r"\d[\d\s]*(?:[.,]\d{1,2})?.*", "", q).strip(" ,:—-«»\"")
+        d = pm.debt(q) if q else next((x for x in pm.debts if not x.get("closed")), None)
+        if not d: return None
+        return {"op": "debt_payment", "debt": d["id"], "amount": amount}
+    if re.search(r"взял|взяла|занял|заняла|дал в долг|дала в долг|одолжил|одолжила", t, re.I):
+        lent = bool(re.search(r"дал в долг|дала в долг|одолжил|одолжила", t, re.I))
+        person = ""
+        pmatch = (re.search(r"(?:у|от|для|кому)\s+([А-ЯЁA-Z][\wА-ЯЁа-яё-]{1,30})", t) or
+                  (re.search(r"(?:дал|дала)\s+(?:в долг\s+)?([А-ЯЁA-Z][\wА-ЯЁа-яё-]{1,30})", t, re.I) if lent else None) or
+                  (re.search(r"одолжил[аи]?\s+([А-ЯЁA-Z][\wА-ЯЁа-яё-]{1,30})", t, re.I) if lent else None))
+        if pmatch: person = pmatch.group(1)
+        name = ("Долг " + ("мне" if lent else "от") + " " + person).strip()
+        rm = re.search(r"(?:под|ставка\s*)\s*(\d+(?:[.,]\d+)?)\s*(?:%|процент\w*)", t, re.I)
+        dm = re.search(r"(?:до|вернуть до)\s*(\d{4}-\d{2}-\d{2})", t, re.I)
+        mm = re.search(r"(?:ежемесячно|в месяц|платеж\w* по)\s*(\d[\d\s]*(?:[.,]\d{1,2})?)", t, re.I)
+        return {"op": "debt_add", "debt": {"name": name, "person": person, "direction": "lent" if lent else "borrowed",
+                "principal": amount, "rate": _num(rm.group(1)) if rm else 0, "due_date": dm.group(1) if dm else "",
+                "monthly_payment": _num(mm.group(1)) if mm else None}}
+    return None
 
 
 def parse_voice(text, pm):

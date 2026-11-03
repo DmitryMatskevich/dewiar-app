@@ -13,7 +13,7 @@ _quotas = {}
 _selected = None
 _loaded = False
 
-MODEL_ROLES = ("communication", "coding", "planning", "analytics")
+MODEL_ROLES = ("communication", "coding", "planning", "analytics", "images")
 
 
 def roles(p):
@@ -185,6 +185,9 @@ def candidates(llm, now=None, role=None):
     for pid, p in ordered:
         if role and role not in roles(p):
             continue
+        # Subscription chat adapters are text-only. Codex's separate image-generation tool is called directly by imagegen.py.
+        if role == "images" and str(p.get("kind", "")).endswith("_subscription"):
+            continue
         import egress
         from urllib.parse import urlparse
         host = urlparse(p.get('base_url') or '').hostname
@@ -229,7 +232,9 @@ def snapshot(llm, role=None):
     for pid, p in (llm.get('profiles') or {}).items():
         provider = str(p.get('kind', '')).removesuffix('_subscription')
         reason = blocked(p)
-        if not p.get('routing_enabled', True):
+        if role == 'images' and p.get('kind') == 'codex_subscription':
+            reason = 'Для генерации и редактирования через Художника; чат подписки не принимает вложенные фото'
+        elif not p.get('routing_enabled', True):
             reason = 'Исключена из автовыбора'
         elif not in_schedule(p):
             reason = 'Вне часов работы'

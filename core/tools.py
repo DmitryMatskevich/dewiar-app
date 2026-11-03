@@ -260,6 +260,29 @@ def t_show_images(a, ctx):
               "не выдумывай деталей. Подпись не о том — не выдавай картинку за нужную.")
 
 
+def t_image_generate(a, ctx):
+    """Create one image or edit the attached photo; result is saved locally and shown in the chat."""
+    import imagegen
+    settings = ctx["settings"]
+    images_fn = ctx.get("turn_images")
+    result = imagegen.generate(settings, ctx["workspace"], a.get("prompt"), images_fn() if images_fn else (),
+                               output_dir=ctx.get("image_output_dir"))
+    data_url = "data:image/png;base64," + result["image"]
+    eng = ctx.get("engine")
+    if eng is not None and hasattr(eng, "show_media"):
+        eng.show_media([{"title": Path(result["path"]).name, "src": data_url, "full": data_url, "page": "",
+                         "site": "Dewiar", "source": "generated"}], str(a.get("caption") or ""))
+    location = result["path"]
+    if ctx.get("image_output_dir"):
+        location = "outputs/images/" + Path(result["path"]).name
+    note = ("Codex был недоступен, поэтому использован OpenAI API; этот запрос оплачивается по API. "
+            if "резерв" in result["provider"] else "")
+    out = {"text": f"Изображение готово через {result['provider']} и сохранено: {location}. {note}Один вызов создаёт одно изображение; для серии повтори вызов с отдельным описанием каждого раздела или кадра."}
+    if not ctx.get("image_output_dir"):
+        out["image"] = result["image"]
+    return out
+
+
 def html_to_text(page):
     """Грубо: HTML -> текст для модели (без скриптов, стилей, навигации, боковых меню, шапки и подвала). Есть <main> или
     <article> с текстом — берём его (отчёт №69: у справочника на Nextra первые тысячи знаков были боковым меню)."""
@@ -2647,6 +2670,14 @@ TOOLS = {
                     "Не говори «вот изображение», не вызвав инструмент.",
                     S({"query": {"type": "string"}, "count": {"type": "integer"}, "caption": {"type": "string"}}, ["query"]),
                     "safe", t_show_images, "Картинки к рассказу"),
+    "image_generate": ("Создать изображение по описанию или отредактировать приложенную фотографию. Используй только для "
+                       "явной просьбы создать/изменить визуал; исходные фотографии текущего сообщения передаются автоматически. "
+                       "Для серий (разделы статьи, обложки, сцены видео) вызывай отдельно для каждого изображения, сохраняя "
+                       "общий стиль и композиционные правила. Изображение сохраняется в папку Dewiar/Изображения и показывается "
+                       "пользователю. Нужен профиль OpenAI с API-ключом, назначенный в очереди «Изображения»; расходы API "
+                       "оплачиваются отдельно. prompt — точное описание результата; caption — подпись.",
+                       S({"prompt": {"type": "string"}, "caption": {"type": "string"}}, ["prompt"]),
+                       "confirm", t_image_generate, "Создать или изменить изображение"),
     "look_at_screen": ("Посмотреть на экран пользователя (снимок придёт картинкой; нужна модель со зрением). Когда спрашивают, что на "
                        "экране, просят посмотреть на ошибку, окно, текст, график.", S({"question": {"type": "string"}}),
                        "safe", t_look_screen, "Смотрю на экран"),
@@ -2774,14 +2805,19 @@ TOOLS = {
                  "Dewiar и его функции («как…», «где…», «что ты умеешь…»), — не выдумывай меню и кнопки. query — о чём спросили; "
                  "where — pc|phone, если ясно, про какое устройство.",
                  S({"query": {"type": "string"}, "where": {"type": "string", "enum": ["pc", "phone"]}}, ["query"]), "safe", t_app_help, "Руководство"),
-    "payments": ("«Платежи» — реестр обязательных оплат (коммунальные, связь, кредиты, страховка): у каждого счёта реквизиты "
+    "payments": ("«Платежи» — реестр обязательных оплат и отдельных долгов между людьми. При любом сообщении про «взял в долг», «дал в долг», «вернул долг», «одолжил» используй этот инструмент, а не money_add: долг сохраняется отдельно и связывается с возвратами. "
+                 "Действия: debt_add (создать долг: name, person, direction=borrowed если пользователь взял / lent если дал, amount — principal, rate — годовая ставка процентов, date — дата выдачи, due_date — срок возврата, monthly_payment — плановый ежемесячный платёж); debt_payment (частичный/полный возврат: debt — название/человек, amount, date); debts (сводка всех долгов, взято/дано/вернулось/остаток/проценты). "
+                 "Долговые операции нельзя записывать в общий бюджет как обычный расход/доход. "
+                 "Обычные платежи: реестр обязательных оплат (коммунальные, связь, кредиты, страховка): у каждого счёта реквизиты "
                  "«как платить», срок, история оплат с показаниями счётчика. action: open — что не оплачено в этом месяце; report — "
                  "сводка (или bill — по одному счёту: как платить и последние оплаты); year — итоги года по счетам (year); "
                  "add_payment — записать оплату (bill, amount, reading — показание, used — расход, date ГГГГ-ММ-ДД, status "
                  "paid|unpaid); add_bill — новый вид платежа (bill — название, kind meter|fixed|loan|yearly|other, day — число "
                  "срока, how — реквизиты). Это не «Деньги»: разовые покупки — туда, а счета и их оплаты — сюда.",
-                 S({"action": {"type": "string", "enum": ["open", "report", "year", "add_payment", "add_bill"]}, "bill": {"type": "string"},
+                 S({"action": {"type": "string", "enum": ["open", "report", "year", "add_payment", "add_bill", "debt_add", "debt_payment", "debts"]}, "bill": {"type": "string"},
                     "amount": {"type": "number"}, "reading": {"type": "number"}, "used": {"type": "number"}, "date": {"type": "string"},
+                    "name": {"type": "string"}, "person": {"type": "string"}, "direction": {"type": "string", "enum": ["borrowed", "lent"]},
+                    "rate": {"type": "number"}, "due_date": {"type": "string"}, "monthly_payment": {"type": "number"},
                     "status": {"type": "string", "enum": ["paid", "unpaid"]}, "kind": {"type": "string"}, "day": {"type": "integer"},
                     "month": {"type": "integer"}, "how": {"type": "string"}, "year": {"type": "integer"}, "note": {"type": "string"}},
                    ["action"]), "safe", lambda a, ctx: __import__("engine_pay").t_payments(a, ctx), "Платежи"),
@@ -2873,7 +2909,7 @@ TOOLS = {
 # Этим умениям нужен интернет из самого Dewiar — при стоп-кране (студия → «Безопасность») модель о них не узнаёт.
 # Открыть сайт, музыку или карту в браузере человека — можно: это его браузер и его просьба.
 NET_TOOLS = {"web_search", "weather", "read_webpage", "send_email", "read_emails", "read_email", "mail", "mail_reply", "send_telegram", "close_send",
-             "close_call", "close_read", "ask_knowledge", "play_radio", "smart_home", "show_images", "server_run", "app_update"}
+             "close_call", "close_read", "ask_knowledge", "play_radio", "smart_home", "show_images", "image_generate", "server_run", "app_update"}
 DEFAULT_OFF = set()          # команды терминала включены, но каждая — только после «Выполнить?»
 # «Только безопасное» (студия → «Безопасность», отзыв 18.10: «лучше чтоб пользователь мог выбрать, что можно делать, а не
 # что нельзя — разрешаю только калькулятор»): разговор, напоминания, заметки, деньги, поиск и чтение — ничего на компьютере
@@ -3110,6 +3146,8 @@ class Toolbox:
             return f"На сервере «{args.get('server', '')}» выполнить: {args.get('command', '')}?"
         if name == "look_through_camera":
             return "Включить камеру и сделать кадр?"
+        if name == "image_generate":
+            return "Создать или изменить изображение через подписку Codex, а если она недоступна — через OpenAI API (API может быть платным)?"
         if name == "create_skill":
             return f"Создать навык «{args.get('name', '')}»: {args.get('description', '')}?"
         if name == "lab_run":
@@ -3126,7 +3164,7 @@ class Toolbox:
                 raise ToolError(str(e)) from e
         return f"Выполнить действие «{self.title(name)}»?"
 
-    def run(self, name, args):
+    def run(self, name, args, context=None):
         """Выполнить инструмент -> текст или {"text", "image"}. Ошибки (ToolError и др.) ловит вызывающий."""
         if not self.policy(name)[0]:
             raise ToolError(f"инструмент {name} выключен или неизвестен")
@@ -3138,7 +3176,8 @@ class Toolbox:
             return self.mcp.call(name, args or {})
         # _truncated — служебная пометка llm.py об оборванном ответе, обработчикам не нужна
         args = {k: v for k, v in coerce_args(TOOLS[name][1], args).items() if not k.startswith("_trunc")}
-        return TOOLS[name][3](args or {}, {"settings": self.s, "reminders": self.reminders, "skills": self.skills, **self.hooks})
+        return TOOLS[name][3](args or {}, {"settings": self.s, "reminders": self.reminders, "skills": self.skills,
+                                           **self.hooks, **(context or {})})
 
 
 def coerce_args(schema, args):

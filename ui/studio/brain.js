@@ -10,7 +10,7 @@
    любая правка профиля шлёт весь словарь S.llm.profiles. */
 let openProf = null, profSig = "";
 let activeModelRole = "communication";
-const ROLE_MAX_TOKENS_DEFAULT = {communication: 1024, planning: 16384, coding: 8192, analytics: 32768};
+const ROLE_MAX_TOKENS_DEFAULT = {communication: 1024, planning: 16384, coding: 8192, analytics: 32768, images: 4096};
 const MODEL_ROLE_DEFS = {
   communication: {
     label: "Общение",
@@ -27,6 +27,10 @@ const MODEL_ROLE_DEFS = {
   analytics: {
     label: "Аналитика",
     description: "Глубокий разбор документов, поручений, данных и длинных запросов с включённым рассуждением."
+  },
+  images: {
+    label: "Изображения",
+    description: "Изображение, картинки и фотографии. Добавляйте сюда модели со зрением для анализа вложений. Художник использует Codex по подписке для создания и правки; если подписка недоступна, при подтверждении запроса можно перейти на OpenAI API, который оплачивается отдельно."
   }
 };
 const profileModelLists = new Map();
@@ -224,7 +228,7 @@ function renderProfiles() {
     <div class="body"><div class="row" style="margin-top:12px">
       <label class="f">Название<input type="text" data-f="name"></label>
       <label class="f">Приоритет (1 — наивысший)<input type="number" data-f="priority" min="1" max="9" step="1"></label>
-      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><label><input type="checkbox" data-role="analytics"> Аналитика</label><span class="hint">Кодер использует только «Программирование», а длинные разборы — «Аналитика».</span></fieldset>
+      <fieldset class="f model-roles" data-roles><legend>Назначение модели</legend><label><input type="checkbox" data-role="communication"> Общение</label><label><input type="checkbox" data-role="coding"> Программирование</label><label><input type="checkbox" data-role="planning"> Планирование</label><label><input type="checkbox" data-role="analytics"> Аналитика</label><label><input type="checkbox" data-role="images"> Изображения</label><span class="hint">Для «Изображений» назначайте модели, которые принимают изображения на вход. Для API редактирования нужен профиль OpenAI с ключом API.</span></fieldset>
       <label class="f"><span><input type="checkbox" data-f="routing_enabled"> Участвует в автовыборе</span></label>
       <label class="f"><span><input type="checkbox" data-f="schedule_enabled"> Ограничить часы работы</span></label>
       <label class="f">Работает с<input type="time" data-f="schedule_start"></label>
@@ -234,6 +238,7 @@ function renderProfiles() {
       <label class="f">Адрес сервера<input type="url" data-f="base_url"><span class="hint">Заполняется само при подключении; менять обычно не нужно.</span></label>
       <label class="f">API-ключ<input type="password" data-f="api_key" placeholder="для локальных не нужен"></label>
       <label class="f">Модель<select data-model-picker aria-label="Выбор модели на сервере" disabled><option>Нажмите «Обновить список моделей»</option></select><span class="hint" data-model-status role="status"></span></label>
+      <label class="f" data-image-model-field style="display:none">Модель генерации изображений<input type="text" data-f="image_model" placeholder="gpt-image-2.5-flare"><span class="hint">Отдельная модель OpenAI Images API для создания и редактирования. Пустое поле использует значение по умолчанию.</span></label>
       <details><summary>Указать модель вручную</summary><label class="f">Идентификатор модели<input type="text" data-f="model" placeholder="пусто — первая с сервера"></label></details>
       <label class="f" title="Размер одной порции генерации. Разговорный ответ автоматически продолжается, если сервер сообщил об обрыве по токенам.">Токенов на один запрос<input type="number" data-f="max_tokens" placeholder="По очереди"></label>
       <label class="f">Температура<input type="number" step="0.1" min="0" max="2" data-f="temperature" placeholder="0.7"></label>
@@ -251,6 +256,8 @@ function renderProfiles() {
     $("b", el).textContent = p.name || "Без названия";
     $("small", el).textContent = p.cloud ? `${S.cloud && S.cloud.account ? "по аккаунту dewiar.pro" : "по ключу …" + (p.api_key || "").slice(-4)} · ${p.title || p.model || ""}` : `${p.base_url || ""}${p.model ? " · " + p.model : ""}`;
     const defaults = {priority:9, routing_enabled:true, schedule_enabled:false, schedule_start:"00:00", schedule_end:"24:00", timeout:60};
+    const imageModelField = $('[data-image-model-field]', el);
+    try { imageModelField.style.display = p.kind === "openai" && new URL(p.base_url).hostname === "api.openai.com" ? "" : "none"; } catch (_) {}
     $('[data-routing-summary]', el).textContent = `Приоритет ${p.priority ?? 9} · ${p.schedule_enabled ? `${p.schedule_start || "00:00"}–${p.schedule_end || "24:00"}` : "круглосуточно"}${p.routing_enabled === false ? " · исключена из автовыбора" : ""}`;
     $$("[data-f]", el).forEach(inp => {
       const k = inp.dataset.f, value = p[k] ?? defaults[k]; if (inp.type === "checkbox") inp.checked = !!value; else inp.value = value ?? "";

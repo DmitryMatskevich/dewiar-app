@@ -100,6 +100,7 @@ ROLE_MAX_TOKENS_DEFAULT = {
     "planning": 16384,
     "coding": 8192,
     "analytics": 32768,
+    "images": 4096,
 }
 
 

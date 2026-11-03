@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 
-from payments import fmt_money, fmt_num, import_apply, parse_import, parse_voice, year_sum
+from payments import fmt_money, fmt_num, import_apply, parse_import, parse_voice, parse_debt_voice, year_sum
 
 log = logging.getLogger("dewiar.pay")
 
@@ -26,6 +26,9 @@ IMPORT_PROMPT = (
 class PayMixin:
     def _pay_cmd(self, cmd, a):
         pm = self.payments
+        if cmd == "pay_debts": return pm.debts_overview()
+        if cmd == "pay_debt_save": return pm.debt_save(a.get("debt") or a)
+        if cmd == "pay_debt_payment": return pm.debt_payment_save(a.get("payment") or a)
         if cmd == "pay_overview":
             return pm.overview()
         if cmd == "pay_grid":
@@ -108,6 +111,18 @@ class PayMixin:
         pm = getattr(self, "payments", None)
         if pm is None:
             return False
+        c = parse_debt_voice(text, pm)
+        if c:
+            if c["op"] == "debt_add":
+                d = pm.debt_save(c["debt"])
+                msg = f"Записала долг «{d['name']}»: {fmt_money(d['principal'])}, ставка {fmt_num(d['rate'])}% годовых."
+            else:
+                p = pm.debt_payment_save(c)
+                d = p["debt"]
+                msg = f"Записала возврат {fmt_money(p['amount'])} по долгу «{d['name']}». Осталось {fmt_money(d['amount_due'])}."
+            self.emit("pay_saved", what="debt")
+            self._say_quick(msg, text, via)
+            return True
         c = parse_voice(text, pm)
         if not c:
             return False
@@ -164,6 +179,24 @@ def t_payments(a, ctx):
         from tools import ToolError
         raise ToolError("платежи недоступны")
     act = a.get("action") or "report"
+    if act == "debts":
+        ov = pm.debts_overview()
+        if not ov["debts"]: return "Долгов пока не записано."
+        return (f"Взято в долг: {fmt_money(ov['borrowed'])}; выдано: {fmt_money(ov['lent'])}. " + "; ".join(
+            f"{d['name']} — остаток {fmt_money(d['amount_due'])} (взято {fmt_money(d['principal'])}, возвращено {fmt_money(d['returned'])}, проценты начислены {fmt_money(d['accrued_interest'])})"
+            for d in ov["debts"]))
+    if act == "debt_add":
+        d = pm.debt_save({"name": a.get("name") or a.get("person"), "person": a.get("person") or "",
+                          "direction": a.get("direction") or "borrowed", "principal": a.get("amount"),
+                          "rate": a.get("rate", 0), "start_date": a.get("date"), "due_date": a.get("due_date"),
+                          "monthly_payment": a.get("monthly_payment")})
+        eng.emit("pay_saved", what="debt")
+        return f"Записан долг «{d['name']}»: {fmt_money(d['principal'])}, остаток {fmt_money(d['amount_due'])}, ставка {fmt_num(d['rate'])}% годовых."
+    if act == "debt_payment":
+        r = pm.debt_payment_save({"debt": a.get("debt") or a.get("name"), "amount": a.get("amount"), "date": a.get("date"), "note": a.get("note")})
+        eng.emit("pay_saved", what="debt")
+        d = r["debt"]
+        return f"Записан возврат {fmt_money(r['amount'])} по долгу «{d['name']}». В том числе проценты {fmt_money(r['interest'])}, основной долг {fmt_money(r['principal'])}; осталось {fmt_money(d['amount_due'])}."
     if act == "add_payment":
         b = pm.bill(a.get("bill") or "")
         if not b:
