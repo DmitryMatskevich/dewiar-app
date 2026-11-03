@@ -1090,6 +1090,13 @@ class CommandsMixin:
             from screenshot_messages import sources
             if not self.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
             return sources()
+        if cmd == 'screenshot_window_preview':
+            if not self.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
+            from screenshot_messages import window_preview
+            return window_preview(a.get('window_id'))
+        if cmd == 'screenshot_window_action':
+            from mac_control import screenshot_window_action
+            return screenshot_window_action(a.get('pid'), a.get('window_id'), a.get('title'), a.get('action'))
         if cmd == 'screenshot_prepare':
             from screenshot_messages import prepare_region
             return prepare_region(self)

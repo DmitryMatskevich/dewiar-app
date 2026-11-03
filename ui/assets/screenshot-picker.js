@@ -3,7 +3,8 @@
   const make = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
   const button = (text, fn) => { const b = make('button', text); b.type = 'button'; b.onclick = fn; return b; };
   function modal(title) {
-    const d = make('dialog', null, 'ss-dialog'), heading = make('h2', title), close = button('Закрыть', () => d.close());
+    const d = make('dialog', null, 'ss-dialog'), heading = make('h2', title), close = button('×', () => d.close());
+    close.className = 'ss-close'; close.setAttribute('aria-label', 'Отменить'); close.title = 'Отменить';
     const bar = make('div', null, 'ss-dialog-bar'); bar.append(heading, close); d.append(bar); document.body.append(d);
     d.addEventListener('close', () => d.remove(), {once: true}); d.showModal(); return d;
   }
@@ -28,13 +29,15 @@
   async function menu(anchor, done, failed) {
     const d = modal('Снимок экрана'); d.classList.add('ss-source-menu');
     const status = make('p', '', 'ss-info'); status.setAttribute('role', 'status');
-    const list = make('div', null, 'ss-source-list');
+    const list = make('div', null, 'ss-source-list'), sourceActions = make('div', null, 'ss-source-actions');
+    const filter = make('input', null, 'ss-window-filter'); filter.type = 'search'; filter.placeholder = 'Фильтр по названию приложения';
+    filter.setAttribute('aria-label', 'Фильтр по названию приложения');
     const capture = async args => {
       d.close(); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       try { done?.(await core.call('screenshot_attach', args)); } catch (e) { failed?.(e); }
     };
-    const full = button('Весь экран', () => capture({source: 'screen'})); full.dataset.ssSource = 'screen';
-    const part = button('Часть экрана…', async () => {
+    const full = button('Весь', () => capture({source: 'screen'})); full.dataset.ssSource = 'screen';
+    const part = button('Часть', async () => {
       d.close();
       try {
         const preview = await core.call('screenshot_prepare');
@@ -48,17 +51,59 @@
         }
       } catch (e) { failed?.(e); }
     }); part.dataset.ssSource = 'region';
-    const heading = make('h3', 'Видимые окна приложений'), refresh = button('Обновить список', () => load());
-    d.append(full, part, heading, refresh, status, list);
+    const heading = make('h3', 'Окна приложений'), refresh = button('Обновить список', () => load());
+    sourceActions.append(full, part); d.append(sourceActions, heading, filter, refresh, status, list);
+    let windows = [], selected = null;
+    filter.addEventListener('input', render);
+    function render() {
+      const q = filter.value.trim().toLocaleLowerCase('ru'); list.replaceChildren();
+      const visible = windows.filter(w => !q || `${w.name} ${w.title || ''}`.toLocaleLowerCase('ru').includes(q));
+      for (const w of visible) {
+        const row = make('article', null, 'ss-window-row'), preview = make('img', null, 'ss-window-preview');
+        preview.alt = ''; preview.setAttribute('aria-hidden', 'true'); preview.src = w.preview || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+        const name = make('span', w.name, 'ss-window-name'), detail = make('span', w.title || 'Окно приложения', 'ss-window-title');
+        const select = button('', async () => {
+          selected = w.window_id; render(); status.textContent = 'Загружаю предварительный снимок…';
+          try { w.preview = await core.call('screenshot_window_preview', {window_id:w.window_id}); if (selected === w.window_id) { status.textContent = ''; render(); } }
+          catch (e) { if (selected === w.window_id) status.textContent = e.message || String(e); }
+        });
+        select.className = 'ss-window-select'; select.setAttribute('aria-pressed', String(selected === w.window_id));
+        select.append(preview, make('span', null, 'ss-window-label'));
+        select.lastChild.append(name, detail);
+        const actions = make('div', null, 'ss-window-actions');
+        const fold = button(w.minimized ? 'Развернуть' : 'Свернуть', () => windowAction(w, w.minimized ? 'restore' : 'minimize', fold, fullScreen));
+        const fullScreen = button(w.fullscreen ? 'Обычный режим' : 'Весь экран', () => windowAction(w, 'fullscreen', fold, fullScreen));
+        actions.append(fold, fullScreen);
+        if (selected === w.window_id) {
+          const take = button('Сделать снимок', () => capture({source:'application', window_id:w.window_id}));
+          take.className = 'ss-window-capture'; actions.append(take);
+        }
+        row.append(select, actions); row.dataset.windowId = w.window_id; list.append(row);
+      }
+      if (!visible.length && windows.length) status.textContent = 'По этому фильтру окна не найдены.';
+      else if (!windows.length && !status.textContent) status.textContent = 'Других окон нет. Откройте приложение и обновите список.';
+    }
+    async function windowAction(w, action, fold, fullScreen) {
+      fold.disabled = fullScreen.disabled = true;
+      try {
+        const state = await core.call('screenshot_window_action', {pid:w.pid, window_id:w.window_id, title:w.title || '', action});
+        w.minimized = state.minimized; w.fullscreen = state.fullscreen;
+        fold.textContent = w.minimized ? 'Развернуть' : 'Свернуть';
+        fullScreen.textContent = w.fullscreen ? 'Обычный режим' : 'Весь экран';
+        status.textContent = '';
+      } catch (e) {
+        status.textContent = e.message || String(e);
+        if ((e.message || '').includes('Универсальный доступ')) {
+          const native = window.api?.();
+          if (native?.open_accessibility_settings) { const open = button('Открыть настройки доступа', () => native.open_accessibility_settings()); open.className = 'ss-settings-link'; status.append(' ', open); }
+        }
+      } finally { fold.disabled = fullScreen.disabled = false; }
+    }
     async function load() {
       refresh.disabled = true; status.textContent = 'Загружаю окна…'; list.replaceChildren();
       try {
         const result = await core.call('screenshot_sources'); if (!d.open) return;
-        (result.windows || []).forEach(w => {
-          const b = button(w.name + (w.title ? ' — ' + w.title : ''), () => capture({source: 'application', window_id: w.window_id}));
-          b.dataset.windowId = w.window_id; list.append(b);
-        });
-        status.textContent = result.message || (list.children.length ? 'Выберите окно для снимка.' : 'Других видимых окон нет. Откройте приложение и обновите список.');
+        windows = result.windows || []; status.textContent = result.message || ''; render();
       } catch (e) { status.textContent = e.message || String(e); }
       finally { refresh.disabled = false; }
     }

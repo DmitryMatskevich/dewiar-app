@@ -318,6 +318,43 @@ def windows(row):
     return root,result
 
 
+def screenshot_window_action(pid, window_id, title, action):
+    """Minimise/restore or enter/leave fullscreen on one listed screenshot window."""
+    if action not in ('minimize', 'restore', 'fullscreen'):
+        raise ValueError('Неизвестное действие с окном')
+    if not permission()['granted']:
+        raise PermissionError('Для управления окнами разрешите Dewiar в настройках macOS → Конфиденциальность и безопасность → Универсальный доступ.')
+    from ApplicationServices import AXUIElementCreateApplication, AXUIElementSetMessagingTimeout
+    root = AXUIElementCreateApplication(int(pid))
+    AXUIElementSetMessagingTimeout(root, 2)
+    matches = []
+    for element in _get(root, 'AXWindows') or []:
+        AXUIElementSetMessagingTimeout(element, 2)
+        number = _get(element, 'AXWindowNumber')
+        try:
+            if number is not None and int(number) == int(window_id):
+                matches = [element]
+                break
+        except (TypeError, ValueError):
+            pass
+        if str(_get(element, 'AXTitle') or '') == str(title or ''):
+            matches.append(element)
+    if len(matches) != 1:
+        raise ValueError('Не удалось однозначно найти окно. Обновите список окон и повторите действие.')
+    element = matches[0]
+    if action in ('minimize', 'restore'):
+        _set(element, 'AXMinimized', action == 'minimize')
+        if bool(_get(element, 'AXMinimized')) != (action == 'minimize'):
+            raise ValueError('Приложение не подтвердило изменение состояния окна')
+    else:
+        entering = not bool(_get(element, 'AXFullScreen'))
+        _set(element, 'AXFullScreen', entering)
+        if bool(_get(element, 'AXFullScreen')) != entering:
+            raise ValueError('Приложение не подтвердило полноэкранный режим')
+    return {'action': action, 'minimized': bool(_get(element, 'AXMinimized')),
+            'fullscreen': bool(_get(element, 'AXFullScreen'))}
+
+
 def execute(args, alias_config=None):
     action=args.get('action');query=str(args.get('application') or '').strip()
     if action in ('dnd_on', 'dnd_off'):

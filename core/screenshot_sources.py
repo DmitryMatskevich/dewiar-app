@@ -43,7 +43,7 @@ def visible_windows():
             if not parts:break
         if parts and owner and app.get('regular', True) and int(item.get('kCGWindowNumber') or 0):
             rows.append({'window_id': int(item['kCGWindowNumber']), 'name': owner, 'title': title,
-                         'id': app.get('id', ''), 'pid': pid})
+                         'id': app.get('id', ''), 'pid': pid, 'bounds': rect})
         if float(item.get('kCGWindowAlpha', 1)) >= .99:covers.append(rect)
     return rows
 

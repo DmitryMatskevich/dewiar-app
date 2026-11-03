@@ -6,9 +6,22 @@
 .ss-dialog button, .ss-window button { min-height:44px; padding:9px 14px; border:1px solid var(--line,rgba(128,140,180,.25)); border-radius:10px; background:var(--glass,rgba(128,140,180,.15)); color:inherit; font:inherit; cursor:pointer; }
 .ss-dialog button:focus-visible, .ss-window button:focus-visible, .ss-region-stage canvas:focus-visible { outline:2px solid var(--accent,#858dff); outline-offset:2px; }
 .ss-dialog button:disabled, .ss-window button:disabled { opacity:.5; cursor:default; }
-.ss-source-menu > button, .ss-source-list button { width:100%; text-align:left; margin-top:8px; overflow-wrap:anywhere; }
-.ss-source-list { display:grid; gap:6px; }
-.ss-source-menu h3 { font-size:14px; margin:20px 0 6px; }
+.ss-source-menu > button { width:100%; text-align:left; margin-top:8px; overflow-wrap:anywhere; }
+.ss-source-actions { display:flex; gap:8px; margin:12px 0 18px; }
+.ss-dialog .ss-source-actions button { flex:1; text-align:center; margin:0; }
+.ss-dialog .ss-close { flex:0 0 38px; width:38px; min-height:38px; padding:0; font-size:26px; line-height:1; }
+.ss-window-filter { box-sizing:border-box; width:100%; min-height:42px; padding:9px 12px; border:1px solid var(--line,rgba(128,140,180,.25)); border-radius:10px; background:var(--field,rgba(128,140,180,.15)); color:inherit; font:inherit; }
+.ss-source-list { display:grid; gap:8px; }
+.ss-window-row { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; padding:8px; border:1px solid var(--line,rgba(128,140,180,.25)); border-radius:12px; }
+.ss-dialog .ss-window-select { display:flex; align-items:center; gap:10px; width:100%; min-width:0; min-height:60px; margin:0; padding:4px; border:0; background:transparent; text-align:left; }
+.ss-window-preview { flex:0 0 88px; width:88px; height:56px; object-fit:cover; border-radius:6px; background:rgba(128,140,180,.15); }
+.ss-window-label { display:flex; flex-direction:column; min-width:0; overflow-wrap:anywhere; }
+.ss-window-name { font-weight:600; }
+.ss-window-title { color:var(--muted,#b8c1d7); font-size:12px; }
+.ss-window-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.ss-dialog .ss-window-actions button { min-height:36px; padding:5px 10px; font-size:12px; }
+.ss-dialog .ss-window-actions .ss-window-capture { margin-left:auto; background:var(--accent,#626ce3); color:white; }
+.ss-source-menu h3 { font-size:14px; margin:0 0 8px; }
 .ss-info { color:var(--muted,#b8c1d7); font-size:13px; margin:12px 0; overflow-wrap:anywhere; }
 .ss-info:empty { display:none; }
 .ss-large { position:fixed; inset:0; margin:auto; width:calc(100% - 16px); height:calc(100% - 16px); max-width:none; max-height:none; }

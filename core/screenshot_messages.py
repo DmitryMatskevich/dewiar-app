@@ -24,6 +24,17 @@ def sources():
     return {'windows': visible_windows(), 'message': ''}
 
 
+def window_preview(window_id):
+    from screenshot_sources import capture_window
+    from PIL import Image
+    data = capture_window(window_id=window_id)
+    with Image.open(io.BytesIO(data)) as image:
+        image.thumbnail((160, 100))
+        output = io.BytesIO()
+        image.convert('RGB').save(output, 'JPEG', quality=68, optimize=True)
+    return 'data:image/jpeg;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
+
+
 def prepare_region(engine):
     """A private in-memory preview; no chat, files or OCR until explicit confirmation."""
     from eyes import capture_screen
