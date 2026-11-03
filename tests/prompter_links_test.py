@@ -3,6 +3,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "core"))
@@ -46,7 +47,8 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "[Аудио/запись.wav](dwr-file:" in p.summary
     assert "[Расшифровки/текст.txt](dwr-file:" in p.summary
     assert "[Расшифровки/Кадры/0001.jpg](dwr-file:" in p.summary
-    assert "[встреча.mp4](dwr-file:" in p.summary
+    video_target = quote("Видео/встреча.mp4", safe="/._-")
+    assert f"[Открыть видео встречи](dwr-file:{video_target})" in p.summary
     assert Path(p._summary_path).is_file()
     assert p.public()["summary_path"] == p._summary_path
 

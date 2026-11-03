@@ -1230,6 +1230,7 @@ class CommandsMixin:
                 log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
             else:
                 log.warning("Диктовка: текст скопирован, но не вставлен: %s", result.get("reason", ""))
+            self.paste_tone(bool(result.get("inserted")))
             return result
         if cmd == "dictation_cancel":
             return self.dictation_cancel()

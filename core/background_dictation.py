@@ -68,6 +68,9 @@ ACCESS_HINT = ('Нет разрешения «Универсальный дос�
                'Настройки → Конфиденциальность и безопасность → Универсальный доступ. '
                'Если Dewiar там уже включён, удалите запись (−) и добавьте Dewiar.app заново (+): '
                'после пересборки macOS считает его новым приложением.')
+NOT_DELIVERED = ('⌘V отправлено в «{}», но текст в поле не появился. Если так в любом приложении, '
+                 'полностью закройте Dewiar (меню Dewiar → Завершить) и откройте снова: после выдачи '
+                 '«Универсального доступа» macOS пропускает нажатия только перезапущенному приложению.')
 _prompted = False
 
 
@@ -98,11 +101,16 @@ def paste_into_focus():
     pid, name, switch = paste_target(ax)
     if switch:
         _activate(ax, pid, name)
-    _refuse_secure_field(ax)
-    if _focused_pid(ax) != pid:
+    field = _ax_value(ax, ax.AXUIElementCreateSystemWide(), 'AXFocusedUIElement')
+    _refuse_secure_field(ax, field)
+    if _focused_pid(ax) not in (pid, 0):
         raise RuntimeError('Фокус перешёл в другое приложение. Вернитесь в нужное поле и повторите «Лира, вставить».')
+    name = name or 'активное приложение'
+    before = _field_state(ax, field)
     press_paste()
-    return name or 'активное приложение'
+    if before is not None and not _changed(ax, field, before):
+        raise RuntimeError(NOT_DELIVERED.format(name))
+    return name
 
 
 def press_paste():
@@ -120,10 +128,9 @@ def press_paste():
 def paste_target(ax):
     """(pid, name, switch) of the application that must receive ⌘V."""
     own = _dewiar_pids()
-    pid = _focused_pid(ax)
-    if not pid:
-        raise RuntimeError('Не удалось определить активное приложение. Щёлкните в нужное поле и повторите «Лира, вставить».')
     owners = [(p, n) for p, n in _window_owners() if p and n.casefold() not in SYSTEM_OWNERS]
+    # Without an accessibility answer the topmost ordinary window belongs to the active application.
+    pid = _focused_pid(ax) or (owners[0][0] if owners else 0)
     if pid and pid not in own:
         return pid, next((n for p, n in owners if p == pid), ''), False
     for p, n in owners:  # front to back: the window right behind Dewiar
@@ -135,12 +142,17 @@ def paste_target(ax):
 def _require_access(ax):
     """Without Accessibility macOS silently drops synthetic key presses."""
     global _prompted
-    if ax.AXIsProcessTrusted():
+    import Quartz
+    post = getattr(Quartz, 'CGPreflightPostEventAccess', None)  # the check macOS applies to posted keys
+    if ax.AXIsProcessTrusted() and (post is None or post()):
         return
     if not _prompted:
         _prompted = True
         try:  # once per run: the system dialog opens the right settings page
             ax.AXIsProcessTrustedWithOptions({'AXTrustedCheckOptionPrompt': True})
+            request = getattr(Quartz, 'CGRequestPostEventAccess', None)
+            if request is not None:
+                request()
         except Exception:  # noqa: BLE001
             pass
     raise RuntimeError(ACCESS_HINT)
@@ -220,10 +232,54 @@ def _activate(ax, pid, name):
                        'Щёлкните в нужное поле и повторите «Лира, вставить».')
 
 
-def _refuse_secure_field(ax):
-    element = _ax_value(ax, ax.AXUIElementCreateSystemWide(), 'AXFocusedUIElement')
-    if element is None:
-        raise RuntimeError('Не удалось определить активное поле и проверить, что оно не защищено. Щёлкните в нужное поле и повторите команду.')
-    kind = (str(_ax_value(ax, element, 'AXRole') or '') + str(_ax_value(ax, element, 'AXSubrole') or '')).lower()
+def _refuse_secure_field(ax, field):
+    """Password fields: by role when the app shows its field to accessibility.
+
+    Chrome, Electron apps (Codex, Claude, VS Code, Slack) and Telegram Desktop
+    usually do not expose the focused field, and ⌘V still works there. For them
+    macOS secure input is the signal: it is on while a password field is focused."""
+    if field is None:
+        if _secure_input_on():
+            raise RuntimeError('Включён защищённый ввод (поле пароля или «Защищённый ввод» в Терминале) — текст не вставляю.')
+        return
+    kind = (str(_ax_value(ax, field, 'AXRole') or '') + str(_ax_value(ax, field, 'AXSubrole') or '')).lower()
     if 'secure' in kind:
         raise RuntimeError('В поле пароля текст не вставляю.')
+
+
+def _secure_input_on():
+    try:
+        import ctypes
+        carbon = ctypes.CDLL('/System/Library/Frameworks/Carbon.framework/Carbon')
+        carbon.IsSecureEventInputEnabled.restype = ctypes.c_bool
+        return bool(carbon.IsSecureEventInputEnabled())
+    except Exception:  # noqa: BLE001 — not macOS or no Carbon: nothing to refuse
+        return False
+
+
+def _field_state(ax, field):
+    """(characters, selection) of the focused field; None when the app does not expose them."""
+    if field is None:
+        return None
+    count = _ax_value(ax, field, 'AXNumberOfCharacters')
+    selection = None
+    value = _ax_value(ax, field, 'AXSelectedTextRange')
+    if value is not None:
+        try:
+            ok, rng = ax.AXValueGetValue(value, getattr(ax, 'kAXValueCFRangeType', 4), None)
+            selection = (int(rng[0]), int(rng[1])) if ok else None
+        except Exception:  # noqa: BLE001
+            selection = None
+    if count is None and selection is None:
+        return None
+    return None if count is None else int(count), selection
+
+
+def _changed(ax, field, before):
+    """The pasted text moves the cursor or adds characters within a moment."""
+    deadline = time.monotonic() + .8
+    while time.monotonic() < deadline:
+        time.sleep(.1)
+        if _field_state(ax, field) != before:
+            return True
+    return False

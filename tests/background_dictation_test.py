@@ -190,11 +190,13 @@ class Background(unittest.TestCase):
         self.assertEqual(e.events[-1][1]['state'], 'inserted')
         self.assertEqual(e.events[-1][1]['app'], 'Заметки')
 
-    def mac(self, focused, windows, trusted=True, role='AXTextArea', subrole='', switches=True):
-        """Fake ApplicationServices and Quartz: AX knows the active pid, the window list goes front to back."""
-        state = SimpleNamespace(focused=focused, raised=[], prompts=0)
+    def mac(self, focused, windows, trusted=True, role='AXTextArea', subrole='', switches=True, chars=None, accepts=True):
+        """Fake ApplicationServices and Quartz: AX knows the active pid, the window list goes front to back.
+        chars — the field shows its length to accessibility; accepts — the app reacts to ⌘V."""
+        state = SimpleNamespace(focused=focused, raised=[], prompts=0, chars=chars)
         def copy(obj, key, out):
             if key == 'AXFocusedApplication':return (0, ('app', state.focused)) if state.focused else (-25212, None)
+            if key == 'AXNumberOfCharacters':return (0, state.chars) if state.chars is not None else (-25205, None)
             return (0, {'AXFocusedUIElement':'field', 'AXRole':role, 'AXSubrole':subrole}.get(key))
         def set_value(obj, key, value):
             state.raised.append((obj, key, value))
@@ -206,8 +208,11 @@ class Background(unittest.TestCase):
             AXUIElementCopyAttributeValue=copy, AXUIElementGetPid=lambda element, out:(0, element[1]),
             AXUIElementSetAttributeValue=set_value)
         keys = []
+        def post(event):
+            keys.append(event)
+            if accepts and state.chars is not None and event[:2] == (9, True):state.chars += 5
         quartz = SimpleNamespace(CGEventCreateKeyboardEvent=lambda source, key, down:[key, down],
-            CGEventSetFlags=lambda event, flags:event.append(flags), CGEventPost=lambda tap, event:keys.append(tuple(event)),
+            CGEventSetFlags=lambda event, flags:event.append(flags), CGEventPost=lambda tap, event:post(tuple(event)),
             kCGEventFlagMaskCommand=8, kCGHIDEventTap=0, kCGWindowListOptionOnScreenOnly=1,
             kCGWindowListExcludeDesktopElements=16, kCGNullWindowID=0,
             CGWindowListCopyWindowInfo=lambda options, window:[{'kCGWindowLayer':layer, 'kCGWindowOwnerPID':pid,
@@ -216,7 +221,8 @@ class Background(unittest.TestCase):
         background_dictation._prompted = False
         ctx = [patch.dict(sys.modules, ApplicationServices=ax, Quartz=quartz, AppKit=SimpleNamespace()),
                patch.object(background_dictation, 'time', clock),
-               patch.object(background_dictation, '_dewiar_pids', lambda:{100})]
+               patch.object(background_dictation, '_dewiar_pids', lambda:{100}),
+               patch.object(background_dictation, '_secure_input_on', lambda:False)]
         for c in ctx:c.start(); self.addCleanup(c.stop)
         return state, keys
 
@@ -241,7 +247,7 @@ class Background(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'пароля'):paste_into_focus()
         self.assertEqual(keys + keys2, [])
         state3, keys3 = self.mac(0, [(100, 'Dewiar', 0)])
-        with self.assertRaisesRegex(RuntimeError, 'активное приложение'):paste_into_focus()
+        with self.assertRaisesRegex(RuntimeError, 'куда вставить'):paste_into_focus()
         self.assertEqual(keys3, [])
 
     def test_missing_accessibility_is_explained_and_prompted_once(self):
@@ -251,20 +257,42 @@ class Background(unittest.TestCase):
         self.assertEqual(state.prompts, 1)
         self.assertEqual(keys, [])
 
-    def test_unknown_focused_field_does_not_post_keys(self):
-        state, keys = self.mac(42, [(42, 'Chrome', 0)])
+    def test_chrome_and_electron_fields_are_pasted_without_accessibility_details(self):
+        # Chrome, Codex, Claude, VS Code, Telegram Desktop do not expose the focused field.
+        state, keys = self.mac(42, [(42, 'Google Chrome', 0)])
         import ApplicationServices as ax
         original = ax.AXUIElementCopyAttributeValue
         ax.AXUIElementCopyAttributeValue = lambda obj, key, out: (-25212, None) if key == 'AXFocusedUIElement' else original(obj, key, out)
-        with self.assertRaisesRegex(RuntimeError, 'активное поле'):
-            paste_into_focus()
+        self.assertEqual(paste_into_focus(), 'Google Chrome')
+        self.assertEqual(keys, self.PASTE)
+        keys.clear()
+        with patch.object(background_dictation, '_secure_input_on', lambda:True):
+            with self.assertRaisesRegex(RuntimeError, 'защищённый ввод'):paste_into_focus()
         self.assertEqual(keys, [])
 
-    def test_unknown_active_application_does_not_guess_another_window(self):
-        state, keys = self.mac(0, [(100, 'Dewiar', 0), (77, 'Telegram', 0)])
-        with self.assertRaisesRegex(RuntimeError, 'активное приложение'):
-            paste_into_focus()
-        self.assertEqual(keys, [])
+    def test_unknown_active_application_uses_the_topmost_window(self):
+        state, keys = self.mac(0, [(77, 'Telegram', 0), (100, 'Dewiar', 0)])
+        self.assertEqual(paste_into_focus(), 'Telegram')
+        self.assertEqual(state.raised, [])
+        self.assertEqual(keys, self.PASTE)
+
+    def test_visible_field_confirms_or_reports_the_paste(self):
+        state, keys = self.mac(42, [(42, 'Заметки', 0)], chars=10)
+        self.assertEqual(paste_into_focus(), 'Заметки')
+        self.assertEqual(state.chars, 15)
+        state2, keys2 = self.mac(42, [(42, 'Заметки', 0)], chars=10, accepts=False)
+        with self.assertRaisesRegex(RuntimeError, 'не появился.*перезапущенному'):paste_into_focus()
+        self.assertEqual(keys2, self.PASTE)
+
+    def test_posting_permission_is_checked_like_accessibility(self):
+        state, keys = self.mac(42, [(42, 'Заметки', 0)])
+        import Quartz
+        requests = []
+        Quartz.CGPreflightPostEventAccess = lambda:False
+        Quartz.CGRequestPostEventAccess = lambda:requests.append(1)
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, 'Универсальный доступ'):paste_into_focus()
+        self.assertEqual((requests, keys), ([1], []))
 
     def test_copy_and_insert_leaves_text_on_clipboard(self):
         from background_dictation import copy_and_insert

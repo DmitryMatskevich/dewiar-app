@@ -1125,13 +1125,24 @@ class AudioMixin:
                 # draft available until the user explicitly clears it.
                 log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
                 self._background_state("inserted", app=result.get("app", ""))
+                self.paste_tone(True)
                 return
             reason = result.get("reason", "")
             if reason:
                 log.warning("Диктовка: текст скопирован, но не вставлен: %s", reason)
+                self.paste_tone(False)
             self.note("Текст скопирован." if action == "copy" else
                       "Текст скопирован, но не вставлен. " + (reason or "Откройте нужное поле и вставьте его."))
             self._background_state("copied", reason=reason)
+
+    def paste_tone(self, ok):
+        """Слышно и при скрытом окне Лиры: вставлено — «готово», не вставлено — нисходящий сигнал (причина в окне)."""
+        play = getattr(self, "play_tone", None)
+        if play is not None:
+            try:
+                play("done" if ok else "sleep")
+            except Exception:  # noqa: BLE001 — сигнал необязателен
+                pass
 
     def _run_dictation_voice_command(self, argument):
         # Dispatch existing commands outside the STT lock; keep the draft intact.
