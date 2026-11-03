@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
         async open_screen_settings(){screenSettings++;return true},
         async copy_image_data(url){copiedImages.push(url);return true;}});
       window.core={snapshot:{},_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
-        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_text','screenshot_text_save','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
+        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_text','screenshot_text_save','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_window_preview','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
         if(cmd==='screenshot_text_save') {
           if(window.failSave)throw Error('Диск недоступен');
           if(window.deferSave){window.deferSave=false;await new Promise(resolve=>window.releaseSave=resolve);}
@@ -213,7 +213,8 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page.wait_for_function("!document.querySelector('.ss-region-stage')")
     assert not engine.chatlog.page()['items']
     # Visible application target is selected by stable window id, not by a guessed title.
-    page.locator('#a-shot').click();page.locator('[data-window-id="42"]').click()
+    page.locator('#a-shot').click();page.locator('[data-window-id="42"] .ss-window-select').click()
+    page.locator('[data-window-id="42"] .ss-window-capture').click()
     page.locator('#screenshot-messages .ss-card').wait_for()
     assert any(cmd=='screenshot_attach' and args.get('window_id')==42 for cmd,args in calls)
     # Saving empty text removes the icon; neither OCR disclosure nor success line returns.

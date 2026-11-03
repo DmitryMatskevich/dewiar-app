@@ -321,7 +321,7 @@
   .askrow .ab { width: 34px; height: 34px; min-width: 34px; }
   #a-clear:disabled, #a-copy:disabled { opacity: .35; cursor: default; background: none; }
   #a-clear[hidden], #a-copy[hidden] { display: none !important; }
-  #a-shot.access-unavailable svg { opacity: .35; }
+  :is(#a-shot, #a-meet, #b-cal, #b-notes).access-unavailable svg { opacity: .35; }
   #a-copy .copied-icon, #a-copy.copied .copy-icon { display: none; }
   #a-copy.copied .copied-icon { display: block; }
   #a-copy.copied { color: #63d5a2; }
@@ -354,6 +354,7 @@
   #a-mic-pick svg { width: 13px; height: 13px; }
   .qm-dialog { box-sizing:border-box; width:min(440px,calc(100% - 24px)); max-height:calc(100% - 24px); padding:16px; border:1px solid rgba(128,140,180,.28); border-radius:16px; color:var(--ink); background:#20232e; font:inherit; font-size:13px; line-height:1.45; overflow:auto; }
   .qm-dialog::backdrop { background:rgba(0,0,0,.55); }
+  .qm-dialog [hidden] { display:none!important; }
   body.light .qm-dialog { background:#f4f7fc; }
   .qm-head,.qm-actions,.qm-source-row,.qm-settings { display:flex; align-items:center; gap:8px; }
   .qm-head { justify-content:space-between; margin-bottom:12px; }
@@ -374,6 +375,8 @@
   .qm-status { min-height:18px; margin:8px 0; color:var(--muted); overflow-wrap:anywhere; }
   .qm-actions { justify-content:flex-end; }
   .qm-actions .qm-start { background:var(--brand); color:#fff; font-weight:700; }
+  #b-notes.access-unavailable { background: transparent; color: var(--muted); }
+  .access-unavailable :is(#b-notes-dot, #b-cal-count) { display: none; }
   #askn { display: none; }
   #mic-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 25; display: none; padding: 6px; border-radius: 15px;
               background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
@@ -688,6 +691,7 @@
 <script src="assets/skins.js"></script>
 <script src="assets/dewiar.js"></script>
 <script src="assets/calendar-badge.js"></script>
+<script src="assets/hud-access.js"></script>
 <script src="assets/dialog.js"></script>
 <script src="assets/rich.js"></script>
 <link rel="stylesheet" href="assets/screenshot-card.css">
@@ -699,6 +703,7 @@
 <script src="assets/zoom.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+const hudAccess = DewiarHudAccess.create({api: () => window.api?.(), notify: text => note({note:text})});
 // карточка сама непрозрачная — диск-подложка не нужен; портрет сдержанный (белый край), голос — лучами (ui.voice_fx)
 // voiceLevels: ядро шлёт уровень своего голоса, пока звук играет, — рот и лучи «говорят» только под звук, а не всё время
 // «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
@@ -1536,7 +1541,10 @@ core.on("close_msg", e => { CLB.hid = 0; core.call("close_state").then(st => clb
   .on("hello", () => setTimeout(() => core.call("close_state").then(st => clbSet(st)).catch(() => {}), 2000));
 $("clb").onclick = () => { const a = api(); if (a) a.open_settings("close"); };
 $("clb-x").onclick = (e) => { e.stopPropagation(); CLB.hid = +($("clb-n").textContent || 1) || 1; $("clb").className = ""; };
-$("b-cal").onclick = () => { const a = api(); if (a) a.open_settings("calendar"); };
+$("b-cal").onclick = guard($("b-cal"), async () => {
+  try { const a = api(); if (a && await hudAccess.ensureFiles()) await a.open_settings("calendar"); }
+  catch (error) { showErr(error); }
+}, () => "Ожидается разрешение доступа к файлам в macOS…");
 function setLocal(on) {
   const button = $("b-lo"); button.hidden = false;
   $("corner-l").classList.toggle("lo", !!on);
@@ -1670,8 +1678,7 @@ function renderNotesBadge() {
   const button = $('b-notes'), last = [...unreadNotes.values()].pop();
   $('b-notes-dot').hidden = !last;
   button.classList.toggle('has-new-notes', !!last);
-  button.title = last ? `Новых заметок: ${unreadNotes.size}. Последняя: «${last.title}». Нажмите — открыть новую заметку.` : 'Заметки: все записи, поиск, фото и файлы';
-  button.setAttribute('aria-label', button.title);
+  hudAccess.setTitle('b-notes', last ? `Новых заметок: ${unreadNotes.size}. Последняя: «${last.title}». Нажмите — открыть новую заметку.` : 'Заметки: все записи, поиск, фото и файлы');
 }
 function markNewNote(note) {
   if (note.kind !== 'note' || !String(note.path || '').startsWith('Заметки/') || seenNotePaths.has(note.path)) return;
@@ -1683,15 +1690,16 @@ function markNewNote(note) {
 function markNoteSeen(path) { unreadNotes.delete(path); renderNotesBadge(); }
 core.on('notes_seen', e => markNoteSeen(e.path));
 renderNotesBadge();
-$('b-notes').onclick = async () => {
+$('b-notes').onclick = guard($('b-notes'), async () => {
   const a = api(), last = [...unreadNotes.values()].pop();
   if (!a) return;
   try {
+    if (!await hudAccess.ensureFiles()) return;
     // Studio acknowledges after ws_read succeeds. Merely raising a window is not a read.
     if (last) await a.open_settings('notes', '&note=' + encodeURIComponent(last.path));
     else await a.open_settings('notes');
   } catch (error) { showErr(error); }
-};
+}, () => 'Ожидается разрешение доступа к файлам в macOS…');
 /* фоновые задачи и обновления — строкой в карточке */
 const tasks = {}, doneAt = {}, dismissed = new Set();
 /* Готовая расшифровка открывает сохранённый текст, а не предлагает действия с исходным роликом.
@@ -1932,7 +1940,7 @@ async function refreshCalendarBadge() {
     const badge=$("b-cal-count"), button=$("b-cal");
     badge.hidden=n===0; badge.textContent=n>99?'99+':String(n);
     const label=`Календарь: ${n} записей · ${prefs.days===1?'сегодня':'ближайшие '+prefs.days+' дней'}. ${prefs.types.map(k=>CalendarBadge.labels[k]).join(', ') || 'Счётчик выключен'}. Открыть календарь`;
-    button.title=label; button.setAttribute('aria-label',label);
+    hudAccess.setTitle('b-cal', label);
   } catch (_) { if(revision===calendarBadgeRevision) $("b-cal-count").hidden=true; }
 }
 core.on('hello',d=>setCalendarBadgeSettings((((d||{}).settings||{}).ui||{})));
@@ -2055,40 +2063,23 @@ core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
 // The bridge can receive hello while the remaining UI scripts are still loading.
 if (core.snapshot) loadScreenshotMessages();
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
-async function refreshScreenshotAccess() {
-  const native = window.api?.(), button = $("a-shot");
-  let status = null;
-  if (native?.screen_capture_permission) {
-    try { status = await native.screen_capture_permission(); }
-    catch (_) { status = {granted:false}; }
-  }
-  const unavailable = status != null && !status.granted;
-  button.classList.toggle('access-unavailable', unavailable);
-  button.title = unavailable
-    ? 'Нет доступа к записи экрана. Нажмите, чтобы открыть настройки macOS и разрешить доступ Dewiar.'
-    : 'Снимок экрана: весь экран, выбор области или окно приложения';
-  button.setAttribute('aria-label', button.title);
-  if (unavailable) button.removeAttribute('aria-haspopup');
-  else button.setAttribute('aria-haspopup', 'dialog');
-  return !unavailable;
-}
 let quickMeetingDialog = null, quickMeetingSource = "screen", quickMeetingRegion = null, quickMeetingAppsLoaded = false;
 function quickMeetingStatus(text, error = false) {
-  const status = $("#qm-status"); if (!status) return;
+  const status = $("qm-status"); if (!status) return;
   status.textContent = text || ""; status.style.color = error ? "#ff8295" : "";
 }
 function quickMeetingReady() {
-  const consent = $("#qm-consent")?.checked;
+  const consent = $("qm-consent")?.checked;
   const targetReady = quickMeetingSource === "screen" ||
     (quickMeetingSource === "region" && !!quickMeetingRegion) ||
-    (quickMeetingSource === "application" && !!$("#qm-app")?.value);
-  $("#qm-start").disabled = !consent || !targetReady;
-  $$("#qm-capture .qm-source").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.source === quickMeetingSource)));
-  $("#qm-app-wrap").hidden = quickMeetingSource !== "application";
-  $("#qm-region-wrap").hidden = quickMeetingSource !== "region";
+    (quickMeetingSource === "application" && !!$("qm-app")?.value);
+  $("qm-start").disabled = !consent || !targetReady;
+  document.querySelectorAll("#qm-capture .qm-source").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.source === quickMeetingSource)));
+  $("qm-app-wrap").hidden = quickMeetingSource !== "application";
+  $("qm-region-wrap").hidden = quickMeetingSource !== "region";
 }
 async function loadQuickMeetingApps() {
-  const select = $("#qm-app"); if (!select || quickMeetingAppsLoaded) return;
+  const select = $("qm-app"); if (!select || quickMeetingAppsLoaded) return;
   select.disabled = true; quickMeetingStatus("Загружаю видимые окна…");
   try {
     const result = await core.call("prompter_capture_apps");
@@ -2115,38 +2106,42 @@ function openQuickMeeting() {
       <p class="qm-status" id="qm-status" role="status" aria-live="polite"></p>
       <div class="qm-actions"><button type="button" id="qm-cancel">Отмена</button><button type="button" id="qm-start" class="qm-start" disabled>Начать встречу</button></div>`;
     document.body.append(dialog); quickMeetingDialog = dialog;
-    $("#qm-close").onclick = $("#qm-cancel").onclick = () => dialog.close();
-    $("#qm-consent").onchange = quickMeetingReady;
-    $("#qm-app").onchange = quickMeetingReady;
-    $("#qm-capture").addEventListener("click", event => {
+    $("qm-close").onclick = $("qm-cancel").onclick = () => dialog.close();
+    $("qm-consent").onchange = quickMeetingReady;
+    $("qm-app").onchange = quickMeetingReady;
+    $("qm-capture").addEventListener("click", event => {
       const source = event.target.closest("[data-source]")?.dataset.source; if (!source) return;
       quickMeetingSource = source; quickMeetingReady(); quickMeetingStatus("");
       if (source === "application") loadQuickMeetingApps();
     });
-    $("#qm-region-pick").onclick = () => {
+    $("qm-region-pick").onclick = () => {
       quickMeetingStatus("Выделите область на снимке экрана…");
       DewiarCapture.selectRegion(region => {
-        quickMeetingRegion = region; $("#qm-region-label").textContent = `${region.width} × ${region.height} px`;
+        quickMeetingRegion = region; $("qm-region-label").textContent = `${region.width} × ${region.height} px`;
         quickMeetingStatus("Область выбрана."); quickMeetingReady();
       }, error => quickMeetingStatus(error.message || String(error), true));
     };
-    dialog.addEventListener("close", () => $("#a-meet")?.focus(), {once: false});
-    $("#qm-start").onclick = startQuickMeeting;
+    dialog.addEventListener("close", () => $("a-meet")?.focus(), {once: false});
+    $("qm-start").onclick = startQuickMeeting;
   }
   quickMeetingSource = "screen"; quickMeetingRegion = null; quickMeetingAppsLoaded = false;
-  $("#qm-consent").checked = false; $("#qm-app").replaceChildren(new Option("Выберите окно", ""));
-  $("#qm-region-label").textContent = ""; $("#qm-interval").value = "0.5"; $("#qm-quality").value = "100";
-  quickMeetingStatus(""); quickMeetingReady(); quickMeetingDialog.showModal(); $("#qm-capture .qm-source")?.focus();
+  $("qm-consent").checked = false; $("qm-app").replaceChildren(new Option("Выберите окно", ""));
+  $("qm-region-label").textContent = ""; $("qm-interval").value = "0.5"; $("qm-quality").value = "100";
+  quickMeetingStatus(""); quickMeetingReady(); quickMeetingDialog.showModal(); document.querySelector("#qm-capture .qm-source")?.focus();
 }
 async function startQuickMeeting() {
-  const button = $("#qm-start"); if (button.disabled) return;
+  const button = $("qm-start"); if (button.disabled) return;
   button.disabled = true; quickMeetingStatus("Запускаю запись встречи…");
   try {
+    if (!await hudAccess.ensureScreen()) {
+      quickMeetingStatus('Разрешите запись экрана и нажмите «Начать встречу» ещё раз.', true);
+      button.disabled = false; return;
+    }
     await core.call("prompter_start", {title:"Встреча", goal:"", mode:"manual", them:true, me:false, knowledge:false,
-      keep_text:true, place:"online", nudge:false, record:true, deferred:true, consent:$("#qm-consent").checked,
-      auto_frames:true, auto_interval:Number($("#qm-interval").value), frame_quality:Number($("#qm-quality").value),
+      keep_text:true, place:"online", nudge:false, record:true, deferred:true, consent:$("qm-consent").checked,
+      auto_frames:true, auto_interval:Number($("qm-interval").value), frame_quality:Number($("qm-quality").value),
       frame_video:true, auto_first_frame:true, capture_source:quickMeetingSource, capture_region:quickMeetingRegion || {},
-      capture_application:quickMeetingSource === "application" ? $("#qm-app").value : "",
+      capture_application:quickMeetingSource === "application" ? $("qm-app").value : "",
       record_source:"system", record_me:true});
     quickMeetingDialog.close();
     const native = window.api?.();
@@ -2156,24 +2151,18 @@ async function startQuickMeeting() {
 }
 $("a-shot").onclick = guard($("a-shot"), async () => {
   try {
-    if (!await refreshScreenshotAccess()) {
-      await window.api().open_screen_settings();
-      return;
-    }
+    if (!await hudAccess.ensureScreen()) return;
     DewiarCapture.menu($("a-shot"), showScreenshotMessage, showErr);
   } catch (error) { showErr(error); }
 });
-window.addEventListener('focus', refreshScreenshotAccess);
-window.addEventListener('pywebviewready', refreshScreenshotAccess);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshScreenshotAccess(); });
-core.on('hello', refreshScreenshotAccess);
-refreshScreenshotAccess();
+core.on('hello', () => hudAccess.refresh());
+hudAccess.start();
 $("a-meet").onclick = guard($("a-meet"), async () => {
   try {
+    if (!await hudAccess.ensureScreen()) return;
     const state = await core.call("prompter_state");
     const native = window.api?.();
     if (state.on || state.processing) { if (native?.open_prompter) await native.open_prompter(); return; }
-    if (!await refreshScreenshotAccess()) { await native?.open_screen_settings?.(); return; }
     openQuickMeeting();
   } catch (error) { showErr(error); }
 });

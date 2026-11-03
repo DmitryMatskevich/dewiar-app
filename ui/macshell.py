@@ -482,7 +482,13 @@ def make_api(app):
                 return self.request_screen_access(automatic=True)
             return self.screen_capture_permission()
 
-        def files_access_state(self):
+        def files_access_state(self, refresh=False):
+            # Recheck previously requested folders after returning from Settings.
+            # Never interpret a cached grant as the current macOS decision.
+            if refresh and getattr(sys, 'frozen', False):
+                from mac_screen_access import was_requested
+                if was_requested('files'):
+                    return self.request_files_access('features', open_settings=False)
             folders = _core_request(self.token, 'mac_files_access', timeout=3) or {}
             with self._files_permission_lock:
                 cached = getattr(self, '_files_access', {})
@@ -543,8 +549,8 @@ def make_api(app):
                     with self._files_permission_lock:self._files_startup_running = False
             threading.Thread(target=request, name='files-access-startup', daemon=True).start()
 
-        def request_files_access(self, target="workspace"):
-            if target not in ('workspace', 'documents', 'desktop', 'downloads', 'selected'):
+        def request_files_access(self, target="workspace", open_settings=True):
+            if target not in ('workspace', 'documents', 'desktop', 'downloads', 'selected', 'features'):
                 raise ValueError('Неизвестная папка')
             if not getattr(sys, 'frozen', False):
                 return self.files_access_state()
@@ -552,22 +558,33 @@ def make_api(app):
                 if getattr(self, '_files_pending', ''):
                     return self.files_access_state()
                 self._files_pending = target
+                targets = ('documents', 'workspace') if target == 'features' else (target,)
+                if not hasattr(self, '_files_access'):self._files_access = {}
+                for key in targets:
+                    self._files_access.pop(key, None)
             def request():
                 selected = ''
+                current = targets[0]
                 try:
                     if target == 'selected':
                         selected = self.pick_folder()
                         if not selected:return
-                    result = _core_request(self.token, 'mac_files_access', {"target":target, "selected":selected}, timeout=90)
-                    with self._files_permission_lock:
-                        if not hasattr(self, '_files_access'):self._files_access = {}
-                        self._files_access[target] = result
-                    if result.get('state') == 'denied':
+                    denied = False
+                    for current in targets:
+                        result = _core_request(self.token, 'mac_files_access', {"target":current, "selected":selected}, timeout=90)
+                        if not isinstance(result, dict) or not result.get('state'):
+                            raise RuntimeError('Не удалось проверить доступ к папке')
+                        with self._files_permission_lock:self._files_access[current] = result
+                        denied = denied or result.get('state') == 'denied'
+                    if target == 'features':
+                        from mac_screen_access import mark_requested
+                        mark_requested('files')
+                    if denied and open_settings:
                         self.open_files_settings()
                 except Exception as error:
                     with self._files_permission_lock:
                         if not hasattr(self, '_files_access'):self._files_access = {}
-                        self._files_access[target] = {"state":"error", "readable":False, "error":str(error), "path":selected}
+                        self._files_access[current] = {"state":"error", "readable":False, "error":str(error), "path":selected}
                 finally:
                     with self._files_permission_lock:self._files_pending = ''
             threading.Thread(target=request, name='files-permission', daemon=True).start()

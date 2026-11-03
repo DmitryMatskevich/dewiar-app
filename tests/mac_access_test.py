@@ -134,5 +134,31 @@ class AccessTests(unittest.TestCase):
         self.assertEqual(value['workspace']['state'],'unchecked')
         scan.assert_not_called()
 
+    def test_feature_access_rechecks_both_folders_and_discards_old_grants(self):
+        folders={key:{'path':'/fixture/'+key,'state':'unchecked'} for key in ('documents','workspace')}
+        denied=False
+        def core(token,cmd,args=None,**kwargs):
+            if not args:return {key:dict(value) for key,value in folders.items()}
+            return dict(folders[args['target']], state='denied' if denied else 'authorized', readable=not denied)
+        with patch('macshell._core_request',side_effect=core) as request, patch.object(sys,'frozen',True,create=True), patch('macshell.threading.Thread') as thread, patch('mac_screen_access.mark_requested') as marked, patch('mac_screen_access.was_requested',return_value=True):
+            api=make_api(app)('fixture');api.open_files_settings=Mock()
+            api.request_files_access('features');thread.call_args.kwargs['target']()
+            self.assertEqual([c.args[2]['target'] for c in request.call_args_list if len(c.args)>2],['documents','workspace'])
+            self.assertTrue(all(v['readable'] for v in api.files_access_state()['folders'].values()))
+            marked.assert_called_once_with('files')
+            denied=True
+            self.assertEqual(api.files_access_state(refresh=True)['pending'],'features')
+            self.assertTrue(all(v['state']=='unchecked' for v in api.files_access_state()['folders'].values()))
+            thread.call_args.kwargs['target']()
+            self.assertTrue(all(v['state']=='denied' for v in api.files_access_state()['folders'].values()))
+            api.open_files_settings.assert_not_called()  # Focus refresh does not open Settings.
+            api.request_files_access('features');thread.call_args.kwargs['target']()
+            api.open_files_settings.assert_called_once()  # Explicit click offers recovery.
+
+    def test_focus_before_any_request_does_not_prompt_for_files(self):
+        with patch('macshell._core_request',return_value={}), patch.object(sys,'frozen',True,create=True), patch('mac_screen_access.was_requested',return_value=False), patch('macshell.threading.Thread') as thread:
+            make_api(app)('fixture').files_access_state(refresh=True)
+            thread.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()
