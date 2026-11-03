@@ -3,6 +3,24 @@ import re
 import threading
 
 
+def copy_text(text):
+    """An explicit voice command replaces the clipboard with the dictated text."""
+    from AppKit import NSPasteboard, NSPasteboardTypeString
+    pasteboard = NSPasteboard.generalPasteboard()
+    pasteboard.clearContents()
+    if not pasteboard.setString_forType_(text, NSPasteboardTypeString):
+        raise RuntimeError('Не удалось скопировать текст в буфер обмена.')
+
+
+def copy_and_insert(text):
+    copy_text(text)
+    try:
+        insert_at_focus(text)
+        return {'copied': True, 'inserted': True}
+    except Exception as exc:
+        return {'copied': True, 'inserted': False, 'reason': str(exc)}
+
+
 def parse(text, aliases):
     """Only an explicit assistant name starts a command; other speech is literal."""
     text = str(text or '').strip()

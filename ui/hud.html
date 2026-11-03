@@ -617,6 +617,11 @@
     <div id="clb" role="button" tabindex="0" title="Открыть переписку"><span id="clb-t"></span><em id="clb-n" hidden></em><button id="clb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
     <div id="ask">
       <div id="link-messages" aria-label="Ссылки в сообщениях ассистента"></div>
+      <section id="background-dictation" hidden style="margin:8px 0;padding:10px;border-radius:12px;background:var(--glass2,rgba(127,127,127,.12))">
+        <label for="background-draft" style="display:block;font-size:12px;margin-bottom:4px">Фоновая диктовка · можно редактировать</label>
+        <textarea id="background-draft" rows="3" style="width:100%;resize:vertical;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:8px;padding:8px" aria-label="Текст фоновой диктовки"></textarea>
+        <div id="background-dictation-status" role="status" style="font-size:12px;margin-top:4px"></div>
+      </section>
       <div class="askbox" id="askbox">
         <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода произнесите имя текущего помощника отдельно или в конце фразы." autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
@@ -1493,11 +1498,65 @@ core.on("dictation", e => {
   if (e.state === "partial" && e.text) {
     insertDictationText(e.text);
   }
+  if (e.state === "copy_requested") {
+    const text = $("askin").value;
+    if (!text.trim()) { $("ask-feedback").textContent = "Нет текста для копирования."; return; }
+    core.call("dictation_copy_text", {text}).then(result => {
+      $("ask-feedback").textContent = result.inserted ? "Текст скопирован и вставлен." : "Текст скопирован. Его можно вставить в нужное поле.";
+    }).catch(showErr);
+    return;
+  }
   if (e.state === "done") {
     dictationUi(false);
     if (e.submit) sendAsk();
   }
 });
+let backgroundState = null, backgroundSaving = false, backgroundDirty = false, backgroundPending = null;
+function renderBackgroundDictation(e) {
+  if (!e) return;
+  const box = $("background-dictation"), editor = $("background-draft");
+  if (e.active === false) {
+    backgroundState = null; backgroundPending = null;
+    if (backgroundDirty) $("background-dictation-status").textContent = "Диктовка завершена. Несохранённую правку можно скопировать из этого поля.";
+    else box.hidden = true;
+    return;
+  }
+  if (!e.active) return;
+  if (backgroundDirty && backgroundState) {
+    if (e.state !== "edited" && (!backgroundPending || e.revision > backgroundPending.revision)) backgroundPending = e;
+    return;
+  }
+  backgroundState = {session: e.session, revision: e.revision, text: e.text || ""};
+  box.hidden = false; openAsk();
+  if (!backgroundDirty && editor.value !== (e.text || "")) editor.value = e.text || "";
+  if (e.state === "copied") $("background-dictation-status").textContent = "Текст скопирован. Его можно вставить в нужное поле.";
+  else if (e.state === "inserted") $("background-dictation-status").textContent = "Текст скопирован и вставлен. Продолжаю слушать.";
+  else if (e.state === "error") $("background-dictation-status").textContent = e.error || "Не удалось скопировать текст.";
+  else if (!backgroundDirty) $("background-dictation-status").textContent = "Лира слушает. Скажите «Лира, текст», чтобы скопировать и вставить.";
+}
+async function saveBackgroundDraft() {
+  if (backgroundSaving || !backgroundState || !backgroundDirty) return;
+  backgroundSaving = true;
+  const editor = $("background-draft"), value = editor.value;
+  const request = {text: value, session: backgroundState.session, revision: backgroundState.revision, base_text: backgroundState.text};
+  try {
+    const state = await core.call("background_dictation_edit", request);
+    backgroundState = {session: state.session, revision: state.revision, text: state.text || ""};
+    backgroundDirty = editor.value !== value;
+    if (!backgroundDirty && editor.value !== state.text) editor.value = state.text || "";
+    if (backgroundPending && backgroundPending.revision > state.revision && !backgroundDirty) {
+      const pending = backgroundPending; backgroundPending = null; renderBackgroundDictation(pending);
+    } else if (backgroundPending && backgroundPending.revision <= state.revision) backgroundPending = null;
+    if (!backgroundDirty) $("background-dictation-status").textContent = "Правка сохранена. Лира продолжает слушать.";
+  } catch (error) {
+    $("background-dictation-status").textContent = (error.message || "Не удалось сохранить правку") + " Скопируйте её из этого поля.";
+    return;
+  } finally { backgroundSaving = false; }
+  if (backgroundDirty) saveBackgroundDraft();
+}
+$("background-draft").addEventListener("input", () => { backgroundDirty = true; saveBackgroundDraft(); });
+core.on("background_dictation", renderBackgroundDictation);
+core.on("hello", () => core.call("background_dictation_state").then(renderBackgroundDictation).catch(() => {}));
 async function startDictation() {
   if (dictating || dictationCancelling) return;
   if (audioMode === "text") await enableMacVoice();

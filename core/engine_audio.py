@@ -958,6 +958,7 @@ class AudioMixin:
             self._dictation_session += 1
             self._background_dictation = bool(background)
             self._background_draft = []
+            self._background_revision = 0
             self._dictation_closed = self._dictation_submit = False
             self.dictation_active = True
             self.dictation_finish_requested = False
@@ -967,7 +968,10 @@ class AudioMixin:
             self.wake_time = time.monotonic()
             self.follow_up_until = 0.0
             self.set_state("listening")
-            self.emit("background_dictation" if background else "dictation", state="recording", session=self._dictation_session)
+            if background:
+                self._background_state("recording")
+            else:
+                self.emit("dictation", state="recording", session=self._dictation_session)
             return {"ok": True, "state": "recording", "session": self._dictation_session}
 
     def dictation_cancel(self):
@@ -980,7 +984,10 @@ class AudioMixin:
             self._dictation_wait_for_pause = False
             self._dictation_session += 1
             self.set_state("idle")
-            self.emit("dictation", state="cancelled", session=sid)
+            if getattr(self, "_background_dictation", False):
+                self._background_state("stopped")
+            else:
+                self.emit("dictation", state="cancelled", session=sid)
         return {"ok": was, "state": "cancelled", "session": sid}
 
     def dictation_finish(self, submit=False, wait_for_pause=False):
@@ -1015,6 +1022,13 @@ class AudioMixin:
                 self._background_dictation_result(text)
                 return
             aliases = self.aliases.get(self.s.get("persona"), [])
+            from background_dictation import parse
+            words, command = parse(text, aliases)
+            if command and command[0] == "insert":
+                if words:
+                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
+                self.emit("dictation", state="copy_requested", session=sid)
+                return
             endings = "|".join(re.escape(a) for a in sorted(filter(None, aliases), key=len, reverse=True))
             match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I) if endings else None
             if match:
@@ -1025,12 +1039,13 @@ class AudioMixin:
                 self.dictation_finish(submit=True)
 
     def _background_dictation_result(self, text):
-        from background_dictation import parse, insert_at_focus
+        from background_dictation import parse, copy_and_insert
         aliases = self.aliases.get(self.s.get("persona"), [])
         words, command = parse(text, aliases)
         if words:
             self._background_draft.append(words)
-            self.emit("background_dictation", state="listening", characters=len(" ".join(self._background_draft)))
+            self._background_revision = getattr(self, "_background_revision", 0) + 1
+            self._background_state("listening")
         if command is None:
             return
         action, argument = command
@@ -1040,19 +1055,25 @@ class AudioMixin:
                 self.note("Нет текста для вставки. Продолжаю слушать.")
                 return
             try:
-                insert_at_focus(draft)
+                result = copy_and_insert(draft)
             except Exception as exc:
                 # Preserve the dictated text until insertion succeeds or the user cancels.
                 self.note("Текст сохранён в диктовке. " + str(exc))
                 self.emit("background_dictation", state="error", error=str(exc))
                 return
-            self._background_draft.clear()
-            self.emit("background_dictation", state="inserted")
+            if result['inserted']:
+                self._background_draft.clear()
+                self._background_revision += 1
+                self._background_state("inserted")
+            else:
+                self.note("Текст скопирован. Откройте нужное поле и вставьте его.")
+                self._background_state("copied", reason=result.get('reason', ''))
         elif action == "show":
             self.emit("window", do="show")
         elif action == "cancel":
             self._background_draft.clear()
-            self.emit("background_dictation", state="cleared")
+            self._background_revision += 1
+            self._background_state("cleared")
         elif action == "stop":
             if self._background_draft:
                 self.note("Сначала вставьте текст или скажите «Лира, отмена».")
@@ -1067,6 +1088,35 @@ class AudioMixin:
                 except Exception as exc:
                     self.note("Команда не выполнена: " + str(exc))
             threading.Thread(target=run, name="background-voice-command", daemon=True).start()
+
+    def _background_state(self, state="listening", **extra):
+        data = {"active": bool(self.dictation_active and getattr(self, "_background_dictation", False)),
+                "text": " ".join(self._background_draft), "revision": getattr(self, "_background_revision", 0),
+                "session": self._dictation_session}
+        self.emit("background_dictation", state=state, **data, **extra)
+        return data
+
+    def background_dictation_state(self):
+        with self._dictation_lock:
+            return {"active": bool(self.dictation_active and getattr(self, "_background_dictation", False)),
+                    "text": " ".join(getattr(self, "_background_draft", [])),
+                    "revision": getattr(self, "_background_revision", 0), "session": self._dictation_session}
+
+    def background_dictation_edit(self, text, session, revision, base_text=""):
+        with self._dictation_lock:
+            if not self.dictation_active or not getattr(self, "_background_dictation", False) or session != self._dictation_session:
+                raise ValueError("Эта диктовка уже завершена.")
+            if revision != self._background_revision:
+                current = " ".join(self._background_draft)
+                if not current.startswith(base_text):
+                    raise ValueError("Текст изменился во время редактирования; скопируйте правку и обновите черновик.")
+                suffix = current[len(base_text):]
+                text = text + (" " if text and suffix and not text[-1].isspace() and not suffix[0].isspace() else "") + suffix
+            if len(text) > 200000:
+                raise ValueError("Текст диктовки слишком большой.")
+            self._background_draft = [text] if text else []
+            self._background_revision += 1
+            return self._background_state("edited")
 
     def _dictation_done(self, sid):
         with self._dictation_lock:

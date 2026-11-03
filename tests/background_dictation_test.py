@@ -46,15 +46,35 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Лира', ['лира']), ('', ('show','')))
         self.assertEqual(parse('Лира, снимок экрана', ['лира']), ('', ('command','снимок экрана')))
         self.assertEqual(parse('вставить текст', ['лира']), ('вставить текст', None))
+
+    def test_voice_copy_also_works_in_normal_dictation(self):
+        e = Engine()
+        e._background_dictation = False
+        e._dictation_result('Последняя фраза, Лира, текст', 'test', 3)
+        self.assertEqual(e.events[0][1]['text'], 'Последняя фраза')
+        self.assertEqual(e.events[1][1]['state'], 'copy_requested')
+        self.assertTrue(e.dictation_active)
+
+    def test_copy_command_replaces_image_even_without_focused_field(self):
+        from background_dictation import copy_and_insert
+        board = SimpleNamespace(contents='image')
+        board.clearContents = lambda:setattr(board, 'contents', None)
+        def put(text, kind): board.contents=text; return True
+        board.setString_forType_ = put
+        appkit=SimpleNamespace(NSPasteboard=SimpleNamespace(generalPasteboard=lambda:board), NSPasteboardTypeString='text')
+        with patch.dict(sys.modules, AppKit=appkit), patch('background_dictation.insert_at_focus', side_effect=RuntimeError('Нет поля')):
+            result=copy_and_insert('Текст вместо изображения')
+        self.assertEqual(board.contents, 'Текст вместо изображения')
+        self.assertEqual(result, {'copied':True,'inserted':False,'reason':'Нет поля'})
     def test_insert_continues_listening_and_keeps_text_on_error(self):
         e = Engine()
         e._dictation_result('Добрый день.', 'test', 3)
         e._dictation_result('Как дела?', 'test', 3)
-        with patch('background_dictation.insert_at_focus', side_effect=RuntimeError('Нет фокуса')):
+        with patch('background_dictation.copy_and_insert', return_value={'copied':True,'inserted':False,'reason':'Нет фокуса'}):
             e._dictation_result('Лира, вставить', 'test', 3)
         self.assertEqual(e._background_draft, ['Добрый день.', 'Как дела?'])
-        self.assertIn('Нет фокуса', e.notes[-1])
-        with patch('background_dictation.insert_at_focus') as insert:
+        self.assertIn('скопирован', e.notes[-1])
+        with patch('background_dictation.copy_and_insert', return_value={'copied':True,'inserted':True}) as insert:
             e._dictation_result('Лира, добавить', 'test', 3)
             insert.assert_called_once_with('Добрый день. Как дела?')
         self.assertEqual(e._background_draft, [])
@@ -72,6 +92,17 @@ class Background(unittest.TestCase):
         self.assertTrue(e.command_done.wait(2))
         self.assertEqual(e.command, 'снимок экрана')
         self.assertEqual(e._background_draft, ['Черновик.'])
+
+    def test_edit_during_new_speech_preserves_both(self):
+        e = Engine()
+        e._dictation_result('Привет', 'test', 3)
+        state = e.background_dictation_state()
+        e._dictation_result('как дела', 'test', 3)
+        result = e.background_dictation_edit('Здравствуйте', 3, state['revision'], state['text'])
+        self.assertEqual(result['text'], 'Здравствуйте как дела')
+        with self.assertRaises(ValueError):
+            e.background_dictation_edit('не потерять', 3, state['revision'], 'другой текст')
+        self.assertEqual(e.background_dictation_state()['text'], 'Здравствуйте как дела')
 
     def test_insertion_rechecks_focus_and_rejects_secure_fields(self):
         app = SimpleNamespace(bundleIdentifier=lambda: 'org.example.editor', processIdentifier=lambda: 17)

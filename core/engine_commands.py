@@ -1213,6 +1213,16 @@ class CommandsMixin:
             return self.hold_end(bool(a.get("cancel")))
         if cmd == "dictation_start":
             return self.dictation_start()
+        if cmd == "background_dictation_state":
+            return self.background_dictation_state()
+        if cmd == "background_dictation_edit":
+            return self.background_dictation_edit(str(a.get("text") or ""), a.get("session"), a.get("revision"), str(a.get("base_text") or ""))
+        if cmd == "dictation_copy_text":
+            from background_dictation import copy_and_insert
+            text = str(a.get("text") or "")
+            if not text.strip() or len(text) > 200000:
+                raise ValueError("Нет текста для копирования или он слишком большой.")
+            return copy_and_insert(text)
         if cmd == "dictation_cancel":
             return self.dictation_cancel()
         if cmd == "dictation_finish":
