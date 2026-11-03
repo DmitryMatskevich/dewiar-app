@@ -50,6 +50,8 @@ class Background(unittest.TestCase):
                          ('Давай наберём текст, который будем копировать.', ('insert','')))
         self.assertEqual(parse('Лира ставить', ['лира']), ('', ('insert','')))
         self.assertEqual(parse('Лира, скопировать текст', ['лира']), ('', ('copy','')))
+        self.assertEqual(parse('Лира, сотри', ['лира']), ('', ('clear','')))
+        self.assertEqual(parse('Лира, очисти текст', ['лира']), ('', ('clear','')))
 
     def test_voice_copy_also_works_in_normal_dictation(self):
         e = Engine()
@@ -61,6 +63,9 @@ class Background(unittest.TestCase):
         e.events.clear()
         e._dictation_result('Лира, скопировать', 'test', 3)
         self.assertEqual(e.events[0][1]['action'], 'copy')
+        e.events.clear()
+        e._dictation_result('Лира, сотри', 'test', 3)
+        self.assertEqual(e.events[0][1]['action'], 'clear')
 
     def test_named_command_is_not_inserted_into_normal_dictation(self):
         e = Engine()
@@ -106,7 +111,8 @@ class Background(unittest.TestCase):
         AudioMixin.handle_text(e, 'Лира, вставить', True, False)
         AudioMixin.handle_text(e, 'Лира, скопировать', True, False)
         AudioMixin.handle_text(e, 'скопировать', True, False, forced='lira')
-        self.assertEqual(e.events, [('draft_command', {'action':'insert'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'copy'})])
+        AudioMixin.handle_text(e, 'Лира, очисти', True, False)
+        self.assertEqual(e.events, [('draft_command', {'action':'insert'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'clear'})])
     def test_insert_continues_listening_and_keeps_text_on_error(self):
         e = Engine()
         e._dictation_result('Добрый день.', 'test', 3)

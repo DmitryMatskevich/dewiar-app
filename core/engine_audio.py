@@ -1024,7 +1024,7 @@ class AudioMixin:
             aliases = self.aliases.get(self.s.get("persona"), [])
             from background_dictation import parse
             words, command = parse(text, aliases)
-            if command and command[0] in ("insert", "copy"):
+            if command and command[0] in ("insert", "copy", "clear"):
                 if words:
                     self.emit("dictation", state="partial", text=words, by=by, session=sid)
                 self.emit("dictation", state="copy_requested", action=command[0], session=sid)
@@ -1065,6 +1065,17 @@ class AudioMixin:
         if command is None:
             return
         action, argument = command
+        if action == "clear":
+            # The HUD owns the selection in the editable background draft.
+            # If there is no UI, there can be no selection, so clear it here.
+            bridge = getattr(self, "bridge", None)
+            if bridge is not None and not bridge.clients:
+                self._background_draft.clear()
+                self._background_revision += 1
+                self._background_state("cleared")
+            else:
+                self._background_state("clear_requested")
+            return
         if action in ("insert", "copy"):
             draft = " ".join(self._background_draft).strip()
             if not draft:

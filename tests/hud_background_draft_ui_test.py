@@ -33,6 +33,18 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     page.wait_for_function("calls.some(x=>x[0]==='dictation_copy_text'&&x[1].copy_only===true)")
     assert page.evaluate("calls.filter(x=>x[0]==='dictation_copy_text').at(-1)[1].text").endswith('диктовка')
     assert not page.evaluate('dictating')
+    page.locator('#askin').fill('Первый лишний последний')
+    page.locator('#askin').evaluate("e=>e.setSelectionRange(7,13)")
+    page.evaluate("fire('draft_command',{action:'clear'})")
+    assert page.locator('#askin').input_value() == 'Первый  последний'
+    page.locator('#askin').evaluate("e=>e.setSelectionRange(0,0)")
+    page.evaluate("fire('draft_command',{action:'clear'})")
+    assert page.locator('#askin').input_value() == ''
+    page.evaluate("fire('background_dictation',{active:true,state:'listening',session:6,revision:1,text:'До лишнее после'})")
+    field.evaluate("e=>e.setSelectionRange(3,9)")
+    page.evaluate("fire('background_dictation',{active:true,state:'clear_requested',session:6,revision:1,text:'До лишнее после'})")
+    assert field.input_value() == 'До  после'
+    page.wait_for_function("calls.some(x=>x[0]==='background_dictation_edit'&&x[1].text==='До  после')")
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')

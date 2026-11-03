@@ -683,7 +683,7 @@
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире.</p>
     <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит уже распознанный текст в поле. Фразы, которые ещё распознаются, не добавятся. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
     <h3>Диктовка в другие приложения</h3><p>Включите микрофон, поставьте курсор в нужное поле и скажите «Лира, слушай» или «Лира, записывай». Продиктуйте текст и скажите «Лира, вставить», «Лира, добавить» или «Лира, текст». Текст заменит предыдущее содержимое буфера обмена; если подходящее поле активно, Лира также вставит текст в него, не отправляя сообщение. Если поле недоступно, текст останется в буфере для ручной вставки, а черновик — в диктовке. Лира продолжит слушать.</p><p>Когда окно Лиры открыто, черновик фоновой диктовки виден в отдельном поле и доступен для редактирования. Команда «Лира, текст» также копирует текст при диктовке через кнопку микрофона. «Лира, отмена» очищает фоновый черновик; «Лира, закончи диктовку» останавливает прослушивание после вставки или очистки. Одно имя показывает ассистента. Для автоматической вставки требуется разрешение «Универсальный доступ» в настройках macOS; защищённые поля не поддерживаются.</p>
-    <h3>Текст и снимок экрана</h3><p>Кнопки копирования и стирания появляются, когда в поле есть текст. Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. Команды работают во время и после диктовки, пока включён голосовой режим. Крестик стирает выделение, а если выделения нет — весь текст. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
+    <h3>Текст и снимок экрана</h3><p>Кнопки копирования и стирания появляются, когда в поле есть текст. Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» работает как крестик: удаляет выделение, а если выделения нет — весь текст. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
@@ -1499,7 +1499,7 @@ core.on("dictation", e => {
     insertDictationText(e.text);
   }
   if (e.state === "copy_requested") {
-    copyDraftByVoice(e.action || "insert");
+    if (e.action === "clear") clearDraftByVoice(); else copyDraftByVoice(e.action || "insert");
     return;
   }
   if (e.state === "done") {
@@ -1514,7 +1514,7 @@ function copyDraftByVoice(action) {
     $("ask-feedback").textContent = result.inserted ? "Текст скопирован и вставлен." : "Текст скопирован. Его можно вставить в нужное поле.";
   }).catch(showErr);
 }
-core.on("draft_command", e => copyDraftByVoice(e.action));
+core.on("draft_command", e => { if (e.action === "clear") clearDraftByVoice(); else copyDraftByVoice(e.action); });
 let backgroundState = null, backgroundSaving = false, backgroundDirty = false, backgroundPending = null;
 function renderBackgroundDictation(e) {
   if (!e) return;
@@ -1526,6 +1526,18 @@ function renderBackgroundDictation(e) {
     return;
   }
   if (!e.active) return;
+  if (e.state === "clear_requested") {
+    if (!backgroundState) {
+      backgroundState = {session:e.session, revision:e.revision, text:e.text || ""};
+      editor.value = e.text || "";
+      box.hidden = false;
+    }
+    const start = editor.selectionStart, end = editor.selectionEnd;
+    if (start !== end) editor.setRangeText("", start, end, "start"); else editor.value = "";
+    backgroundDirty = true;
+    saveBackgroundDraft();
+    return;
+  }
   if (backgroundDirty && backgroundState) {
     if (e.state !== "edited" && (!backgroundPending || e.revision > backgroundPending.revision)) backgroundPending = e;
     return;
@@ -2389,15 +2401,20 @@ function draftActionRange(e, input) {
   return selection.start === selection.end ? null : [selection.start, selection.end];
 }
 $("askin").addEventListener("select", updateDraftActions);
-$("a-clear").onclick = e => {
-  const t = $("askin"), range = draftActionRange(e, t);
+function clearDraft(range, restoreFocus) {
+  const t = $("askin");
   const selected = !!range;
   if (range) t.setRangeText("", range[0], range[1], "start");
   else t.value = "";
   lastDictationSelection = null;
-  fitAsk(); t.focus();
+  fitAsk(); if (restoreFocus) t.focus();
   $("ask-feedback").textContent = selected ? "Выделенный текст удалён" : "Текст ввода очищен";
-};
+}
+function clearDraftByVoice() {
+  const t = $("askin");
+  clearDraft(t.selectionStart !== t.selectionEnd ? [t.selectionStart, t.selectionEnd] : null, false);
+}
+$("a-clear").onclick = e => clearDraft(draftActionRange(e, $("askin")), true);
 let draftCopiedTimer;
 $("a-copy").onclick = async e => {
   const t = $("askin"), range = draftActionRange(e, t);
