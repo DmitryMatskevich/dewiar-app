@@ -62,6 +62,18 @@ class Background(unittest.TestCase):
         e._dictation_result('Лира, скопировать', 'test', 3)
         self.assertEqual(e.events[0][1]['action'], 'copy')
 
+    def test_named_command_is_not_inserted_into_normal_dictation(self):
+        e = Engine()
+        e._background_dictation = False
+        e.command_done = threading.Event()
+        e._dictation_result('Лира, снимок экрана', 'test', 3)
+        self.assertTrue(e.command_done.wait(2))
+        self.assertEqual(e.command, 'снимок экрана')
+        self.assertFalse(any(event.get('state') == 'partial' for _, event in e.events))
+        self.assertTrue(e.dictation_active)
+        e._dictation_result('Лира, появись', 'test', 3)
+        self.assertIn(('window', {'do':'show'}), e.events)
+
     def test_copy_command_replaces_image_even_without_focused_field(self):
         from background_dictation import copy_and_insert
         board = SimpleNamespace(contents='image')

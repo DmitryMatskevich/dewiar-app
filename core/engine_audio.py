@@ -1029,6 +1029,22 @@ class AudioMixin:
                     self.emit("dictation", state="partial", text=words, by=by, session=sid)
                 self.emit("dictation", state="copy_requested", action=command[0], session=sid)
                 return
+            # Addressed voice commands are controls, not part of the dictated
+            # message. Keep any words spoken before the assistant's name.
+            if command and command[0] == "command":
+                if words:
+                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
+                self._run_dictation_voice_command(command[1])
+                return
+            if command and command[0] in ("cancel", "stop", "listen"):
+                if words:
+                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
+                if command[0] in ("cancel", "stop"):
+                    self.dictation_cancel()
+                return
+            if command and command[0] == "show" and command[1] == "" and words == "" and re.search(r"\b(?:появись|появиться|покажись|покажи себя)\b", text, re.I):
+                self.emit("window", do="show")
+                return
             endings = "|".join(re.escape(a) for a in sorted(filter(None, aliases), key=len, reverse=True))
             match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I) if endings else None
             if match:
@@ -1084,14 +1100,17 @@ class AudioMixin:
             else:
                 self.dictation_cancel()
         elif action == "command":
-            # Dispatch existing commands outside the STT lock; keep the draft intact.
-            def run():
-                try:
-                    if not self._window_cmd(argument) and not self._voice_control_cmd(argument):
-                        self.ask(argument)
-                except Exception as exc:
-                    self.note("Команда не выполнена: " + str(exc))
-            threading.Thread(target=run, name="background-voice-command", daemon=True).start()
+            self._run_dictation_voice_command(argument)
+
+    def _run_dictation_voice_command(self, argument):
+        # Dispatch existing commands outside the STT lock; keep the draft intact.
+        def run():
+            try:
+                if not self._window_cmd(argument) and not self._voice_control_cmd(argument):
+                    self.ask(argument)
+            except Exception as exc:
+                self.note("Команда не выполнена: " + str(exc))
+        threading.Thread(target=run, name="dictation-voice-command", daemon=True).start()
 
     def _background_state(self, state="listening", **extra):
         data = {"active": bool(self.dictation_active and getattr(self, "_background_dictation", False)),

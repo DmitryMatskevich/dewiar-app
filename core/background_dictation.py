@@ -41,7 +41,7 @@ def parse(text, aliases):
     rx = re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(n) for n in names) + r')(?!\w)', re.I)
     for match in rx.finditer(text):
         before = text[:match.start()].rstrip(' ,;:—–-')
-        after = text[match.end():].strip(' ,.;:!?—–-').casefold().replace('ё', 'е')
+        after = text[match.end():].strip(' ,.;:!?…—–-').casefold().replace('ё', 'е')
         action = draft_command(after)
         if action:
             return before, (action, '')
@@ -55,7 +55,10 @@ def parse(text, aliases):
             return before, ('listen', '')
         # Named commands are deliberate, but a name embedded in ordinary dictation
         # is kept as text unless the command is at the start of the phrase.
-        if not before and after:
+        if not before and after and re.match(r'^(?:открой|открыть|закрой|закрыть|сделай|сделать|сними|'
+                                              r'снимок|покажи|найди|запусти|останови|включи|выключи|'
+                                              r'перемести|перенеси|сохрани|создай|удали|очисти|'
+                                              r'спрячься|скройся|покажись|появись|отключись)\b', after):
             return '', ('command', text[match.end():].strip(' ,.;:!?—–-'))
     return text, None
 
