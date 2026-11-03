@@ -158,6 +158,17 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     stop.click()
     assert page.evaluate("calls.at(-1)[0]") == "stop"
     assert stop.is_hidden()
+    # A long dictated draft used to hide the entire answer and Stop control.
+    field.fill('Текст черновика. ' * 20)
+    page.evaluate("dictationUi(true);showCap('Команда','');setState('thinking')")
+    assert page.locator('#card').evaluate("e=>e.classList.contains('long')")
+    assert stop.is_visible()
+    assert page.locator('#run-status').inner_text() == 'Думаю…'
+    original = field.input_value()
+    stop.click()
+    assert page.evaluate("calls.at(-1)[0]") == 'stop'
+    assert field.input_value() == original and page.evaluate('dictating')
+    assert stop.is_hidden()
     assert not errors, errors
     browser.close()
 print("ALL OK: real HUD keyboard/voice send, insertion at live caret, selection replacement, cursor advance and help")

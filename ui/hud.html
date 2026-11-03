@@ -352,6 +352,8 @@
   #a-stop { display: none; color: #ff7895; background: rgba(255,104,144,.12); }
   #a-stop:hover, #a-stop:focus-visible { color: #fff; background: rgba(255,104,144,.28); }
   #cap.running #a-stop { display: grid; flex: none; margin-left: auto; }
+  #run-status { display: none; color: var(--muted); font-size: 12px; }
+  #cap.running #run-status { display: block; flex: 0 0 auto; }
   body.light #a-stop { color: #ad2449; }
   #ask.running #a-send { display: none; }
   #a-mic, #a-mic-pick { border-radius: 10px; }
@@ -416,6 +418,7 @@
   #card.crowd #orb { width: calc(104px * var(--ok, 1)); height: calc(104px * var(--ok, 1)); }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
   #card.long #orb { width: calc(84px * var(--ok, 1)); height: calc(84px * var(--ok, 1)); }          /* длинный текст — сфера уступает место полю */
   #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
+  #card.long #cap.show, #card.long #cap.running { display: flex; }
   .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
   .ab:hover { background: rgba(255,255,255,.09); color: var(--ink); }
   .ab svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -603,7 +606,7 @@
   <div id="orb" tabindex="0" role="button" title="Нажмите — выбрать помощника. Удерживайте — диктовка любой длины, отпустите — отправлю" aria-label="Выбрать помощника"><canvas id="cv"></canvas>
     <svg id="tarc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span id="tmini"></span></div>
   <div id="mid">
-    <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div id="answer-row"><div class="bot" id="bot"></div><button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div id="media"></div><button id="more">Открыть целиком</button></div>
+    <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div id="answer-row"><div class="bot" id="bot"></div><span id="run-status" role="status"></span><button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div id="media"></div><button id="more">Открыть целиком</button></div>
     <div id="screenshot-messages" aria-label="Снимки в сообщениях ассистента"></div>
     <div id="yn"><button class="yes" id="y">Да</button><button id="n">Нет</button></div>
     <div id="note"></div><div id="ldbar"><i></i></div>
@@ -681,7 +684,7 @@
   <dialog id="hud-help" hidden></dialog>
   <template id="hud-help-content">
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире.</p>
-    <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит уже распознанный текст в поле. Фразы, которые ещё распознаются, не добавятся. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
+    <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит уже распознанный текст в поле. Фразы, которые ещё распознаются, не добавятся. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Пока Лира думает или отвечает, в области ответа видна кнопка остановки: она прерывает текущий ответ и не очищает черновик. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
     <h3>Диктовка в другие приложения</h3><p>Включите микрофон, поставьте курсор в нужное поле и скажите «Лира, слушай» или «Лира, записывай». Продиктуйте текст и скажите «Лира, вставить», «Лира, добавить» или «Лира, текст». Текст заменит предыдущее содержимое буфера обмена; если подходящее поле активно, Лира также вставит текст в него, не отправляя сообщение. Если поле недоступно, текст останется в буфере для ручной вставки, а черновик — в диктовке. Лира продолжит слушать.</p><p>Когда окно Лиры открыто, черновик фоновой диктовки виден в отдельном поле и доступен для редактирования. Команда «Лира, текст» также копирует текст при диктовке через кнопку микрофона. «Лира, отмена» очищает фоновый черновик; «Лира, закончи диктовку» останавливает прослушивание после вставки или очистки. Одно имя показывает ассистента. Для автоматической вставки требуется разрешение «Универсальный доступ» в настройках macOS; защищённые поля не поддерживаются.</p>
     <h3>Текст и снимок экрана</h3><p>Кнопки копирования и стирания появляются, когда в поле есть текст. Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» работает как крестик: удаляет выделение, а если выделения нет — весь текст. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
@@ -809,6 +812,7 @@ function setRunControls(s) {
   const running = s === "thinking" || s === "speaking";
   $("ask").classList.toggle("running", running);
   $("cap").classList.toggle("running", running);
+  $("run-status").textContent = s === "thinking" ? "Думаю…" : s === "speaking" ? "Отвечаю…" : "";
   const stop = $("a-stop");
   if (stop) {
     stop.disabled = Boolean(stop.dataset.busy);
