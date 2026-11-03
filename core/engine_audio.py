@@ -1003,13 +1003,13 @@ class AudioMixin:
             self.stt_q.put((b"", False, False, None, "dictation_end", sid))
 
     def _dictation_result(self, text, by, sid):
-        """Фрагменты идут по порядку; имя, «ввод» или «вот» в конце отправляют черновик."""
+        """Фрагменты идут по порядку; имя текущего помощника в конце отправляет черновик."""
         with self._dictation_lock:
             if not self.dictation_active or sid != self._dictation_session:
                 return
             aliases = self.aliases.get(self.s.get("persona"), [])
-            endings = "|".join(re.escape(a) for a in sorted(set(aliases) | {"ввод", "вот"}, key=len, reverse=True))
-            match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I)
+            endings = "|".join(re.escape(a) for a in sorted(filter(None, aliases), key=len, reverse=True))
+            match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I) if endings else None
             if match:
                 text = text[:match.start()].rstrip(" ,;:—-")
             if text:

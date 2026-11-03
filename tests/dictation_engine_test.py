@@ -157,15 +157,10 @@ assert not r.dictation_finish_requested
 # Exercise the real STT queue -> command detection -> capture flush -> FIFO done.
 # Terminal words are stripped; a one-word utterance submits the preceding draft.
 for texts, expected, persona in [
-    (["Напиши письмо, ввод."], ["Напиши письмо"], "lira"),
-    (["Напиши письмо, ВОТ!"], ["Напиши письмо"], "lira"),
-    (["Первая часть.", "Ввод"], ["Первая часть."], "lira"),
-    (["Первая часть.", "вот…"], ["Первая часть."], "lira"),
-    (["ввод"], [], "lira"),
-    (["Вот."], [], "lira"),
+    (["Первая часть.", "Лира…"], ["Первая часть."], "lira"),
+    (["Лира"], [], "lira"),
     (["Составь список, Патрик!"], ["Составь список"], "patrik"),
     (["Составь список. Лира!"], ["Составь список."], "lira"),
-    (["Текст, ввод"], ["Текст"], "no-aliases"),
 ]:
     r = Recorder()
     r.s = SimpleNamespace(get=lambda *k, p=persona: p if k == ("persona",) else None)
@@ -182,13 +177,20 @@ for texts, expected, persona in [
     assert r.events[-1] == {"state": "done", "submit": True, "session": r._dictation_session}, (texts, r.events)
     assert sum(e["state"] == "done" for e in r.events) == 1
 
-for text in ["Вот план на завтра.", "Настрой ввод данных.", "Лира подготовит план.",
+for text in ["ввод", "Вот.", "Напиши письмо, ввод.", "Напиши письмо, вот.", "Вот план на завтра.", "Настрой ввод данных.", "Лира подготовит план.",
              "Расскажи про вводные.", "Поворот", "Вводить", "Составь список, Патрик."]:
     r = Recorder()
     r.dictation_start()
     r._dictation_result(text, "test", r._dictation_session)
     assert not r.dictation_finish_requested, text
     assert r.events[-1]["text"] == text
+
+# A persona with no voice names never triggers an empty regex match.
+r = Recorder()
+r.aliases.clear()
+r.dictation_start()
+r._dictation_result("Обычный текст.", "test", r._dictation_session)
+assert not r.dictation_finish_requested and r.events[-1]["text"] == "Обычный текст."
 
 # Cancel during STT, then start again: an old result must not enter the new draft.
 r = Recorder()

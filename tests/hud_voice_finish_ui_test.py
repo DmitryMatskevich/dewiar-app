@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     field = page.locator("#askin")
     hint = field.get_attribute("title")
     assert "Ctrl+Enter" not in hint
-    for word in ["Enter — новая строка", "стрелкой вверх", "«Лира»", "«ввод»", "«вот»", "отдельно"]:
+    for word in ["Enter — новая строка", "стрелкой вверх", "«Лира»", "отдельно"]:
         assert word in hint, (word, hint)
     field.fill("Первая строка")
     field.press("End")
@@ -52,14 +52,15 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.evaluate("applyPersona('patrik')")
     assert "«Патрик»" in field.get_attribute("title")
     page.evaluate("fire('dictation',{state:'recording'})")
-    assert "«ввод» или «вот»" in page.locator("#a-mic").get_attribute("title")
+    assert "имя текущего помощника" in page.locator("#a-mic").get_attribute("title")
+    assert "«ввод»" not in hint and "«вот»" not in hint
     field.fill("Мой черновик.")
     count = page.evaluate("sent.length")
     page.evaluate("""() => {
       fire('dictation',{state:'partial',text:'Напиши письмо'});
       fire('dictation',{state:'finishing'});
     }""")
-    assert page.locator("#a-mic").is_disabled()
+    assert page.locator("#a-mic").is_enabled()
     assert page.evaluate("sent.length") == count
     page.evaluate("fire('dictation',{state:'done',submit:true})")
     assert page.evaluate("sent.length") == count + 1
@@ -71,8 +72,8 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     # Manual microphone stop retains the recognised draft, without sending it.
     page.evaluate("fire('dictation',{state:'recording'});fire('dictation',{state:'partial',text:'Оставить в поле'})")
     page.locator("#a-mic").click()
-    assert page.evaluate("calls.at(-1)") == ["dictation_finish", {"submit": False}]
-    page.evaluate("fire('dictation',{state:'done',submit:false})")
+    assert page.evaluate("calls.at(-1)[0]") == "dictation_cancel"
+    page.wait_for_function("!dictating")
     assert field.input_value() == "Оставить в поле"
     assert page.evaluate("sent.length") == count + 1
     # Each asynchronous result uses the live caret, including after a manual move.
@@ -81,38 +82,50 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.locator("#a-mic").click()
     page.evaluate("fire('dictation',{state:'partial',text:'середина'})")
     assert field.input_value() == "Начало середина конец."
-    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [16,16]
+    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [7,15]
     page.evaluate("fire('dictation',{state:'partial',text:'ещё'})")
     assert field.input_value() == "Начало середина ещё конец."
-    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [20,20]
+    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [16,19]
     field.evaluate("e=>e.setSelectionRange(0,0)")
     page.evaluate("fire('dictation',{state:'partial',text:'Вступление.'})")
     assert field.input_value() == "Вступление. Начало середина ещё конец."
-    assert field.evaluate("e=>e.selectionStart") == len("Вступление. ")
+    assert field.evaluate("e=>e.selectionStart") == 0
     # Selecting a word replaces only that word; punctuation and suffix survive.
     field.fill("Привет, старый мир!")
     field.evaluate("e=>e.setSelectionRange(8,14)")
     page.evaluate("fire('dictation',{state:'partial',text:'новый'})")
     assert field.input_value() == "Привет, новый мир!"
-    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [13,13]
-    for initial, pos, phrase, expected, caret in [
-        ("А\nБ", 2, "новая строка", "А\nновая строка Б", 15),
-        ("Список:   ", 10, "пункт", "Список:   пункт", 15),
-        ("Текст!", 5, "вставка", "Текст вставка!", 13),
-        ("(конец)", 1, "начало", "(начало конец)", 8),
-        ("😀 конец", 3, "середина", "😀 середина конец", 12),
+    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [8,13]
+    for initial, pos, phrase, expected in [
+        ("А\nБ", 2, "новая строка", "А\nновая строка Б"),
+        ("Список:   ", 10, "пункт", "Список:   пункт"),
+        ("Текст!", 5, "вставка", "Текст вставка!"),
+        ("(конец)", 1, "начало", "(начало конец)"),
+        ("😀 конец", 3, "середина", "😀 середина конец"),
     ]:
         field.fill(initial)
         field.evaluate("(e,p)=>e.setSelectionRange(p,p)",pos)
         page.evaluate("text=>fire('dictation',{state:'partial',text})",phrase)
         assert field.input_value() == expected, (initial,field.input_value())
-        assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [caret,caret], expected
+        assert field.evaluate("e=>e.value.slice(e.selectionStart,e.selectionEnd)") == phrase, expected
     page.evaluate("fire('dictation',{state:'finishing'});fire('dictation',{state:'done',submit:true})")
     assert page.evaluate("sent.at(-1)[1].text") == "😀 середина конец"
     field.hover()
     page.wait_for_timeout(400)
     assert "«Патрик»" in field.get_attribute("data-tip")
     assert "Ctrl+Enter" not in field.get_attribute("data-tip")
+    # Stop sits beside the assistant's answer and calls the existing stop command.
+    page.evaluate("showCap('Вопрос','Ответ');setState('speaking')")
+    stop = page.locator("#answer-row #a-stop")
+    assert stop.is_visible() and page.locator("#ask #a-stop").count() == 0
+    page.set_viewport_size({"width": 340, "height": 520})
+    answer_box = page.locator("#bot").bounding_box()
+    stop_box = stop.bounding_box()
+    assert answer_box["x"] + answer_box["width"] <= stop_box["x"]
+    assert stop_box["x"] + stop_box["width"] <= 340
+    stop.click()
+    assert page.evaluate("calls.at(-1)[0]") == "stop"
+    assert stop.is_hidden()
     assert not errors, errors
     browser.close()
 print("ALL OK: real HUD keyboard/voice send, insertion at live caret, selection replacement, cursor advance and help")

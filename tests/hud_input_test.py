@@ -18,11 +18,11 @@ ok('e.key === "Enter" && (e.ctrlKey || e.metaKey)' in src, "Ctrl/⌘+Enter от�
 ok('#ask { display: block;' in src, "окно чата агента открыто постоянно")
 ok('M12 19V5M6 11l6-6 6 6' in src, "стрелка отправки направлена вверх")
 ok(src.index('id="b-voice-inline"') < src.index('id="a-mic"'), "динамик находится слева от микрофона")
-ok(src.index('id="dict-level"') < src.index('id="a-mic"'), "индикатор уровня находится слева от микрофона")
+ok("DICTATION_LEVEL_ICONS" in src, "индикатор уровня встроен в кнопку микрофона")
 for ident in ("b-mic", "b-type", "b-team"):
     ok(f'id="{ident}" hidden' in src, f"старая кнопка {ident} убрана из панели опций")
 ok('e.key === "Enter" && !e.shiftKey' not in src, "старое поведение Shift+Enter не осталось")
-for ident in ("a-mic", "a-mic-pick", "dict-level", "b-voice-inline"):
+for ident in ("a-mic", "a-mic-pick", "b-voice-inline"):
     ok(f'id="{ident}"' in src, f"элемент {ident} присутствует")
 ok('aria-pressed="false"' in src and 'textOnly || unavailable' in src,
    "динамик имеет состояние и показывает выключенный звук уже в текстовом режиме")
@@ -49,7 +49,7 @@ ok('id="a-chat"' not in src and 'id="b-chat"' in src and '$("b-chat").onclick' i
    "кнопка чата находится в нижней панели, а не в строке ввода")
 ok(src.index('id="b-notes"') < src.index('id="b-chat"') < src.index('id="b-set"') and 'id="b-chat" hidden' not in src,
    "кнопка чата видна сразу справа от «Заметок»")
-ok('id="a-stop"' in src and 'core.call("stop")' in src and '#ask.running #a-stop' in src,
+ok('id="a-stop"' in src and 'core.call("stop")' in src and '#cap.running #a-stop' in src,
    "кнопка «Стоп» появляется во время ответа и отменяет текущую работу")
 ok('Я ${name}, жду ваше задание' in src and 'Я ${name}, говорите, я слушаю' in src,
    "placeholder объясняет ожидание задания и продолжение голосового диалога")
@@ -72,7 +72,7 @@ ok('#corner #b-play { display: none !important; }' in src,
    "кнопка «Досуг» убрана из первой строки HUD")
 ok('chat-open' in src and '#card.chat-open #cap' in src, "ответ и чат растягиваются при расширении окна")
 ok('box.classList.toggle("show")' in src and 'function tapOrb()' in src, "круг помощника открывает выбор персонажа")
-ok("Enter добавляет новую строку" in help_src and "«ввод» или «вот»" in help_src and "выбрать устройство macOS" in help_src
+ok("Enter добавляет новую строку" in help_src and "имя текущего помощника" in help_src and "выбрать устройство macOS" in help_src
    and "автоматически добавляется" in help_src and "слева от микрофона" in help_src
    and "справа в первой строке" in help_src and "Досуг" in help_src
    and "динамик с крестиком" in help_src and "не открывает карточку сообщения" in help_src,

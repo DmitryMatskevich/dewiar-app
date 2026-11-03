@@ -73,12 +73,18 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     field.evaluate("e=>e.setSelectionRange(2,8)")
     copy.click()
     page.wait_for_function("document.querySelector('#a-copy').classList.contains('copied')")
-    assert page.evaluate("copied") == [text]
+    assert page.evaluate("copied") == ["Привет"]
     assert field.input_value() == text
     assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [2,8]
     assert page.evaluate("sent.length") == 0
+    assert "Выделенный текст" in page.locator("#ask-feedback").inner_text()
+    field.evaluate("e=>e.setSelectionRange(0,0)")
+    copy.focus()
+    page.keyboard.press("Enter")
+    page.wait_for_function("copied.length===2")
+    assert page.evaluate("copied[1]") == text
     assert "Весь текст" in page.locator("#ask-feedback").inner_text()
-    # Native WebViews may reject Clipboard API. The fallback copies everything
+    # Native WebViews may reject Clipboard API. The fallback copies the selected text
     # and restores focus/selection instead of leaving a hidden textarea selected.
     page.evaluate("""() => {
       navigator.clipboard.writeText=async()=>{throw Error('denied')};
@@ -89,7 +95,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     field.evaluate("e=>e.setSelectionRange(4,9,'backward')")
     page.evaluate("document.querySelector('#a-copy').click()")
     page.wait_for_function("fallback.length===1")
-    assert page.evaluate("fallback[0]") == ["copy", text]
+    assert page.evaluate("fallback[0]") == ["copy", text[4:9]]
     assert page.evaluate("document.activeElement.id") == "askin"
     assert field.evaluate("e=>[e.selectionStart,e.selectionEnd,e.selectionDirection]") == [4,9,"backward"]
     assert field.input_value() == text
@@ -115,11 +121,12 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert page.evaluate("atts.length") == 1
     # Cancel remains available with an empty draft and ignores already queued results.
     page.evaluate("window.delayCancel=true;fire('dictation',{state:'recording',session:1})")
-    assert clear.is_visible() and clear.is_enabled() and copy.is_hidden()
-    assert "Отменить голосовую запись" in clear.get_attribute("aria-label")
-    clear.click()
+    mic = page.locator("#a-mic")
+    assert mic.is_enabled() and copy.is_hidden()
+    assert "Остановить голосовой ввод" in mic.get_attribute("aria-label")
+    mic.click()
     page.wait_for_function("typeof resolveCancel==='function'")
-    assert clear.is_disabled()
+    assert mic.is_disabled()
     page.evaluate("fire('dictation',{state:'partial',session:1,text:'Не вставлять'});fire('dictation',{state:'done',session:1,submit:true})")
     assert field.input_value() == "" and page.evaluate("sent.length") == 0
     page.evaluate("resolveCancel({});window.delayCancel=false")
@@ -130,7 +137,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     field.fill(text)
     field.evaluate("e=>e.setSelectionRange(4,9)")
     page.evaluate("fire('dictation',{state:'recording',session:3});fire('dictation',{state:'finishing',session:3})")
-    clear.click()
+    mic.click()
     page.wait_for_function("!dictating")
     assert field.input_value() == text
     assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [4,9]
@@ -164,7 +171,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
                     page.wait_for_timeout(30)
                     layout = page.evaluate("""() => {
                       const box=document.querySelector('#askbox').getBoundingClientRect();
-                      const ids=['a-att','a-shot','ask-model','b-voice-inline','a-mic','a-mic-pick','a-clear','a-copy',document.querySelector('#a-send').getBoundingClientRect().width?'a-send':'a-stop'];
+                      const ids=['a-att','a-shot','ask-model','b-voice-inline','a-mic','a-mic-pick','a-clear','a-copy','a-send'].filter(id=>document.getElementById(id).getBoundingClientRect().width);
                       return {box:{left:box.left,right:box.right},buttons:ids.map(id=>{
                         const r=document.getElementById(id).getBoundingClientRect();
                         return {id,left:r.left,right:r.right,top:r.top,bottom:r.bottom}}),
@@ -176,8 +183,12 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
                     for i, button in enumerate(buttons):
                         assert layout["box"]["left"] <= button["left"] < button["right"] <= layout["box"]["right"], (width, layout)
                         if i:
-                            assert buttons[i-1]["right"] <= button["left"] + 1, (width, layout)
-                            assert abs((buttons[i-1]["top"]+buttons[i-1]["bottom"])-(button["top"]+button["bottom"])) < 1, (width, layout)
+                            previous = buttons[i-1]
+                            if button["top"] >= previous["bottom"]:
+                                assert width <= 375, (width, layout)
+                            else:
+                                assert previous["right"] <= button["left"] + 1, (width, layout)
+                                assert abs((previous["top"]+previous["bottom"])-(button["top"]+button["bottom"])) < 1, (width, layout)
     page.set_viewport_size({"width": 640, "height": 850})
     page.evaluate("applyLook({skin:'neusky'});dictationUi(false);setRunControls('idle');clearTimeout(draftCopiedTimer);document.querySelector('#a-copy').classList.remove('copied')")
     field.fill("Привет. Очень важно.")
@@ -186,4 +197,4 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.screenshot(path=str(shot))
     assert not errors, errors
     browser.close()
-print("ALL OK: hidden empty actions, full copy/fallback, selected/full erase, cancelled dictation, stale results and responsive actions")
+print("ALL OK: hidden empty actions, selected/full copy and fallback, selected/full erase, cancelled dictation, stale results and responsive actions")

@@ -7,9 +7,10 @@ const elements = new Map();
 function $(id) {
   if (!elements.has(id)) {
     const element = {
-    value: '', title: '', innerHTML: '', disabled: false, attributes: {}, style: {},
+    value: '', title: '', innerHTML: '', disabled: false, dataset: {}, attributes: {}, style: {},
     firstElementChild: { style: {} }, classList: { toggle() {} },
     setAttribute(k, v) { this.attributes[k] = v; }, focus() {},
+    setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
     setRangeText(text, start, end) {
       this.value = this.value.slice(0, start) + text + this.value.slice(end);
       this.selectionStart = this.selectionEnd = start + text.length;
@@ -25,7 +26,7 @@ function $(id) {
   return elements.get(id);
 }
 const calls = [], sent = [], handlers = {};
-const ctx = vm.createContext({ $, console, dictating: false, audioMode: 'voice', atts: [],
+const ctx = vm.createContext({ $, console, audioMode: 'voice', atts: [],
   core: {
     connected: true, on: (event, fn) => { handlers[event] = fn; },
     call: async (...args) => { calls.push(args); },
@@ -34,23 +35,24 @@ const ctx = vm.createContext({ $, console, dictating: false, audioMode: 'voice',
   fitAsk() {}, updateDraftActions() {}, openAsk() {}, showErr(e) { throw e; },
   guard: (el, fn) => fn, tlReset() {}, showCap() {}, renderAtts() {}, WAIT: 'wait',
 });
+vm.runInContext(src.slice(src.indexOf('let dictating ='), src.indexOf('let turnUntil =')), ctx);
+const recording = () => vm.runInContext('dictating', ctx);
 vm.runInContext(src.slice(src.indexOf('let dictationSession ='), src.indexOf('async function showMicMenu(')), ctx);
 vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* Поле растёт')), ctx);
 (async () => {
   $('askin').value = 'Мой черновик.';
   await $('a-mic').onclick();
-  assert.equal(ctx.dictating, true);
-  assert.match($('a-mic').innerHTML, /fill="currentColor"/);
+  assert.equal(recording(), true);
+  assert.match($('a-mic').innerHTML, /<rect x="13"/);
   assert.equal($('a-mic').attributes['aria-pressed'], 'true');
   handlers.dictation({ state: 'partial', text: 'Первая часть.' });
   handlers.dictation({ state: 'partial', text: 'Вторая часть.' });
-  assert.equal(ctx.dictating, true);
+  assert.equal(recording(), true);
   assert.equal(sent.length, 0);
   assert.equal($('askin').value, 'Мой черновик. Первая часть. Вторая часть.');
   await $('a-mic').onclick();
-  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['dictation_finish', { submit: false }]);
-  handlers.dictation({ state: 'done', submit: false });
-  assert.equal(ctx.dictating, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['dictation_cancel']);
+  assert.equal(recording(), false);
   assert.equal(sent.length, 0);
   assert.match($('a-mic').innerHTML, /M5 11/);
   // Send while recording waits for final STT; draft and attachments are preserved.
@@ -59,7 +61,7 @@ vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* П�
   vm.runInContext('sendAsk()', ctx);
   assert.equal(sent.length, 0);
   handlers.dictation({ state: 'finishing' });
-  assert.equal($('a-mic').disabled, true);
+  assert.equal($('a-mic').disabled, false);
   handlers.dictation({ state: 'partial', text: 'Последние слова.' });
   handlers.dictation({ state: 'done', submit: true });
   assert.equal(sent.length, 1);
@@ -67,7 +69,7 @@ vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* П�
   assert.equal(sent[0][1].images[0], 'image:test');
   assert.equal($('askin').value, '');
   assert.equal($('a-mic').disabled, false);
-  assert.equal(ctx.dictating, false);
+  assert.equal(recording(), false);
   console.log('OK: live HUD stop icon, partials, stop keeps draft, send waits for final text and preserves attachments');
   console.log('OK');
 })().catch(e => { console.error(e); process.exitCode = 1; });
