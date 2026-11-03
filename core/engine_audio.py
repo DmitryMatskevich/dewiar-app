@@ -938,7 +938,7 @@ class AudioMixin:
         self.stt_q.put((pcm, True, False, None, "hold"))
         return {"ok": True, "sec": sec}
 
-    def dictation_start(self):
+    def dictation_start(self, background=False):
         """Непрерывная диктовка: пауза отправляет фрагмент в STT, но не выключает запись."""
         if getattr(self, "server", False):
             raise ValueError("Голосовой ввод недоступен в текстовом режиме")
@@ -946,6 +946,8 @@ class AudioMixin:
             self.hold_end(cancel=True)
         with self._dictation_lock:
             if self.dictation_active:
+                if getattr(self, "_background_dictation", False) and not background:
+                    raise ValueError("Фоновая диктовка уже идёт. Скажите «Лира, вставить» или «Лира, отмени» и «Лира, закончи диктовку».")
                 return {"ok": True, "state": "finishing" if self._dictation_closed else "recording",
                         "session": self._dictation_session}
             if getattr(self, "muted", False):
@@ -954,6 +956,8 @@ class AudioMixin:
             if self.state in ("speaking", "thinking"):
                 self.interrupt("диктовка", follow=False)
             self._dictation_session += 1
+            self._background_dictation = bool(background)
+            self._background_draft = []
             self._dictation_closed = self._dictation_submit = False
             self.dictation_active = True
             self.dictation_finish_requested = False
@@ -963,7 +967,7 @@ class AudioMixin:
             self.wake_time = time.monotonic()
             self.follow_up_until = 0.0
             self.set_state("listening")
-            self.emit("dictation", state="recording", session=self._dictation_session)
+            self.emit("background_dictation" if background else "dictation", state="recording", session=self._dictation_session)
             return {"ok": True, "state": "recording", "session": self._dictation_session}
 
     def dictation_cancel(self):
@@ -1007,6 +1011,9 @@ class AudioMixin:
         with self._dictation_lock:
             if not self.dictation_active or sid != self._dictation_session:
                 return
+            if getattr(self, "_background_dictation", False):
+                self._background_dictation_result(text)
+                return
             aliases = self.aliases.get(self.s.get("persona"), [])
             endings = "|".join(re.escape(a) for a in sorted(filter(None, aliases), key=len, reverse=True))
             match = re.search(r"(?<!\w)(?:" + endings + r")[\s,.!?;:…—–-]*$", text, re.I) if endings else None
@@ -1016,6 +1023,50 @@ class AudioMixin:
                 self.emit("dictation", state="partial", text=text, by=by, session=sid)
             if match:
                 self.dictation_finish(submit=True)
+
+    def _background_dictation_result(self, text):
+        from background_dictation import parse, insert_at_focus
+        aliases = self.aliases.get(self.s.get("persona"), [])
+        words, command = parse(text, aliases)
+        if words:
+            self._background_draft.append(words)
+            self.emit("background_dictation", state="listening", characters=len(" ".join(self._background_draft)))
+        if command is None:
+            return
+        action, argument = command
+        if action == "insert":
+            draft = " ".join(self._background_draft).strip()
+            if not draft:
+                self.note("Нет текста для вставки. Продолжаю слушать.")
+                return
+            try:
+                insert_at_focus(draft)
+            except Exception as exc:
+                # Preserve the dictated text until insertion succeeds or the user cancels.
+                self.note("Текст сохранён в диктовке. " + str(exc))
+                self.emit("background_dictation", state="error", error=str(exc))
+                return
+            self._background_draft.clear()
+            self.emit("background_dictation", state="inserted")
+        elif action == "show":
+            self.emit("window", do="show")
+        elif action == "cancel":
+            self._background_draft.clear()
+            self.emit("background_dictation", state="cleared")
+        elif action == "stop":
+            if self._background_draft:
+                self.note("Сначала вставьте текст или скажите «Лира, отмена».")
+            else:
+                self.dictation_cancel()
+        elif action == "command":
+            # Dispatch existing commands outside the STT lock; keep the draft intact.
+            def run():
+                try:
+                    if not self._window_cmd(argument) and not self._voice_control_cmd(argument):
+                        self.ask(argument)
+                except Exception as exc:
+                    self.note("Команда не выполнена: " + str(exc))
+            threading.Thread(target=run, name="background-voice-command", daemon=True).start()
 
     def _dictation_done(self, sid):
         with self._dictation_lock:
@@ -1417,7 +1468,11 @@ class AudioMixin:
             # имя уже узнано по звуку и отрезано; если распознаватель всё же написал его — уберём
             pid, end = find_name(text, self.aliases) if text else (None, 0)
             rest = text[end:].lstrip(" ,.!?:;—-").strip() if pid else text.strip()
+            if re.fullmatch(r"(?:слушай|записывай)[\s.!?]*", rest, re.I):
+                self.dictation_start(background=True)
+                return
             if len(re.sub(r"\W", "", rest)) < 2:
+                self.emit("window", do="show")
                 self.listen_for_command()
             else:
                 self.ask(rest)
@@ -1448,6 +1503,9 @@ class AudioMixin:
             if pid != self.s.get("persona"):
                 self.switch_persona(pid)
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
+            if re.fullmatch(r"(?:слушай|записывай)[\s.!?]*", rest, re.I):
+                self.dictation_start(background=True)
+                return
             word = _norm(re.sub(r"[^\w ]", "", rest)).strip()
             word = stop_word(word) or word if " " not in word else word      # «Лира, Ctop» → «стоп»
             if self._voice_control_cmd(rest):
@@ -1459,6 +1517,7 @@ class AudioMixin:
                 if word in MEDIA_STOP:
                     threading.Thread(target=self._media_stop_word, args=(word, True), daemon=True).start()
             elif len(re.sub(r"\W", "", rest)) < 2:
+                self.emit("window", do="show")
                 self.listen_for_command()
             else:
                 self.ask(rest)
