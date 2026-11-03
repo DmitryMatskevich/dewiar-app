@@ -414,19 +414,24 @@ def make_api(app):
             except Exception as e:  # noqa: BLE001 — older macOS/PyObjC
                 return {"state": "unknown", "granted": False, "error": str(e)}
             with self._screen_permission_lock:
+                from mac_screen_access import was_requested
                 if granted or (getattr(self, '_screen_pending', False) and time.monotonic()-self._screen_started > 90):
                     self._screen_pending = False
                 if granted:self._screen_error = ''
                 return {"state": "authorized" if granted else "denied", "granted": granted,
                         "error": getattr(self, '_screen_error', ''),
                         "pending": bool(getattr(self, '_screen_pending', False)),
-                        "requested": bool(getattr(self, '_screen_requested', False)),
+                        "requested": bool(getattr(self, '_screen_requested', False) or was_requested()),
                         "request_supported": bool(getattr(sys, 'frozen', False))}
 
-        def request_screen_access(self):
+        def request_screen_access(self, automatic=False):
             with self._screen_permission_lock:
                 status = self.screen_capture_permission()
-                if not status.get('request_supported') or status.get('granted') or status.get('pending') or status.get('requested'):
+                if not status.get('request_supported') or status.get('granted') or status.get('pending'):
+                    return status
+                if status.get('requested'):
+                    if not automatic:
+                        self.open_screen_settings()
                     return status
                 self._screen_requested = self._screen_pending = True
                 self._screen_started = time.monotonic()
@@ -434,13 +439,38 @@ def make_api(app):
             def request():
                 try:
                     from macsys import request_screen_capture_permission
+                    from mac_screen_access import mark_requested
+                    # Written immediately before dispatch to macOS, not when merely
+                    # inspecting status. A denial must not prompt on every launch.
+                    try:
+                        mark_requested()
+                    except OSError as error:
+                        print(f'Не удалось сохранить попытку запроса экрана: {error}', file=sys.stderr)
                     if not request_screen_capture_permission():
-                        self.open_screen_settings()
+                        if automatic:
+                            # pywebview creates windows after startup only from a
+                            # worker thread. Calling it on Cocoa's main thread
+                            # leaves an uninitialised Studio window behind.
+                            threading.Thread(target=self.open_settings,
+                                             args=('safety', '&mac_access_setup=1'),
+                                             name='screen-access-setup', daemon=True).start()
+                        else:
+                            self.open_screen_settings()
                 except Exception as error:
                     with self._screen_permission_lock:self._screen_error = str(error)
                 finally:
                     with self._screen_permission_lock:self._screen_pending = False
             AppHelper.callAfter(request)
+            return self.screen_capture_permission()
+
+        def startup_screen_access(self):
+            """Called only after Cocoa starts, from the packaged GUI process."""
+            try:
+                ui = json.loads(app.SETTINGS_PATH.read_text()).get('ui') or {}
+            except (OSError, ValueError):
+                ui = {}
+            if ui.get('mac_screen_request_at_startup', True):
+                return self.request_screen_access(automatic=True)
             return self.screen_capture_permission()
 
         def files_access_state(self):
@@ -956,6 +986,8 @@ def main_mac(args, extra, app):
                     api._meeting_status_pending = False
             AppHelper.callAfter(install_status_on_main)
         report = os.environ.get("DEWIAR_MAC_SMOKE_REPORT")
+        if not report:
+            api.startup_screen_access()
         if not report and wanted_voice and api.microphone_permission().get("granted"):
             app._core_call(token, "audio_enable", timeout=15)
         if getattr(args, "request_microphone", False) and not report:

@@ -1,4 +1,4 @@
-/* Native onboarding never triggers a protected request until its specific button is pressed. */
+/* Native shell owns the once-per-build startup request; this page shows its live status. */
 (() => {
   const box = document.getElementById('mac-access');
   if (!box) return;
@@ -17,6 +17,7 @@
     byId('screen-allow').disabled = !supported || pending || !!screen.granted;
     byId('screen-allow').hidden = !!screen.granted;
     byId('screen-allow').textContent = screen.requested && !screen.granted ? 'Открыть настройки экрана' : 'Разрешить запись экрана';
+    byId('screen-recovery').hidden = !supported || !!screen.granted || !!screen.pending;
     const rows = [];
     for (const [key, value] of Object.entries(files.folders || {})) {
       const row = document.createElement('p'); row.className = 'hint';
@@ -61,10 +62,17 @@
       byId('result').textContent = 'Настройка запуска сохранена.';
     } catch (error) { e.target.checked = !e.target.checked; byId('result').textContent = error.message || String(error); }
   };
+  byId('screen-startup').onchange = async e => {
+    try {
+      const result = await core.call('settings_save', {patch:{ui:{mac_screen_request_at_startup:e.target.checked}}});
+      if (typeof S !== 'undefined') S = result;
+    } catch (error) { e.target.checked = !e.target.checked; byId('result').textContent = error.message || String(error); }
+  };
   async function start(settings) {
     await refresh();
     if (!api()?.files_access_state) return;
     byId('startup').checked = !!settings?.ui?.mac_access_at_startup;
+    byId('screen-startup').checked = settings?.ui?.mac_screen_request_at_startup !== false;
     if (!settings?.ui || started || new URLSearchParams(location.search).get('mac_access_setup') !== '1') return;
     started = true;
     document.querySelector('nav button[data-p="safety"]')?.click();

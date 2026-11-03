@@ -7,6 +7,7 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,22 +60,44 @@ def install(source, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     # Same filesystem: the final replacement is a rename, never a merge of files.
     stage_root = Path(tempfile.mkdtemp(prefix=".dewiar-install-", dir=target.parent))
-    staged, backup = stage_root / "Dewiar.app", stage_root / "previous.app"
+    staged, backup = stage_root / "Dewiar.app", stage_root / "previous.zip"
+    old_contents = stage_root / "previous-contents"
+    installed = False
     try:
         subprocess.run(["/usr/bin/ditto", str(source), str(staged)], check=True)
         validate_bundle(staged)
+        if set(p.name for p in staged.iterdir()) != {'Contents'}:
+            raise ValueError('Неожиданная структура новой .app: установка отменена')
         if target.exists():
-            target.rename(backup)
-        try:
+            # Retain the application directory itself. Moving it to previous.app
+            # lets LaunchServices/TCC follow the old app under its backup name.
+            # Archives are not launchable copies with the same bundle identifier.
+            if set(p.name for p in target.iterdir()) != {'Contents'}:
+                raise ValueError('Неожиданная структура установленной .app: установка отменена')
+            subprocess.run(['/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent',
+                            str(target), str(backup)], check=True)
+            if not backup.is_file() or backup.stat().st_size == 0:
+                raise OSError('Не создан архив предыдущей версии; установка отменена')
+            (target / 'Contents').rename(old_contents)
+            try:
+                (staged / 'Contents').rename(target / 'Contents')
+                validate_bundle(target)
+            except Exception:
+                if (target / 'Contents').exists():
+                    shutil.rmtree(target / 'Contents')
+                old_contents.rename(target / 'Contents')
+                raise
+        else:
             staged.rename(target)
-        except OSError:
-            if backup.exists():
-                backup.rename(target)
-            raise
+        installed = True
         print(f"Установлено: {target}")
         if backup.exists():
             print(f"Предыдущая версия для отката: {backup}")
     finally:
+        # Keep only the rollback archive; never leave a second live bundle.
+        for folder in ((staged, old_contents) if installed else (staged,)):
+            if folder.exists():
+                shutil.rmtree(folder)
         if not backup.exists():
             shutil.rmtree(stage_root)
 
@@ -87,10 +110,21 @@ def main():
     # Refuse replacement of either a running source or installed build, including
     # orphaned --core processes left after closing the GUI.
     binaries = [str(p.resolve() / "Contents/MacOS/Dewiar") for p in (args.source, args.target)]
-    processes = subprocess.check_output(["/bin/ps", "-axo", "command="], text=True)
-    if any(line == exe or line.startswith(exe + " ") for line in processes.splitlines() for exe in binaries):
-        parser.error("Сначала завершите Dewiar и его процессы ядра; запущенную сборку заменять нельзя")
-    install(args.source, args.target)
+    import fcntl
+    sys.path.insert(0, str(ROOT / 'core'))
+    from settings import STATE_DIR
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # Share the GUI's launch lock so a launch during archive/copy cannot start
+    # reading the bundle halfway through its replacement.
+    with (STATE_DIR / 'ui.lock').open('a') as held:
+        try:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            parser.error('Dewiar запущен; завершите приложение перед установкой')
+        processes = subprocess.check_output(["/bin/ps", "-axo", "command="], text=True)
+        if any(line == exe or line.startswith(exe + " ") for line in processes.splitlines() for exe in binaries):
+            parser.error("Сначала завершите Dewiar и его процессы ядра; запущенную сборку заменять нельзя")
+        install(args.source, args.target)
 
 
 if __name__ == "__main__":

@@ -229,7 +229,8 @@ DEFAULTS = {
            "memory_motion": "auto",         # «Память»: анимация карты — auto (на слабом компьютере выкл) | on | off
            "welcome": "",                   # «Первые шаги»: "" — показать, "later" — кнопкой в меню, "done" — всё
            "mac_access_setup_seen": False,    # Native permission setup has actually been shown.
-           "mac_access_at_startup": False,    # Optional repeat of setup on each launch; never repeat OS prompts automatically.
+           "mac_access_at_startup": False,    # Optional repeat of the access setup page.
+           "mac_screen_request_at_startup": True,  # One native screen request per build when access is absent.
            "intro": "",                     # знакомство голосом (engine_intro.py): "" — ещё не было, "done" — было
            "pad_w": None, "pad_h": None,    # свой размер блокнота у виджета (растянули за уголок), px при 100 % (ui/app.py pad_resize)
            "pad_text": None,                # размер текста в блокноте, 0.8–1.7 (ui/pad.js textSize); пусто — как задумано

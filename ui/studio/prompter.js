@@ -19,11 +19,36 @@
     finally { button.disabled = false; }
   }
   $("#pr-audio-apps-refresh")?.addEventListener("click", loadAudioApps);
+  let screenAccess = {}, captureAppsLoading = false;
+  async function refreshCaptureAccess() {
+    const native = window.api?.();
+    if (!native?.screen_capture_permission) return;
+    try {
+      screenAccess = await native.screen_capture_permission();
+      $("#pr-screen-access").hidden = !!screenAccess.granted;
+      $("#pr-screen-access-status").textContent = screenAccess.pending ? "Ожидается ответ в системном окне macOS…" : "Доступ к экрану пока не подтверждён. Без него список окон и захват недоступны.";
+      $("#pr-screen-allow").disabled = !!screenAccess.pending || screenAccess.request_supported === false;
+      $("#pr-screen-allow").textContent = screenAccess.requested ? "Открыть настройки экрана" : "Разрешить запись экрана";
+      $("#pr-capture-test").disabled = !screenAccess.granted;
+      $("#pr-capture-apps-refresh").disabled = !screenAccess.granted || captureAppsLoading;
+      if (screenAccess.granted && !$("#pr-capture-application").dataset.loaded) await loadCaptureApps();
+    } catch (e) { $("#pr-capture-test-result").textContent = e.message; }
+  }
+  $("#pr-screen-allow")?.addEventListener("click", async () => {
+    try { await window.api().request_screen_access(); await refreshCaptureAccess(); }
+    catch (e) { $("#pr-capture-test-result").textContent = e.message; }
+  });
+  $("#pr-screen-settings")?.addEventListener("click", async () => {
+    try { await window.api().open_screen_settings(); }
+    catch (e) { $("#pr-capture-test-result").textContent = e.message; }
+  });
+  window.addEventListener("focus", refreshCaptureAccess);
+  window.addEventListener("pywebviewready", refreshCaptureAccess);
   async function loadCaptureApps() {
     const select = $("#pr-capture-application"), button = $("#pr-capture-apps-refresh"), out = $("#pr-capture-test-result");
-    if (!select || !button) return;
+    if (!select || !button || captureAppsLoading) return;
     const selected = select.value || get("prompter.capture_application") || "";
-    button.disabled = true;
+    captureAppsLoading = true; button.disabled = true;
     try {
       const result = await core.call("prompter_capture_apps");
       const apps = Array.isArray(result.apps) ? result.apps : [];
@@ -31,11 +56,12 @@
       apps.forEach(app => select.add(new Option(app.title ? `${app.name} — ${app.title}` : app.name, app.key)));
       if (selected && !apps.some(app => app.key === selected)) select.add(new Option(`${selected} · сейчас не найдено`, selected));
       select.value = selected;
+      select.dataset.loaded = "1";
       if (!result.supported) out.textContent = "Выбор окна приложения доступен в версии для macOS.";
       else if (!apps.length) out.textContent = "Откройте нужное окно и обновите список.";
       else if (!out.textContent || out.textContent.includes("доступен")) out.textContent = `Найдено окон: ${apps.length}`;
     } catch (e) { out.textContent = e.message; }
-    finally { button.disabled = false; }
+    finally { captureAppsLoading = false; button.disabled = false; }
   }
   $("#pr-capture-apps-refresh")?.addEventListener("click", loadCaptureApps);
   $("#pr-capture-test")?.addEventListener("click", async () => {
@@ -113,6 +139,6 @@
   const oldRefresh = window.refreshStatic;
   window.refreshStatic = function () { oldRefresh(); renderCaptureFields(); renderVideoState(); };
   $("#pr-stt-model")?.addEventListener("change", loadMeetingModel);
-  core.on("hello", () => { renderCaptureFields(); renderVideoState(); loadSchedules(); loadMeetingModel(); loadAudioApps(); loadCaptureApps(); });
+  core.on("hello", () => { renderCaptureFields(); renderVideoState(); loadSchedules(); loadMeetingModel(); loadAudioApps(); refreshCaptureAccess(); });
   core.on("prompter", e => { if (e.kind === "schedule") loadSchedules(); });
 })();

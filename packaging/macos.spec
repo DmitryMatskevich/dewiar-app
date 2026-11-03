@@ -2,6 +2,7 @@
 import os
 import re
 import subprocess
+import uuid
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
@@ -51,6 +52,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Dewiar", console=Fals
 coll = COLLECT(exe, a.binaries, a.datas, name="Dewiar")
 app = BUNDLE(coll, name="Dewiar.app", bundle_identifier="pro.dewiar.macos",
              info_plist={"CFBundleDisplayName": "Dewiar", "CFBundleShortVersionString": "0.45.3",
+                         "DewiarBuildID": uuid.uuid4().hex,
                          "NSContactsUsageDescription": "Импорт выбранных контактов в Dewiar и создание новых карточек по вашему подтверждению",
                          "NSMicrophoneUsageDescription": "Голосовое общение с помощником Dewiar",
                          "NSDocumentsFolderUsageDescription": "Чтение выбранных вами документов и сохранение заметок в рабочей папке Dewiar",

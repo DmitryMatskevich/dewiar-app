@@ -14,7 +14,8 @@ PY=.venv/bin/python
 
 step "Тесты записи встреч"
 for t in meeting_player_test prompter_dual_track_test prompter_links_test prompter_recording_test \
-         prompter_capture_test meeting_capture_regression_test meeting_video_test prompter_schedule_test; do
+         prompter_capture_test meeting_capture_regression_test meeting_video_test prompter_schedule_test \
+         mac_access_test macos_screen_startup_test macos_install_test; do
   if "$PY" "tests/$t.py" >"work/rebuild-$TS-$t.log" 2>&1; then echo "OK   $t"; else fail "тест $t — см. work/rebuild-$TS-$t.log"; fi
 done
 
@@ -22,7 +23,7 @@ step "Хелпер звука dewiar-audio-tap"
 bash tools/build_audio_tap.sh || fail "сборка dewiar-audio-tap"
 
 step "Закрываю запущенный Dewiar"
-osascript -e 'tell application "Dewiar" to quit' >/dev/null 2>&1 || true
+# Stop only these exact binaries; resolving an app by name can select an old backup.
 "$PY" - <<'PY' || fail "завершение прежней версии"
 import os, signal, subprocess, time
 from pathlib import Path
@@ -43,7 +44,7 @@ PY
 
 if [ -d dist/Dewiar.app ]; then
   step "Копия прежней сборки"
-  ditto dist/Dewiar.app "work/Dewiar-before-meetings-$TS.app" && echo "work/Dewiar-before-meetings-$TS.app"
+  ditto -c -k --sequesterRsrc --keepParent dist/Dewiar.app "work/Dewiar-before-meetings-$TS.zip" || fail "архив прежней сборки"
 fi
 
 step "Сборка PyInstaller"
