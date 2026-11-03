@@ -347,14 +347,12 @@
   #ask.running #a-stop { display: grid; }
   #ask.running #a-send { display: none; }
   #a-mic, #a-mic-pick { border-radius: 10px; }
-  #a-mic.recording { border-radius: 50%; color: var(--ink); background: rgba(255,104,144,.13); }
+  #a-mic.recording { position: relative; border-radius: 50%; color: #f7f7fa; background: #17181d;
+    box-shadow: 0 0 0 var(--mic-ring, 0px) rgba(255,137,38,var(--mic-alpha, 0)); transition: box-shadow .08s linear; }
+  #a-mic.recording:hover, #a-mic.recording:focus-visible { background: #17181d; }
+  #a-mic.recording svg { width: 13px; height: 13px; }
   #a-mic-pick { width: 22px; min-width: 22px; margin-left: 0; }
   #a-mic-pick svg { width: 13px; height: 13px; }
-  /* Уровень диктовки находится слева от микрофона и появляется только во время записи. */
-  #dict-level { display: none; width: 48px; min-width: 0; max-width: 48px; height: 5px; margin: 0 1px 0 2px;
-                flex: 0 2 48px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.14); }
-  #dict-level.on { display: block; }
-  #dict-level i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#65d6a4,#ffc95b,#ff6b8b); transition: width .08s linear; }
   #askn { display: none; }
   #mic-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 25; display: none; padding: 6px; border-radius: 15px;
               background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
@@ -589,12 +587,11 @@
           <button class="ab" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" type="button" title="Выбрать модель" aria-label="Выбрать модель" aria-expanded="false" aria-controls="model-menu">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
-          <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
           <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
           </div>
           <div class="ask-actions">
-          <button class="ab" id="a-clear" type="button" hidden disabled title="Стереть выделенный текст или весь текст, если ничего не выделено. Вложения и переписка сохранятся." aria-label="Стереть текст ввода"><svg viewBox="0 0 24 24"><path d="m16 3 5 5-11 11H6l-4-4L13 4a2 2 0 0 1 3-1ZM9 8l7 7M10 19h11"/></svg></button>
+          <button class="ab" id="a-clear" type="button" hidden disabled title="Стереть выделенный текст или весь текст, если ничего не выделено. Вложения и переписка сохранятся." aria-label="Стереть текст ввода"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <button class="ab" id="a-copy" type="button" hidden disabled title="Скопировать весь текст поля ввода в буфер обмена, включая переносы строк, даже если выделена только часть. Текст останется в поле; сообщение не отправляется." aria-label="Скопировать весь текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
           <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <button class="ab send" id="a-send" title="Отправить сообщение и вложения. Во время диктовки — завершить распознавание и отправить весь текст." aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -809,7 +806,7 @@ let radioNow = "";                           // играет радио — в �
 let stateSince = Date.now();
 let hold = null;              // диктовка удержанием (ниже, у перетаскивания): {on, t0, far, timer, by: "mouse"|"key"}
 let audioMode = "voice";       // Ядро --server не захватывает звук: не показываем ложную запись.
-let dictating = false, selectedMic = "";
+let dictating = false, selectedMic = "", dictationLevel = 0;
 let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
 // обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
 // портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
@@ -1084,7 +1081,7 @@ core.on("hello", d => {
 .on("settings", e => { const settings = e.settings || {}; applyLook(settings.ui); setMailBadgeMode((settings.ui || {}).mail_badge_mode); setCalendarBadgeSettings(settings.ui); setLocal((settings.privacy || {}).local_only); featuresSet(settings.features); setModelSettings(settings.llm); setAskModel(settings.llm?.profiles?.[settings.llm.active]?.model); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
-.on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") { const pct = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100); $("dict-level").firstElementChild.style.width = pct + "%"; $("dict-level").setAttribute("aria-valuenow", String(pct)); } })
+.on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") setDictationLevel(e.v); })
 .on("wake", () => { /* имя услышано — об этом говорит надпись «Я вас слушаю»; карточку не открываем:
                        если имя почудилось (шум, телевизор), не останется висящих точек */ })
 .on("heard", e => { if (e.text) showCap(e.text, WAIT); else showCap("", "Слушаю…"); })
@@ -1362,19 +1359,31 @@ async function enableMacVoice() {
   updateAudioMode("voice");
 }
 let dictationSession = null, cancelledDictationSession = null, dictationCancelling = false;
+function setDictationLevel(value) {
+  dictationLevel = Math.max(0, Math.min(1, Number(value) || 0));
+  const active = dictationLevel > 0.018;
+  const strength = active ? Math.min(1, (dictationLevel - 0.018) / .32) : 0;
+  const mic = $("a-mic");
+  mic.style.setProperty("--mic-ring", active ? `${Math.round(2 + strength * 12)}px` : "0px");
+  mic.style.setProperty("--mic-alpha", active ? String(.16 + strength * .44) : "0");
+  const icon = active
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z" fill="currentColor" stroke="none"/></svg>';
+  const signal = active ? "sound" : "silent";
+  if (dictating && mic.dataset.signal !== signal) { mic.innerHTML = icon; mic.dataset.signal = signal; }
+}
 function dictationUi(on) {
   dictating = !!on;
   $("a-mic").classList.toggle("recording", dictating);
-  $("a-mic").innerHTML = dictating
-    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none"/></svg>'
-    : '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+  if (!dictating) {
+    dictationLevel = 0; $("a-mic").dataset.signal = "";
+    $("a-mic").style.removeProperty("--mic-ring"); $("a-mic").style.removeProperty("--mic-alpha");
+    $("a-mic").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+  } else setDictationLevel(dictationLevel);
   $("a-mic").title = (dictating ? "Остановить голосовой ввод — текст останется в поле. " : "Начать голосовой ввод. ") + "Завершить и отправить голосом: скажите имя текущего помощника, «ввод» или «вот» в конце фразы, либо отдельно «ввод» или «вот». После паузы дождитесь распознавания.";
   $("a-mic").setAttribute("aria-pressed", String(dictating));
   $("a-mic").disabled = false;
   $("a-mic").setAttribute("aria-label", $("a-mic").title);
-  $("dict-level").classList.toggle("on", dictating);
-  $("dict-level").setAttribute("aria-hidden", dictating ? "false" : "true");
-  if (!dictating) { $("dict-level").firstElementChild.style.width = "0%"; $("dict-level").setAttribute("aria-valuenow", "0"); }
   updateDraftActions();
 }
 function insertDictationText(text) {
@@ -1401,8 +1410,6 @@ core.on("dictation", e => {
   if (!dictating || (e.session != null && dictationSession != null && e.session !== dictationSession)) return;
   if (e.state === "cancelled") { dictationUi(false); return; }
   if (e.state === "finishing") {
-    $("dict-level").classList.toggle("on", false);
-    $("dict-level").setAttribute("aria-hidden", "true");
     $("a-mic").disabled = true;
     $("a-mic").title = "Завершаю распознавание записанной речи…";
     $("a-mic").setAttribute("aria-label", $("a-mic").title);
