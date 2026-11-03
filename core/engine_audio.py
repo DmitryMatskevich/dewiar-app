@@ -1106,10 +1106,8 @@ class AudioMixin:
             self._background_revision += 1
             self._background_state("cleared")
         elif action == "stop":
-            if self._background_draft:
-                self.note("Сначала вставьте текст или скажите «Лира, отмена».")
-            else:
-                self.dictation_cancel()
+            # Stop listening without discarding already recognised text.
+            self.dictation_cancel()
         elif action == "command":
             self._run_dictation_voice_command(argument)
 

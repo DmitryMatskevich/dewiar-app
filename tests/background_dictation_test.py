@@ -52,6 +52,7 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Лира, скопировать текст', ['лира']), ('', ('copy','')))
         self.assertEqual(parse('Лира, сотри', ['лира']), ('', ('clear','')))
         self.assertEqual(parse('Лира, очисти текст', ['лира']), ('', ('clear','')))
+        self.assertEqual(parse('Решение принято. Лира, стоп', ['лира']), ('Решение принято.', ('stop','')))
 
     def test_voice_copy_also_works_in_normal_dictation(self):
         e = Engine()
@@ -78,6 +79,26 @@ class Background(unittest.TestCase):
         self.assertTrue(e.dictation_active)
         e._dictation_result('Лира, появись', 'test', 3)
         self.assertIn(('window', {'do':'show'}), e.events)
+
+    def test_named_stop_preserves_recognised_text(self):
+        e = Engine()
+        e._background_dictation = False
+        e.set_state = lambda state: None
+        e._dictation_result('Последняя фраза. Лира, стоп', 'test', 3)
+        self.assertFalse(e.dictation_active)
+        self.assertEqual(e.events[0][1]['text'], 'Последняя фраза.')
+        self.assertEqual(e.events[-1][1]['state'], 'cancelled')
+        e._dictation_result('Опоздавший результат', 'test', 3)
+        self.assertEqual(len(e.events), 2)
+
+    def test_named_stop_preserves_background_draft(self):
+        e = Engine()
+        e.set_state = lambda state: None
+        e._dictation_result('Важный черновик. Лира, стоп', 'test', 3)
+        self.assertFalse(e.dictation_active)
+        self.assertEqual(e._background_draft, ['Важный черновик.'])
+        self.assertEqual(e.events[-1][1]['state'], 'stopped')
+        self.assertEqual(e.events[-1][1]['text'], 'Важный черновик.')
 
     def test_copy_command_replaces_image_even_without_focused_field(self):
         from background_dictation import copy_and_insert

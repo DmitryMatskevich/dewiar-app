@@ -45,6 +45,10 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     page.evaluate("fire('background_dictation',{active:true,state:'clear_requested',session:6,revision:1,text:'До лишнее после'})")
     assert field.input_value() == 'До  после'
     page.wait_for_function("calls.some(x=>x[0]==='background_dictation_edit'&&x[1].text==='До  после')")
+    page.evaluate("fire('background_dictation',{active:false,state:'stopped',session:7,revision:3,text:'Сохранённый текст'})")
+    assert field.is_visible() and field.input_value() == 'Сохранённый текст'
+    page.evaluate("fire('draft_command',{action:'copy'})")
+    page.wait_for_function("calls.filter(x=>x[0]==='dictation_copy_text').at(-1)[1].text==='Сохранённый текст'")
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')

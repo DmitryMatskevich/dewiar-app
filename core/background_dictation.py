@@ -52,7 +52,7 @@ def parse(text, aliases):
             return before, ('show', '')
         if after in ('отмена', 'отмени'):
             return before, ('cancel', '')
-        if after in ('прекрати запись', 'перестань слушать', 'закончи диктовку'):
+        if after in ('стоп', 'прекрати запись', 'перестань слушать', 'закончи диктовку'):
             return before, ('stop', '')
         if after in ('слушай', 'записывай'):
             return before, ('listen', '')
