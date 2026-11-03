@@ -32,7 +32,7 @@ for ident in ("dict-tools", "dict-cancel", "dict-done"):
     ok(f'id="{ident}"' not in src, f"лишний элемент {ident} не показывается")
 for command in ("dictation_start", 'core.call("devices")'):
     ok(command in src, f"подключена команда {command}")
-ok('$("ask-model").onclick' in src and 'open_settings("brain")' in src, "кнопка модели открывает вкладку «Модели»")
+ok('$("ask-model").onclick' in src and 'id="model-menu"' in src, "кнопка модели открывает меню выбора")
 ok('id="b-model"' not in src and 'id="bubble" hidden' in src,
    "верхняя кнопка состояния и текстовые статусы скрыты")
 ok('say.textContent = "Текст"' in src and 'Текстовый режим' not in src,

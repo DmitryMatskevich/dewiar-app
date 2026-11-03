@@ -326,9 +326,18 @@
   #ask-feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   #ask-model { flex: 1 1 118px; min-width: 14px; max-width: 118px; margin-left: 2px; margin-right: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                border: 0; padding: 0; background: transparent; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 1.2; text-align: left; cursor: pointer; }
-  #ask-model:hover, #ask-model:focus-visible { color: var(--ink); outline: none; }
+  #ask-model:hover, #ask-model:focus-visible { color: var(--ink); }
+  #ask-model:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
   #ask-model::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%; background: #63d5a2; }
   #ask-model.off::before { background: #f2b35d; }
+  #ask-model.manual::before { display: none; }
+  #ask-model svg { width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 2; }
+  #model-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 26; max-height: 240px; overflow: auto;
+    padding: 6px; border-radius: 15px; background: #242d3d; color: #fff; box-shadow: 0 15px 35px rgba(0,0,0,.25); }
+  #model-menu button { width: 100%; min-height: 44px; padding: 6px 9px; border: 0; border-radius: 9px; text-align: left;
+    background: transparent; color: inherit; cursor: pointer; overflow-wrap: anywhere; }
+  #model-menu button:hover, #model-menu button[aria-pressed="true"] { background: rgba(110,130,190,.23); }
+  body.light #model-menu { background: #fff; color: var(--ink); }
   #ask-model.off { color: var(--muted); }
   #a-stop { display: none; color: #ff7895; background: rgba(255,104,144,.12); }
   #a-stop:hover, #a-stop:focus-visible { color: #fff; background: rgba(255,104,144,.28); }
@@ -575,7 +584,7 @@
           <div class="ask-tools">
           <button class="ab" id="a-att" title="Добавить файлы или папку" aria-label="Добавить файлы или папку"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
           <button class="ab" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
-          <button id="ask-model" class="off" title="Активная модель ответа — открыть вкладку «Модели»" aria-label="Открыть настройки моделей">Модель не подключена</button>
+          <button id="ask-model" class="off" type="button" title="Выбрать модель" aria-label="Выбрать модель" aria-expanded="false" aria-controls="model-menu">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <div id="dict-level" role="progressbar" aria-label="Уровень микрофона во время диктовки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" title="Уровень микрофона во время диктовки"><i></i></div>
           <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
@@ -591,6 +600,7 @@
         <span id="ask-feedback" role="status" aria-live="polite"></span>
       </div>
       <div id="att-menu" role="menu" aria-label="Добавить вложение"><h4>Добавить</h4><button id="att-files" type="button" title="Выбрать файлы для следующего сообщения. Проверьте вложения перед отправкой: их содержимое может получить выбранная модель.">Файлы</button><button id="att-folder" type="button" title="Выбрать папку для следующего сообщения. Проверьте её содержимое перед отправкой; рабочая папка Dewiar этим действием не меняется.">Папку</button></div>
+      <div id="model-menu" hidden role="group" aria-label="Выбор модели для общения"></div>
       <div id="mic-menu" role="menu" aria-label="Микрофоны"><h4>Микрофон</h4><div id="mic-list"></div></div>
       <input type="file" id="a-file" multiple hidden>
       <input type="file" id="a-folder" webkitdirectory directory multiple hidden>
@@ -1067,7 +1077,7 @@ core.on("hello", d => {
   clearTimeout(window._turnT);                    // полоса дотаяла — надпись обычная, даже если ядро ещё не сказало «покой»
   window._turnT = setTimeout(() => { if (Date.now() >= turnUntil - 50) setState(state); }, (e.seconds || 0) * 1000 + 100);
 })
-.on("settings", e => { const settings = e.settings || {}; applyLook(settings.ui); setMailBadgeMode((settings.ui || {}).mail_badge_mode); setCalendarBadgeSettings(settings.ui); setLocal((settings.privacy || {}).local_only); featuresSet(settings.features); setModelSettings(settings.llm); setAskModel(null, settings.audio || {}); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
+.on("settings", e => { const settings = e.settings || {}; applyLook(settings.ui); setMailBadgeMode((settings.ui || {}).mail_badge_mode); setCalendarBadgeSettings(settings.ui); setLocal((settings.privacy || {}).local_only); featuresSet(settings.features); setModelSettings(settings.llm); setAskModel(settings.llm?.profiles?.[settings.llm.active]?.model); refreshModelHint(); })   // студия → «Оформление» и «Безопасность»
 .on("persona", e => applyPersona(e.persona))
 .on("personas", e => { personas = e.personas; applyPersona(current ? current.id : personas[0].id); })
 .on("level", e => { entity.set({ level: e.v, voice: e.src === "voice" }); if (dictating && e.src === "mic") { const pct = Math.round(Math.max(0, Math.min(1, e.v || 0)) * 100); $("dict-level").firstElementChild.style.width = pct + "%"; $("dict-level").setAttribute("aria-valuenow", String(pct)); } })
@@ -1473,9 +1483,23 @@ $("b-lo").onclick = () => { const a = api(); if (a) a.open_settings("safety"); }
 let hudModels = {}, hudModelRequest = 0;
 function setAskModel(name, audio) {
   const el = $("ask-model"); if (!el) return;
-  const text = String(name || "").trim();
-  el.textContent = text || "Модель не подключена";
-  el.title = text ? "Активная модель: " + text : "Модель не подключена — откройте настройки «Модели»";
+  const profile = hudModels.profiles?.[hudModels.active];
+  const manual = hudModels.auto_select === false && !!profile;
+  const text = String((manual ? profile.model || profile.name : name) || "").trim();
+  el.replaceChildren();
+  if (manual) {
+    const pen = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    pen.setAttribute("viewBox", "0 0 24 24");
+    pen.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(pen.namespaceURI, "path");
+    path.setAttribute("d", "m4 16-1 5 5-1L21 7l-4-4Z M14 6l4 4");
+    pen.append(path);
+    el.append(pen);
+  }
+  el.append(text || "Модель не подключена");
+  el.classList.toggle("manual", manual);
+  el.title = (manual ? "Ручной выбор" : "Автовыбор") + " · " + (text || "Модель не подключена");
+  el.setAttribute("aria-label", "Выбрать модель. " + el.title);
   el.classList.toggle("off", !text);
 }
 function setModelSettings(llm) {
@@ -1487,21 +1511,67 @@ async function refreshModelHint() {
   const version = ++hudModelRequest;
   try {
     // Local metadata only: never refresh subscription limits or send an inference request.
-    const status = await core.call("models_routing_status");
+    const status = await core.call("models_routing_status", { role: "communication" });
     if (version !== hudModelRequest) return;
     const id = status.automatic ? status.next : hudModels.active;
     const p = (hudModels.profiles || {})[id];
     const chosen = p?.model || (id ? id : "нет доступной модели");
     $("bubble").title = "Режим ввода: " + ($("say").textContent || "готов").trim() + ". Модель выбирается отдельной кнопкой в строке сообщения.";
     $("bubble").setAttribute("aria-label", $("bubble").title);
-    setAskModel(status.selected?.model || chosen);
+    setAskModel(chosen);
   } catch (_) { /* Keep the settings-derived model if the core is unavailable. */ }
 }
 // Индикатор режима не открывает настройки и не запускает выбор модели. Обновление активной модели
 // выполняется общей проверкой состояния и отдельной кнопкой с названием модели в строке ввода.
 $("bubble").onclick = () => { $("bubble").title = "Это индикатор режима ввода. Для выбора модели нажмите на название модели в строке сообщения или откройте раздел «Модели»."; };
-$("ask-model").onclick = (e) => { e.stopPropagation(); const a = api(); if (a) a.open_settings("brain"); };
-$("ask-model").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("ask-model").click(); } };
+const modelMenu = $("model-menu");
+function closeModelMenu(restoreFocus = false) {
+  modelMenu.hidden = true;
+  $("ask-model").setAttribute("aria-expanded", "false");
+  if (restoreFocus) $("ask-model").focus();
+}
+async function selectHudModel(patch) {
+  for (const button of modelMenu.querySelectorAll("button")) button.disabled = true;
+  try {
+    const settings = await core.call("settings_save", { patch: { llm: patch } });
+    setModelSettings(settings.llm);
+    setAskModel(settings.llm.auto_select ? "" : settings.llm.profiles?.[settings.llm.active]?.model);
+    closeModelMenu(true);
+    refreshModelHint();
+  } catch (error) {
+    showErr(error);
+    for (const button of modelMenu.querySelectorAll("button")) button.disabled = false;
+  }
+}
+$("ask-model").onclick = () => {
+  if (!modelMenu.hidden) { closeModelMenu(); return; }
+  modelMenu.replaceChildren();
+  const add = (label, action, selected) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.onclick = action;
+    if (selected !== undefined) button.setAttribute("aria-pressed", String(selected));
+    modelMenu.append(button);
+  };
+  add("Автовыбор по приоритету", () => selectHudModel({ auto_select: true }), !!hudModels.auto_select);
+  const profiles = Object.entries(hudModels.profiles || {}).filter(([, p]) => p.roles == null || p.roles.includes("communication"));
+  profiles.sort(([, a], [, b]) => (a.priority ?? 9) - (b.priority ?? 9));
+  for (const [id, p] of profiles) {
+    const label = [...new Set([p.name, p.model].filter(Boolean))].join(" · ") || id;
+    add(label, () => selectHudModel({ active: id, auto_select: false }), !hudModels.auto_select && hudModels.active === id);
+  }
+  add("Настройки моделей", () => { closeModelMenu(); api()?.open_settings("brain"); });
+  modelMenu.hidden = false;
+  $("ask-model").setAttribute("aria-expanded", "true");
+  modelMenu.querySelector("button").focus();
+};
+document.addEventListener("click", e => {
+  if (!e.target.closest("#model-menu, #ask-model")) closeModelMenu();
+});
+modelMenu.addEventListener("keydown", e => {
+  if (e.key === "Escape") { e.stopPropagation(); closeModelMenu(true); }
+});
 setInterval(() => { if (core.connected && !document.hidden) refreshModelHint(); }, 15000);
 // жалоба: сначала снимок экрана (каким его видит человек в момент проблемы), потом форма в студии («О программе»)
 $("b-bug").onclick = guard($("b-bug"), async () => {

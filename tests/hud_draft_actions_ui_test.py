@@ -26,6 +26,38 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.goto((ui / "hud.html").as_uri())
     page.wait_for_function("typeof writeClipboardText==='function'")
     page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
+    page.evaluate("""() => {
+      const llm = {auto_select:true,active:'backup',profiles:{
+        primary:{model:'first-model',priority:1},
+        backup:{model:'backup-model',priority:9}
+      }};
+      core.call = async (cmd, args) => {
+        if (cmd === 'settings_save') {
+          Object.assign(llm, args.patch.llm);
+          return {llm};
+        }
+        if (cmd === 'models_routing_status') {
+          return {automatic:llm.auto_select,next:'primary',selected:{model:'previous-answer'}};
+        }
+        return {};
+      };
+      setModelSettings(llm);
+      return refreshModelHint();
+    }""")
+    model = page.locator("#ask-model")
+    assert model.inner_text() == "first-model"
+    model.click()
+    page.locator("#model-menu").get_by_role("button", name="backup-model").click()
+    page.wait_for_function("document.querySelector('#ask-model.manual svg') !== null")
+    assert model.inner_text() == "backup-model"
+    model.click()
+    page.locator("#model-menu").get_by_role("button", name="Автовыбор по приоритету").click()
+    page.wait_for_function("document.querySelector('#ask-model').textContent === 'first-model'")
+    assert not model.locator("svg").count()
+    model.click()
+    page.keyboard.press("Escape")
+    assert page.locator("#model-menu").is_hidden()
+    assert model.get_attribute("aria-expanded") == "false"
     field, clear, copy = [page.locator(s) for s in ["#askin", "#a-clear", "#a-copy"]]
     assert clear.is_disabled() and copy.is_disabled()
     text = "  Привет 😀\nВторая строка\n  "
