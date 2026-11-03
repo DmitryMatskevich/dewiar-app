@@ -69,6 +69,20 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     # A one-word voice command without draft/attachments does not send an empty request.
     page.evaluate("fire('dictation',{state:'recording'});fire('dictation',{state:'done',submit:true})")
     assert page.evaluate("sent.length") == count + 1
+    # The send button stops capture, waits for the final phrase and sends once.
+    field.fill("Предыдущий текст.")
+    field.evaluate("e=>e.setSelectionRange(e.value.length,e.value.length)")
+    page.evaluate("fire('dictation',{state:'recording',session:42})")
+    count = page.evaluate("sent.length")
+    page.locator("#a-send").click()
+    assert page.evaluate("calls.at(-1)[0]") == "dictation_finish"
+    assert page.evaluate("calls.at(-1)[1].submit") is True
+    assert page.evaluate("sent.length") == count
+    page.evaluate("fire('dictation',{state:'finishing',session:42});fire('dictation',{state:'partial',session:42,text:'Последняя фраза'});fire('dictation',{state:'done',session:42,submit:true});fire('dictation',{state:'done',session:42,submit:true})")
+    assert page.evaluate("sent.length") == count + 1
+    assert page.evaluate("sent.at(-1)[1].text") == "Предыдущий текст. Последняя фраза"
+    assert not page.evaluate("dictating")
+    count = page.evaluate("sent.length") - 1
     # Manual microphone stop retains the recognised draft, without sending it.
     page.evaluate("fire('dictation',{state:'recording'});fire('dictation',{state:'partial',text:'Оставить в поле'})")
     page.locator("#a-mic").click()

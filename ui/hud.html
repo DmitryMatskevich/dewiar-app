@@ -2288,6 +2288,12 @@ new ResizeObserver(entries => {
   const w = entries[0]?.contentRect?.width || 0;
   if (w && Math.abs(w - askWidth) > .5) { askWidth = w; fitAsk(); }
 }).observe($("askbox"));
+$("a-send").addEventListener("pointerdown", e => {
+  if (!dictating || e.button !== 0) return;
+  // Recognition may resize the toolbar before the pointer is released.
+  e.currentTarget.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
 $("a-send").onclick = sendAsk;
 function updateDraftActions() {
   const t = $("askin"), clear = $("a-clear"), copy = $("a-copy");
