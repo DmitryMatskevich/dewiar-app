@@ -18,7 +18,7 @@ ok('e.key === "Enter" && (e.ctrlKey || e.metaKey)' in src, "Ctrl/⌘+Enter от�
 ok('#ask { display: block;' in src, "окно чата агента открыто постоянно")
 ok('M12 19V5M6 11l6-6 6 6' in src, "стрелка отправки направлена вверх")
 ok(src.index('id="b-voice-inline"') < src.index('id="a-mic"'), "динамик находится слева от микрофона")
-ok("DICTATION_LEVEL_ICONS" in src, "индикатор уровня встроен в кнопку микрофона")
+ok('id="dictation-ring"' in src, "индикатор уровня встроен в кнопку микрофона")
 for ident in ("b-mic", "b-type", "b-team"):
     ok(f'id="{ident}" hidden' in src, f"старая кнопка {ident} убрана из панели опций")
 ok('e.key === "Enter" && !e.shiftKey' not in src, "старое поведение Shift+Enter не осталось")

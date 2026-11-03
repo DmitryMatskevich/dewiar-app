@@ -114,6 +114,24 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.wait_for_timeout(400)
     assert "«Патрик»" in field.get_attribute("data-tip")
     assert "Ctrl+Enter" not in field.get_attribute("data-tip")
+    # Keep a real pointer press on Stop while a recognition result moves the toolbar.
+    field.fill("Короткий черновик.")
+    field.evaluate("e=>e.setSelectionRange(e.value.length,e.value.length)")
+    page.evaluate("fire('dictation',{state:'recording',session:12})")
+    mic = page.locator("#a-mic")
+    box = mic.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    phrase = "Последняя фраза, которую нужно прокрутить. " * 120 + "Конец."
+    page.evaluate("text=>{setDictationLevel(.4);fire('dictation',{state:'partial',text,session:12})}", phrase)
+    assert field.evaluate("e=>e.scrollTop + e.clientHeight >= e.scrollHeight - 2")
+    page.mouse.up()
+    page.wait_for_function("!dictating")
+    assert page.evaluate("calls.at(-1)[0]") == "dictation_cancel"
+    assert field.input_value().endswith("Конец.")
+    assert field.evaluate("e=>e.scrollTop + e.clientHeight >= e.scrollHeight - 2")
+
+    field.fill("")
     # Stop sits beside the assistant's answer and calls the existing stop command.
     page.evaluate("showCap('Вопрос','Ответ');setState('speaking')")
     stop = page.locator("#answer-row #a-stop")

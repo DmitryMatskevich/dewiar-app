@@ -357,6 +357,9 @@
   #a-mic, #a-mic-pick { border-radius: 10px; }
   #a-mic.recording { border-radius: 50%; color: #17181d; background: transparent; }
   #a-mic.recording:hover, #a-mic.recording:focus-visible { background: transparent; }
+  #a-mic svg { pointer-events: none; }
+  #a-mic .record-icon, #a-mic.recording .mic-icon { display: none; }
+  #a-mic.recording .record-icon { display: block; }
   #a-mic.recording svg { width: 34px; height: 34px; overflow: visible; }
   #a-mic.recording.quiet svg rect { transform-origin: center; animation: dictation-quiet 2s ease-in-out infinite; }
   @keyframes dictation-quiet { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
@@ -623,7 +626,7 @@
           <button class="ab" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
           <button id="ask-model" class="off" type="button" title="Выбрать модель" aria-label="Выбрать модель" aria-expanded="false" aria-controls="model-menu">Модель не подключена</button>
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
-          <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+          <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><svg class="record-icon" viewBox="0 0 34 34" aria-hidden="true"><circle id="dictation-ring" cx="17" cy="17" fill="#ff922e" stroke="none"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#17181d" stroke="none"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
           </div>
           <div class="ask-actions">
@@ -845,11 +848,6 @@ let stateSince = Date.now();
 let hold = null;              // диктовка удержанием (ниже, у перетаскивания): {on, t0, far, timer, by: "mouse"|"key"}
 let audioMode = "voice";       // Ядро --server не захватывает звук: не показываем ложную запись.
 let dictating = false, selectedMic = "", dictationLevel = 0, lastDictationSelection = null;
-const DICTATION_LEVEL_ICONS = Array.from({length: 11}, (_, index) => {
-  const radius = index === 0 ? 0 : 9 + index * .68;
-  const opacity = index === 0 ? 0 : .12 + index * .045;
-  return `<svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="${radius}" fill="#ff922e" stroke="none" opacity="${opacity}"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#17181d" stroke="none"/></svg>`;
-});
 let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
 // обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
 // портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
@@ -1406,19 +1404,18 @@ function setDictationLevel(value) {
   dictationLevel = Math.max(0, Math.min(1, Number(value) || 0));
   const mic = $("a-mic");
   const strength = Math.max(0, Math.min(1, (dictationLevel - .006) / .38));
-  const index = Math.round(strength * (DICTATION_LEVEL_ICONS.length - 1));
+  const index = Math.round(strength * 10);
   mic.classList.toggle("quiet", dictating && index === 0);
-  if (dictating && mic.dataset.levelIcon !== String(index)) {
-    mic.innerHTML = DICTATION_LEVEL_ICONS[index]; mic.dataset.levelIcon = String(index);
-  }
+  const ring = $("dictation-ring");
+  ring.setAttribute("r", index ? 9 + index * .68 : 0);
+  ring.setAttribute("opacity", index ? .12 + index * .045 : 0);
 }
 function dictationUi(on) {
   dictating = !!on;
   $("a-mic").classList.toggle("recording", dictating);
   if (!dictating) {
     dictationFinishing = false;
-    dictationLevel = 0; $("a-mic").dataset.levelIcon = "";
-    $("a-mic").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+    dictationLevel = 0;
   } else setDictationLevel(dictationLevel);
   $("a-mic").title = (dictating ? "Остановить голосовой ввод — текст останется в поле. " : "Начать голосовой ввод. ") + "Завершить и отправить голосом: скажите имя текущего помощника в конце фразы или отдельно. После паузы дождитесь распознавания.";
   $("a-mic").setAttribute("aria-pressed", String(dictating));
@@ -1442,7 +1439,39 @@ function insertDictationText(text) {
   t.setRangeText(left + words + right, start, end, "end");
   const phraseStart = start + left.length, phraseEnd = phraseStart + words.length;
   lastDictationSelection = {start: phraseStart, end: phraseEnd, value: t.value};
-  t.focus(); t.setSelectionRange(phraseStart, phraseEnd); fitAsk();
+  t.focus({preventScroll: true});
+  t.setSelectionRange(phraseStart, phraseEnd);
+  fitAsk();
+  revealDictationEnd(t, phraseEnd);
+}
+function revealDictationEnd(input, end) {
+  if (input.scrollHeight <= input.clientHeight) return;
+  if (end === input.value.length) {
+    input.scrollTop = input.scrollHeight;
+    return;
+  }
+  // Textarea selections do not reliably scroll into view in WKWebView.
+  const style = getComputedStyle(input);
+  const mirror = document.createElement("div");
+  Object.assign(mirror.style, {
+    position: "fixed", top: "0", left: "0", visibility: "hidden",
+    boxSizing: "border-box", width: input.clientWidth + "px",
+    font: style.font, lineHeight: style.lineHeight, letterSpacing: style.letterSpacing,
+    padding: style.padding, tabSize: style.tabSize, whiteSpace: "pre-wrap", overflowWrap: "break-word",
+  });
+  const text = document.createTextNode(input.value);
+  mirror.append(text);
+  document.body.append(mirror);
+  const range = document.createRange();
+  range.setStart(text, end - 1);
+  range.setEnd(text, end);
+  const line = range.getBoundingClientRect();
+  const origin = mirror.getBoundingClientRect().top;
+  mirror.remove();
+  const top = line.top - origin;
+  const bottom = line.bottom - origin + parseFloat(style.paddingBottom);
+  if (bottom > input.scrollTop + input.clientHeight) input.scrollTop = bottom - input.clientHeight;
+  else if (top < input.scrollTop) input.scrollTop = top;
 }
 core.on("dictation", e => {
   // A result already in transit when Cancel is clicked must never edit or send the draft.
@@ -1493,6 +1522,12 @@ async function cancelDictation() {
     dictationUi(dictating); $("askin").focus();
   }
 }
+$("a-mic").addEventListener("pointerdown", e => {
+  if (!dictating || e.button !== 0) return;
+  // A partial transcript can resize the draft while the pointer is held down.
+  e.currentTarget.setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
 $("a-mic").onclick = () => {
   if (dictating) {
     return cancelDictation();
@@ -2229,6 +2264,7 @@ function sendAsk() {
 function fitAsk() {
   const t = $("askin"); if (!t) return;
   window.DewiarLinks?.refresh(t);
+  const scrollTop = t.scrollTop;
   t.style.height = "24px";
   const available = Math.max(120, Math.min(260, Math.floor(innerHeight * .36)));
   const longText = $("card").classList.contains("long") || t.value.length > 60 || t.value.includes("\n");
@@ -2237,6 +2273,7 @@ function fitAsk() {
   $("askbox").classList.toggle("has", !!t.value.trim() || atts.length > 0);
   updateDraftActions();
   t.classList.toggle("scroll", t.scrollHeight > lim);
+  t.scrollTop = scrollTop;
   const long = t.value.length > 60 || t.value.includes("\n");
   $("card").classList.toggle("long", long && $("ask").style.display === "block");
   const n = t.value.length, lines = t.value.split("\n").length;

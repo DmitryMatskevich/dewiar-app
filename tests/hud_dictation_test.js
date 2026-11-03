@@ -9,7 +9,7 @@ function $(id) {
     const element = {
     value: '', title: '', innerHTML: '', disabled: false, dataset: {}, attributes: {}, style: {},
     firstElementChild: { style: {} }, classList: { toggle() {} },
-    setAttribute(k, v) { this.attributes[k] = v; }, focus() {},
+    setAttribute(k, v) { this.attributes[k] = v; }, focus() {}, addEventListener() {},
     setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; },
     setRangeText(text, start, end) {
       this.value = this.value.slice(0, start) + text + this.value.slice(end);
@@ -43,7 +43,7 @@ vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* П�
   $('askin').value = 'Мой черновик.';
   await $('a-mic').onclick();
   assert.equal(recording(), true);
-  assert.match($('a-mic').innerHTML, /<rect x="13"/);
+  assert.equal($('dictation-ring').attributes.r, 0);
   assert.equal($('a-mic').attributes['aria-pressed'], 'true');
   handlers.dictation({ state: 'partial', text: 'Первая часть.' });
   handlers.dictation({ state: 'partial', text: 'Вторая часть.' });
@@ -54,7 +54,6 @@ vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* П�
   assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), ['dictation_cancel']);
   assert.equal(recording(), false);
   assert.equal(sent.length, 0);
-  assert.match($('a-mic').innerHTML, /M5 11/);
   // Send while recording waits for final STT; draft and attachments are preserved.
   handlers.dictation({ state: 'recording' });
   ctx.atts = [{ kind: 'image', name: 'Фото', url: 'image:test' }];
