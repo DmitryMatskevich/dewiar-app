@@ -46,6 +46,10 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Лира', ['лира']), ('', ('show','')))
         self.assertEqual(parse('Лира, снимок экрана', ['лира']), ('', ('command','снимок экрана')))
         self.assertEqual(parse('вставить текст', ['лира']), ('вставить текст', None))
+        self.assertEqual(parse('Давай наберём текст, который будем копировать. Лира, вставить текст.', ['лира']),
+                         ('Давай наберём текст, который будем копировать.', ('insert','')))
+        self.assertEqual(parse('Лира ставить', ['лира']), ('', ('insert','')))
+        self.assertEqual(parse('Лира, скопировать текст', ['лира']), ('', ('copy','')))
 
     def test_voice_copy_also_works_in_normal_dictation(self):
         e = Engine()
