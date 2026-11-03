@@ -31,10 +31,10 @@ const ctx = vm.createContext({ $, console, dictating: false, audioMode: 'voice',
     call: async (...args) => { calls.push(args); },
     sendLater: async (...args) => { sent.push(args); },
   },
-  fitAsk() {}, openAsk() {}, showErr(e) { throw e; },
+  fitAsk() {}, updateDraftActions() {}, openAsk() {}, showErr(e) { throw e; },
   guard: (el, fn) => fn, tlReset() {}, showCap() {}, renderAtts() {}, WAIT: 'wait',
 });
-vm.runInContext(src.slice(src.indexOf('function dictationUi('), src.indexOf('async function showMicMenu(')), ctx);
+vm.runInContext(src.slice(src.indexOf('let dictationSession ='), src.indexOf('async function showMicMenu(')), ctx);
 vm.runInContext(src.slice(src.indexOf('function sendAsk()'), src.indexOf('/* Поле растёт')), ctx);
 (async () => {
   $('askin').value = 'Мой черновик.';

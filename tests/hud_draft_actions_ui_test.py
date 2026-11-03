@@ -32,6 +32,8 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
         backup:{model:'backup-model',priority:9}
       }};
       core.call = async (cmd, args) => {
+        calls.push([cmd,args]);
+        if (cmd === 'dictation_cancel' && window.delayCancel) return new Promise(resolve=>window.resolveCancel=resolve);
         if (cmd === 'settings_save') {
           Object.assign(llm, args.patch.llm);
           return {llm};
@@ -59,7 +61,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert page.locator("#model-menu").is_hidden()
     assert model.get_attribute("aria-expanded") == "false"
     field, clear, copy = [page.locator(s) for s in ["#askin", "#a-clear", "#a-copy"]]
-    assert clear.is_disabled() and copy.is_disabled()
+    assert clear.is_hidden() and copy.is_hidden()
     text = "  Привет 😀\nВторая строка\n  "
     field.fill(text)
     field.evaluate("e=>e.setSelectionRange(2,8)")
@@ -91,18 +93,52 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert "Не удалось скопировать" in page.evaluate("copyError")
     assert not copy.evaluate("e=>e.classList.contains('copied')")
     assert field.input_value() == text
-    # Clearing affects only the draft. Dictation and attached files survive.
-    page.evaluate("atts=[{kind:'image',url:'data:image/png;base64,',name:'fixture.png'}];fire('dictation',{state:'recording'})")
+    # Erase only the selected UTF-16 range, preserving whitespace and attachments.
+    page.evaluate("atts=[{kind:'image',url:'data:image/png;base64,',name:'fixture.png'}]")
+    field.fill("Начало 😀 конец\n ")
+    field.evaluate("e=>e.setSelectionRange(7,10)")
     clear.click()
+    assert field.input_value() == "Начало конец\n "
+    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [7,7]
+    assert clear.is_visible() and copy.is_visible()
+    # A collapsed selection erases the whole draft; keyboard activation works too.
+    clear.focus()
+    page.keyboard.press("Enter")
     assert field.input_value() == ""
-    assert clear.is_disabled() and copy.is_disabled()
+    assert clear.is_hidden() and copy.is_hidden()
+    assert page.evaluate("atts.length") == 1
+    # Cancel remains available with an empty draft and ignores already queued results.
+    page.evaluate("window.delayCancel=true;fire('dictation',{state:'recording',session:1})")
+    assert clear.is_visible() and clear.is_enabled() and copy.is_hidden()
+    assert "Отменить голосовую запись" in clear.get_attribute("aria-label")
+    clear.click()
+    page.wait_for_function("typeof resolveCancel==='function'")
+    assert clear.is_disabled()
+    page.evaluate("fire('dictation',{state:'partial',session:1,text:'Не вставлять'});fire('dictation',{state:'done',session:1,submit:true})")
+    assert field.input_value() == "" and page.evaluate("sent.length") == 0
+    page.evaluate("resolveCancel({});window.delayCancel=false")
+    page.wait_for_function("!dictating")
+    assert clear.is_hidden() and copy.is_hidden()
+    assert page.evaluate("calls.at(-1)[0]") == "dictation_cancel"
+    # Cancel during final recognition preserves existing text, its selection and files.
+    field.fill(text)
+    field.evaluate("e=>e.setSelectionRange(4,9)")
+    page.evaluate("fire('dictation',{state:'recording',session:3});fire('dictation',{state:'finishing',session:3})")
+    clear.click()
+    page.wait_for_function("!dictating")
+    assert field.input_value() == text
+    assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [4,9]
     assert page.evaluate("document.activeElement.id") == "askin"
     assert page.evaluate("atts.length") == 1
-    assert page.evaluate("dictating")
     assert page.evaluate("sent.length") == 0
-    page.evaluate("fire('dictation',{state:'partial',text:'Новая фраза'})")
-    assert field.input_value() == "Новая фраза"
-    assert not copy.is_disabled() and not clear.is_disabled()
+    # An old session cannot affect a new recording, including a late submit event.
+    page.evaluate("fire('dictation',{state:'recording',session:5});fire('dictation',{state:'partial',session:3,text:'Старая фраза'});fire('dictation',{state:'done',session:3,submit:true})")
+    assert field.input_value() == text and page.evaluate("dictating")
+    assert page.evaluate("sent.length") == 0
+    field.evaluate("e=>e.setSelectionRange(e.value.length,e.value.length)")
+    page.evaluate("fire('dictation',{state:'partial',session:5,text:'Новая фраза'});fire('dictation',{state:'done',session:5,submit:false})")
+    assert field.input_value() == text + "Новая фраза"
+    assert clear.is_visible() and copy.is_visible()
     # Whitespace is still text and is copied without trimming.
     field.fill(" \n ")
     assert not copy.is_disabled()
@@ -144,4 +180,4 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.screenshot(path=str(shot))
     assert not errors, errors
     browser.close()
-print("ALL OK: full draft copy/fallback/error, clear without attachment loss, ongoing dictation and right-edge actions")
+print("ALL OK: hidden empty actions, full copy/fallback, selected/full erase, cancelled dictation, stale results and responsive actions")

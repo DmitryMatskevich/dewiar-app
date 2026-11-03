@@ -35,8 +35,10 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
         return {'result':result,'events':list(events)}
     ui=root/'ui';shutil.copytree(ROOT/'ui',ui)
     (ui/'assets/dewiar.js').write_text('''
-      window.opens=[];window.copiedImages=[];window.copiedTexts=[];
+      window.opens=[];window.copiedImages=[];window.copiedTexts=[];window.screenGranted=false;window.screenSettings=0;
       window.api=()=>({async open_settings(...args){opens.push(args);return true;},
+        async screen_capture_permission(){if(window.permissionError)throw Error('Unavailable');return {granted:screenGranted}},
+        async open_screen_settings(){screenSettings++;return true},
         async copy_image_data(url){copiedImages.push(url);return true;}});
       window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
         if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
@@ -48,6 +50,27 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page=browser.new_page(viewport={'width':420,'height':850});page.expose_function('nativeCommand',call)
     errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
+    shot_button=page.locator('#a-shot')
+    page.wait_for_function("document.querySelector('#a-shot').classList.contains('access-unavailable')")
+    assert float(shot_button.locator('svg').evaluate("e=>getComputedStyle(e).opacity")) < .5
+    assert 'Нет доступа' in shot_button.get_attribute('aria-label')
+    shot_button.click()
+    page.wait_for_function('screenSettings===1')
+    assert not page.locator('.ss-source-menu').count()
+    assert not any(cmd in ('screenshot_attach','screenshot_sources','screenshot_prepare') for cmd,_ in calls)
+    page.evaluate("screenGranted=true;window.dispatchEvent(new Event('focus'))")
+    page.wait_for_function("!document.querySelector('#a-shot').classList.contains('access-unavailable')")
+    # Permission can be revoked while HUD remains open; the click checks again.
+    page.evaluate('screenGranted=false')
+    shot_button.focus();page.keyboard.press('Enter')
+    page.wait_for_function('screenSettings===2')
+    assert not page.locator('.ss-source-menu').count()
+    # An unavailable native check never presents the capture picker as permitted.
+    page.evaluate("permissionError=true;window.dispatchEvent(new Event('focus'))")
+    shot_button.click();page.wait_for_function('screenSettings===3')
+    assert not page.locator('.ss-source-menu').count()
+    page.evaluate("permissionError=false;screenGranted=true;window.dispatchEvent(new Event('pywebviewready'))")
+    page.wait_for_function("!document.querySelector('#a-shot').classList.contains('access-unavailable')")
     page.locator('#a-shot').click()
     assert page.locator('.ss-source-menu').is_visible()
     assert not engine.chatlog.page()['items'],'Opening the menu must not capture'

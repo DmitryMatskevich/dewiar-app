@@ -320,6 +320,8 @@
   .ask-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
   .askrow .ab { width: 34px; height: 34px; min-width: 34px; }
   #a-clear:disabled, #a-copy:disabled { opacity: .35; cursor: default; background: none; }
+  #a-clear[hidden], #a-copy[hidden] { display: none !important; }
+  #a-shot.access-unavailable svg { opacity: .35; }
   #a-copy .copied-icon, #a-copy.copied .copy-icon { display: none; }
   #a-copy.copied .copied-icon { display: block; }
   #a-copy.copied { color: #63d5a2; }
@@ -591,8 +593,8 @@
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
           </div>
           <div class="ask-actions">
-          <button class="ab" id="a-clear" type="button" disabled title="Очистить весь текст в поле ввода. Вложения и переписка сохранятся. Во время диктовки новые распознанные фразы продолжат добавляться в поле." aria-label="Очистить весь текст ввода"><svg viewBox="0 0 24 24"><path d="m16 3 5 5-11 11H6l-4-4L13 4a2 2 0 0 1 3-1ZM9 8l7 7M10 19h11"/></svg></button>
-          <button class="ab" id="a-copy" type="button" disabled title="Скопировать весь текст поля ввода в буфер обмена, включая переносы строк, даже если выделена только часть. Текст останется в поле; сообщение не отправляется." aria-label="Скопировать весь текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
+          <button class="ab" id="a-clear" type="button" hidden disabled title="Стереть выделенный текст или весь текст, если ничего не выделено. Вложения и переписка сохранятся." aria-label="Стереть текст ввода"><svg viewBox="0 0 24 24"><path d="m16 3 5 5-11 11H6l-4-4L13 4a2 2 0 0 1 3-1ZM9 8l7 7M10 19h11"/></svg></button>
+          <button class="ab" id="a-copy" type="button" hidden disabled title="Скопировать весь текст поля ввода в буфер обмена, включая переносы строк, даже если выделена только часть. Текст останется в поле; сообщение не отправляется." aria-label="Скопировать весь текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
           <button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
           <button class="ab send" id="a-send" title="Отправить сообщение и вложения. Во время диктовки — завершить распознавание и отправить весь текст." aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
           </div>
@@ -638,7 +640,8 @@
   <dialog id="hud-help" hidden></dialog>
   <template id="hud-help-content">
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире.</p>
-    <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит текст в поле. Для завершения и отправки скажите в конце «Лира», «ввод» или «вот», либо отдельно «ввод» или «вот».</p>
+    <h3>Голосовой ввод</h3><p>Нажмите микрофон, произнесите фразу и дождитесь распознавания после паузы. Повторное нажатие остановит запись и оставит текст в поле. Ластик отменяет голосовую запись: ожидающие распознавания фразы не добавятся, текст в поле сохранится. Для завершения и отправки скажите в конце «Лира», «ввод» или «вот», либо отдельно «ввод» или «вот».</p>
+    <h3>Текст и снимок экрана</h3><p>Кнопки копирования и стирания появляются, когда в поле есть текст. Копирование сохраняет весь текст в буфер обмена. Ластик стирает выделение, а если выделения нет — весь текст. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
@@ -1357,6 +1360,7 @@ async function enableMacVoice() {
   await core.call("audio_enable");
   updateAudioMode("voice");
 }
+let dictationSession = null, cancelledDictationSession = null, dictationCancelling = false;
 function dictationUi(on) {
   dictating = !!on;
   $("a-mic").classList.toggle("recording", dictating);
@@ -1370,6 +1374,7 @@ function dictationUi(on) {
   $("dict-level").classList.toggle("on", dictating);
   $("dict-level").setAttribute("aria-hidden", dictating ? "false" : "true");
   if (!dictating) { $("dict-level").firstElementChild.style.width = "0%"; $("dict-level").setAttribute("aria-valuenow", "0"); }
+  updateDraftActions();
 }
 function insertDictationText(text) {
   const t = $("askin"), words = text.trim();
@@ -1386,7 +1391,13 @@ function insertDictationText(text) {
   fitAsk(); t.focus();
 }
 core.on("dictation", e => {
-  if (e.state === "recording") { openAsk(); dictationUi(true); return; }
+  // A result already in transit when Cancel is clicked must never edit or send the draft.
+  if (dictationCancelling || (e.session != null && e.session === cancelledDictationSession)) return;
+  if (e.state === "recording") {
+    dictationSession = e.session ?? null;
+    openAsk(); dictationUi(true); return;
+  }
+  if (!dictating || (e.session != null && dictationSession != null && e.session !== dictationSession)) return;
   if (e.state === "cancelled") { dictationUi(false); return; }
   if (e.state === "finishing") {
     $("dict-level").classList.toggle("on", false);
@@ -1405,10 +1416,29 @@ core.on("dictation", e => {
   }
 });
 async function startDictation() {
-  if (dictating) return;
+  if (dictating || dictationCancelling) return;
   if (audioMode === "text") await enableMacVoice();
-  await core.call("dictation_start");
+  const result = await core.call("dictation_start");
+  if (dictationCancelling || (result?.session != null && result.session === cancelledDictationSession)) return;
+  dictationSession = result?.session ?? dictationSession;
   dictationUi(true); openAsk(); $("askin").focus();
+}
+async function cancelDictation() {
+  if (dictationCancelling) return;
+  dictationCancelling = true;
+  cancelledDictationSession = dictationSession;
+  updateDraftActions(); $("a-mic").disabled = true;
+  try {
+    await core.call("dictation_cancel");
+    dictationUi(false);
+    $("ask-feedback").textContent = "Голосовая запись отменена. Текст в поле сохранён.";
+  } catch (error) {
+    cancelledDictationSession = null;
+    showErr(error);
+  } finally {
+    dictationCancelling = false;
+    dictationUi(dictating); $("askin").focus();
+  }
 }
 $("a-mic").onclick = guard($("a-mic"), () => (dictating
   ? core.call("dictation_finish", { submit: false }) : startDictation()).catch(showErr),
@@ -1976,9 +2006,37 @@ core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
   .on('screenshot_removed', e=>{screenshotCards.get(e.id)?.remove();screenshotCards.delete(e.id);screenshotLayout();})
   .on('hello', loadScreenshotMessages).on('chat_changed', loadScreenshotMessages);
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
-$("a-shot").title = 'Снимок экрана: весь экран, выбор области или окно приложения';
-$("a-shot").setAttribute('aria-haspopup', 'dialog');
-$("a-shot").onclick = () => DewiarCapture.menu($("a-shot"), showScreenshotMessage, showErr);
+async function refreshScreenshotAccess() {
+  const native = window.api?.(), button = $("a-shot");
+  let status = null;
+  if (native?.screen_capture_permission) {
+    try { status = await native.screen_capture_permission(); }
+    catch (_) { status = {granted:false}; }
+  }
+  const unavailable = status != null && !status.granted;
+  button.classList.toggle('access-unavailable', unavailable);
+  button.title = unavailable
+    ? 'Нет доступа к записи экрана. Нажмите, чтобы открыть настройки macOS и разрешить доступ Dewiar.'
+    : 'Снимок экрана: весь экран, выбор области или окно приложения';
+  button.setAttribute('aria-label', button.title);
+  if (unavailable) button.removeAttribute('aria-haspopup');
+  else button.setAttribute('aria-haspopup', 'dialog');
+  return !unavailable;
+}
+$("a-shot").onclick = guard($("a-shot"), async () => {
+  try {
+    if (!await refreshScreenshotAccess()) {
+      await window.api().open_screen_settings();
+      return;
+    }
+    DewiarCapture.menu($("a-shot"), showScreenshotMessage, showErr);
+  } catch (error) { showErr(error); }
+});
+window.addEventListener('focus', refreshScreenshotAccess);
+window.addEventListener('pywebviewready', refreshScreenshotAccess);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshScreenshotAccess(); });
+core.on('hello', refreshScreenshotAccess);
+refreshScreenshotAccess();
 document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("drop"); });
 document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("drop"); });
 document.addEventListener("drop", (e) => { e.preventDefault(); document.body.classList.remove("drop"); addFiles([...(e.dataTransfer.files || [])]); });
@@ -2031,7 +2089,7 @@ function fitAsk() {
   const lim = Math.min(available, longText ? 260 : 120);
   const h = Math.min(t.scrollHeight, lim); t.style.height = Math.max(24, h) + "px";
   $("askbox").classList.toggle("has", !!t.value.trim() || atts.length > 0);
-  $("a-clear").disabled = $("a-copy").disabled = !t.value.length;
+  updateDraftActions();
   t.classList.toggle("scroll", t.scrollHeight > lim);
   const long = t.value.length > 60 || t.value.includes("\n");
   $("card").classList.toggle("long", long && $("ask").style.display === "block");
@@ -2048,10 +2106,28 @@ new ResizeObserver(entries => {
   if (w && Math.abs(w - askWidth) > .5) { askWidth = w; fitAsk(); }
 }).observe($("askbox"));
 $("a-send").onclick = sendAsk;
+function updateDraftActions() {
+  const t = $("askin"), clear = $("a-clear"), copy = $("a-copy");
+  copy.hidden = copy.disabled = !t.value.length;
+  clear.hidden = !t.value.length && !dictating && !dictationCancelling;
+  clear.disabled = clear.hidden || dictationCancelling;
+  const selected = t.selectionStart !== t.selectionEnd;
+  clear.title = dictationCancelling ? "Отменяю голосовую запись…" : dictating
+    ? "Отменить голосовую запись без добавления результата. Текст в поле сохранится."
+    : selected ? "Стереть выделенный текст" : "Стереть весь текст ввода. Вложения и переписка сохранятся.";
+  clear.setAttribute("aria-label", clear.title);
+}
+// Keep the textarea selection when the pointer moves to the eraser (including WebKit).
+$("a-clear").addEventListener("mousedown", e => { if (e.button === 0) e.preventDefault(); });
+$("askin").addEventListener("select", updateDraftActions);
 $("a-clear").onclick = () => {
-  $("askin").value = "";
-  fitAsk(); $("askin").focus();
-  $("ask-feedback").textContent = "Текст ввода очищен";
+  if (dictationCancelling) return;
+  if (dictating) return cancelDictation();
+  const t = $("askin"), selected = t.selectionStart !== t.selectionEnd;
+  if (selected) t.setRangeText("", t.selectionStart, t.selectionEnd, "start");
+  else t.value = "";
+  fitAsk(); t.focus();
+  $("ask-feedback").textContent = selected ? "Выделенный текст удалён" : "Текст ввода очищен";
 };
 let draftCopiedTimer;
 $("a-copy").onclick = async () => {

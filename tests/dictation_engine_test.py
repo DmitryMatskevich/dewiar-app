@@ -102,7 +102,7 @@ for pause in (5000, 10000):
     r.listen([False] * 2)
     r.transcribe(["Первая часть.", "Вторая часть."])
     assert [e["text"] for e in r.events if e["state"] == "partial"] == ["Первая часть.", "Вторая часть."]
-    assert r.events[-1] == {"state": "done", "submit": False}
+    assert r.events[-1] == {"state": "done", "submit": False, "session": r._dictation_session}
 
 # Stop in the middle of speech flushes immediately, without waiting 10 seconds.
 r = Recorder(10000)
@@ -118,7 +118,7 @@ r.dictation_start()
 r.dictation_finish()
 r.listen([False] * 2)
 r.transcribe([])
-assert r.events[-1] == {"state": "done", "submit": False}
+assert r.events[-1] == {"state": "done", "submit": False, "session": r._dictation_session}
 
 # A fast name detection must not submit a sentence before STT confirms its ending.
 r = Recorder()
@@ -129,7 +129,7 @@ r._dictation_result("Напиши письмо, Лира.", "test", r._dictation
 r.listen([False] * 2)
 r.transcribe([])
 assert [e["text"] for e in r.events if e["state"] == "partial"] == ["Напиши письмо"]
-assert r.events[-1] == {"state": "done", "submit": True}
+assert r.events[-1] == {"state": "done", "submit": True, "session": r._dictation_session}
 assert sum(e["state"] == "done" for e in r.events) == 1
 
 # A different agent's name does not close the active agent's dictation.
@@ -179,7 +179,7 @@ for texts, expected, persona in [
     worker.join(2)
     assert not worker.is_alive(), texts
     assert [e["text"] for e in r.events if e["state"] == "partial"] == expected, (texts, r.events)
-    assert r.events[-1] == {"state": "done", "submit": True}, (texts, r.events)
+    assert r.events[-1] == {"state": "done", "submit": True, "session": r._dictation_session}, (texts, r.events)
     assert sum(e["state"] == "done" for e in r.events) == 1
 
 for text in ["Вот план на завтра.", "Настрой ввод данных.", "Лира подготовит план.",
@@ -195,8 +195,10 @@ r = Recorder()
 r.dictation_start()
 sid = r._dictation_session
 r._on_utterance(b"\x01\x00" * RATE, 0, 1)
-r.dictation_cancel()
-r.dictation_start()
+cancelled = r.dictation_cancel()
+assert cancelled["session"] == sid and r.events[-1]["session"] == sid
+started = r.dictation_start()
+assert started["session"] != sid and r.events[-1]["session"] == started["session"]
 count = len(r.events)
 r._dictation_result("Устаревший текст", "test", sid)
 r._dictation_done(sid)
@@ -228,7 +230,7 @@ release.set()
 worker.join(2)
 assert not worker.is_alive()
 assert [e["text"] for e in r.events if e["state"] == "partial"] == ["Первая часть.", "Хвост."]
-assert r.events[-1] == {"state": "done", "submit": True}
+assert r.events[-1] == {"state": "done", "submit": True, "session": r._dictation_session}
 
 # Ordinary voice questions must not be submitted just because 25 seconds elapsed.
 r = Recorder()
