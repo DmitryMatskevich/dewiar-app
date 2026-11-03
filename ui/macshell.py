@@ -46,7 +46,9 @@ def start_owned_core(app, token, text_only, port):
                    else [sys.executable, str(app.ROOT / "core/main.py")])
         if text_only:
             command.append("--server")
-        process = subprocess.Popen(command, cwd=app.ROOT, stdout=stream, stderr=stream, start_new_session=True)
+        env = dict(os.environ, DEWIAR_CORE_OWNER_PID=str(os.getpid()))
+        process = subprocess.Popen(command, cwd=app.ROOT, stdout=stream, stderr=stream,
+                                   start_new_session=True, env=env)
         deadline = time.monotonic() + 25
         while not core_authenticated(port, token):
             if process.poll() is not None or time.monotonic() > deadline:

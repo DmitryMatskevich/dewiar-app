@@ -36,6 +36,9 @@ def main():
                     help="режим сервера: без микрофона и звука — задачи с телефона, синхронизация, Telegram, напоминания "
                          "круглосуточно (packaging/dewiar-server.service)")
     args = ap.parse_args()
+    owner_pid = int(os.environ.pop("DEWIAR_CORE_OWNER_PID", "0"))
+    if owner_pid and os.getppid() != owner_pid:
+        return
 
     if os.name == "nt":                         # Windows: вывод в UTF-8, даже если запустили без -X utf8
         for s in (sys.stdout, sys.stderr):
@@ -143,7 +146,9 @@ def main():
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     while not done.wait(0.5):                   # ждём по 0,5 с, а не бесконечно: так Python успевает обработать Ctrl+C
-        pass
+        if owner_pid and os.getppid() != owner_pid:
+            log.info("Окно Dewiar завершилось — останавливаю его ядро")
+            break
     engine.shutdown()
 
     def hard_exit():                            # не-фоновый поток (скачивание, ответ) держит процесс — а с ним порт и файлы,

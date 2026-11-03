@@ -67,6 +67,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.turn = None
         self.turn_n = 0
         self._turn_lock = threading.Lock()
+        self._speech_lock = threading.Lock()
         self._level_t = 0.0
         self.stt_q = queue.Queue()
         self.check_q = queue.Queue()          # фразы без явного имени — ищем в них имя точной моделью

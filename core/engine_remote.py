@@ -280,25 +280,34 @@ class RemoteMixin:
             return
         def run():
             for _ in range(120):
-                if self.turn is None and self.state not in ("thinking", "speaking"):
-                    break
-                time.sleep(0.5)
-            with self._turn_lock:
-                self.turn_n += 1
-                turn = Turn(self.turn_n)
-                self.turn = turn
+                if self.stopping.is_set():
+                    return
+                with self._turn_lock:
+                    if self.turn is None and self.state not in ("thinking", "speaking") and not self.dictation_active:
+                        self.turn_n += 1
+                        turn = Turn(self.turn_n)
+                        self.turn = turn
+                        break
+                self.stopping.wait(0.5)
+            else:
+                if not self.stopping.is_set():
+                    self.push("Dewiar", text)
+                return
             q = queue.Queue()
             q.put(text)
             q.put(None)
-            self.emit("answer", text=text, done=True)
-            self.play_tone("wake")
-            time.sleep(0.4)
-            self._speak_worker(turn, q)
-            self.follow_up_until = time.monotonic() + float(self.s.get("audio", "follow_up_seconds") or 0)
-            with self._turn_lock:
-                if self.turn is turn:
-                    self.turn = None
-                    self.set_state("listening")
+            try:
+                self.emit("answer", text=text, done=True)
+                if not turn.cancel.is_set():
+                    self.play_tone("wake")
+                if not turn.cancel.wait(0.4):
+                    self._speak_worker(turn, q)
+            finally:
+                with self._turn_lock:
+                    if self.turn is turn:
+                        self.follow_up_until = time.monotonic() + float(self.s.get("audio", "follow_up_seconds") or 0)
+                        self.turn = None
+                        self.set_state("listening")
         threading.Thread(target=run, daemon=True).start()
 
     def _voice_cfg(self):
@@ -477,6 +486,12 @@ class RemoteMixin:
         return val
 
     def _speak_worker(self, turn, sentences, fx_override=None, voice_override=None):
+        # Interrupted turns can still be unwinding while the next voice starts.
+        with self._speech_lock:
+            if not turn.cancel.is_set():
+                self._play_speech(turn, sentences, fx_override, voice_override)
+
+    def _play_speech(self, turn, sentences, fx_override=None, voice_override=None):
         """Озвучить фразы из очереди sentences до None или отмены хода (блокирует, зовётся из потока ответа).
         Синтез и звук — в два потока: пока звучит фраза, следующая уже синтезируется (поток speak-synth, опережение —
         до двух фраз). Раньше следующую фразу начинали синтезировать, только когда прошлая доиграла, — на медленном

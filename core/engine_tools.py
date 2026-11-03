@@ -854,8 +854,6 @@ class ToolsMixin:
                 break
             if say and n in (0, 3, 8):
                 self._say_now(phrase, a)
-                self.follow_up_until = time.monotonic() + 7    # «отложи на 10 минут» — можно без имени
-                self.set_state("listening")
             a["done"].wait(1.2 if n < 3 else 3.0)
             n += 1
         with self._alarm_lock:
@@ -889,6 +887,8 @@ class ToolsMixin:
     def _say_now(self, text, a=None):
         """Сказать сразу и дождаться конца (из потока будильника)."""
         with self._turn_lock:
+            if self.turn is not None or self.state in ("thinking", "speaking") or self.dictation_active:
+                return
             self.turn_n += 1
             turn = Turn(self.turn_n)
             self.turn = turn
@@ -902,7 +902,8 @@ class ToolsMixin:
             with self._turn_lock:
                 if self.turn is turn:
                     self.turn = None
-                    self.set_state("idle")
+                    self.follow_up_until = time.monotonic() + 7  # «отложи» можно сказать без имени
+                    self.set_state("listening")
 
     def alarm_finish(self, result="ack", minutes=0, rid=None):
         """«Готово» или «Отложить на N минут» — кнопкой, голосом, из Telegram."""
