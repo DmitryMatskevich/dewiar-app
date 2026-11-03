@@ -1,11 +1,13 @@
 .image-ocr-panel { box-sizing:border-box; width:min(94vw,650px); max-height:88vh; overflow:auto; margin:auto; padding:18px; border:1px solid #637189; border-radius:18px; background:#141c29; color:#edf3fa; font:14px/1.45 sans-serif; text-align:left; }
 .image-ocr-panel::backdrop { background:#0008; }
-.image-ocr-panel header,.image-ocr-panel footer { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+.image-ocr-panel header,.image-ocr-panel footer { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.image-ocr-panel footer { justify-content:flex-end; }
 .image-ocr-panel h2 { margin:0; font-size:18px; }
 .image-ocr-panel p { margin:12px 0; }
 .image-ocr-panel label { display:block; }
 .image-ocr-panel textarea { box-sizing:border-box; width:100%; min-height:160px; margin:6px 0; padding:10px; border:1px solid #7c8b9f; border-radius:8px; background:#0d1420; color:inherit; font:inherit; resize:vertical; }
-.image-ocr-panel button { min-height:36px; padding:6px 10px; border:1px solid #7a8a9f; border-radius:9px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.image-ocr-panel button { display:grid; place-items:center; flex:none; width:44px; height:44px; padding:0; border:1px solid #7a8a9f; border-radius:9px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.image-ocr-panel button svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .image-ocr-panel button:focus-visible,.image-ocr-panel textarea:focus-visible { outline:2px solid #8fb8ff; outline-offset:2px; }
 .image-ocr-panel button:disabled { opacity:.5; cursor:default; }
 .image-ocr-panel #image-ocr-insert { background:#315f92; color:white; }

@@ -6,12 +6,21 @@
     if (panel) return;
     panel = document.createElement('dialog'); panel.className = 'image-ocr-panel';
     panel.setAttribute('aria-labelledby', 'image-ocr-title');
-    panel.innerHTML = `<header><h2 id="image-ocr-title">Текст с картинки</h2><button type="button" id="image-ocr-close">Закрыть</button></header>
+    panel.innerHTML = `<header><h2 id="image-ocr-title">Текст с картинки</h2><button type="button" id="image-ocr-close" title="Отменить" aria-label="Отменить">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+      </button></header>
       <p id="image-ocr-status" role="status" aria-live="polite"></p>
       <label for="image-ocr-text">Распознанный текст — можно исправить перед вставкой</label>
       <textarea id="image-ocr-text" rows="10" spellcheck="false"></textarea>
       <p id="image-ocr-error" role="alert"></p>
-      <footer><button type="button" id="image-ocr-copy" disabled>Скопировать</button><button type="button" id="image-ocr-insert" disabled>Вставить в сообщение</button></footer>`;
+      <footer>
+        <button type="button" id="image-ocr-copy" title="Скопировать текст в буфер обмена" aria-label="Скопировать текст в буфер обмена" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg>
+        </button>
+        <button type="button" id="image-ocr-insert" title="Вставить текст в черновик сообщения" aria-label="Вставить текст в черновик сообщения" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+        </button>
+      </footer>`;
     document.body.append(panel);
     by('image-ocr-close').onclick = () => panel.close();
     panel.addEventListener('close', () => { serial++; });
@@ -36,7 +45,11 @@
     by('image-ocr-text').value = ''; by('image-ocr-error').textContent = ''; controls(true);
     by('image-ocr-status').textContent = 'Распознаю текст локально…';
     by('image-ocr-text').disabled = true;
-    by('image-ocr-insert').onclick = () => { insert(by('image-ocr-text').value); panel.close(); };
+    by('image-ocr-insert').onclick = () => {
+      const text = by('image-ocr-text').value;
+      panel.close();
+      insert(text);
+    };
     if (!panel.open) panel.showModal();
     try {
       const result = await core.call('image_ocr', {image: attachment.ocrData || attachment.url || attachment.b64});
