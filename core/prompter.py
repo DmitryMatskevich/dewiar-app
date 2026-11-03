@@ -2177,9 +2177,11 @@ class Prompter:
         if data is None:
             from eyes import EyesError, capture_screen
             from tools import desktop_env
+            from platform_info import MAC
             try:
                 data = capture_screen(desktop_env(), source=self._capture_source,
-                                      region=self._capture_region, application=self._capture_application)
+                                      region=self._capture_region, application=self._capture_application,
+                                      exclude_dewiar=MAC and self._capture_source in ("screen", "region"))
             except (EyesError, PermissionError, OSError) as exc:
                 raise ValueError(str(exc)) from exc
         from meeting_video import frame_stamp, write_frame

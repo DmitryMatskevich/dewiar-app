@@ -127,15 +127,31 @@ def screen_capture(source="screen", region=None, application="", exclude_dewiar=
     from PIL import ImageGrab
     if not CGPreflightScreenCaptureAccess():
         raise PermissionError("Разрешите Dewiar запись экрана: Системные настройки → Конфиденциальность и безопасность → Запись экрана; затем перезапустите приложение")
-    if exclude_dewiar:
-        if source != "screen":
-            raise ValueError("снимок без Dewiar поддерживает основной экран целиком")
+    source = str(source or "screen").lower()
+    if exclude_dewiar and source in ("screen", "region"):
         try:
-            return _screenshot_without_dewiar()
+            raw = _screenshot_without_dewiar()
+            if source == "screen":
+                return raw
+            from PIL import Image
+            from Quartz import CGDisplayBounds, CGMainDisplayID
+            try:
+                x, y, w, h = [int(region.get(k, 0)) for k in ("x", "y", "width", "height")]
+            except (AttributeError, TypeError, ValueError):
+                raise ValueError("область экрана задана неверно") from None
+            bounds = CGDisplayBounds(CGMainDisplayID())
+            if w < 2 or h < 2 or x < bounds.origin.x or y < bounds.origin.y or x + w > bounds.origin.x + bounds.size.width or y + h > bounds.origin.y + bounds.size.height:
+                raise ValueError("область должна целиком находиться на основном экране")
+            image = Image.open(io.BytesIO(raw))
+            sx, sy = image.width / bounds.size.width, image.height / bounds.size.height
+            box = (round((x - bounds.origin.x) * sx), round((y - bounds.origin.y) * sy),
+                   round((x + w - bounds.origin.x) * sx), round((y + h - bounds.origin.y) * sy))
+            result = io.BytesIO()
+            image.crop(box).save(result, "PNG")
+            return result.getvalue()
         except (ImportError, AttributeError) as exc:
             # Do not silently fall back to a screenshot containing the assistant.
             raise OSError("Для снимка без ассистента нужны macOS 14+ и компонент ScreenCaptureKit. Обновите зависимости Dewiar.") from exc
-    source = str(source or "screen").lower()
     if source == "region":
         try:
             x, y, w, h = [int(region.get(k, 0)) for k in ("x", "y", "width", "height")]
