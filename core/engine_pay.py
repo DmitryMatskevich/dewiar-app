@@ -162,7 +162,7 @@ class PayMixin:
             try:
                 for b, text in self.payments.check_due():
                     log.info("💳 %s", text)
-                    self.push("Платежи", text)
+                    self.push("Деньги", text)
                     if not getattr(self, "server", False) and self.state == "idle":
                         self.announce(text)
             except Exception as e:  # noqa: BLE001
@@ -212,7 +212,7 @@ def t_payments(a, ctx):
         b = pm.bill_save({"name": a.get("bill") or a.get("name") or "", "kind": a.get("kind"), "day": a.get("day"),
                           "month": a.get("month"), "autopay": a.get("autopay"), "how": a.get("how") or "", "amount": a.get("amount")})
         eng.emit("pay_saved", what="pay_bill_save")
-        return f"Платёж «{b['name']}» добавлен" + (f", срок — {b['day']}-е число" if b.get("day") else "") + ". Он в студии, «Платежи»."
+        return f"Платёж «{b['name']}» добавлен" + (f", срок — {b['day']}-е число" if b.get("day") else "") + ". Он в студии, раздел «Деньги»."
     if act == "year":
         import datetime as _dt
         st = pm.stats(int(a.get("year") or _dt.date.today().year))

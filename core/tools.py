@@ -2820,7 +2820,7 @@ TOOLS = {
                     "rate": {"type": "number"}, "due_date": {"type": "string"}, "monthly_payment": {"type": "number"},
                     "status": {"type": "string", "enum": ["paid", "unpaid"]}, "kind": {"type": "string"}, "day": {"type": "integer"},
                     "month": {"type": "integer"}, "how": {"type": "string"}, "year": {"type": "integer"}, "note": {"type": "string"}},
-                   ["action"]), "safe", lambda a, ctx: __import__("engine_pay").t_payments(a, ctx), "Платежи"),
+                   ["action"]), "safe", lambda a, ctx: __import__("engine_pay").t_payments(a, ctx), "Деньги"),
     "money_report": ("Итоги личного бюджета за период: доходы, расходы по категориям, остаток, последние операции. "
                      "from/to — ГГГГ-ММ-ДД (пусто — текущий месяц).",
                      S({"from": {"type": "string"}, "to": {"type": "string"}}), "safe", t_money_report, "Деньги: отчёт"),

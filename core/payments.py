@@ -559,7 +559,7 @@ class Payments:
         today = today or dt.date.today()
         ov = self.overview(today)
         if not ov["bills"]:
-            return "Платежей пока нет. Добавьте их в студии — раздел «Платежи», или скажите «добавь платёж: газ, до 25-го»."
+            return "Записей пока нет. Добавьте их в студии — раздел «Деньги», или скажите «добавь платёж: газ, до 25-го»."
         if what and what != "open":
             b = self.bill(what)
             if not b:
@@ -607,7 +607,7 @@ class Payments:
             return
         base = Path(self.ws.ensure()) / "Платежи"
         base.mkdir(parents=True, exist_ok=True)
-        lines = [f"# {b['name']}", "", "_Файл обновляется сам из раздела «Платежи». Записать оплату: «оплатил газ 47,84, "
+        lines = [f"# {b['name']}", "", "_Файл обновляется сам из раздела «Деньги». Записать оплату: «оплатил газ 47,84, "
                  "показания 28135»._", ""]
         meta = [KINDS.get(b.get("kind"), KINDS["other"])["title"]]
         if b.get("day"):
