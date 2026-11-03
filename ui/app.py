@@ -648,7 +648,9 @@ class Api:
         """Open a large image/selection surface without resizing the user's HUD."""
         import re
         import webview
-        if mode not in ('view', 'region') or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(identifier)):
+        if mode not in ('view', 'region', 'window') or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(identifier)):
+            raise ValueError('Неверный снимок')
+        if mode == 'window' and (not str(identifier).isdigit() or int(identifier) <= 0):
             raise ValueError('Неверный снимок')
         url = self._url('screenshot-window.html', '&mode=' + mode + '&id=' + str(identifier))
         window = getattr(self, '_screenshot_window', None)

@@ -24,15 +24,19 @@ def sources():
     return {'windows': visible_windows(), 'message': ''}
 
 
-def window_preview(window_id):
+def window_preview(window_id, full_size=False):
     from screenshot_sources import capture_window
     from PIL import Image
     data = capture_window(window_id=window_id)
     with Image.open(io.BytesIO(data)) as image:
-        image.thumbnail((160, 100))
         output = io.BytesIO()
-        image.convert('RGB').save(output, 'JPEG', quality=68, optimize=True)
-    return 'data:image/jpeg;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
+        if full_size:
+            image.save(output, 'PNG')
+        else:
+            image.thumbnail((320, 200), Image.Resampling.LANCZOS)
+            image.convert('RGB').save(output, 'JPEG', quality=85, optimize=True)
+    mime = 'png' if full_size else 'jpeg'
+    return f'data:image/{mime};base64,' + base64.b64encode(output.getvalue()).decode('ascii')
 
 
 def prepare_region(engine):

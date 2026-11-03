@@ -77,6 +77,15 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page.wait_for_function("!document.querySelector('#a-shot').classList.contains('access-unavailable')")
     page.locator('#a-shot').click()
     assert page.locator('.ss-source-menu').is_visible()
+    page.wait_for_function("document.querySelector('.ss-window-preview')?.naturalWidth > 0")
+    assert page.locator('.ss-window-select').get_attribute('aria-pressed')=='false'
+    page.locator('.ss-window-preview-button').click()
+    page.locator('.ss-large .ss-full-image').wait_for()
+    assert page.locator('.ss-large .ss-full-image').evaluate('e=>e.naturalWidth')==700
+    assert not engine.chatlog.page()['items'],'Preview must not attach a screenshot or run OCR'
+    assert any(cmd=='screenshot_window_preview' and args.get('full_size') for cmd,args in calls)
+    page.locator('.ss-large .ss-close').click()
+    assert page.locator('.ss-source-menu').is_visible()
     assert not engine.chatlog.page()['items'],'Opening the menu must not capture'
     page.locator('[data-ss-source="screen"]').click()
     card=page.locator('#screenshot-messages .ss-card');card.wait_for()

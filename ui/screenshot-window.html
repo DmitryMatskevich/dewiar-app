@@ -3,7 +3,7 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Dewiar — Снимок экрана</title><link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/screenshot-picker.css">
 <style>:root{--ink:#eef2ff;--muted:#b8c1d7;--panel:#20232e;--accent:#626ce3;--line:rgba(128,140,180,.25)}@media(prefers-color-scheme:light){:root{--ink:#24324a;--muted:#596780;--panel:#f3f6fc}}</style></head>
-<body class="ss-window"><header class="ss-dialog-bar"><h1 id="ss-title">Снимок экрана</h1><button id="ss-close" type="button">Закрыть</button></header><main id="ss-content"></main>
+<body class="ss-window"><header class="ss-dialog-bar"><h1 id="ss-title">Снимок экрана</h1><button id="ss-close" class="ss-close" type="button" aria-label="Закрыть" title="Закрыть">×</button></header><main id="ss-content"></main>
 <script src="assets/dewiar.js"></script><script src="assets/screenshot-picker.js"></script>
 <script>
 const params = new URLSearchParams(location.search), mode = params.get('mode'), id = params.get('id');
@@ -15,6 +15,7 @@ async function start() {
   if (started) return; started = true;
   const host = document.getElementById('ss-content');
   if (mode === 'region') { document.getElementById('ss-title').textContent = 'Выберите часть экрана'; cleanup = await DewiarCapture.regionEditor(host, id, close); }
+  else if (mode === 'window') { document.getElementById('ss-title').textContent = 'Предпросмотр окна'; await DewiarCapture.windowViewer(host, Number(id)); }
   else await DewiarCapture.viewer(host, id);
 }
 core.on('hello', start); if (core.snapshot) start();

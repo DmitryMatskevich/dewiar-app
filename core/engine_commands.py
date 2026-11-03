@@ -1093,7 +1093,7 @@ class CommandsMixin:
         if cmd == 'screenshot_window_preview':
             if not self.toolbox.policy('save_screenshot')[0]:raise ValueError('Снимок экрана отключён в настройках Dewiar')
             from screenshot_messages import window_preview
-            return window_preview(a.get('window_id'))
+            return window_preview(a.get('window_id'), full_size=a.get('full_size') is True)
         if cmd == 'screenshot_window_action':
             from mac_control import screenshot_window_action
             return screenshot_window_action(a.get('pid'), a.get('window_id'), a.get('title'), a.get('action'))

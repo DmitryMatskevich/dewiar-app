@@ -1,5 +1,6 @@
 """Visible windows, exact application matching and private region preview lifecycle."""
 import io
+import base64
 import sys
 import tempfile
 import unittest
@@ -24,6 +25,22 @@ class ScreenshotSourcesTest(unittest.TestCase):
         self.engine=SimpleNamespace(s=settings,workspace=Workspace(settings),chatlog=ChatLog(root/'chat.jsonl'),
                                     toolbox=SimpleNamespace(policy=Mock(return_value=(True,False))),note=Mock(),emit=Mock())
         out=io.BytesIO();Image.new('RGB',(600,400),(11,22,33)).save(out,'PNG');self.png=out.getvalue()
+
+    def test_window_thumbnail_and_full_preview_do_not_save_or_ocr(self):
+        from engine_commands import CommandsMixin
+        with patch('screenshot_sources.capture_window',return_value=self.png) as capture, patch('ocr.recognize_result') as ocr:
+            thumb=CommandsMixin.command(self.engine,'screenshot_window_preview',{'window_id':42})
+            full=CommandsMixin.command(self.engine,'screenshot_window_preview',{'window_id':42,'full_size':True})
+            self.assertEqual(Image.open(io.BytesIO(base64.b64decode(thumb.split(',')[1]))).size,(300,200))
+            original=Image.open(io.BytesIO(base64.b64decode(full.split(',')[1])))
+            self.assertEqual(original.format,'PNG');self.assertEqual(original.size,(600,400))
+            self.assertEqual(original.getpixel((0,0)),(11,22,33))
+            self.assertEqual(capture.call_args.kwargs,{'window_id':42});ocr.assert_not_called()
+            self.assertFalse(self.engine.chatlog.page()['items'])
+            self.assertFalse(list(self.engine.workspace.root.glob('Входящие/Снимки экрана/*')))
+            self.engine.toolbox.policy.return_value=(False,False)
+            with self.assertRaises(ValueError):CommandsMixin.command(self.engine,'screenshot_window_preview',{'window_id':42,'full_size':True})
+            self.assertEqual(capture.call_count,2)
 
     def test_region_preview_cancel_and_confirm(self):
         with patch('eyes.capture_screen',return_value=self.png),patch('ocr.recognize_result') as ocr:
@@ -91,6 +108,10 @@ class ScreenshotSourcesTest(unittest.TestCase):
             self.assertTrue(api.open_screenshot_window('region','abc456'))
             create.assert_called_once();window.load_url.assert_called_once()
             api._hud.resize.assert_not_called()
+            self.assertTrue(api.open_screenshot_window('window','42'))
+            self.assertEqual(api._url.call_args.args,('screenshot-window.html','&mode=window&id=42'))
+            for invalid in ['0','-1','abc','../../etc/passwd']:
+                with self.assertRaises(ValueError):api.open_screenshot_window('window',invalid)
             with self.assertRaises(ValueError):api.open_screenshot_window('file','../../etc/passwd')
             api.close_screenshot_window();window.destroy.assert_called_once()
 

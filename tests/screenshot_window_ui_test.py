@@ -23,6 +23,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
       window.core={snapshot:{},on(){return this;},async call(cmd,args={}){
         calls.push([cmd,args]);
         if(cmd==='screenshot_image')return URL;
+        if(cmd==='screenshot_window_preview'){if(window.windowGone)throw Error('Окно закрыто');return URL;}
         if(cmd==='screenshot_draft')return {url:URL,width:2400,height:1200};
         return {id:'result'};
       }};
@@ -38,6 +39,18 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     assert page.locator('.ss-view-stage').evaluate('(e)=>e.scrollWidth')>=2400
     page.get_by_role('button',name='Вместить в окно',exact=True).click()
     assert page.locator('.ss-actual').count()==0
+    page.goto((ui/'screenshot-window.html').as_uri()+'?mode=window&id=42')
+    page.locator('.ss-full-image').wait_for()
+    assert page.locator('.ss-full-image').evaluate('e=>e.naturalWidth')==2400
+    assert page.evaluate('calls')==[['screenshot_window_preview',{'window_id':42,'full_size':True}]]
+    page.get_by_role('button',name='Обновить',exact=True).click()
+    page.wait_for_function('calls.length===2')
+    page.wait_for_function('!document.querySelector(".ss-view-actions button:last-child").disabled')
+    page.evaluate('windowGone=true')
+    page.get_by_role('button',name='Обновить',exact=True).click()
+    page.get_by_role('status').filter(has_text='Окно закрыто').wait_for()
+    assert not page.locator('.ss-full-image').count(),'Closed windows must not show a stale full preview'
+    assert not page.evaluate("calls.some(c=>c[0]==='screenshot_attach')")
     page.goto((ui/'screenshot-window.html').as_uri()+'?mode=region&id=region')
     page.locator('.ss-region-stage canvas').wait_for()
     assert not page.evaluate("calls.some(c=>c[0]==='screenshot_attach')")

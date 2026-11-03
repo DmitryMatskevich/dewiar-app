@@ -14,17 +14,53 @@
     const d = modal('Снимок экрана'); d.classList.add('ss-large');
     await viewer(d, value.id);
   }
+  function loadImage(url, alt) {
+    return new Promise((resolve, reject) => {
+      if (typeof url !== 'string' || !url.startsWith('data:image/')) { reject(Error('Предпросмотр недоступен')); return; }
+      const img = make('img'); img.alt = alt;
+      img.onload = () => resolve(img); img.onerror = () => reject(Error('Не удалось загрузить изображение'));
+      img.src = url;
+    });
+  }
+  async function imageViewer(host, load, {refreshable = false, alt = 'Исходный снимок экрана'} = {}) {
+    const status = make('p', 'Загружаю изображение…', 'ss-info'), stage = make('div', null, 'ss-view-stage');
+    const actions = make('div', null, 'ss-view-actions');
+    let img = null;
+    const zoom = button('Показать 1:1', () => {
+      if (!img) return;
+      const actual = img.classList.toggle('ss-actual'); zoom.textContent = actual ? 'Вместить в окно' : 'Показать 1:1';
+      zoom.setAttribute('aria-pressed', String(actual));
+    });
+    zoom.setAttribute('aria-pressed', 'false'); zoom.disabled = true;
+    const refresh = button('Обновить', update); actions.append(zoom); if (refreshable) actions.append(refresh);
+    status.setAttribute('role', 'status'); host.append(actions, status, stage);
+    async function update() {
+      refresh.disabled = true; zoom.disabled = true; status.textContent = 'Загружаю изображение…';
+      try {
+        const next = await loadImage(await load(), alt);
+        if (!host.isConnected) return;
+        next.className = 'ss-full-image'; img = next; stage.replaceChildren(img);
+        zoom.textContent = 'Показать 1:1'; zoom.setAttribute('aria-pressed', 'false'); status.textContent = '';
+      } catch (e) {
+        // Never present an old frame as the current content of a closed/hidden window.
+        stage.replaceChildren(); img = null; status.textContent = e.message || String(e);
+      } finally { refresh.disabled = false; zoom.disabled = !img; }
+    }
+    await update();
+  }
   async function viewer(host, id) {
-    const status = make('p', 'Загружаю исходный снимок…', 'ss-info'), stage = make('div', null, 'ss-view-stage');
-    status.setAttribute('role', 'status'); host.append(status, stage);
-    try {
-      const url = await core.call('screenshot_image', {id});
-      if (!host.isConnected) return;
-      const img = make('img', null, 'ss-full-image'); img.alt = 'Исходный снимок экрана'; img.src = url;
-      const zoom = button('Показать 1:1', () => { const actual = img.classList.toggle('ss-actual'); zoom.textContent = actual ? 'Вместить в окно' : 'Показать 1:1'; zoom.setAttribute('aria-pressed', String(actual)); });
-      zoom.setAttribute('aria-pressed', 'false'); host.insertBefore(zoom, stage); stage.append(img); status.textContent = '';
-      img.onerror = () => { status.textContent = 'Не удалось открыть изображение'; };
-    } catch (e) { status.textContent = e.message || String(e); }
+    await imageViewer(host, () => core.call('screenshot_image', {id}));
+  }
+  async function windowViewer(host, windowId) {
+    await imageViewer(host, () => core.call('screenshot_window_preview', {window_id:windowId, full_size:true}),
+      {refreshable:true, alt:'Предпросмотр окна приложения'});
+  }
+  async function openWindowImage(w, anchor) {
+    const native = window.api?.();
+    if (native?.open_screenshot_window) return native.open_screenshot_window('window', String(w.window_id));
+    const d = modal(w.title ? `${w.name} — ${w.title}` : w.name); d.classList.add('ss-large');
+    d.addEventListener('close', () => anchor?.focus(), {once:true});
+    await windowViewer(d, w.window_id);
   }
   async function menu(anchor, done, failed) {
     const d = modal('Снимок экрана'); d.classList.add('ss-source-menu');
@@ -53,23 +89,63 @@
     }); part.dataset.ssSource = 'region';
     const heading = make('h3', 'Окна приложений'), refresh = button('Обновить список', () => load());
     sourceActions.append(full, part); d.append(sourceActions, heading, filter, refresh, status, list);
-    let windows = [], selected = null;
+    let windows = [], selected = null, observer = null, activePreviews = 0;
+    const previewQueue = [];
+    function drainPreviews() {
+      while (activePreviews < 2 && previewQueue.length) {
+        const {w, resolve, reject} = previewQueue.shift();
+        if (!d.open || !windows.includes(w)) { resolve(null); continue; }
+        activePreviews++;
+        core.call('screenshot_window_preview', {window_id:w.window_id}).then(url => {
+          w.preview = url; resolve(url);
+        }, reject).finally(() => { activePreviews--; drainPreviews(); });
+      }
+    }
+    function previewUrl(w) {
+      if (w.preview) return Promise.resolve(w.preview);
+      if (!w.previewPromise) w.previewPromise = new Promise((resolve, reject) => {
+        previewQueue.push({w, resolve, reject}); drainPreviews();
+      }).finally(() => { w.previewPromise = null; });
+      return w.previewPromise;
+    }
+    async function showThumbnail(w, tile) {
+      try {
+        const url = await previewUrl(w); if (!url || !tile.isConnected || !d.open) return;
+        const image = await loadImage(url, `Окно ${w.name}`); image.className = 'ss-window-preview';
+        if (tile.isConnected && d.open) tile.replaceChildren(image);
+      } catch (error) {
+        w.preview = null;
+        if (tile.isConnected) {
+          tile.replaceChildren(make('span', 'Нет снимка', 'ss-preview-placeholder'));
+          tile.title = (error.message || String(error)) + '. Нажмите для повторного предпросмотра.';
+        }
+      }
+    }
     filter.addEventListener('input', render);
     function render() {
+      observer?.disconnect();
       const q = filter.value.trim().toLocaleLowerCase('ru'); list.replaceChildren();
+      observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+        for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); entry.target.loadPreview(); }
+      }, {root:d, rootMargin:'120px'}) : null;
       const visible = windows.filter(w => !q || `${w.name} ${w.title || ''}`.toLocaleLowerCase('ru').includes(q));
       for (const w of visible) {
-        const row = make('article', null, 'ss-window-row'), preview = make('img', null, 'ss-window-preview');
-        preview.alt = ''; preview.setAttribute('aria-hidden', 'true'); preview.src = w.preview || 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-        const name = make('span', w.name, 'ss-window-name'), detail = make('span', w.title || 'Окно приложения', 'ss-window-title');
-        const select = button('', async () => {
-          selected = w.window_id; render(); status.textContent = 'Загружаю предварительный снимок…';
-          try { w.preview = await core.call('screenshot_window_preview', {window_id:w.window_id}); if (selected === w.window_id) { status.textContent = ''; render(); } }
-          catch (e) { if (selected === w.window_id) status.textContent = e.message || String(e); }
+        const row = make('article', null, 'ss-window-row'), header = make('div', null, 'ss-window-header');
+        row.dataset.selected = String(selected === w.window_id);
+        const preview = button('', async () => {
+          selected = w.window_id; render();
+          const anchor = list.querySelector(`[data-window-id="${w.window_id}"] .ss-window-preview-button`);
+          try { await openWindowImage(w, anchor); } catch (error) { status.textContent = error.message || String(error); }
         });
+        preview.className = 'ss-window-preview-button'; preview.title = 'Открыть большой предпросмотр';
+        preview.setAttribute('aria-label', `Открыть большой предпросмотр: ${w.name}${w.title ? ' — ' + w.title : ''}`);
+        preview.append(make('span', 'Загрузка…', 'ss-preview-placeholder'));
+        preview.loadPreview = () => showThumbnail(w, preview);
+        const name = make('span', w.name, 'ss-window-name'), detail = make('span', w.title || 'Окно приложения', 'ss-window-title');
+        const select = button('', () => { selected = w.window_id; render(); });
         select.className = 'ss-window-select'; select.setAttribute('aria-pressed', String(selected === w.window_id));
-        select.append(preview, make('span', null, 'ss-window-label'));
-        select.lastChild.append(name, detail);
+        const label = make('span', null, 'ss-window-label'); label.append(name, detail); select.append(label);
+        header.append(preview, select);
         const actions = make('div', null, 'ss-window-actions');
         const fold = button(w.minimized ? 'Развернуть' : 'Свернуть', () => windowAction(w, w.minimized ? 'restore' : 'minimize', fold, fullScreen));
         const fullScreen = button(w.fullscreen ? 'Обычный режим' : 'Весь экран', () => windowAction(w, 'fullscreen', fold, fullScreen));
@@ -78,7 +154,8 @@
           const take = button('Сделать снимок', () => capture({source:'application', window_id:w.window_id}));
           take.className = 'ss-window-capture'; actions.append(take);
         }
-        row.append(select, actions); row.dataset.windowId = w.window_id; list.append(row);
+        row.append(header, actions); row.dataset.windowId = w.window_id; list.append(row);
+        if (observer) observer.observe(preview); else preview.loadPreview();
       }
       if (!visible.length && windows.length) status.textContent = 'По этому фильтру окна не найдены.';
       else if (!windows.length && !status.textContent) status.textContent = 'Других окон нет. Откройте приложение и обновите список.';
@@ -91,6 +168,7 @@
         fold.textContent = w.minimized ? 'Развернуть' : 'Свернуть';
         fullScreen.textContent = w.fullscreen ? 'Обычный режим' : 'Весь экран';
         status.textContent = '';
+        w.preview = null; render();
       } catch (e) {
         status.textContent = e.message || String(e);
         if ((e.message || '').includes('Универсальный доступ')) {
@@ -107,7 +185,7 @@
       } catch (e) { status.textContent = e.message || String(e); }
       finally { refresh.disabled = false; }
     }
-    d.addEventListener('close', () => anchor?.focus(), {once: true}); full.focus(); load();
+    d.addEventListener('close', () => { observer?.disconnect(); drainPreviews(); windows = []; anchor?.focus(); }, {once: true}); full.focus(); load();
   }
   async function selectRegion(done, failed) {
     try {
@@ -196,5 +274,5 @@
     } catch (e) { status.textContent = e.message || String(e); }
     return cleanup;
   }
-  window.DewiarCapture = {menu, openImage, viewer, regionEditor, selectRegion};
+  window.DewiarCapture = {menu, openImage, viewer, windowViewer, regionEditor, selectRegion};
 })();
