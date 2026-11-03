@@ -530,7 +530,7 @@ class CommandsMixin:
                         pass
                     pr._frame_interval = max(0.5, min(5.0, float(a.get("interval", 0.5) or 0.5)))
                     pr._frame_quality = max(40, min(100, int(a.get("quality", 85) or 85)))
-                    pr._video_enabled = bool(a.get("video", False))
+                    pr._video_enabled = True
                     pr._frames_enabled = True
                     if pr._frame_thread is None or not pr._frame_thread.is_alive():
                         pr._frame_thread = threading.Thread(target=pr._frame_loop, name="prompter-frames", daemon=True)
@@ -545,9 +545,7 @@ class CommandsMixin:
                         old.join(timeout=max(1.0, pr._frame_interval + 0.2))
                     pr._frame_thread = None
                     pr.meeting["auto_frames"] = False
-                    if pr._video_enabled:
-                        pr._finalize_frame_video()
-                    pr._video_enabled = False
+                    # Video is assembled once, after the meeting's audio is closed.
                     pr._state()
                     return pr.public()
                 raise ValueError("действие кадров: start, stop или state")

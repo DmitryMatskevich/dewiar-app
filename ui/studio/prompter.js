@@ -80,13 +80,9 @@
   }
   $("#pr-capture-source")?.addEventListener("change", renderCaptureFields);
   function renderVideoState() {
-    const enabled = !!$("#pr-frame-video")?.checked;
     const out = $("#pr-video-state");
-    if (out) out.textContent = enabled
-      ? "Сборка видео включена. Включите «Автоматические кадры» и запись аудио в окне встречи; MP4 появится после остановки."
-      : "Сборка видео выключена. Кадры и аудио можно записывать отдельно.";
+    if (out) out.textContent = "Включите кадры и запись аудио в окне встречи. MP4 появится в её итогах автоматически.";
   }
-  $("#pr-frame-video")?.addEventListener("change", renderVideoState);
   $("#pr-stt-download")?.addEventListener("click", async () => {
     const model = $("#pr-stt-model").value;
     const out = $("#pr-stt-result"); const b = $("#pr-stt-download");

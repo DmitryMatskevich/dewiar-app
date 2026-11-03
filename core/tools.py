@@ -1511,7 +1511,7 @@ def t_meeting_frames(a, ctx):
             pr._frame_quality = max(40, min(100, int(a.get("quality", 85) or 85)))
         except (TypeError, ValueError) as exc:
             raise ToolError("интервал должен быть 0,5–5 секунд, качество — 40–100") from exc
-        pr._video_enabled = bool(a.get("video", False))
+        pr._video_enabled = True
         pr._frames_enabled = True
         pr.meeting["auto_frames"] = True
         if pr._frame_thread is None or not pr._frame_thread.is_alive():
@@ -1526,9 +1526,7 @@ def t_meeting_frames(a, ctx):
         if old is not None and old is not threading.current_thread() and old.is_alive():
             old.join(timeout=max(1.0, pr._frame_interval + 0.2))
         pr._frame_thread = None
-        if pr._video_enabled:
-            pr._finalize_frame_video()
-        pr._video_enabled = False
+        # Final video uses the complete audio and is built after the meeting ends.
         pr._state()
         return {"enabled": False, "video": bool(pr._video_path)}
     raise ToolError("действие должно быть start, stop или state")

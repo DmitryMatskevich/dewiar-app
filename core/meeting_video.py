@@ -103,10 +103,10 @@ def build_meeting_video(events, audio_path, root, output, ffmpeg):
         text += file_line(frames[-1][1])
         manifest.write_text(text, encoding="utf-8")
         pending = tmp / "meeting.mp4"
-        command = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(manifest),
+        command = [ffmpeg, "-y", "-filter_threads", "1", "-f", "concat", "-safe", "0", "-i", str(manifest),
                    "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0",
                    "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25",
-                   "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p",
+                   "-c:v", "libx264", "-threads", "2", "-preset", "fast", "-crf", "23", "-pix_fmt", "yuv420p",
                    "-c:a", "aac", "-b:a", "128k", "-t", str(duration), "-movflags", "+faststart",
                    str(pending)]
         result = subprocess.run(command, capture_output=True, text=True, timeout=max(120, duration * 3))

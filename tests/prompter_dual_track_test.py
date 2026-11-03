@@ -223,11 +223,11 @@ p4.add_line("them", "старая фраза", session=4)
 p4.add_line("them", "новая фраза", session=5)
 assert [x["text"] for x in p4.lines] == ["новая фраза"]
 
-# ---------- 8. stop() не ждёт сборку видео ----------
+# ---------- 8. stop() не ждёт закрытие устройств; до закрытия новая запись запрещена ----------
 p5 = Prompter(FakeEngine(root))
-p5.on, p5.meeting, p5._video_enabled = True, {"title": "Видео"}, True
+p5.on, p5.meeting = True, {"title": "Видео"}
 done = threading.Event()
-p5._finalize_frame_video = lambda: (time.sleep(1.5), done.set())
+p5._finish_capture = lambda: (time.sleep(1.5), done.set())
 p5._summarize = lambda: None
 t0 = time.monotonic()
 p5.stop(summary=True)
@@ -236,10 +236,12 @@ assert p5._post_busy
 try:
     p5.start(title="Следующая")
 except ValueError as exc:
-    assert "итога предыдущей" in str(exc)
+    assert "освобождаю устройства" in str(exc)
 else:
-    raise AssertionError("новая встреча не должна стартовать, пока считается итог прошлой")
-assert done.wait(3) and not p5._post_busy
+    raise AssertionError("новая запись не должна стартовать, пока устройства ещё заняты")
+assert done.wait(3)
+p5._post_thread.join(3)
+assert not p5._post_busy
 
 # ---------- 9. Расписание: перезапуск приложения и пропущенная встреча ----------
 now = time.time()

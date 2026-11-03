@@ -74,13 +74,12 @@ try:
     entry = p.capture_frame(data.getvalue(), ocr=False)
     assert entry["elapsed_seconds"] >= 100
     assert entry["audio_seconds"] == 1, entry
-    p._record_close()
-    p.on = False
-    p.export_meeting_video()
-    deadline = time.monotonic() + 15
-    while p._video_export_busy and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert not p._video_export_busy and Path(p._video_path).is_file()
+    # Stopping alone must create a real MP4, even with the old video option off.
+    assert not p._video_enabled
+    p.stop(summary=False)
+    p._post_thread.join(15)
+    assert not p._post_thread.is_alive() and Path(p._video_path).is_file()
+    assert p.public()["recording"]["video_file"].endswith(".mp4")
     assert (p._session_dir / "frames.jsonl").is_file()
     print("OK: EXIF/PNG timestamps, JSON sidecars, audio-clock timeline, red/blue/red video, audio, faststart, async export")
 finally:

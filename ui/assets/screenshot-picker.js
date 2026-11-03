@@ -146,36 +146,19 @@
         select.className = 'ss-window-select'; select.setAttribute('aria-pressed', String(selected === w.window_id));
         const label = make('span', null, 'ss-window-label'); label.append(name, detail); select.append(label);
         header.append(preview, select);
-        const actions = make('div', null, 'ss-window-actions');
-        const fold = button(w.minimized ? 'Развернуть' : 'Свернуть', () => windowAction(w, w.minimized ? 'restore' : 'minimize', fold, fullScreen));
-        const fullScreen = button(w.fullscreen ? 'Обычный режим' : 'Весь экран', () => windowAction(w, 'fullscreen', fold, fullScreen));
-        actions.append(fold, fullScreen);
+        row.append(header);
         if (selected === w.window_id) {
+          const actions = make('div', null, 'ss-window-actions');
           const take = button('Сделать снимок', () => capture({source:'application', window_id:w.window_id}));
-          take.className = 'ss-window-capture'; actions.append(take);
+          take.className = 'ss-window-capture';
+          actions.append(take);
+          row.append(actions);
         }
-        row.append(header, actions); row.dataset.windowId = w.window_id; list.append(row);
+        row.dataset.windowId = w.window_id; list.append(row);
         if (observer) observer.observe(preview); else preview.loadPreview();
       }
       if (!visible.length && windows.length) status.textContent = 'По этому фильтру окна не найдены.';
       else if (!windows.length && !status.textContent) status.textContent = 'Других окон нет. Откройте приложение и обновите список.';
-    }
-    async function windowAction(w, action, fold, fullScreen) {
-      fold.disabled = fullScreen.disabled = true;
-      try {
-        const state = await core.call('screenshot_window_action', {pid:w.pid, window_id:w.window_id, title:w.title || '', action});
-        w.minimized = state.minimized; w.fullscreen = state.fullscreen;
-        fold.textContent = w.minimized ? 'Развернуть' : 'Свернуть';
-        fullScreen.textContent = w.fullscreen ? 'Обычный режим' : 'Весь экран';
-        status.textContent = '';
-        w.preview = null; render();
-      } catch (e) {
-        status.textContent = e.message || String(e);
-        if ((e.message || '').includes('Универсальный доступ')) {
-          const native = window.api?.();
-          if (native?.open_accessibility_settings) { const open = button('Открыть настройки доступа', () => native.open_accessibility_settings()); open.className = 'ss-settings-link'; status.append(' ', open); }
-        }
-      } finally { fold.disabled = fullScreen.disabled = false; }
     }
     async function load() {
       refresh.disabled = true; status.textContent = 'Загружаю окна…'; list.replaceChildren();

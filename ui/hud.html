@@ -350,6 +350,9 @@
   #a-mic.recording { border-radius: 50%; color: #17181d; background: transparent; }
   #a-mic.recording:hover, #a-mic.recording:focus-visible { background: transparent; }
   #a-mic.recording svg { width: 34px; height: 34px; overflow: visible; }
+  #a-mic.recording.quiet svg rect { transform-origin: center; animation: dictation-quiet 2s ease-in-out infinite; }
+  @keyframes dictation-quiet { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+  @media (prefers-reduced-motion: reduce) { #a-mic.recording.quiet svg rect { animation: none; } }
   #a-mic-pick { width: 22px; min-width: 22px; margin-left: 0; }
   #a-mic-pick svg { width: 13px; height: 13px; }
   .qm-dialog { box-sizing:border-box; width:min(440px,calc(100% - 24px)); max-height:calc(100% - 24px); padding:16px; border:1px solid rgba(128,140,180,.28); border-radius:16px; color:var(--ink); background:#20232e; font:inherit; font-size:13px; line-height:1.45; overflow:auto; }
@@ -1390,12 +1393,13 @@ async function enableMacVoice() {
   await core.call("audio_enable");
   updateAudioMode("voice");
 }
-let dictationSession = null, cancelledDictationSession = null, dictationCancelling = false;
+let dictationSession = null, cancelledDictationSession = null, dictationCancelling = false, dictationFinishing = false;
 function setDictationLevel(value) {
   dictationLevel = Math.max(0, Math.min(1, Number(value) || 0));
   const mic = $("a-mic");
   const strength = Math.max(0, Math.min(1, (dictationLevel - .006) / .38));
   const index = Math.round(strength * (DICTATION_LEVEL_ICONS.length - 1));
+  mic.classList.toggle("quiet", dictating && index === 0);
   if (dictating && mic.dataset.levelIcon !== String(index)) {
     mic.innerHTML = DICTATION_LEVEL_ICONS[index]; mic.dataset.levelIcon = String(index);
   }
@@ -1435,12 +1439,14 @@ core.on("dictation", e => {
   // A result already in transit when Cancel is clicked must never edit or send the draft.
   if (dictationCancelling || (e.session != null && e.session === cancelledDictationSession)) return;
   if (e.state === "recording") {
+    dictationFinishing = false;
     dictationSession = e.session ?? null;
     openAsk(); dictationUi(true); return;
   }
   if (!dictating || (e.session != null && dictationSession != null && e.session !== dictationSession)) return;
   if (e.state === "cancelled") { dictationUi(false); return; }
   if (e.state === "finishing") {
+    dictationFinishing = true;
     $("a-mic").disabled = true;
     $("a-mic").title = "Завершаю распознавание записанной речи…";
     $("a-mic").setAttribute("aria-label", $("a-mic").title);
@@ -1458,7 +1464,7 @@ async function startDictation() {
   if (dictating || dictationCancelling) return;
   if (audioMode === "text") await enableMacVoice();
   const result = await core.call("dictation_start");
-  if (dictationCancelling || (result?.session != null && result.session === cancelledDictationSession)) return;
+  if (dictationCancelling || dictationFinishing || (result?.session != null && result.session === cancelledDictationSession)) return;
   dictationSession = result?.session ?? dictationSession;
   dictationUi(true); openAsk(); $("askin").focus();
 }
@@ -1479,9 +1485,15 @@ async function cancelDictation() {
     dictationUi(dictating); $("askin").focus();
   }
 }
-$("a-mic").onclick = guard($("a-mic"), () => (dictating
-  ? core.call("dictation_finish", { submit: false }) : startDictation()).catch(showErr),
-  () => dictating ? "Завершаю голосовой ввод…" : "Включаю диктовку в поле сообщения…");
+$("a-mic").onclick = () => {
+  if (dictating) {
+    if (dictationFinishing) return;
+    dictationFinishing = true;
+    core.call("dictation_finish", { submit: false }).then(result => {
+      if (result?.state === "idle") { dictationFinishing = false; dictationUi(false); }
+    }).catch(error => { dictationFinishing = false; showErr(error); });
+  } else startDictation().catch(showErr);
+};
 async function showMicMenu() {
   const menu = $("mic-menu"), list = $("mic-list");
   if (menu.classList.contains("on")) { menu.classList.remove("on"); return; }

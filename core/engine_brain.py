@@ -792,15 +792,6 @@ class BrainMixin:
         a = np.frombuffer(r.stdout, dtype=np.int16)
         sr, n = 16000, len(a)
         win = int(0.03 * sr)
-        # Скользящее среднее через накопленную сумму: O(n) вместо O(n·win) у np.convolve.
-        # Для часовой записи (57 млн отсчётов × 480) convolve считал минуты до начала распознавания.
-        if n:
-            sq = np.concatenate(([0.0], np.cumsum(a.astype(np.float64) ** 2)))
-            idx = np.arange(n)
-            lo_i, hi_i = np.clip(idx - win // 2, 0, n), np.clip(idx - win // 2 + win, 0, n)
-            energy = np.sqrt(np.maximum((sq[hi_i] - sq[lo_i]) / win, 0.0)).astype(np.float32)
-        else:
-            energy = np.array([])
         out, start = [], 0
         while start < n:
             if cancel is not None and cancel.is_set():
@@ -808,7 +799,16 @@ class BrainMixin:
             end = min(n, start + int(chunk * sr))
             if end < n:                                   # конец куска — в самом тихом месте последних 6 с (кусок не короче 8 с)
                 lo = max(start + int(8 * sr), end - int(6 * sr))
-                seg = energy[lo:end]
+                # Only this six-second boundary needs RMS, not the whole meeting.
+                # Full-length float64/index arrays consumed several GB for an hour
+                # of audio and stalled the rest of the application under memory pressure.
+                left, right = max(0, lo - win // 2), min(n, end + win // 2)
+                samples = a[left:right].astype(np.float64)
+                sq = np.concatenate(([0.0], np.cumsum(samples * samples)))
+                idx = np.arange(lo, end) - left
+                lo_i = np.maximum(idx - win // 2, 0)
+                hi_i = np.minimum(idx - win // 2 + win, len(samples))
+                seg = sq[hi_i] - sq[lo_i]  # argmin of squared RMS has the same boundary
                 if len(seg):
                     end = lo + int(np.argmin(seg))
             pcm = a[start:end]

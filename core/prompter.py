@@ -24,6 +24,7 @@
 после остановки запись транскрибируется целиком и превращается в протокол в «Встречи/».
 Событие окну одно — «prompter» {kind: state | line | hint | sheet | summary | open | note, …}."""
 import math
+import copy
 import io
 import os
 import re
@@ -246,6 +247,8 @@ class Prompter:
         self._video_frames = 0
         self._video_path = ""
         self._video_export_busy = False
+        self._video_error = ""
+        self._video_thread = None
         self._record_lock = threading.RLock()
         self._loop_cap = None
         self._loop_thread = None
@@ -267,7 +270,12 @@ class Prompter:
         self._mic_error = ""
         self._system_kind = ""   # tap | blackhole | monitor | wasapi | file — каким способом пишем собеседника
         self._tap_warning = ""
-        self._post_busy = False  # идёт фон после остановки (расшифровка/итог) — новую встречу не начинаем
+        self._post_busy = False  # только освобождение устройств и хвост живого распознавания
+        self._summary_busy = False
+        self._summary_progress = {}
+        self._completed_job = None
+        self._job_owner = None
+        self._text_job_lock = threading.Lock()  # длинные расшифровки не запускают несколько моделей одновременно
         self._post_thread = None
         self._ocr_q = queue.Queue(maxsize=20)
         self._ocr_thread = None
@@ -458,8 +466,8 @@ class Prompter:
                 self._notify_schedule_check(item, result)
             for item in due:
                 if self._post_busy and not self.on:
-                    # Итог прошлой встречи ещё считается: подождём, а не
-                    # отменяем — окно опоздания проверяется выше.
+                    # Устройства ещё освобождаются; обработка готовых файлов
+                    # уже не задерживает следующую запланированную встречу.
                     with self._schedules_lock:
                         for current in self._schedules:
                             if current.get("id") == item.get("id") and current.get("state") == "starting":
@@ -632,6 +640,8 @@ class Prompter:
 
     def public(self):
         with self._lock:
+            if self._completed_job is not None and not self.on:
+                return self._completed_job.public()
             m = dict(self.meeting)
             preview = self._summary_preview(m) if m else {}
             audio_path = Path(self._record_path) if self._record_path else None
@@ -655,9 +665,14 @@ class Prompter:
             rec.update({"frame_interval": self._frame_interval, "frame_quality": self._frame_quality,
                         "video": bool(self._video_enabled), "video_frames": self._video_frames,
                         "video_path": Path(self._video_path).name if self._video_path else "",
+                        "video_file": self._video_relative_path(), "video_error": self._video_error,
                         "export_busy": self._video_export_busy,
-                        "can_export": not self.on and bool(self._frame_events) and audio_ready})
-            return {"on": self.on, "paused": self.paused, "processing": self._post_busy, "meeting": m, "status": self.status,
+                        "can_export": not self.on and bool(self._frame_events) and (audio_ready or self._video_frames >= 2)})
+            return {"on": self.on, "paused": self.paused,
+                    "processing": self._post_busy or self._summary_busy or self._video_export_busy,
+                    "can_start": not self.on and not self._post_busy,
+                    "summary_busy": self._summary_busy, "summary_progress": dict(self._summary_progress),
+                    "meeting": m, "status": self.status,
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
                     "summary_path": self._summary_path,
@@ -665,10 +680,41 @@ class Prompter:
                     "brain": bool(self.eng.s.active_llm()), "loopback": True, "voice": self.voice_info()}
 
     def _emit(self, kind, **kw):
-        self.eng.emit("prompter", kind=kind, **kw)
+        if kind == "summary":
+            self._summary_busy = bool(kw.get("busy"))
+            self._summary_progress = {k: kw[k] for k in ("phase", "part", "parts") if k in kw}
+        self._publish_job()
+        self.eng.emit("prompter", kind=kind, meeting_id=self.meeting.get("id", ""), **kw)
 
     def _state(self):
+        if self._job_owner is not None:
+            self._publish_job()
+            self._job_owner._state()
+            return
         self._emit("state", state=self.public())
+
+    def _publish_job(self):
+        """A completed job may update its own result, never the next meeting."""
+        owner = self._job_owner
+        if owner is None:
+            return
+        with owner._lock:
+            if owner._completed_job is self and not owner.on:
+                for key in ("summary", "_summary_path", "status", "_video_path", "_video_error"):
+                    setattr(owner, key, getattr(self, key))
+
+    def _completed_snapshot(self):
+        # No constructor: a job owns files and metadata, not devices or another scheduler.
+        job = copy.copy(self)
+        for key in ("meeting", "lines", "files", "hints", "sheet", "_screenshots", "_frame_events", "_track_paths", "_levels"):
+            setattr(job, key, copy.deepcopy(getattr(self, key)))
+        job._lock = threading.RLock()
+        job._record_lock = threading.RLock()
+        job._job_owner = self
+        job._completed_job = None
+        job._post_busy = False
+        job._summary_progress = dict(self._summary_progress)
+        return job
 
     # ---------- материалы ----------
 
@@ -1127,16 +1173,12 @@ class Prompter:
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
         if self.on:
             raise ValueError("Встреча уже идёт — сначала завершите её.")
-        if self._video_export_busy:
-            raise ValueError("Дождитесь создания видео встречи.")
         if self._post_busy:
             workers = (self._post_thread, self._stt_thread, self._loop_thread, self._frame_thread, self._ocr_thread)
             if self._post_thread is not None and not any(t and t.is_alive() for t in workers):
                 self._post_busy = False  # поздно завершившийся I/O больше не удерживает приложение
         if self._post_busy:
-            # Отложенная расшифровка/итог прошлой встречи ещё читает её файлы и
-            # поля; новая встреча подменила бы их посреди обработки.
-            raise ValueError("Дождитесь итога предыдущей встречи — расшифровка ещё идёт.")
+            raise ValueError("Завершаю сохранение записи и освобождаю устройства. Попробуйте через несколько секунд.")
         live = place == "live"
         if record and not consent:
             raise ValueError("для записи переговоров подтвердите согласие участников")
@@ -1186,11 +1228,14 @@ class Prompter:
             self._frame_quality = max(40, min(100, int(frame_quality or 85)))
         except (TypeError, ValueError):
             self._frame_quality = 85
-        self._video_enabled = bool(frame_video) and bool(auto_frames)
+        self._video_enabled = bool(auto_frames)
         self._frames_enabled = bool(auto_frames)
         self._video_dir = None
         self._video_frames = 0
         self._video_path = ""
+        self._video_error = ""
+        self._video_export_busy = False
+        self._video_thread = None
         cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
         cfg = cfg or {}
         if capture_source in (None, "", "screen") and cfg.get("capture_source"):
@@ -1221,7 +1266,7 @@ class Prompter:
             except Exception as exc:
                 raise ValueError(f"запись не началась: {exc}") from exc
         with self._lock:
-            self.meeting = {"title": (title or "").strip()[:120] or "Встреча", "goal": (goal or "").strip()[:2000],
+            self.meeting = {"id": uuid.uuid4().hex, "title": (title or "").strip()[:120] or "Встреча", "goal": (goal or "").strip()[:2000],
                             "mode": "manual" if mode == "manual" else "auto", "them": bool(them) and not live, "me": bool(me) or live,
                             "place": "live" if live else "online", "nudge": bool(nudge),
                             "knowledge": bool(knowledge), "keep_text": bool(keep_text) or record,
@@ -1235,6 +1280,9 @@ class Prompter:
                 self.meeting["schedule_id"] = str(schedule_id)
             self.lines, self.hints, self.sheet, self.summary, self.paused = [], [], [], "", False
             self._summary_path = ""
+            self._summary_busy = False
+            self._summary_progress = {}
+            self._completed_job = None
             # Новая сессия: потоки прошлой встречи (если join не дождался их)
             # видят чужой номер и ничего не пишут в эту встречу.
             self._session += 1
@@ -1361,27 +1409,47 @@ class Prompter:
 
     def _after_stop(self, stt_thread, summary):
         """Освободить захват и дождаться хвоста до обработки файлов; UI не ждёт I/O."""
+        job = None
         try:
             self._finish_capture()
             if stt_thread is not None and stt_thread is not threading.current_thread() and stt_thread.is_alive():
                 stt_thread.join(timeout=60)
                 if stt_thread.is_alive():
                     raise RuntimeError("Распознавание ещё занято; запись сохранена. Дождитесь завершения перед новой встречей.")
-            if self._video_enabled:
-                self._finalize_frame_video()
+            if any(t and t.is_alive() for t in (self._loop_thread, self._frame_thread, self._ocr_thread)):
+                raise RuntimeError("Сохранение записи ещё не завершено. Дождитесь освобождения устройств.")
+            with self._lock:
+                job = self._completed_snapshot()
+                job._summary_busy = bool(summary)
+                self._completed_job = job
+                self._post_busy = False
+            # Both workers use the immutable completed session. A new recording
+            # can now start while the previous meeting's files are processed.
+            if job._frame_events:
+                job.export_meeting_video()
+            job._state()
             if summary:
-                if self.meeting.get("record") and self.meeting.get("deferred") and self._record_path:
-                    self._post_transcribe()
-                else:
-                    self._summarize()
+                job._emit("summary", summary="", busy=True, phase="queued")
+                with job._text_job_lock:
+                    if job.meeting.get("record") and job.meeting.get("deferred") and job._record_path:
+                        job._post_transcribe()
+                    else:
+                        job._summarize()
         except Exception as exc:  # ошибка не должна оставлять пустой экран итога
-            self.status = str(exc)
+            target = job or self
+            target.status = str(exc)
+            target.summary = "Запись сохранена. Обработка не завершена: " + str(exc)
             log.exception("🎬 Обработка после встречи")
-            self._emit("summary", summary="Запись сохранена. Обработка не завершена: " + str(exc), busy=False)
+            target._emit("summary", summary=target.summary, busy=False)
         finally:
-            # Старый STT не должен продолжать писать в новую встречу.
-            self._post_busy = any(t and t.is_alive() for t in (stt_thread, self._loop_thread, self._frame_thread, self._ocr_thread))
-            self._state()
+            if job is not None:
+                job._summary_busy = False
+                job._state()
+                if job._video_thread is not None:
+                    job._video_thread.join()
+            else:
+                self._post_busy = any(t and t.is_alive() for t in (stt_thread, self._loop_thread, self._frame_thread, self._ocr_thread))
+                self._state()
 
     def _finish_capture(self):
         cap = self._loop_cap
@@ -1396,12 +1464,12 @@ class Prompter:
         ft = self._frame_thread
         if ft is not None and ft is not threading.current_thread() and ft.is_alive():
             ft.join(timeout=max(1.0, self._frame_interval + 0.2))
-        # OCR не тормозит захват кадров, но итог должен дождаться уже принятых кадров.
-        if self._ocr_thread is not None:
-            self._ocr_thread.join(timeout=30)
         self._record_close()
         if self.meeting.get("record"):
             self._suspend_engine_mic(False)
+        # The assistant microphone is already free while queued OCR finishes.
+        if self._ocr_thread is not None:
+            self._ocr_thread.join(timeout=30)
         if self._hint_cancel:
             self._hint_cancel.set()
         if ft is None or not ft.is_alive():
@@ -2222,34 +2290,82 @@ class Prompter:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def export_meeting_video(self):
+        if self._completed_job is not None and not self.on:
+            return self._completed_job.export_meeting_video()
         with self._lock:
             if self.on:
                 raise ValueError("Сначала завершите запись встречи.")
+            if self._post_busy:
+                raise ValueError("Запись ещё сохраняется. Видео начнёт собираться автоматически.")
+            if self._video_path and Path(self._video_path).is_file():
+                return {"busy": False, "path": self._video_path, "file": self._video_relative_path()}
             if self._video_export_busy:
                 return {"busy": True}
-            if not self._frame_events or not self._record_path:
-                raise ValueError("Нужны сохранённые кадры и аудиозапись встречи.")
-            events = [dict(item) for item in self._frame_events]
-            audio = self._record_path
-            root = Path(self._transcript_path).parent
-            output = self._session_dir / "Видео" / "Видео встречи.mp4"
+            if not self._frame_events:
+                raise ValueError("Нет сохранённых кадров для видео встречи.")
             self._video_export_busy = True
+            self._video_error = ""
 
         def build():
             try:
-                from meeting_video import build_meeting_video
-                from eyes import ffmpeg_path
-                path = build_meeting_video(events, audio, root, output, ffmpeg_path())
-                self._video_path = path
-                self._emit("video", busy=False, path=path)
+                self._video_path = self._finalize_frame_video()
+                if not self._video_path:
+                    raise RuntimeError("Недостаточно сохранённых кадров или аудиозапись пуста.")
             except Exception as exc:
                 log.exception("Видео встречи не создано")
-                self._emit("video", busy=False, error=str(exc))
+                self._video_error = str(exc)
             finally:
                 self._video_export_busy = False
+                self._refresh_summary_video()
+                self._emit("video", busy=False, path=self._video_path,
+                           file=self._video_relative_path(), error=self._video_error)
                 self._state()
-        threading.Thread(target=build, name="meeting-video", daemon=True).start()
+        self._emit("video", busy=True)
+        self._video_thread = threading.Thread(target=build, name="meeting-video", daemon=True)
+        self._video_thread.start()
         return {"busy": True}
+
+    def _video_relative_path(self):
+        if not self._video_path:
+            return ""
+        try:
+            return Path(self._video_path).resolve().relative_to(self.eng.workspace.ensure().resolve()).as_posix()
+        except ValueError:
+            return ""
+
+    def _with_video_status(self, body):
+        """An owned block in Summary is replaceable when MP4 finishes after the text."""
+        rel = self._video_relative_path()
+        if rel.startswith("Встречи/"):
+            value = f"готово — [Открыть видео встречи](dwr-file:{quote(rel[len('Встречи/'):], safe='/._-')})"
+        elif self._video_export_busy:
+            value = "создаётся в фоне"
+        elif self._video_error:
+            value = "не создано — " + self._video_error.replace("\n", " ")[:400]
+        else:
+            value = "нет сохранённых кадров"
+        block = f"<!-- dewiar-meeting-video:start -->\n- Видео: {value}\n<!-- dewiar-meeting-video:end -->"
+        pattern = r"<!-- dewiar-meeting-video:start -->.*?<!-- dewiar-meeting-video:end -->"
+        if re.search(pattern, body, re.S):
+            return re.sub(pattern, lambda _: block, body, flags=re.S)
+        return body.replace("## Summary\n", "## Summary\n" + block + "\n", 1)
+
+    def _refresh_summary_video(self):
+        with self._lock:
+            if not self.summary:
+                return
+            body = self.summary
+            try:
+                if self._summary_path:
+                    path = Path(self._summary_path)
+                    body = self._with_video_status(path.read_text(encoding="utf-8"))
+                    pending = path.with_suffix(".md.tmp")
+                    pending.write_text(body, encoding="utf-8")
+                    os.replace(pending, path)
+            except OSError:
+                log.exception("Не удалось обновить ссылку на видео в итоге встречи")
+            self.summary = self._with_video_status(body)
+        self._emit("summary", summary=self.summary, path=self._summary_path, busy=self._summary_busy)
 
     def _frame_loop(self, stop_ev=None):
         """Проверять экран с заданным интервалом; неизменившиеся сцены отбрасывать."""
@@ -2276,7 +2392,7 @@ class Prompter:
             from eyes import ffmpeg_path
             ff = ffmpeg_path()
             if not ff:
-                return ""
+                raise RuntimeError("Для создания видео требуется ffmpeg.")
             audio = Path(self._record_path) if self._record_path else None
             if audio and audio.is_file() and audio.stat().st_size > 44:
                 from meeting_video import build_meeting_video
@@ -2288,13 +2404,15 @@ class Prompter:
                 return ""
             result = subprocess.run([ff, "-y", "-framerate", str(round(1.0 / self._frame_interval, 4)),
                                      "-i", str(self._video_dir / "frame_%06d.jpg"), "-c:v", "libx264",
-                                     "-pix_fmt", "yuv420p", str(out.with_suffix(".mp4"))],
+                                     "-threads", "2", "-pix_fmt", "yuv420p", str(out.with_suffix(".mp4"))],
                                     capture_output=True, text=True, timeout=120)
             if result.returncode == 0 and out.with_suffix(".mp4").is_file():
                 self._video_path = str(out.with_suffix(".mp4"))
                 return self._video_path
+            raise RuntimeError("Не удалось собрать видео: " + result.stderr[-600:])
         except Exception as exc:  # noqa: BLE001 — протокол встречи не должен падать из-за видео
             log.info("🎬 Видео из кадров не собрано: %s", exc)
+            raise
         return ""
 
     # ---------- шпаргалка и итог ----------
@@ -2531,25 +2649,28 @@ class Prompter:
         if self._screenshots:
             body += "\n\n## Кадры экрана\n" + "\n".join(
                 f"- {meeting_link(x['path'], relative_to=transcript_root)}" + (f" — {x['ocr']}" if x.get("ocr") else "") for x in self._screenshots)
-        if self._video_path:
-            body += f"\n\n## Видео из кадров\n- {meeting_link(self._video_path, Path(self._video_path).name)} — таймлапс, кадр каждые {self._frame_interval:g} с"
         folders = self._folder_links(meeting_root, m.get("title", "Встреча"))
         if folders:
             body += "\n\n## Папки встречи\n" + "\n".join(f"- {x}" for x in folders)
-        path = ""
-        try:
-            d = self.eng.workspace.ensure() / "Встречи"
-            d.mkdir(parents=True, exist_ok=True)
-            f = d / f"{self._meeting_base(m.get('title', 'Встреча'))}.md"
-            f.write_text(body, encoding="utf-8")
-            path = str(f)
-        except OSError as e:
-            log.warning("🎬 Итог встречи не сохранён: %s", e)
+        with self._lock:
+            body = self._with_video_status(body)
+            path = ""
+            try:
+                d = self.eng.workspace.ensure() / "Встречи"
+                d.mkdir(parents=True, exist_ok=True)
+                f = d / f"{self._meeting_base(m.get('title', 'Встреча'))}.md"
+                pending = f.with_suffix(".md.tmp")
+                pending.write_text(body, encoding="utf-8")
+                os.replace(pending, f)
+                path = str(f)
+            except OSError as e:
+                log.warning("🎬 Итог встречи не сохранён: %s", e)
+            self.summary = body
+            self._summary_path = path
+            self._summary_busy = False
         self._transcript_set_participants(m.get("participants"))
-        self.summary = body
-        self._summary_path = path
         log.info("🎬 Итог встречи: %s", path or "(не сохранён)")
-        self._emit("summary", summary=body, path=path, busy=False)
+        self._emit("summary", summary=self.summary, path=path, busy=False)
 
 
 
