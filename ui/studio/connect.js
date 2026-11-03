@@ -237,7 +237,11 @@ const IS_WIN = /Win/.test(navigator.platform || navigator.userAgent);   // по�
 $$(".wtile").forEach(b => b.onclick = () => {
   const on = !b.classList.contains("cur");
   $$(".wtile").forEach(x => x.classList.remove("cur")); $$(".wpanel").forEach(x => x.classList.remove("on"));
-  if (on) { b.classList.add("cur"); $("#w-" + b.dataset.w).classList.add("on"); if (b.dataset.w === "dwkey") dkAccFill(); const f = $("#w-" + b.dataset.w + " input"); if (f && !(b.dataset.w === "dwkey" && DW.acc && DW.acc.logged_in)) f.focus(); }
+  if (on && b.dataset.cloudProvider) {
+    $("#ck-prov").value = b.dataset.cloudProvider;
+    ckHint();
+  }
+  if (on) { b.classList.add("cur"); $("#w-" + b.dataset.w).classList.add("on"); if (b.dataset.w === "dwkey") dkAccFill(); const f = b.dataset.w === "cloud" ? $("#ck-key") : $("#w-" + b.dataset.w + " input"); if (f && !(b.dataset.w === "dwkey" && DW.acc && DW.acc.logged_in)) f.focus(); }
   $("#w-done").style.display = "none";
 });
 if (IS_WIN) { $$(".tts-sys").forEach(x => x.textContent = "Голос Windows"); $$(".tts-sys-d").forEach(x => x.textContent = "Встроенный голос системы («Ирина», «Павел»). Без скачивания — на крайний случай."); }
@@ -296,8 +300,8 @@ const CLOUD = {
             rec: ["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini", "gpt-5", "gpt-4.1"] },
   anthropic: { hint: 'Ключ — на <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>.',
                rec: ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-3-5-haiku-latest", "claude-sonnet-4-0"] },
-  deepseek: { hint: 'Ключ — на <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com</a>. Напрямую — дешевле, чем через посредников.',
-              rec: ["deepseek-chat", "deepseek-reasoner"] },
+  deepseek: { hint: 'Вставьте ключ DeepSeek Platform, который используете в Harness, или создайте новый <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">в кабинете DeepSeek</a>. Запросы оплачиваются по тарифу вашего API-аккаунта.',
+              rec: ["deepseek-flash", "deepseek-v4-pro"] },
   gemini: { hint: 'Ключ — в <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> («Get API key»). Есть бесплатный уровень.',
             rec: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-pro-latest", "gemini-2.5-pro"] },
   kimi: { hint: 'Ключ — на <a href="https://platform.moonshot.ai/console/api-keys" target="_blank">platform.moonshot.ai</a>. Модели Kimi K2 — сильные в инструментах.',

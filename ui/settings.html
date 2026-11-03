@@ -1203,6 +1203,7 @@
       <button class="wtile" data-w="local"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M2 20h20"/></svg><b>На этом компьютере</b><span>Ollama или LM Studio — бесплатно и без интернета</span></button>
       <button class="wtile" data-w="server"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/></svg><b>Сервер компании или дома</b><span>vLLM, Ollama, llama.cpp на другом компьютере — нужен только адрес</span></button>
       <button class="wtile" data-w="cloud"><svg viewBox="0 0 24 24"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5z"/></svg><b>Ключ любимого сервиса</b><span>OpenAI, Claude, OpenRouter, DeepSeek или любой сервис по адресу — своим ключом</span></button>
+      <button class="wtile" data-w="cloud" data-cloud-provider="deepseek"><svg viewBox="0 0 24 24"><circle cx="8" cy="9" r="4"/><path d="m11 12 8 8m-2-2 2-2m-4 0 2-2"/></svg><b>DeepSeek Harness · ключ API</b><span>Подключить DeepSeek Flash или V4 Pro ключом DeepSeek Platform</span></button>
     </div>
 
     <div class="wpanel" id="w-dwkey">
@@ -1284,7 +1285,7 @@
     <div class="wpanel" id="w-cloud">
       <h3>Облачная модель по ключу</h3>
       <div class="actions" style="margin:0;align-items:flex-end;flex-wrap:wrap">
-        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek</option><option value="gemini">Google Gemini</option><option value="kimi">Kimi (Moonshot)</option><option value="glm">GLM (Z.ai)</option><option value="qwen">Qwen (Alibaba)</option><option value="mistral">Mistral</option><option value="xai">Grok (xAI)</option><optgroup label="Российские — оплата картой РФ"><option value="proxyapi">ProxyAPI</option><option value="vsegpt">VseGPT</option></optgroup><option value="custom">Другой — по адресу</option></select></label>
+        <label class="f" style="width:220px">Сервис<select id="ck-prov"><option value="openrouter">OpenRouter</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option><option value="deepseek">DeepSeek API</option><option value="gemini">Google Gemini</option><option value="kimi">Kimi (Moonshot)</option><option value="glm">GLM (Z.ai)</option><option value="qwen">Qwen (Alibaba)</option><option value="mistral">Mistral</option><option value="xai">Grok (xAI)</option><optgroup label="Российские — оплата картой РФ"><option value="proxyapi">ProxyAPI</option><option value="vsegpt">VseGPT</option></optgroup><option value="custom">Другой — по адресу</option></select></label>
         <label class="f" id="ck-url-f" style="flex:1;min-width:240px;display:none">Адрес (OpenAI-совместимый)<input type="url" id="ck-url" placeholder="https://api.example.ru/v1" spellcheck="false" autocomplete="off"></label>
         <label class="f" style="flex:1;min-width:240px">Ключ API<input type="password" id="ck-key" placeholder="вставьте ключ" autocomplete="off"></label>
         <button class="btn primary" id="ck-go">Подключить</button>
