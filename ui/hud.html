@@ -347,10 +347,9 @@
   #ask.running #a-stop { display: grid; }
   #ask.running #a-send { display: none; }
   #a-mic, #a-mic-pick { border-radius: 10px; }
-  #a-mic.recording { position: relative; border-radius: 50%; color: #f7f7fa; background: #17181d;
-    box-shadow: 0 0 0 var(--mic-ring, 0px) rgba(255,137,38,var(--mic-alpha, 0)); transition: box-shadow .08s linear; }
-  #a-mic.recording:hover, #a-mic.recording:focus-visible { background: #17181d; }
-  #a-mic.recording svg { width: 13px; height: 13px; }
+  #a-mic.recording { border-radius: 50%; color: #17181d; background: transparent; }
+  #a-mic.recording:hover, #a-mic.recording:focus-visible { background: transparent; }
+  #a-mic.recording svg { width: 34px; height: 34px; overflow: visible; }
   #a-mic-pick { width: 22px; min-width: 22px; margin-left: 0; }
   #a-mic-pick svg { width: 13px; height: 13px; }
   #askn { display: none; }
@@ -806,7 +805,12 @@ let radioNow = "";                           // играет радио — в �
 let stateSince = Date.now();
 let hold = null;              // диктовка удержанием (ниже, у перетаскивания): {on, t0, far, timer, by: "mouse"|"key"}
 let audioMode = "voice";       // Ядро --server не захватывает звук: не показываем ложную запись.
-let dictating = false, selectedMic = "", dictationLevel = 0;
+let dictating = false, selectedMic = "", dictationLevel = 0, lastDictationSelection = null;
+const DICTATION_LEVEL_ICONS = Array.from({length: 11}, (_, index) => {
+  const radius = index === 0 ? 0 : 9 + index * .68;
+  const opacity = index === 0 ? 0 : .12 + index * .045;
+  return `<svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="${radius}" fill="#ff922e" stroke="none" opacity="${opacity}"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#17181d" stroke="none"/></svg>`;
+});
 let turnUntil = 0;                           // до какого времени ждём ответа без имени (событие turn от ядра)
 // обновление: ядро перезапускается — это не «нет связи», а спокойное «обновляюсь» с обычным лицом (без притушенного
 // портрета и пунктирного круга); дольше 3 минут — значит, правда что-то не так, и снова честное «Нет связи с ядром»
@@ -1361,23 +1365,18 @@ async function enableMacVoice() {
 let dictationSession = null, cancelledDictationSession = null, dictationCancelling = false;
 function setDictationLevel(value) {
   dictationLevel = Math.max(0, Math.min(1, Number(value) || 0));
-  const active = dictationLevel > 0.018;
-  const strength = active ? Math.min(1, (dictationLevel - 0.018) / .32) : 0;
   const mic = $("a-mic");
-  mic.style.setProperty("--mic-ring", active ? `${Math.round(2 + strength * 12)}px` : "0px");
-  mic.style.setProperty("--mic-alpha", active ? String(.16 + strength * .44) : "0");
-  const icon = active
-    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>'
-    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z" fill="currentColor" stroke="none"/></svg>';
-  const signal = active ? "sound" : "silent";
-  if (dictating && mic.dataset.signal !== signal) { mic.innerHTML = icon; mic.dataset.signal = signal; }
+  const strength = Math.max(0, Math.min(1, (dictationLevel - .006) / .38));
+  const index = Math.round(strength * (DICTATION_LEVEL_ICONS.length - 1));
+  if (dictating && mic.dataset.levelIcon !== String(index)) {
+    mic.innerHTML = DICTATION_LEVEL_ICONS[index]; mic.dataset.levelIcon = String(index);
+  }
 }
 function dictationUi(on) {
   dictating = !!on;
   $("a-mic").classList.toggle("recording", dictating);
   if (!dictating) {
-    dictationLevel = 0; $("a-mic").dataset.signal = "";
-    $("a-mic").style.removeProperty("--mic-ring"); $("a-mic").style.removeProperty("--mic-alpha");
+    dictationLevel = 0; $("a-mic").dataset.levelIcon = "";
     $("a-mic").innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
   } else setDictationLevel(dictationLevel);
   $("a-mic").title = (dictating ? "Остановить голосовой ввод — текст останется в поле. " : "Начать голосовой ввод. ") + "Завершить и отправить голосом: скажите имя текущего помощника, «ввод» или «вот» в конце фразы, либо отдельно «ввод» или «вот». После паузы дождитесь распознавания.";
@@ -1389,16 +1388,20 @@ function dictationUi(on) {
 function insertDictationText(text) {
   const t = $("askin"), words = text.trim();
   if (!words) return;
-  // Use the current selection for every STT fragment: the user can move the caret
-  // while recognition is running. Preserve all text and whitespace outside it.
-  const start = t.selectionStart, end = t.selectionEnd;
+  // Keep the last recognized phrase selected for quick correction. The next phrase
+  // appends after that automatic selection; a selection the user made remains editable.
+  let start = t.selectionStart, end = t.selectionEnd;
+  if (lastDictationSelection && lastDictationSelection.value === t.value &&
+      start === lastDictationSelection.start && end === lastDictationSelection.end) start = end;
   const before = t.value.slice(0, start), after = t.value.slice(end);
   const left = before && !/\s$/.test(before) && !/[(\[{«“„]$/.test(before)
     && !/^[,.;:!?…)}\]»”]/.test(words) ? " " : "";
   const right = after && !/^\s/.test(after) && !/^[,.;:!?…)}\]»”]/.test(after)
     && !/[(\[{«“„]$/.test(words) ? " " : "";
   t.setRangeText(left + words + right, start, end, "end");
-  fitAsk(); t.focus();
+  const phraseStart = start + left.length, phraseEnd = phraseStart + words.length;
+  lastDictationSelection = {start: phraseStart, end: phraseEnd, value: t.value};
+  t.focus(); t.setSelectionRange(phraseStart, phraseEnd); fitAsk();
 }
 core.on("dictation", e => {
   // A result already in transit when Cancel is clicked must never edit or send the draft.
@@ -2132,12 +2135,10 @@ $("a-send").onclick = sendAsk;
 function updateDraftActions() {
   const t = $("askin"), clear = $("a-clear"), copy = $("a-copy");
   copy.hidden = copy.disabled = !t.value.length;
-  clear.hidden = !t.value.length && !dictating && !dictationCancelling;
-  clear.disabled = clear.hidden || dictationCancelling;
+  clear.hidden = !t.value.length;
+  clear.disabled = clear.hidden;
   const selected = t.selectionStart !== t.selectionEnd;
-  clear.title = dictationCancelling ? "Отменяю голосовую запись…" : dictating
-    ? "Отменить голосовую запись без добавления результата. Текст в поле сохранится."
-    : selected ? "Стереть выделенный текст" : "Стереть весь текст ввода. Вложения и переписка сохранятся.";
+  clear.title = selected ? "Стереть выделенный текст" : "Стереть весь текст ввода. Вложения и переписка сохранятся.";
   clear.setAttribute("aria-label", clear.title);
 }
 // Keep the textarea selection when the pointer moves to the eraser (including WebKit).
@@ -2150,8 +2151,6 @@ $("a-clear").addEventListener("mousedown", e => {
 });
 $("askin").addEventListener("select", updateDraftActions);
 $("a-clear").onclick = () => {
-  if (dictationCancelling) return;
-  if (dictating) return cancelDictation();
   const t = $("askin"), saved = draftClearSelection;
   draftClearSelection = null;
   const liveSelected = t.selectionStart !== t.selectionEnd;
@@ -2159,6 +2158,7 @@ $("a-clear").onclick = () => {
   const selected = !!range;
   if (range) t.setRangeText("", range[0], range[1], "start");
   else t.value = "";
+  lastDictationSelection = null;
   fitAsk(); t.focus();
   $("ask-feedback").textContent = selected ? "Выделенный текст удалён" : "Текст ввода очищен";
 };
