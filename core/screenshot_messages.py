@@ -116,6 +116,17 @@ def command(engine, cmd, args):
     with LOCK:
         item = engine.chatlog.screenshot(args.get('id'))
         value = public(item)
+        if cmd == 'screenshot_text':
+            return {'id': value['id'], 'text': value['text'], 'revision': value.get('text_revision', 0)}
+        if cmd == 'screenshot_text_save':
+            text, revision = args.get('text'), args.get('revision')
+            if not isinstance(text, str) or len(text) > 1_000_000:
+                raise ValueError('Текст снимка должен быть строкой не длиннее 1 000 000 символов')
+            if type(revision) is not int or revision < 0:
+                raise ValueError('Откройте редактор текста заново')
+            updated = public(engine.chatlog.screenshot(value['id'], text=text, revision=revision))
+            engine.emit('chat_changed')
+            return {'id': updated['id'], 'text': updated['text'], 'revision': updated.get('text_revision', 0)}
         if cmd == 'screenshot_image':
             data = engine.workspace.safe(value['image']).read_bytes()
             return 'data:image/png;base64,' + base64.b64encode(data).decode('ascii')
@@ -133,7 +144,8 @@ def command(engine, cmd, args):
         attachment = workspace.note_attach(rel, 'Экран.png', workspace.safe(value['image']).read_bytes())
         text = value['text']
         fence = '`' * max(3, max((len(x) + 1 for x in re.findall(r'`+', text)), default=3))
-        body = (f"Движок: {value['engine']}. Текст извлечён автоматически; возможны ошибки.\n\n{fence}text\n{text}\n{fence}\n"
+        origin = 'Текст отредактирован пользователем.' if value.get('text_edited') else f"Движок: {value['engine']}. Текст извлечён автоматически; возможны ошибки."
+        body = (f"{origin}\n\n{fence}text\n{text}\n{fence}\n"
                 if text else value['summary'] + '\n')
         content = f"# {value['title']}\n\n## Снимок экрана\n\n{attachment['line']}\n\n## Распознанный текст\n\n{body}"
         if text:

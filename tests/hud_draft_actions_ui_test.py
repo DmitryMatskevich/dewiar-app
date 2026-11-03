@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
           return {llm};
         }
         if (cmd === 'models_routing_status') {
-          return {automatic:llm.auto_select,next:'primary',selected:{model:'previous-answer'}};
+          return {automatic:llm.auto_select,next:'primary',order:['primary','backup'],selected:{model:'previous-answer'}};
         }
         return {};
       };
@@ -49,10 +49,16 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     model = page.locator("#ask-model")
     assert model.inner_text() == "first-model"
     model.click()
+    auto = page.locator("#model-menu").get_by_role("button", name="Автовыбор по приоритету")
+    assert auto.get_attribute("title").splitlines() == ["1. first-model (приоритет 1)", "2. backup-model (приоритет 9)"]
+    assert page.locator('[data-model-id="primary"]').get_attribute("aria-pressed") == "true"
     page.locator("#model-menu").get_by_role("button", name="backup-model").click()
-    page.wait_for_function("document.querySelector('#ask-model.manual svg') !== null")
+    page.wait_for_function("document.querySelector('#ask-model').textContent === 'backup-model'")
+    assert "выбрана модель «backup-model»" in page.locator("#cap").inner_text()
     assert model.inner_text() == "backup-model"
+    assert not model.locator("svg").count()
     model.click()
+    assert page.locator('[data-model-id="backup"]').get_attribute("aria-pressed") == "true"
     page.locator("#model-menu").get_by_role("button", name="Автовыбор по приоритету").click()
     page.wait_for_function("document.querySelector('#ask-model').textContent === 'first-model'")
     assert not model.locator("svg").count()

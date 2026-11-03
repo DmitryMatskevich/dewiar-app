@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'core'), str(ROOT / 'ui')]
@@ -98,6 +98,79 @@ class ScreenStartupTests(unittest.TestCase):
         (self.root / 'screen-access-request.json').write_text('{bad')
         self.api.startup_screen_access()
         self.dispatch.assert_called_once()
+
+
+class FilesStartupTests(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name); self.settings = self.root / 'settings.json'
+        self.settings.write_text('{}'); self.build = 'files-A'
+        for target, kwargs in [
+            ('mac_screen_access.STATE_DIR', {'new':self.root}),
+            ('mac_screen_access.build_id', {'side_effect':lambda:self.build}),
+            ('app.SETTINGS_PATH', {'new':self.settings}),
+            ('sys.frozen', {'new':True, 'create':True}),
+            ('macshell.threading.Thread', {}),
+            ('macshell.time.sleep', {}),
+            ('macshell._core_request', {'side_effect':lambda token, cmd, args, **kw:
+                {'state':'authorized', 'readable':True, 'path':'/fixture/'+args['target']}}),
+        ]:
+            p = patch(target, **kwargs); mock = p.start(); self.addCleanup(p.stop)
+            if target.endswith('Thread'): self.thread = mock
+            if target.endswith('_core_request'): self.core = mock
+        self.api = make_api(app)('fixture')
+        self.api.screen_capture_permission = Mock(return_value={'pending':False})
+        self.api.open_settings = Mock(); self.api.open_files_settings = Mock()
+
+    def run_request(self):
+        self.thread.call_args.kwargs['target']()
+
+    def test_waits_for_screen_and_runs_once_per_build(self):
+        def status():
+            self.core.assert_not_called()
+            return {'pending':True}
+        self.api.screen_capture_permission.side_effect = [status(), {'pending':False}]
+        self.api.startup_files_access(); self.api.startup_files_access()
+        self.thread.assert_called_once(); self.core.assert_not_called()
+        self.run_request()
+        self.assertEqual([c.args[2]['target'] for c in self.core.call_args_list], ['workspace', 'documents'])
+        self.assertTrue(mac_screen_access.was_requested('files'))
+        self.assertFalse(mac_screen_access.was_requested())
+        make_api(app)('fixture').startup_files_access()
+        self.thread.assert_called_once()
+        self.build = 'files-B'
+        make_api(app)('fixture').startup_files_access()
+        self.assertEqual(self.thread.call_count, 2)
+
+    def test_denial_opens_files_settings_and_keeps_results(self):
+        self.core.side_effect = lambda token, cmd, args, **kw: {'state':'denied', 'readable':False, 'path':'/fixture/'+args['target']}
+        self.api.startup_files_access(); self.run_request()
+        self.api.open_files_settings.assert_called_once()
+        self.api.open_settings.assert_called_once_with('safety', '&mac_access_setup=1')
+        self.assertEqual(self.api._files_access['documents']['state'], 'denied')
+        self.assertEqual(self.api._files_pending, '')
+        self.assertTrue(mac_screen_access.was_requested('files'))
+
+    def test_unavailable_core_is_retryable_and_never_claims_access(self):
+        self.core.side_effect = TimeoutError('core unavailable')
+        self.api.startup_files_access(); self.run_request()
+        self.assertFalse(mac_screen_access.was_requested('files'))
+        self.assertFalse(getattr(self.api, '_files_access', {}))
+        self.assertFalse(self.api._files_startup_running)
+        self.assertEqual(self.api._files_pending, '')
+        self.api.open_settings.assert_called_once()
+
+    def test_opt_out_source_and_explicit_request_are_respected(self):
+        self.settings.write_text('{"ui":{"mac_files_request_at_startup":false}}')
+        self.api.startup_files_access(); self.thread.assert_not_called()
+        self.settings.write_text('{}')
+        with patch.object(sys, 'frozen', False): self.api.startup_files_access()
+        self.thread.assert_not_called()
+        self.api._files_pending = 'selected'
+        self.api.startup_files_access(); self.run_request()
+        self.core.assert_not_called()
+        self.assertEqual(self.api._files_pending, 'selected')
+        self.assertFalse(mac_screen_access.was_requested('files'))
 
 
 class CaptureDiagnosticTests(unittest.TestCase):

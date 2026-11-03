@@ -16,22 +16,28 @@ def build_id():
         return ''
 
 
-def was_requested():
+def _marker(scope):
+    if scope not in ('screen', 'files'):
+        raise ValueError('Unknown permission scope')
+    return STATE_DIR / f'{scope}-access-request.json'
+
+
+def was_requested(scope='screen'):
     build = build_id()
     if not build:
         return False
     try:
-        return json.loads((STATE_DIR / 'screen-access-request.json').read_text()).get('build') == build
+        return json.loads(_marker(scope).read_text()).get('build') == build
     except (OSError, ValueError, AttributeError):
         return False
 
 
-def mark_requested():
+def mark_requested(scope='screen'):
     build = build_id()
     if not build:
         return
     STATE_DIR.mkdir(parents=True, exist_ok=True)
-    target = STATE_DIR / 'screen-access-request.json'
+    target = _marker(scope)
     pending = target.with_suffix('.tmp')
     pending.write_text(json.dumps({'build': build}), encoding='utf-8')
     pending.replace(target)

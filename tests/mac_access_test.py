@@ -9,11 +9,36 @@ from unittest.mock import Mock, patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'core'),str(ROOT/'ui')]
 from mac_access import folder_access
-from macshell import make_api,access_setup_on_start
+from macshell import make_api,access_setup_on_start,_core_request
 import app
 
 
 class AccessTests(unittest.TestCase):
+    def test_native_request_ignores_events_until_its_matching_reply(self):
+        ws=Mock()
+        result={'state':'authorized','readable':True,'path':'/fixture/Documents'}
+        ws.recv.side_effect=[json.dumps(x) for x in [
+            {'type':'level','level':0}, {'type':'hello','data':{}},
+            {'type':'chat_changed'}, {'type':'reply','id':9,'data':None},
+            {'type':'reply','id':1,'ok':True,'data':result}]]
+        with patch('websockets.sync.client.connect') as connect:
+            connect.return_value.__enter__.return_value=ws
+            self.assertEqual(_core_request('fixture','mac_files_access',{'target':'documents'}),result)
+        self.assertEqual(ws.recv.call_count,5)
+        self.assertEqual(json.loads(ws.send.call_args.args[0])['args'],{'target':'documents'})
+
+    def test_native_request_keeps_one_timeout_and_reports_reply_errors(self):
+        ws=Mock()
+        ws.recv.side_effect=[json.dumps({'type':'hello'}),json.dumps({'type':'level'})]
+        with patch('websockets.sync.client.connect') as connect, patch('macshell.time.monotonic',side_effect=[0,1,2,4]):
+            connect.return_value.__enter__.return_value=ws
+            with self.assertRaises(TimeoutError):_core_request('fixture','mac_files_access',timeout=3)
+        self.assertEqual([c.kwargs['timeout'] for c in ws.recv.call_args_list],[2,1])
+        ws.recv.side_effect=[json.dumps({'type':'hello'}),json.dumps({'type':'reply','id':1,'ok':False,'error':'denied'})]
+        with patch('websockets.sync.client.connect') as connect:
+            connect.return_value.__enter__.return_value=ws
+            with self.assertRaisesRegex(RuntimeError,'denied'):_core_request('fixture','mac_files_access')
+
     def test_status_only_does_not_touch_protected_folders(self):
         with patch('mac_access.os.scandir') as scan:
             values=folder_access(SimpleNamespace(root=Path('/fixture/workspace')))

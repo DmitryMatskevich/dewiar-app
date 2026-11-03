@@ -40,8 +40,12 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
         async screen_capture_permission(){if(window.permissionError)throw Error('Unavailable');return {granted:screenGranted}},
         async open_screen_settings(){screenSettings++;return true},
         async copy_image_data(url){copiedImages.push(url);return true;}});
-      window.core={_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
-        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
+      window.core={snapshot:{},_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
+        if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_text','screenshot_text_save','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
+        if(cmd==='screenshot_text_save') {
+          if(window.failSave)throw Error('Диск недоступен');
+          if(window.deferSave){window.deferSave=false;await new Promise(resolve=>window.releaseSave=resolve);}
+        }
         const r=await nativeCommand(cmd,args);for(const [kind,data] of r.events)fire(kind,data);return r.result;}};
       window.fire=(type,data)=>(core._on[type]||[]).forEach(fn=>fn(data));
       Object.defineProperty(navigator,'clipboard',{configurable:true,value:{async writeText(t){copiedTexts.push(t)}}});
@@ -82,7 +86,9 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     item=engine.chatlog.page()['items'][0]
     assert item['role']=='assistant' and item['att'][0]['capture']['text']==text
     assert not any(kind=='note_saved' for kind,_ in events)
-    assert card.locator('pre').text_content()==text
+    assert not card.locator('details,summary,pre').count()
+    assert card.locator('.ss-status').is_hidden()
+    assert 'Текст распознан локально' not in card.inner_text()
     card.locator('[data-ss-open]').click()
     page.locator('.ss-full-image').wait_for()
     assert base64.b64decode(page.locator('.ss-full-image').get_attribute('src').split(',',1)[1])==png
@@ -90,12 +96,69 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     card.locator('[data-ss-action="image"]').click()
     page.wait_for_function('copiedImages.length===1')
     assert base64.b64decode(page.evaluate('copiedImages[0]').split(',',1)[1])==png
-    card.locator('[data-ss-action="text"]').click();page.wait_for_function('copiedTexts.length===1')
-    assert page.evaluate('copiedTexts[0]')==text
+    card.locator('[data-ss-action="text"]').click()
+    editor=page.get_by_role('dialog',name='Редактирование текста снимка')
+    field=editor.get_by_role('textbox',name='Текст снимка')
+    assert field.input_value()==text
+    assert page.evaluate('copiedTexts')==[], 'Opening the editor must not overwrite the clipboard'
+    edited_text='Исправлено вручную\n<script>только текст</script>\n  '
+    field.fill(edited_text)
+    editor.get_by_role('button',name='Скопировать',exact=True).click()
+    page.wait_for_function('copiedTexts.length===1')
+    page.wait_for_function("document.querySelector('.ss-text-dialog [role=status]').textContent.includes('Сохранено')")
+    assert page.evaluate('copiedTexts[0]')==edited_text
+    assert engine.chatlog.screenshot(item['id'])['att'][0]['capture']['text']==edited_text
+    # Native WebKit may deny Clipboard API; its fallback must stay inside the modal.
+    page.evaluate("""window.clipboardWriter=navigator.clipboard.writeText;
+      navigator.clipboard.writeText=async()=>{throw Error('denied')};
+      document.execCommand=()=>{window.fallbackText=document.activeElement.value;
+        return !!document.activeElement.closest('.ss-text-dialog')};""")
+    field.evaluate('e=>e.setSelectionRange(0,5)')
+    editor.get_by_role('button',name='Скопировать',exact=True).click()
+    page.wait_for_function('typeof fallbackText===\'string\'')
+    assert page.evaluate('fallbackText')==edited_text
+    page.evaluate('navigator.clipboard.writeText=clipboardWriter')
+    editor.get_by_role('button',name='Закрыть',exact=True).click();editor.wait_for(state='detached')
+    engine.chatlog=ChatLog(root/'chat.jsonl')
+    # A native bridge may receive hello before HUD subscribes; history must still load.
+    page.reload();card.wait_for()
+    page.evaluate("screenGranted=true;window.dispatchEvent(new Event('focus'))")
+    card.locator('[data-ss-action="text"]').click()
+    assert field.input_value()==edited_text, 'Edits must survive reloading the stored history'
+    # A failed save leaves the editor/draft open; retry is explicit and recoverable.
+    page.evaluate('failSave=true')
+    field.fill('Несохранённый текст')
+    editor.get_by_role('button',name='Закрыть',exact=True).click()
+    page.wait_for_function("document.querySelector('.ss-text-dialog [role=status]').textContent.includes('Диск недоступен')")
+    assert editor.is_visible() and field.input_value()=='Несохранённый текст'
+    assert engine.chatlog.screenshot(item['id'])['att'][0]['capture']['text']==edited_text
+    page.evaluate('failSave=false;deferSave=true')
+    field.fill('Первая правка')
+    editor.get_by_role('button',name='Сохранить',exact=True).click()
+    page.wait_for_function("typeof releaseSave==='function'")
+    # Type while saving and close: latest text must be serialized after the first write.
+    edited_text='Последняя правка\n  Все пробелы сохранены.  '
+    field.fill(edited_text)
+    editor.get_by_role('button',name='Закрыть',exact=True).click()
+    assert editor.is_visible()
+    page.evaluate('releaseSave()');editor.wait_for(state='detached')
+    assert engine.chatlog.screenshot(item['id'])['att'][0]['capture']['text']==edited_text
+    # Debounced autosave works without a Save/Close click, including narrow windows.
+    card.locator('[data-ss-action="text"]').click()
+    edited_text += '\nАвтосохранение.'
+    field.fill(edited_text)
+    page.wait_for_function("document.querySelector('.ss-text-dialog [role=status]').textContent==='Сохранено'")
+    assert engine.chatlog.screenshot(item['id'])['att'][0]['capture']['text']==edited_text
+    page.set_viewport_size({'width':340,'height':600})
+    assert editor.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
+    assert field.bounding_box()['height']>=100
+    page.screenshot(path=str(ROOT/'work/screenshot-text-editor.png'))
+    page.keyboard.press('Escape');editor.wait_for(state='detached')
     card.locator('[data-ss-action="note"]').click()
     page.wait_for_function('unreadNotes.size===1')
     notes=list(ws.root.glob('Заметки/Снимки экрана/*.md'));assert len(notes)==1
-    assert text in notes[0].read_text()
+    assert edited_text in notes[0].read_text()
+    assert 'Текст отредактирован пользователем' in notes[0].read_text()
     assert next(ws.root.glob('Заметки/**/Экран.png')).read_bytes()==png
     # Repeat commands are idempotent and persisted across a ChatLog reload.
     result=CommandsMixin.command(engine,'screenshot_to_note',{'id':item['id']})
@@ -153,6 +216,14 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page.locator('#a-shot').click();page.locator('[data-window-id="42"]').click()
     page.locator('#screenshot-messages .ss-card').wait_for()
     assert any(cmd=='screenshot_attach' and args.get('window_id')==42 for cmd,args in calls)
+    # Saving empty text removes the icon; neither OCR disclosure nor success line returns.
+    card.locator('[data-ss-action="text"]').click()
+    field.fill('');editor.get_by_role('button',name='Закрыть',exact=True).click()
+    editor.wait_for(state='detached')
+    assert card.locator('[data-ss-action="text"]').is_hidden()
+    engine.chatlog=ChatLog(root/'chat.jsonl');page.evaluate('loadScreenshotMessages()')
+    page.wait_for_function("document.querySelector('#screenshot-messages [data-ss-action=text]').hidden")
+    assert not card.locator('details,summary,pre').count()
     assert not errors,errors
     browser.close()
 print('ALL OK: assistant message, no auto-note, PNG/text clipboard, explicit idempotent transfer, restart persistence, dismissal and layout')

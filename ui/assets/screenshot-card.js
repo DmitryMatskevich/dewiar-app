@@ -6,6 +6,76 @@
     note: '<path d="M5 3h10l4 4v14H5zM15 3v5h4M8 12h8M8 16h5"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>'
   };
+  async function editText(value, options, anchor) {
+    // Reload the persisted version: another Chat/HUD window may have edited it.
+    const current = await core.call('screenshot_text', {id:value.id});
+    let saved = current.text, revision = current.revision, pending = null, timer, closing = false;
+    const dialog = document.createElement('dialog'); dialog.className = 'ss-dialog ss-text-dialog';
+    dialog.setAttribute('aria-label', 'Редактирование текста снимка');
+    const header = document.createElement('div'); header.className = 'ss-dialog-bar';
+    const title = document.createElement('h2'); title.textContent = 'Текст снимка';
+    const close = document.createElement('button'); close.type = 'button'; close.textContent = 'Закрыть';
+    header.append(title, close);
+    const input = document.createElement('textarea'); input.className = 'ss-text-input'; input.value = saved;
+    input.setAttribute('aria-label', 'Текст снимка'); input.spellcheck = true;
+    const hint = document.createElement('p'); hint.className = 'ss-info'; hint.textContent = 'Изменения сохраняются в снимке автоматически.';
+    const status = document.createElement('p'); status.className = 'ss-info'; status.setAttribute('role', 'status');
+    const actions = document.createElement('div'); actions.className = 'ss-region-actions';
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Скопировать';
+    const save = document.createElement('button'); save.type = 'button'; save.textContent = 'Сохранить'; save.className = 'ss-primary';
+    actions.append(copy, save); dialog.append(header, hint, input, status, actions);
+    const refresh = () => { save.disabled = !!pending || input.value === saved; copy.disabled = !input.value; };
+    async function flush() {
+      clearTimeout(timer);
+      if (pending) return pending;
+      pending = (async () => {
+        while (input.value !== saved) {
+          const text = input.value;
+          status.textContent = 'Сохраняю…';
+          try {
+            const result = await core.call('screenshot_text_save', {id:value.id, text, revision});
+            saved = result.text; revision = result.revision;
+            value.text = saved; value.text_revision = revision;
+            anchor.hidden = !saved.trim();
+            status.textContent = 'Сохранено';
+          } catch (error) { status.textContent = 'Не удалось сохранить: ' + (error.message || String(error)); return false; }
+        }
+        return true;
+      })();
+      refresh();
+      const ok = await pending;
+      pending = null; refresh();
+      return ok;
+    }
+    input.oninput = () => {
+      clearTimeout(timer); status.textContent = 'Есть несохранённые изменения'; refresh();
+      timer = setTimeout(flush, 500);
+    };
+    save.onclick = flush;
+    copy.onclick = async () => {
+      copy.disabled = true;
+      try {
+        const text = input.value;
+        if (options.copyText) await options.copyText(text, dialog);
+        else await navigator.clipboard.writeText(text);
+        if (await flush()) status.textContent = 'Текст скопирован · Сохранено';
+      } catch (error) { status.textContent = 'Не удалось скопировать: ' + (error.message || String(error)); }
+      finally { refresh(); }
+    };
+    close.onclick = async () => {
+      if (closing) return;
+      closing = true; input.readOnly = true; close.disabled = true;
+      if (await flush()) dialog.close();
+      else { closing = false; input.readOnly = false; close.disabled = false; input.focus(); }
+    };
+    dialog.addEventListener('cancel', event => { event.preventDefault(); close.click(); });
+    dialog.addEventListener('close', () => {
+      clearTimeout(timer); dialog.remove();
+      const card = document.querySelector(`[data-screenshot-id="${CSS.escape(value.id)}"]`);
+      (anchor.isConnected ? anchor : card?.querySelector('[data-ss-action="text"]:not([hidden]), [data-ss-open]'))?.focus();
+    }, {once:true});
+    document.body.append(dialog); refresh(); dialog.showModal(); input.focus();
+  }
   function card(value, options = {}) {
     const root = document.createElement('article'); root.className = 'ss-card'; root.dataset.screenshotId = value.id;
     root.setAttribute('aria-label', 'Сообщение ассистента: снимок экрана');
@@ -16,7 +86,7 @@
     open.append(image);
     open.onclick = async () => { open.disabled = true; try { await DewiarCapture.openImage(value); } catch (e) { status.textContent = e.message || String(e); } finally { open.disabled = false; } };
     const status = document.createElement('div'); status.className = 'ss-status'; status.setAttribute('role', 'status');
-    status.textContent = value.note_path ? 'В заметках' : value.summary;
+    status.textContent = value.note_path ? 'В заметках' : value.status === 'error' ? 'Распознать текст не удалось; изображение сохранено.' : '';
     const actions = document.createElement('div'); actions.className = 'ss-actions';
     const button = (kind, title, action) => {
       const b = document.createElement('button'); b.type = 'button'; b.title = title; b.setAttribute('aria-label', title); b.dataset.ssAction = kind;
@@ -39,12 +109,10 @@
       } else throw Error('Копирование картинки доступно в приложении Dewiar или браузере с поддержкой буфера изображений');
       status.textContent = 'Картинка скопирована';
     });
-    const copyText = button('text', 'Скопировать распознанный текст', async () => {
-      if (options.copyText) await options.copyText(value.text);
-      else await navigator.clipboard.writeText(value.text);
-      status.textContent = 'Распознанный текст скопирован';
-    });
-    copyText.disabled = !!options.readOnly || !value.text;
+    const textButton = button('text', 'Открыть и редактировать текст снимка', () => editText(value, options, textButton));
+    textButton.setAttribute('aria-haspopup', 'dialog');
+    textButton.hidden = !value.text?.trim();
+    textButton.disabled = !!options.readOnly || textButton.hidden;
     const save = button('note', 'Перенести картинку и текст в заметки', async () => {
       const result = await core.call('screenshot_to_note', {id:value.id});
       value.note_path = result.path; status.textContent = 'Картинка и текст перенесены в заметки';
@@ -56,11 +124,6 @@
     head.append(close); // close belongs at the message's top-right, not in the copy toolbar
     const preview = document.createElement('div'); preview.className = 'ss-preview'; preview.append(open, actions);
     root.append(head, preview);
-    if (value.text) {
-      const details = document.createElement('details'), summary = document.createElement('summary'), text = document.createElement('pre');
-      summary.textContent = 'Распознанный текст'; text.textContent = value.text;
-      details.append(summary, text); root.append(details);
-    }
     root.append(status);
     return root;
   }

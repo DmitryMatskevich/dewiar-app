@@ -88,7 +88,7 @@ class ChatLog:
             groups.setdefault(key, []).append(item)
         return groups
 
-    def screenshot(self, message_id, note_path=None, dismiss=False):
+    def screenshot(self, message_id, note_path=None, dismiss=False, text=None, revision=None):
         """Read/update only a screenshot message, retaining originals after dismissal."""
         with self._lock:
             item = next((x for x in self.items if x['id'] == message_id and not x.get('dismissed')
@@ -96,11 +96,18 @@ class ChatLog:
             if item is None:
                 raise ValueError('Сообщение со снимком не найдено; для архивного чата сначала восстановите переписку')
             previous = copy.deepcopy(item)
+            if text is not None:
+                capture = item['att'][0]['capture']
+                if revision != capture.get('text_revision', 0):
+                    raise ValueError('Текст изменён в другом окне. Скопируйте свои правки и откройте редактор заново.')
+                if text == capture['text']:
+                    return copy.deepcopy(item)
+                capture.update(text=text, text_revision=revision + 1, text_edited=True)
             if note_path is not None:
                 item['att'][0]['note_path'] = note_path
             if dismiss:
                 item['dismissed'] = True
-            if note_path is not None or dismiss:
+            if note_path is not None or dismiss or text is not None:
                 try:
                     self._write_all()
                 except Exception:

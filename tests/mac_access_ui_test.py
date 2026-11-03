@@ -45,6 +45,14 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     assert 'settings:files' in page.evaluate('nativeCalls')
     page.locator('#mac-access-startup').check()
     page.wait_for_function('S.ui.mac_access_at_startup===true')
+    assert page.locator('#mac-access-files-startup').is_checked()
+    page.locator('#mac-access-files-startup').uncheck()
+    page.wait_for_function('S.ui.mac_files_request_at_startup===false')
+    for target in ['desktop','downloads']:
+        page.locator(f'[data-mac-folder="{target}"]').click()
+        assert page.evaluate('files.pending')==target
+        page.evaluate("files.pending='';window.dispatchEvent(new Event('focus'))")
+        page.wait_for_function("!document.querySelector('[data-mac-folder=workspace]').disabled")
     page.locator('#mac-access-later').click();assert page.locator('#mac-access-setup').is_hidden()
     assert page.locator('#mac-access').is_visible()
     page.evaluate("mic={...mic,granted:true};files.folders.workspace={path:'/fixture/Dewiar',state:'authorized',readable:true};window.dispatchEvent(new Event('focus'))")

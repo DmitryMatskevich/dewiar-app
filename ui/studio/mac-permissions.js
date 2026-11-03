@@ -68,11 +68,18 @@
       if (typeof S !== 'undefined') S = result;
     } catch (error) { e.target.checked = !e.target.checked; byId('result').textContent = error.message || String(error); }
   };
+  byId('files-startup').onchange = async e => {
+    try {
+      const result = await core.call('settings_save', {patch:{ui:{mac_files_request_at_startup:e.target.checked}}});
+      if (typeof S !== 'undefined') S = result;
+    } catch (error) { e.target.checked = !e.target.checked; byId('result').textContent = error.message || String(error); }
+  };
   async function start(settings) {
     await refresh();
     if (!api()?.files_access_state) return;
     byId('startup').checked = !!settings?.ui?.mac_access_at_startup;
     byId('screen-startup').checked = settings?.ui?.mac_screen_request_at_startup !== false;
+    byId('files-startup').checked = settings?.ui?.mac_files_request_at_startup !== false;
     if (!settings?.ui || started || new URLSearchParams(location.search).get('mac_access_setup') !== '1') return;
     started = true;
     document.querySelector('nav button[data-p="safety"]')?.click();

@@ -331,14 +331,15 @@
   #ask-model:hover, #ask-model:focus-visible { color: var(--ink); }
   #ask-model:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
   #ask-model::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 5px 1px 0; border-radius: 50%; background: #63d5a2; }
-  #ask-model.off::before { background: #f2b35d; }
-  #ask-model.manual::before { display: none; }
-  #ask-model svg { width: 12px; height: 12px; margin-right: 4px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 2; }
+  #ask-model.off::before { background: transparent; }
   #model-menu { position: absolute; left: 8px; right: 8px; bottom: 48px; z-index: 26; max-height: 240px; overflow: auto;
     padding: 6px; border-radius: 15px; background: #242d3d; color: #fff; box-shadow: 0 15px 35px rgba(0,0,0,.25); }
   #model-menu button { width: 100%; min-height: 44px; padding: 6px 9px; border: 0; border-radius: 9px; text-align: left;
     background: transparent; color: inherit; cursor: pointer; overflow-wrap: anywhere; }
   #model-menu button:hover, #model-menu button[aria-pressed="true"] { background: rgba(110,130,190,.23); }
+  #model-menu button[data-model-id]::before { content: ""; display: inline-block; width: 7px; height: 7px;
+    margin-right: 8px; border-radius: 50%; background: transparent; vertical-align: 1px; }
+  #model-menu button[data-model-id][aria-pressed="true"]::before { background: #249866; }
   body.light #model-menu { background: #fff; color: var(--ink); }
   #ask-model.off { color: var(--muted); }
   #a-stop { display: none; color: #ff7895; background: rgba(255,104,144,.12); }
@@ -1510,24 +1511,13 @@ function setLocal(on) {
   button.setAttribute("aria-label", button.title + ". Открыть настройки безопасности");
 }
 $("b-lo").onclick = () => { const a = api(); if (a) a.open_settings("safety"); };
-let hudModels = {}, hudModelRequest = 0;
+let hudModels = {}, hudModelRequest = 0, hudModelOrder = [];
 function setAskModel(name, audio) {
   const el = $("ask-model"); if (!el) return;
   const profile = hudModels.profiles?.[hudModels.active];
   const manual = hudModels.auto_select === false && !!profile;
   const text = String((manual ? profile.model || profile.name : name) || "").trim();
-  el.replaceChildren();
-  if (manual) {
-    const pen = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    pen.setAttribute("viewBox", "0 0 24 24");
-    pen.setAttribute("aria-hidden", "true");
-    const path = document.createElementNS(pen.namespaceURI, "path");
-    path.setAttribute("d", "m4 16-1 5 5-1L21 7l-4-4Z M14 6l4 4");
-    pen.append(path);
-    el.append(pen);
-  }
-  el.append(text || "Модель не подключена");
-  el.classList.toggle("manual", manual);
+  el.textContent = text || "Модель не подключена";
   el.title = (manual ? "Ручной выбор" : "Автовыбор") + " · " + (text || "Модель не подключена");
   el.setAttribute("aria-label", "Выбрать модель. " + el.title);
   el.classList.toggle("off", !text);
@@ -1543,9 +1533,11 @@ async function refreshModelHint() {
     // Local metadata only: never refresh subscription limits or send an inference request.
     const status = await core.call("models_routing_status", { role: "communication" });
     if (version !== hudModelRequest) return;
+    hudModelOrder = status.order || [];
+    if (!modelMenu.hidden) updateModelMenuStatus();
     const id = status.automatic ? status.next : hudModels.active;
     const p = (hudModels.profiles || {})[id];
-    const chosen = p?.model || (id ? id : "нет доступной модели");
+    const chosen = p?.model || p?.name || id || "";
     $("bubble").title = "Режим ввода: " + ($("say").textContent || "готов").trim() + ". Модель выбирается отдельной кнопкой в строке сообщения.";
     $("bubble").setAttribute("aria-label", $("bubble").title);
     setAskModel(chosen);
@@ -1555,6 +1547,20 @@ async function refreshModelHint() {
 // выполняется общей проверкой состояния и отдельной кнопкой с названием модели в строке ввода.
 $("bubble").onclick = () => { $("bubble").title = "Это индикатор режима ввода. Для выбора модели нажмите на название модели в строке сообщения или откройте раздел «Модели»."; };
 const modelMenu = $("model-menu");
+function updateModelMenuStatus() {
+  const profiles = hudModels.profiles || {};
+  const order = hudModelOrder.filter(id => profiles[id]);
+  const labels = order.map((id, index) => {
+    const p = profiles[id];
+    const label = [...new Set([p.name, p.model].filter(Boolean))].join(" · ") || id;
+    return `${index + 1}. ${label} (приоритет ${p.priority ?? 9})`;
+  });
+  modelMenu.firstElementChild.title = labels.join("\n") || "Сейчас нет доступных моделей для автовыбора";
+  const active = hudModels.auto_select ? order[0] : hudModels.active;
+  for (const button of modelMenu.querySelectorAll("[data-model-id]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.modelId === active));
+  }
+}
 function closeModelMenu(restoreFocus = false) {
   modelMenu.hidden = true;
   $("ask-model").setAttribute("aria-expanded", "false");
@@ -1567,6 +1573,11 @@ async function selectHudModel(patch) {
     setModelSettings(settings.llm);
     setAskModel(settings.llm.auto_select ? "" : settings.llm.profiles?.[settings.llm.active]?.model);
     closeModelMenu(true);
+    if (!settings.llm.auto_select) {
+      const selected = settings.llm.profiles?.[settings.llm.active];
+      const name = selected?.model || selected?.name || settings.llm.active;
+      showCap("", "Осуществлён переход в ручной режим и выбрана модель «" + name + "».");
+    }
     refreshModelHint();
   } catch (error) {
     showErr(error);
@@ -1583,16 +1594,19 @@ $("ask-model").onclick = () => {
     button.onclick = action;
     if (selected !== undefined) button.setAttribute("aria-pressed", String(selected));
     modelMenu.append(button);
+    return button;
   };
   add("Автовыбор по приоритету", () => selectHudModel({ auto_select: true }), !!hudModels.auto_select);
   const profiles = Object.entries(hudModels.profiles || {}).filter(([, p]) => p.roles == null || p.roles.includes("communication"));
   profiles.sort(([, a], [, b]) => (a.priority ?? 9) - (b.priority ?? 9));
   for (const [id, p] of profiles) {
     const label = [...new Set([p.name, p.model].filter(Boolean))].join(" · ") || id;
-    add(label, () => selectHudModel({ active: id, auto_select: false }), !hudModels.auto_select && hudModels.active === id);
+    add(label, () => selectHudModel({ active: id, auto_select: false })).dataset.modelId = id;
   }
   add("Настройки моделей", () => { closeModelMenu(); api()?.open_settings("brain"); });
+  updateModelMenuStatus();
   modelMenu.hidden = false;
+  refreshModelHint();
   $("ask-model").setAttribute("aria-expanded", "true");
   modelMenu.querySelector("button").focus();
 };
@@ -2005,6 +2019,8 @@ async function loadScreenshotMessages() {
 core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
   .on('screenshot_removed', e=>{screenshotCards.get(e.id)?.remove();screenshotCards.delete(e.id);screenshotLayout();})
   .on('hello', loadScreenshotMessages).on('chat_changed', loadScreenshotMessages);
+// The bridge can receive hello while the remaining UI scripts are still loading.
+if (core.snapshot) loadScreenshotMessages();
 new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
 async function refreshScreenshotAccess() {
   const native = window.api?.(), button = $("a-shot");
@@ -2186,14 +2202,14 @@ function renderReader() {
   if (window.DewiarRich) DewiarRich.diagrams(box).then(n => { if (n && atEnd) box.scrollTop = box.scrollHeight; });   // ```mermaid — схемой
   if (atEnd) box.scrollTop = box.scrollHeight;
 }
-async function writeClipboardText(text) {
+async function writeClipboardText(text, parent = document.body) {
   try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return; } } catch (e) { /* Native WebViews may require the local fallback. */ }
   const active = document.activeElement;
   const selection = active && typeof active.selectionStart === "number"
     ? [active.selectionStart, active.selectionEnd, active.selectionDirection] : null;
   const ta = document.createElement("textarea"); ta.value = text;
   ta.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
-  document.body.appendChild(ta); ta.select();
+  parent.appendChild(ta); ta.focus(); ta.select();
   try { if (!document.execCommand("copy")) throw Error("Не удалось скопировать текст в буфер обмена. Попробуйте ещё раз или используйте ⌘C/Ctrl+C."); }
   finally { ta.remove(); if (active?.isConnected) { active.focus({ preventScroll: true }); if (selection) active.setSelectionRange(...selection); } }
 }

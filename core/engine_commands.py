@@ -1100,7 +1100,7 @@ class CommandsMixin:
             from screenshot_messages import LOCK
             with LOCK:getattr(self, '_screenshot_drafts', {}).pop(str(a.get('id')), None)
             return True
-        if cmd in ('screenshot_messages', 'screenshot_image', 'screenshot_to_note', 'screenshot_dismiss'):
+        if cmd in ('screenshot_messages', 'screenshot_image', 'screenshot_text', 'screenshot_text_save', 'screenshot_to_note', 'screenshot_dismiss'):
             from screenshot_messages import command
             return command(self, cmd, a)
         if cmd == "calib_start":

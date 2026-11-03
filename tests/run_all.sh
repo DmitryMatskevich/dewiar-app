@@ -190,6 +190,7 @@ run "ядро: длинный ответ и сохранение при обры
 run "голосовой ввод: подсказки и завершение в интерфейсе" $PY "$T/hud_voice_finish_ui_test.py"
 run "поле ввода: очистка, копирование и правый край" $PY "$T/hud_draft_actions_ui_test.py"
 run "кнопка снимка: заметка, OCR и индикатор" $PY "$T/screenshot_button_ui_test.py"
+run "снимок: правки текста, конфликты и сохранение" $PY "$T/screenshot_text_test.py"
 if command -v node >/dev/null; then
   run "диктовка: кнопка стоп и отправка черновика" node "$T/hud_dictation_test.js"
 fi

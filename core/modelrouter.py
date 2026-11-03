@@ -241,4 +241,5 @@ def snapshot(llm, role=None):
         selected = copy.deepcopy(_selected)
     return {'automatic': bool(llm.get('auto_select')), 'role': role,
             'next': ranked[0]['_profile_id'] if ranked else None,
+            'order': [p['_profile_id'] for p in ranked],
             'selected': selected, 'profiles': rows, 'timezone': str(dt.datetime.now().astimezone().tzinfo)}

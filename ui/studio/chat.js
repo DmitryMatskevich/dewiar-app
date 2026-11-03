@@ -12,10 +12,10 @@ function chatDay(ts) {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
 }
 const chatSize = (n) => n < 1024 * 1024 ? Math.max(1, Math.round(n / 1024)) + " КБ" : (n / 1048576).toFixed(1).replace(".", ",") + " МБ";
-function chatCopyText(text) {
+function chatCopyText(text, parent = document.body) {
   const fallback = () => new Promise((resolve, reject) => {
     const area = document.createElement("textarea"); area.value = text; area.setAttribute("readonly", "");
-    area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0"; document.body.appendChild(area);
+    area.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0"; parent.appendChild(area);
     area.focus(); area.select();
     let copied = false;
     try { copied = document.execCommand("copy"); } catch (e) { copied = false; }

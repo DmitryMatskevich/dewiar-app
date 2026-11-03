@@ -5,13 +5,17 @@
 .ss-card button:hover { background:rgba(128,140,180,.18); }
 .ss-card button:focus-visible { outline:2px solid var(--accent,#797df1); outline-offset:1px; }
 .ss-card button:disabled { opacity:.4; cursor:default; }
+.ss-card button[hidden], .ss-status:empty { display:none; }
 .ss-card svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
 .ss-preview { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .ss-image { display:block; flex:none; width:72px; height:56px; object-fit:contain; border-radius:6px; margin:4px 0; }
 .ss-actions { display:flex; align-items:center; gap:4px; }
 .ss-status { font-size:11px; line-height:1.4; margin-top:3px; overflow-wrap:anywhere; }
-.ss-card details { font-size:12px; margin:6px 0; }
-.ss-card pre { max-height:140px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.4 ui-monospace,monospace; }
+.ss-dialog.ss-text-dialog { position:fixed; inset:0; margin:auto; width:min(720px,calc(100% - 24px)); height:min(720px,calc(100% - 24px)); }
+.ss-text-dialog[open] { display:flex; flex-direction:column; gap:10px; }
+.ss-text-dialog .ss-info { margin:0; }
+.ss-text-input { flex:1; min-height:100px; width:100%; box-sizing:border-box; resize:none; padding:12px; border:1px solid var(--line,rgba(128,140,180,.3)); border-radius:10px; background:var(--field,rgba(128,140,180,.08)); color:inherit; font:14px/1.5 Manrope,"Segoe UI",sans-serif; }
+.ss-text-input:focus-visible { outline:2px solid var(--accent,#858dff); outline-offset:1px; }
 #screenshot-messages { flex:0 1 auto; min-height:0; max-height:38vh; overflow-y:auto; scrollbar-width:thin; }
 #screenshot-messages:empty { display:none; }
 #card.has-screenshots #orb { width:calc(84px * var(--ok,1)); height:calc(84px * var(--ok,1)); }

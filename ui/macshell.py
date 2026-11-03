@@ -121,14 +121,23 @@ def _core_request(token, cmd, args=None, timeout=3):
     """Send one authenticated command to the local core (used by native Mac menus)."""
     from websockets.sync.client import connect
     with connect(f"ws://127.0.0.1:{WS_PORT}", open_timeout=timeout, close_timeout=1, proxy=None) as ws:
+        deadline = time.monotonic() + timeout
+        def receive(kind, identifier=None):
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Ядро Dewiar не ответило вовремя')
+                message = json.loads(ws.recv(timeout=remaining))
+                # This connection also receives levels/status/chat events. Only
+                # a matching reply is the result of the permission probe.
+                if isinstance(message, dict) and message.get('type') == kind and (identifier is None or message.get('id') == identifier):
+                    return message
         ws.send(json.dumps({"cmd": "hello", "token": token}))
-        hello = json.loads(ws.recv(timeout=timeout))
-        if hello.get("type") != "hello":
-            raise RuntimeError("ядро Dewiar не подтвердило подключение")
+        receive('hello')
         ws.send(json.dumps({"id": 1, "cmd": cmd, "args": dict(args or {})}))
-        reply = json.loads(ws.recv(timeout=timeout))
-        if reply.get("error"):
-            raise RuntimeError(str(reply["error"]))
+        reply = receive('reply', 1)
+        if reply.get("error") or reply.get('ok') is False:
+            raise RuntimeError(str(reply.get('error') or 'Ядро Dewiar отклонило запрос'))
         return reply.get("data")
 
 
@@ -486,6 +495,53 @@ def make_api(app):
                         folders[key] = merged
                 return {"folders": folders, "pending": getattr(self, '_files_pending', ''),
                         "request_supported": bool(getattr(sys, 'frozen', False))}
+
+        def startup_files_access(self):
+            """Request folder access for this installed build, after the screen dialog."""
+            from mac_screen_access import was_requested, mark_requested
+            if not getattr(sys, 'frozen', False):
+                return
+            try:
+                ui = json.loads(app.SETTINGS_PATH.read_text()).get('ui') or {}
+            except (OSError, ValueError):
+                ui = {}
+            if not ui.get('mac_files_request_at_startup', True) or was_requested('files'):
+                return
+            with self._files_permission_lock:
+                if getattr(self, '_files_startup_running', False):
+                    return
+                self._files_startup_running = True
+            def request():
+                try:
+                    while self.screen_capture_permission().get('pending'):
+                        time.sleep(.2)
+                    denied = False
+                    for target in ('workspace', 'documents'):
+                        with self._files_permission_lock:
+                            if getattr(self, '_files_pending', ''):
+                                return  # An explicit request owns the dialog; retry on the next launch.
+                            self._files_pending = target
+                        try:
+                            result = _core_request(self.token, 'mac_files_access', {'target':target}, timeout=90)
+                            if not isinstance(result, dict) or result.get('state') not in ('authorized', 'denied', 'missing'):
+                                raise RuntimeError('Не удалось проверить доступ к папке')
+                            with self._files_permission_lock:
+                                if not hasattr(self, '_files_access'):self._files_access = {}
+                                self._files_access[target] = result
+                            denied = denied or result['state'] == 'denied'
+                        finally:
+                            with self._files_permission_lock:self._files_pending = ''
+                    mark_requested('files')
+                    if denied:
+                        self.open_settings('safety', '&mac_access_setup=1')
+                        self.open_files_settings()
+                except Exception as error:
+                    # Do not mark an unavailable core as a completed permission request.
+                    print(f'Не удалось подготовить доступ к файлам: {error}', file=sys.stderr)
+                    self.open_settings('safety', '&mac_access_setup=1')
+                finally:
+                    with self._files_permission_lock:self._files_startup_running = False
+            threading.Thread(target=request, name='files-access-startup', daemon=True).start()
 
         def request_files_access(self, target="workspace"):
             if target not in ('workspace', 'documents', 'desktop', 'downloads', 'selected'):
@@ -988,6 +1044,7 @@ def main_mac(args, extra, app):
         report = os.environ.get("DEWIAR_MAC_SMOKE_REPORT")
         if not report:
             api.startup_screen_access()
+            api.startup_files_access()
         if not report and wanted_voice and api.microphone_permission().get("granted"):
             app._core_call(token, "audio_enable", timeout=15)
         if getattr(args, "request_microphone", False) and not report:
