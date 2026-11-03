@@ -1091,7 +1091,8 @@ class AudioMixin:
             if not draft:
                 self.note("Нет текста для вставки. Продолжаю слушать.")
                 return None
-            return lambda: self._background_paste(action, draft, pasted)
+            session = self._dictation_session
+            return lambda: self._background_paste(action, draft, pasted, session)
         elif action == "show":
             self.emit("window", do="show")
         elif action == "cancel":
@@ -1104,7 +1105,7 @@ class AudioMixin:
         elif action == "command":
             self._run_dictation_voice_command(argument)
 
-    def _background_paste(self, action, draft, words):
+    def _background_paste(self, action, draft, words, session):
         """«Скопировать» — как ⌘C; «вставить» — ⌘C и ⌘V в поле, где стоит курсор."""
         from background_dictation import copy_and_insert, copy_text
         try:
@@ -1121,8 +1122,12 @@ class AudioMixin:
             return
         with self._dictation_lock:
             if result["inserted"]:
-                # Posting ⌘V does not prove the target accepted it. Keep the
-                # draft available until the user explicitly clears it.
+                # Only remove the exact snapshot sent for insertion. New speech
+                # must survive, as must edits or a newly started session.
+                if (session == self._dictation_session and
+                        self._background_draft[:len(words)] == words):
+                    del self._background_draft[:len(words)]
+                    self._background_revision += 1
                 log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
                 self._background_state("inserted", app=result.get("app", ""))
                 self.paste_tone(True)

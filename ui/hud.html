@@ -1512,9 +1512,15 @@ core.on("dictation", e => {
   }
 });
 function copyDraftByVoice(action) {
-  const text = !$("background-dictation").hidden && !backgroundState ? $("background-draft").value : $("askin").value;
+  const editor = !$("background-dictation").hidden && !backgroundState ? $("background-draft") : $("askin");
+  const text = editor.value;
   if (!text.trim()) { $("ask-feedback").textContent = "Нет текста для копирования."; return; }
   core.call("dictation_copy_text", {text, copy_only: action === "copy"}).then(result => {
+    if (action !== "copy" && result.inserted && editor.value.startsWith(text)) {
+      editor.value = editor.value.slice(text.length).replace(/^\s+/, "");
+      if (editor.id === "askin") { lastDictationSelection = null; fitAsk(); }
+      else if (!editor.value && !backgroundState) $("background-dictation").hidden = true;
+    }
     $("ask-feedback").textContent = pasteMessage(result, action);
   }).catch(showErr);
 }

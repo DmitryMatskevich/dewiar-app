@@ -9,7 +9,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     (ui/'assets/dewiar.js').write_text('''
 window.calls=[];window.api=()=>({});
 window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},
- async call(cmd,a){calls.push([cmd,a]);if(cmd==='background_dictation_edit')return {active:true,session:a.session,revision:a.revision+1,text:a.text};if(cmd==='dictation_copy_text')return window.pasteResult||{copied:true,inserted:false};return {active:false}},
+ async call(cmd,a){calls.push([cmd,a]);if(cmd==='background_dictation_edit')return {active:true,session:a.session,revision:a.revision+1,text:a.text};if(cmd==='dictation_copy_text')return window.pendingPaste||window.pasteResult||{copied:true,inserted:false};return {active:false}},
  async sendLater(){return {}}};window.fire=(t,d)=>(core._on[t]||[]).forEach(f=>f(d));
 ''')
     browser=pw.chromium.launch();page=browser.new_page(viewport={'width':640,'height':850})
@@ -57,6 +57,26 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     assert 'вставки отправлена в «Заметки»' in page.locator('#background-dictation-status').inner_text()
     page.evaluate("fire('background_dictation',{active:false,state:'stopped',session:9,revision:3,text:'Готовый текст'});pasteResult={copied:true,inserted:true,app:'Telegram'};fire('draft_command',{action:'insert'})")
     page.wait_for_function("document.getElementById('ask-feedback').textContent.includes('«Telegram»')")
+    assert field.is_hidden()
+    page.locator('#askin').fill('Текст для вставки')
+    page.evaluate("pasteResult={copied:true,inserted:false,reason:'Нет фокуса'};fire('draft_command',{action:'insert'})")
+    page.wait_for_function("document.getElementById('ask-feedback').textContent.includes('Нет фокуса')")
+    assert page.locator('#askin').input_value() == 'Текст для вставки'
+    page.evaluate("pasteResult={copied:true,inserted:false};fire('draft_command',{action:'copy'})")
+    page.wait_for_function("document.getElementById('ask-feedback').textContent.includes('Текст скопирован')")
+    assert page.locator('#askin').input_value() == 'Текст для вставки'
+    page.evaluate("pendingPaste=new Promise(resolve=>window.finishPaste=resolve);fire('draft_command',{action:'insert'})")
+    page.locator('#askin').fill('Текст для вставки Новая фраза')
+    page.evaluate("finishPaste({copied:true,inserted:true,app:'Telegram'});pendingPaste=null")
+    page.wait_for_function("document.getElementById('askin').value==='Новая фраза'")
+    page.evaluate("pendingPaste=new Promise(resolve=>window.finishPaste=resolve);fire('draft_command',{action:'insert'})")
+    page.locator('#askin').fill('Исправленный текст')
+    page.evaluate("finishPaste({copied:true,inserted:true,app:'Telegram'});pendingPaste=null")
+    page.wait_for_timeout(100)
+    assert page.locator('#askin').input_value() == 'Исправленный текст'
+    page.evaluate("fire('dictation',{state:'recording',session:10});pasteResult={copied:true,inserted:true,app:'Telegram'};fire('dictation',{state:'copy_requested',action:'insert',session:10})")
+    page.wait_for_function("document.getElementById('askin').value==='' ")
+    assert page.evaluate('dictating')
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')

@@ -147,12 +147,12 @@ class Background(unittest.TestCase):
         with patch('background_dictation.copy_and_insert', return_value={'copied':True,'inserted':True}) as insert:
             e._dictation_result('Лира, добавить', 'test', 3)
             insert.assert_called_once_with('Добрый день. Как дела?')
-        self.assertEqual(e._background_draft, ['Добрый день.', 'Как дела?'])
+        self.assertEqual(e._background_draft, [])
         self.assertTrue(e.dictation_active)
         e._dictation_result('Ещё текст', 'test', 3)
         e._dictation_result('Лира', 'test', 3)
         self.assertIn(('window', {'do':'show'}), e.events)
-        self.assertEqual(e._background_draft, ['Добрый день.', 'Как дела?', 'Ещё текст'])
+        self.assertEqual(e._background_draft, ['Ещё текст'])
         e._dictation_result('Лира, отмена', 'test', 3)
         self.assertEqual(e._background_draft, [])
     def test_named_command_runs_without_dropping_draft(self):
@@ -186,9 +186,24 @@ class Background(unittest.TestCase):
             return {'copied':True, 'inserted':True, 'app':'Заметки'}
         with patch('background_dictation.copy_and_insert', side_effect=paste):
             e._dictation_result('Лира, вставить', 'test', 3)
-        self.assertEqual(e._background_draft, ['Добрый день.', 'Новое.'])
+        self.assertEqual(e._background_draft, ['Новое.'])
         self.assertEqual(e.events[-1][1]['state'], 'inserted')
         self.assertEqual(e.events[-1][1]['app'], 'Заметки')
+
+    def test_paste_does_not_remove_concurrent_edit_or_new_session(self):
+        for new_session in (False, True):
+            e = Engine()
+            e._dictation_result('Старый текст', 'test', 3)
+            def paste(text):
+                if new_session:
+                    e._dictation_session += 1
+                    e._background_draft = ['Старый текст']
+                else:
+                    e._background_draft = ['Исправленный текст']
+                return {'copied': True, 'inserted': True}
+            with patch('background_dictation.copy_and_insert', side_effect=paste):
+                e._dictation_result('Лира, вставить', 'test', 3)
+            self.assertEqual(e._background_draft, ['Старый текст' if new_session else 'Исправленный текст'])
 
     def mac(self, focused, windows, trusted=True, role='AXTextArea', subrole='', switches=True, chars=None, accepts=True):
         """Fake ApplicationServices and Quartz: AX knows the active pid, the window list goes front to back.
