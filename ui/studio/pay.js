@@ -51,17 +51,33 @@ async function pyRender() {
 
 function pyDebts(box, ov) {
   const live = (ov.debts || []).filter(d => !d.closed);
-  box.innerHTML = `<div class="py-sum glass"><div><small>Долги между людьми</small><b>Взято ${pyMoney(ov.borrowed)} · выдано ${pyMoney(ov.lent)}</b><span>План возврата в месяц: ${pyMoney(ov.monthly_borrowed)} по вашим долгам · ${pyMoney(ov.monthly_lent)} по выданным вами</span></div></div>
-    ${live.length ? `<div class="py-cards">${live.map(d => `<article class="py-card glass"><div class="py-top"><span class="py-ic">${d.direction === "borrowed" ? "↙️" : "↗️"}</span><b>${escH(d.name)}</b></div>
+  const card = d => `<article class="py-card glass"><div class="py-top"><span class="py-ic">${d.direction === "borrowed" ? "↙️" : "↗️"}</span><b>${escH(d.name)}</b></div>
       <span class="py-st">${d.direction === "borrowed" ? "Вы взяли" : "Вы дали"}${d.person ? ` · ${escH(d.person)}` : ""}</span>
       <small>Сумма ${pyMoney(d.principal)} · возвращено ${pyMoney(d.returned)} · ставка ${pyNum(d.rate)}% годовых</small>
       <small>Остаток ${pyMoney(d.remaining)} основной долг + ${pyMoney(Math.max(0, d.accrued_interest - d.interest_paid))} процентов</small>
       <small>${d.monthly_payment ? `План: ${pyMoney(d.monthly_payment)} в месяц · ` : ""}${d.due_date ? `вернуть до ${pyDate(d.due_date)}` : "Срок не указан"}</small>
-      <div class="py-foot"><span>К возврату ${pyMoney(d.amount_due)}</span><button class="btn small" data-debt-pay="${escH(d.id)}">Записать возврат</button></div></article>`).join("")}</div>` : `<div class="py-empty glass"><h3>Долгов пока нет</h3><p>Запишите деньги, взятые или выданные в долг. Частичные возвраты будут уменьшать остаток.</p><button class="btn primary" id="py-debt-first">Добавить долг</button></div>`}
-    ${(ov.debts || []).filter(d => d.closed).length ? `<details class="py-arch"><summary>Закрытые: ${ov.debts.filter(d => d.closed).length}</summary>${ov.debts.filter(d => d.closed).map(d => `<p>${escH(d.name)} — закрыт, возвращено ${pyMoney(d.returned)}</p>`).join("")}</details>` : ""}`;
+      ${d.payments?.length ? `<details class="py-debt-history"><summary>Возвраты: ${d.payments.length}</summary>${d.payments.map(p => `<small>${pyDate(p.date)} · ${pyMoney(p.amount)}${p.note ? ` · ${escH(p.note)}` : ""} (проценты ${pyMoney(p.interest)}, основной долг ${pyMoney(p.principal)})</small>`).join("")}</details>` : ""}
+      <div class="py-foot"><span>К возврату ${pyMoney(d.amount_due)}</span><span class="py-debt-actions"><button class="btn small" data-debt-copy="${escH(d.id)}" title="Скопировать долг и возвраты">Копировать</button><button class="btn small" data-debt-edit="${escH(d.id)}">Изменить</button>${!d.closed ? `<button class="btn small" data-debt-pay="${escH(d.id)}">Записать возврат</button>` : "Закрыт"}</span></div></article>`;
+  box.innerHTML = `<div class="py-sum glass"><div><small>Долги между людьми</small><b>Взято ${pyMoney(ov.borrowed)} · выдано ${pyMoney(ov.lent)}</b><span>План возврата в месяц: ${pyMoney(ov.monthly_borrowed)} по вашим долгам · ${pyMoney(ov.monthly_lent)} по выданным вами</span></div></div>
+    ${live.length ? `<div class="py-cards">${live.map(card).join("")}</div>` : `<div class="py-empty glass"><h3>Долгов пока нет</h3><p>Запишите деньги, взятые или выданные в долг. Частичные возвраты будут уменьшать остаток.</p><button class="btn primary" id="py-debt-first">Добавить долг</button></div>`}
+    ${(ov.debts || []).filter(d => d.closed).length ? `<details class="py-arch"><summary>Закрытые: ${ov.debts.filter(d => d.closed).length}</summary><div class="py-cards">${ov.debts.filter(d => d.closed).map(card).join("")}</div></details>` : ""}`;
   const add = () => pyDebtForm();
   if (box.querySelector("#py-debt-first")) box.querySelector("#py-debt-first").onclick = add;
   box.querySelectorAll("[data-debt-pay]").forEach(b => b.onclick = () => pyDebtPaymentForm(ov.debts.find(d => d.id === b.dataset.debtPay)));
+  box.querySelectorAll("[data-debt-edit]").forEach(b => b.onclick = () => pyDebtForm(ov.debts.find(d => d.id === b.dataset.debtEdit)));
+  box.querySelectorAll("[data-debt-copy]").forEach(b => b.onclick = () => pyDebtCopy(ov.debts.find(d => d.id === b.dataset.debtCopy)));
+}
+
+async function pyDebtCopy(d) {
+  if (!d) return;
+  const lines = [`Долг: ${d.name}`, `Человек: ${d.person || "—"}`, `Направление: ${d.direction === "borrowed" ? "взял(а) в долг" : "дал(а) в долг"}`,
+    `Дата: ${d.start_date || "—"}`, `Сумма: ${pyMoney(d.principal)}`, `Ставка: ${pyNum(d.rate)}% годовых`, `Срок возврата: ${d.due_date ? pyDate(d.due_date) : "не указан"}`,
+    `Плановый платёж в месяц: ${d.monthly_payment ? pyMoney(d.monthly_payment) : "не задан"}`, `Всего возвращено: ${pyMoney(d.returned)}`,
+    `Остаток основного долга: ${pyMoney(d.remaining)}`, `Начислено процентов: ${pyMoney(d.accrued_interest)}`, `Уплачено процентов: ${pyMoney(d.interest_paid)}`,
+    `К возврату: ${pyMoney(d.amount_due)}`, `Статус: ${d.closed ? "закрыт" : "активен"}`, "", "История возвратов:"];
+  lines.push(...(d.payments?.length ? d.payments.map(p => `• ${pyDate(p.date)} — ${pyMoney(p.amount)} (проценты ${pyMoney(p.interest)}, основной долг ${pyMoney(p.principal)})${p.note ? `; ${p.note}` : ""}`) : ["Возвратов пока нет"]));
+  try { await navigator.clipboard.writeText(lines.join("\n")); toast("Долг и история возвратов скопированы"); }
+  catch (_) { const ta = document.createElement("textarea"); ta.value = lines.join("\n"); ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.append(ta); ta.select(); const ok = document.execCommand("copy"); ta.remove(); toast(ok ? "Долг и история возвратов скопированы" : "Не удалось скопировать долг"); }
 }
 
 /* ---------- «Месяц»: карточки ---------- */
@@ -305,22 +321,23 @@ function pyDrawerWire(b, pays) {
 async function pyReload() { PY.ov = await core.call("pay_overview").catch(() => PY.ov); if ($("#p-pay").classList.contains("cur")) pyRender(); }
 
 /* ---------- формы: новый платёж и запись оплаты ---------- */
-function pyDebtForm() {
+function pyDebtForm(d = null) {
   const now = new Date(), today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
-  const [o, close] = pyModal(`<h2>Новый долг</h2>
-    <label class="py-f"><span>Название или человек</span><input id="pd-name" placeholder="Долг у Ивана / Ивану на ремонт"></label>
-    <label class="py-f"><span>Человек</span><input id="pd-person" placeholder="Иван"></label>
-    <label class="py-f"><span>Направление</span><select id="pd-dir"><option value="borrowed">Я взял(а) в долг</option><option value="lent">Я дал(а) в долг</option></select></label>
-    <div class="py-two"><label class="py-f"><span>Сумма</span><input id="pd-amount" type="number" min="0.01" step="0.01"></label><label class="py-f"><span>Ставка, % годовых (0 — без процентов)</span><input id="pd-rate" type="number" min="0" step="0.01" value="0"></label></div>
-    <div class="py-two"><label class="py-f"><span>Дата получения/выдачи</span><input id="pd-date" type="date" value="${today}"></label><label class="py-f"><span>Вернуть до</span><input id="pd-due" type="date"></label></div>
-    <label class="py-f"><span>Плановый ежемесячный платёж</span><input id="pd-month" type="number" min="0" step="0.01" placeholder="если договорились"></label>
+  const val = (x) => escH(x == null ? "" : String(x));
+  const [o, close] = pyModal(`<h2>${d ? "Изменить долг" : "Новый долг"}</h2>
+    <label class="py-f"><span>Название или человек</span><input id="pd-name" value="${val(d?.name)}" placeholder="Долг у Ивана / Ивану на ремонт"></label>
+    <label class="py-f"><span>Человек</span><input id="pd-person" value="${val(d?.person)}" placeholder="Иван"></label>
+    <label class="py-f"><span>Направление</span><select id="pd-dir"><option value="borrowed" ${d?.direction !== "lent" ? "selected" : ""}>Я взял(а) в долг</option><option value="lent" ${d?.direction === "lent" ? "selected" : ""}>Я дал(а) в долг</option></select></label>
+    <div class="py-two"><label class="py-f"><span>Сумма</span><input id="pd-amount" type="number" min="0.01" step="0.01" value="${val(d?.principal)}"></label><label class="py-f"><span>Ставка, % годовых (0 — без процентов)</span><input id="pd-rate" type="number" min="0" step="0.01" value="${val(d?.rate ?? 0)}"></label></div>
+    <div class="py-two"><label class="py-f"><span>Дата получения/выдачи</span><input id="pd-date" type="date" value="${val(d?.start_date || today)}"></label><label class="py-f"><span>Вернуть до</span><input id="pd-due" type="date" value="${val(d?.due_date)}"></label></div>
+    <label class="py-f"><span>Плановый ежемесячный платёж</span><input id="pd-month" type="number" min="0" step="0.01" value="${val(d?.monthly_payment)}" placeholder="если договорились"></label>
     <div class="py-mact"><button class="btn" id="pd-no">Отмена</button><button class="btn primary" id="pd-ok">Сохранить долг</button></div>`);
   o.querySelector("#pd-name").focus(); o.querySelector("#pd-no").onclick = close;
   o.querySelector("#pd-ok").onclick = async () => { try {
-    const d = await core.call("pay_debt_save", { debt: { name: o.querySelector("#pd-name").value || o.querySelector("#pd-person").value, person: o.querySelector("#pd-person").value,
+    const saved = await core.call("pay_debt_save", { debt: { ...(d ? { id: d.id } : {}), name: o.querySelector("#pd-name").value || o.querySelector("#pd-person").value, person: o.querySelector("#pd-person").value,
       direction: o.querySelector("#pd-dir").value, principal: o.querySelector("#pd-amount").value, rate: o.querySelector("#pd-rate").value,
       start_date: o.querySelector("#pd-date").value, due_date: o.querySelector("#pd-due").value, monthly_payment: o.querySelector("#pd-month").value } });
-    close(); await pyReload(); PY.tab = "debts"; pyTabs(); pyRender(); toast(`Долг «${d.name}» сохранён`);
+    close(); await pyReload(); PY.tab = "debts"; pyTabs(); pyRender(); toast(`Долг «${saved.name}» сохранён`);
   } catch (e) { toast(e.message); } };
 }
 function pyDebtPaymentForm(d) {
