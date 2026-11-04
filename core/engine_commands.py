@@ -1237,7 +1237,7 @@ class CommandsMixin:
         if cmd == "dictation_cancel":
             return self.dictation_cancel()
         if cmd == "dictation_finish":
-            return self.dictation_finish(submit=bool(a.get("submit")))
+            return self.dictation_finish(submit=bool(a.get("submit")), keep_draft=bool(a.get("keep_draft")))
         if cmd == "stop":
             self.interrupt("кнопка", follow=False)
             return True

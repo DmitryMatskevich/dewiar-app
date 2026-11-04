@@ -960,6 +960,7 @@ class AudioMixin:
             self._background_draft = []
             self._background_revision = 0
             self._dictation_closed = self._dictation_submit = False
+            self._dictation_stop_requested = False
             self.dictation_active = True
             self.dictation_finish_requested = False
             self._dictation_wait_for_pause = False
@@ -990,13 +991,18 @@ class AudioMixin:
                 self.emit("dictation", state="cancelled", session=sid)
         return {"ok": was, "state": "cancelled", "session": sid}
 
-    def dictation_finish(self, submit=False, wait_for_pause=False):
+    def dictation_finish(self, submit=False, wait_for_pause=False, keep_draft=False):
         """Завершить диктовку; голосовая команда ждёт паузу, кнопка закрывает захват сразу."""
         with self._dictation_lock:
             if not self.dictation_active:
                 return {"ok": False, "state": "idle"}
-            self._dictation_submit = self._dictation_submit or submit
-            self._dictation_wait_for_pause = self._dictation_wait_for_pause or wait_for_pause
+            if keep_draft:
+                self._dictation_stop_requested = True
+                self._dictation_submit = False
+                self._dictation_wait_for_pause = False
+            elif not getattr(self, "_dictation_stop_requested", False):
+                self._dictation_submit = self._dictation_submit or submit
+                self._dictation_wait_for_pause = self._dictation_wait_for_pause or wait_for_pause
             if not self.dictation_finish_requested:
                 self.dictation_finish_requested = True
                 self.emit("dictation", state="finishing", session=self._dictation_session)

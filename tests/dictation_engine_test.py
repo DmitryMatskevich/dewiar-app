@@ -112,6 +112,19 @@ assert r._dictation_closed and r.stt_q.qsize() == 2
 r.transcribe(["Незаконченная фраза"])
 assert r.events[-2]["text"] == "Незаконченная фраза" and not r.events[-1]["submit"]
 
+# Stop while an earlier send is finishing: retain the tail and suppress send,
+# even if the last recognised phrase itself ends with the assistant's name.
+r = Recorder(10000)
+r.dictation_start()
+r._on_utterance(b"\x01\x00" * RATE, 0, 1)
+r.dictation_finish(submit=True, wait_for_pause=True)
+r.dictation_finish(keep_draft=True)
+assert not r._dictation_wait_for_pause and not r._dictation_submit
+r.listen([False] * 2)
+r.transcribe(["Последние слова, Лира"])
+assert any(e.get("text") == "Последние слова" for e in r.events)
+assert r.events[-1]["state"] == "done" and not r.events[-1]["submit"]
+
 # Stop when no speech ever occurred still completes, with no STT request.
 r = Recorder()
 r.dictation_start()

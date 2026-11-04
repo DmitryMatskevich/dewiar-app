@@ -84,11 +84,12 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert not page.evaluate("dictating")
     count = page.evaluate("sent.length") - 1
     # Manual microphone stop retains the recognised draft, without sending it.
-    page.evaluate("fire('dictation',{state:'recording'});fire('dictation',{state:'partial',text:'Оставить в поле'})")
+    page.evaluate("fire('dictation',{state:'recording',session:44});fire('dictation',{state:'partial',session:44,text:'Оставить в поле'})")
     page.locator("#a-mic").click()
-    assert page.evaluate("calls.at(-1)[0]") == "dictation_cancel"
+    assert page.evaluate("calls.at(-1)") == ["dictation_finish", {"submit": False, "keep_draft": True}]
+    page.evaluate("fire('dictation',{state:'finishing',session:44});fire('dictation',{state:'partial',session:44,text:'Последние слова'});fire('dictation',{state:'done',session:44,submit:false})")
     page.wait_for_function("!dictating")
-    assert field.input_value() == "Оставить в поле"
+    assert field.input_value() == "Оставить в поле Последние слова"
     assert page.evaluate("sent.length") == count + 1
     # Each asynchronous result uses the live caret, including after a manual move.
     field.fill("Начало конец.")
@@ -140,8 +141,9 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.evaluate("text=>{setDictationLevel(.4);fire('dictation',{state:'partial',text,session:12})}", phrase)
     assert field.evaluate("e=>e.scrollTop + e.clientHeight >= e.scrollHeight - 2")
     page.mouse.up()
+    assert page.evaluate("calls.at(-1)[0]") == "dictation_finish"
+    page.evaluate("fire('dictation',{state:'done',session:12,submit:false})")
     page.wait_for_function("!dictating")
-    assert page.evaluate("calls.at(-1)[0]") == "dictation_cancel"
     assert field.input_value().endswith("Конец.")
     assert field.evaluate("e=>e.scrollTop + e.clientHeight >= e.scrollHeight - 2")
 

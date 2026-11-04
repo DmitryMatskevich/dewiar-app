@@ -29,6 +29,16 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     page.goto((ui/'hud.html').as_uri())
     page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
+    assert page.evaluate("['a-meet','a-shot','b-mail','b-cal'].every(id=>document.getElementById(id).parentElement.id==='bar')")
+    for width in (260, 340, 440, 640):
+        page.set_viewport_size({'width':width,'height':900})
+        bounds = page.evaluate("""() => {
+          const ids=['a-meet','a-shot','b-mail','b-cal','b-notes','b-chat','b-set'];
+          return ids.map(id=>{let r=document.getElementById(id).getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom}});
+        }""")
+        assert bounds[0]['left'] >= 0 and bounds[-1]['right'] <= width, (width,bounds)
+        assert all(a['right'] <= b['left'] and a['top']==b['top'] for a,b in zip(bounds,bounds[1:])), (width,bounds)
+    page.set_viewport_size({'width':440,'height':900})
     for id in ['a-shot','a-meet','b-cal','b-notes']:
         page.wait_for_function('(id)=>document.getElementById(id).dataset.access === "unavailable"',arg=id)
         assert float(page.locator('#'+id+' svg').evaluate('e=>getComputedStyle(e).opacity')) < .5
