@@ -3,7 +3,7 @@
    конфликт ревизий показан рядом с полем и не перезаписывает введённый текст. */
 window.SongReview = (() => {
   const drafts = new Map(), timers = new Map();
-  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null;
+  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null;
   window.addEventListener('beforeunload', event => {
     if (drafts.size) { event.preventDefault(); event.returnValue = ''; }
   });
@@ -82,9 +82,10 @@ window.SongReview = (() => {
     const full = document.getElementById('song-play-full');
     const status = document.getElementById('song-play-status');
     const sheetStatus = document.getElementById('song-sheet-play-status');
-    let fullData = null;
+    let fullData = null, followSheet = true;
     const message = text => { status.textContent = text; if (sheetStatus) sheetStatus.textContent = text; };
     function sync() {
+      if (!player.isConnected) return;
       const loading = !!player.dataset.loading, playing = !player.paused && !player.ended;
       if (play) {
         const title = loading ? 'Подготавливаем запись для прослушивания' : !row.capabilities?.audio ? 'Для прослушивания добавьте аудиозапись' : playing ? 'Приостановить воспроизведение; продолжить можно с этого места' : player.dataset.session && !player.dataset.phraseId ? 'Продолжить воспроизведение песни с места паузы' : 'Проиграть всю песню в исходной тональности записи';
@@ -99,6 +100,7 @@ window.SongReview = (() => {
           SongSheet.lineTarget(SongSheet.lineStarts(row.song_id),player.currentTime*1000,direction)===null;
       }
       full.disabled = loading || !row.capabilities?.audio;
+      window.onSongPlayback?.(row.song_id,{loading,playing,active:loading || !!player.dataset.session || playing || player.currentTime>0});
     }
     function clearHighlights() {
       document.querySelectorAll('.song-phrase.playing, .song-word.current-word').forEach(el => el.classList.remove('playing','current-word'));
@@ -115,9 +117,9 @@ window.SongReview = (() => {
     function followWords(scroll) {
       if (!player.dataset.sheetStopped) SongSheet.updatePlayback(row.song_id,Number(player.dataset.clipStart || 0)+player.currentTime*1000,scroll);
     }
-    player.addEventListener('timeupdate', () => { followWords(!player.paused); sync(); });
-    player.addEventListener('seeked', () => { followWords(!player.paused); sync(); });
-    player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(true); sync(); };
+    player.addEventListener('timeupdate', () => { followWords(followSheet && !player.paused); sync(); });
+    player.addEventListener('seeked', () => { followWords(followSheet && !player.paused); sync(); });
+    player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(followSheet); sync(); };
     player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
     player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); message(''); sync(); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
@@ -152,8 +154,9 @@ window.SongReview = (() => {
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
     }
-    full.onclick = () => playFull(true);
-    if (play) play.onclick = () => { if (!player.paused && !player.ended) { player.pause(); return; } return playFull(); };
+    full.onclick = () => { followSheet=true; return playFull(true); };
+    togglePlayback = (follow=true) => { followSheet=follow; if (!player.paused && !player.ended) { player.pause(); return; } return playFull(); };
+    if (play) play.onclick = () => togglePlayback(true);
     if (stopButton) stopButton.onclick = stop;
     function seekLine(direction) {
       if(player.dataset.loading || !player.dataset.session || player.dataset.phraseId) return;
@@ -255,5 +258,5 @@ window.SongReview = (() => {
       };
     });
   }
-  return {html, bind, protectedView, stop};
+  return {html, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow)};
 })();

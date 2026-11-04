@@ -169,6 +169,8 @@ window.SongSheet = (() => {
   }
   function icon(name) {
     const paths = {
+      edit:'<path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z"/>',
+      trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/>',
       down:'<path d="M12 4v16m-6-6 6 6 6-6"/>',
       up:'<path d="M12 20V4m-6 6 6-6 6 6"/>',
       previous:'<path d="M5 5v14m14-14L7 12l12 7Z"/>',

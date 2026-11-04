@@ -1,0 +1,85 @@
+"""Real song cards and shared audio; temporary UI, synthetic WAV, no user data."""
+import base64
+import io
+import json
+import shutil
+import sys
+import tempfile
+import wave
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+from songs_ui_preview import page as preview_page
+
+stream = io.BytesIO()
+with wave.open(stream, 'wb') as wav:
+    wav.setnchannels(1)
+    wav.setsampwidth(2)
+    wav.setframerate(8000)
+    wav.writeframes(b'\0\0' * 8000 * 30)
+audio = 'data:audio/wav;base64,' + base64.b64encode(stream.getvalue()).decode()
+rows = [dict(song_id=str(i), title='ТЕСТ ' + str(i), revision=1, status='review',
+             capabilities={'audio': i != 3}, phrases=[], chords=[]) for i in (1, 2, 3)]
+with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
+    ui = Path(tmp) / 'ui'
+    shutil.copytree(ROOT / 'ui', ui)
+    html = preview_page('fixture').decode().replace('="/studio/', '="studio/')
+    start = html.index('const core=')
+    end = html.index('</script>', start)
+    mock = '''window.calls=[];window.rows=ROWS;window.audioData=AUDIO;
+const core={on(){},async call(cmd,a){calls.push([cmd,a]);
+ if(cmd==='songs_list')return structuredClone(rows);
+ if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
+ if(cmd==='song_full_audio'){if(window.failAudio)throw Error('fixture audio error');if(window.delayAudio)await new Promise(r=>window.releaseAudio=r);return {data:audioData};}
+ return {};}};
+'''.replace('ROWS', json.dumps(rows)).replace('AUDIO', json.dumps(audio))
+    (ui / 'test.html').write_text(html[:start] + mock + html[end:])
+    browser = pw.chromium.launch()
+    tab = browser.new_page(viewport={'width': 1100, 'height': 800})
+    errors = []
+    tab.on('pageerror', lambda e: errors.append(str(e)))
+    tab.goto((ui / 'test.html').as_uri())
+    play = tab.locator('[data-song-play="1"]')
+    stop = tab.locator('[data-song-stop="1"]')
+    play.wait_for()
+    assert tab.locator('.song-card-actions button').all_text_contents() == [''] * 12
+    assert tab.locator('[data-song-open="1"]').last.get_attribute('title').startswith('Редактировать')
+    assert tab.locator('[data-song-play="3"]').is_disabled()
+    assert not stop.is_visible()
+    play.click()
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
+    tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Приостановить')")
+    assert stop.is_visible() and play.get_attribute('aria-label').startswith('Приостановить')
+    assert tab.evaluate('window.scrollY') == 0, 'Card playback must not jump into the editor'
+    play.click()
+    assert tab.locator('#song-review-audio').evaluate('(a)=>a.paused')
+    tab.evaluate('loadSongs()')
+    tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Продолжить')")
+    play.click()
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
+    tab.locator('.song-card-actions [data-song-open="1"]').click()
+    assert not tab.locator('#song-review-audio').evaluate('(a)=>a.paused'), 'Editing same card should retain audio'
+    stop.click()
+    assert tab.locator('#song-review-audio').evaluate('(a)=>a.paused && a.currentTime===0')
+    assert not stop.is_visible()
+    tab.locator('[data-song-play="2"]').click()
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
+    assert not stop.is_visible() and tab.locator('[data-song-stop="2"]').is_visible()
+    tab.locator('[data-song-stop="2"]').click()
+    # Cancel an in-flight audio response; it must never start playback later.
+    tab.evaluate('window.delayAudio=true')
+    play.click()
+    tab.wait_for_function('!!window.releaseAudio')
+    assert play.is_disabled() and stop.is_visible()
+    stop.click()
+    tab.evaluate('releaseAudio();delayAudio=false')
+    tab.wait_for_function("!document.querySelector('[data-song-play=\"1\"]').disabled")
+    assert tab.locator('#song-review-audio').evaluate('(a)=>a.paused')
+    for width in (390, 760, 1100):
+        tab.set_viewport_size({'width': width, 'height': 800})
+        assert tab.locator('.song-card-actions').evaluate_all('(es)=>es.every(e=>e.getBoundingClientRect().right<=innerWidth)'), width
+    assert not errors, errors
+    browser.close()
+print('OK: icon cards, shared play/pause/stop, refresh, switching, cancellation and narrow layout')

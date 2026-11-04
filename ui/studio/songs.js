@@ -3,6 +3,7 @@
 (function () {
   "use strict";
   const state = { rows: [], query: "", status: "", current: null };
+  let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
   const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["review", "Проверяем"]];
   const esc = (v) => escH(v == null ? "" : v);
@@ -26,19 +27,27 @@
         <div class="song-title">${esc(row.title)}</div>${artist}
         <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>
       </div>
-      <div class="song-card-actions"><button class="btn small" data-song-open="${esc(row.song_id)}">Открыть</button><button class="btn small ghost" data-song-delete="${esc(row.song_id)}" aria-label="Удалить ${esc(row.title)}">Удалить</button></div>
+      <div class="song-card-actions">
+        <button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}»" aria-label="Проиграть ${esc(row.title)}" ${row.capabilities?.audio ? '' : 'disabled'}>${SongSheet.icon('play')}</button>
+        <button class="btn song-icon-btn" data-song-stop="${esc(row.song_id)}" title="Остановить песню «${esc(row.title)}» и вернуться к началу; отменить подготовку записи" aria-label="Остановить ${esc(row.title)}" hidden>${SongSheet.icon('stop')}</button>
+        <button class="btn song-icon-btn" data-song-open="${esc(row.song_id)}" title="Редактировать текст, аккорды и свойства песни «${esc(row.title)}»" aria-label="Редактировать ${esc(row.title)}">${SongSheet.icon('edit')}</button>
+        <button class="btn song-icon-btn ghost" data-song-delete="${esc(row.song_id)}" title="Удалить карточку песни «${esc(row.title)}»; перед удалением появится подтверждение" aria-label="Удалить ${esc(row.title)}">${SongSheet.icon('trash')}</button>
+      </div>
     </article>`;
   }
   function renderList() {
     const list = $s("songs-list"), empty = $s("songs-empty");
     if (!list || !empty) return;
     list.innerHTML = state.rows.map(card).join("");
+    updateCardPlayback();
     empty.hidden = state.rows.length > 0;
     list.hidden = state.rows.length === 0;
     list.querySelectorAll("[data-song-open]").forEach((el) => {
       el.addEventListener("click", () => openSong(el.dataset.songOpen));
-      el.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openSong(el.dataset.songOpen); } });
+      if (el.tagName !== "BUTTON") el.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openSong(el.dataset.songOpen); } });
     });
+    list.querySelectorAll('[data-song-play]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songPlay)));
+    list.querySelectorAll('[data-song-stop]').forEach(el=>el.addEventListener('click',stopCard));
     list.querySelectorAll("[data-song-delete]").forEach((el) => el.addEventListener("click", async (event) => {
       event.stopPropagation();
       const row = state.rows.find((x) => x.song_id === el.dataset.songDelete);
@@ -91,7 +100,7 @@
       try { renderDetail(await call("song_transcribe", {song_id: row.song_id, full: true})); await load(); }
       catch (error) { toast(error.message, 5000, "bad"); }
     });
-    $s("song-refresh").onclick = () => openSong(row.song_id);
+    $s("song-refresh").onclick = () => openSong(row.song_id,true,true);
     $s("song-cancel-analysis")?.addEventListener("click", async () => {
       try { renderDetail(await call("song_cancel", {song_id: row.song_id})); }
       catch (error) { toast(error.message, 5000, "bad"); }
@@ -135,8 +144,48 @@
       } catch (error) { toast(error.message || "Не удалось добавить аудиофайл", 5000, "bad"); }
     });
   }
-  async function openSong(id) { try { SongReview.stop(); renderDetail(await call("song_get", { song_id: id })); $s("songs-detail")?.scrollIntoView({behavior:"smooth",block:"start"}); } catch (error) { toast(error.message || "Песня не найдена", 4000, "bad"); } }
-  function closeDetail() { SongReview.stop(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
+  function updateCardPlayback() {
+    const list=$s('songs-list'); if(!list) return;
+    list.querySelectorAll('[data-song-play]').forEach(button=>{
+      const row=state.rows.find(r=>r.song_id===button.dataset.songPlay);if(!row)return;
+      const current=cardPlayback.songId===row.song_id ? cardPlayback : {};
+      const label=current.loading ? 'Подготавливаем запись' : current.playing ? 'Приостановить' : current.active ? 'Продолжить' : 'Проиграть';
+      button.innerHTML=SongSheet.icon(current.playing ? 'pause' : 'play');
+      button.title=row.capabilities?.audio ? `${label} песню «${row.title}»` : 'Для прослушивания добавьте аудиозапись';
+      button.setAttribute('aria-label',`${label} ${row.title}`);
+      button.setAttribute('aria-busy',String(!!current.loading));
+      button.disabled=!!current.loading || !row.capabilities?.audio;
+    });
+    list.querySelectorAll('[data-song-stop]').forEach(button=>{button.hidden=!(cardPlayback.songId===button.dataset.songStop && cardPlayback.active);});
+  }
+  window.onSongPlayback=(songId,status)=>{cardPlayback={songId,...status};updateCardPlayback();};
+  function stopCard() {
+    cardRequest++;openRequest++;SongReview.stop();cardPlayback={};updateCardPlayback();
+  }
+  async function playCard(id) {
+    const request=++cardRequest;
+    if(state.current?.song_id!==id) {
+      const opened=await openSong(id,false);
+      if(request!==cardRequest)return;
+      if(!opened){cardPlayback={};updateCardPlayback();return;}
+    }
+    if(request===cardRequest) await SongReview.toggleFull(false);
+  }
+  async function openSong(id,scroll=true,force=false) {
+    const request=++openRequest;
+    try {
+      if(state.current?.song_id!==id || force) {
+        SongReview.stop();
+        if(!scroll){cardPlayback={songId:id,loading:true,active:true};updateCardPlayback();}
+        const row=await call('song_get',{song_id:id});
+        if(request!==openRequest)return false;
+        renderDetail(row);
+      }
+      if(scroll)$s('songs-detail')?.scrollIntoView({behavior:'smooth',block:'start'});
+      return true;
+    } catch(error) { if(request===openRequest)toast(error.message || 'Песня не найдена',4000,'bad');return false; }
+  }
+  function closeDetail() { stopCard(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
   async function load() { try { state.rows = await call("songs_list", { q: state.query, status: state.status, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
   async function create(source, title, artist) { try { const row = await call("song_create", { source, title, artist }); await load(); renderDetail(row); if (source === "query") renderDetail(await call("song_find_sources", {song_id: row.song_id})); } catch (error) { toast(error.message || "Не удалось создать карточку", 4000, "bad"); } }
   let createSource = "query", createFocus = null;
