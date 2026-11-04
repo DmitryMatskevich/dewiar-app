@@ -194,7 +194,15 @@ window.SongSheet = (() => {
   function sheetHTML(row) {
     if (!row.guitar_sheet?.length) return '';
     const links = sourceLinks(row);
-    return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${sheetRows(row).map(r=>`<div class="song-paper-${r.kind}">${(r.kind==='lyrics' ? lyricHTML(r) : esc(r.text)) || '&nbsp;'}</div>`).join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
+    const rows=sheetRows(row), blocks=[];
+    for(let i=0;i<rows.length;i++) {
+      const r=rows[i];
+      if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
+      const chords=r.kind==='chords' ? `<div class="song-paper-chords">${esc(r.text)}</div>` : '';
+      const lyric=r.kind==='lyrics' ? r : rows[i+1]?.kind==='lyrics' ? rows[++i] : null;
+      blocks.push(`<div class="song-paper-line">${chords}${lyric ? `<div class="song-paper-lyrics">${lyricHTML(lyric)}</div>` : ''}</div>`);
+    }
+    return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
   }
   function icon(name) {
     const paths = {

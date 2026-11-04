@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--library', type=Path)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--assets', type=Path, default=ROOT / 'ui')
+    parser.add_argument('--theme', choices=('light', 'dark'), default='light')
     args = parser.parse_args()
     rows = json.loads(args.library.read_text()) if args.library else [{
         'song_id': 'boundary', 'title': 'ТЕСТ — пауза между фразами', 'revision': 1,
@@ -34,6 +35,11 @@ def main():
         ui = Path(tmp) / 'ui'
         shutil.copytree(args.assets, ui)
         html = preview_page('fixture').decode().replace('="/studio/', '="studio/')
+        html = html.replace('<link rel="stylesheet" href="studio/songs.css">',
+                            '<link rel="stylesheet" href="assets/fonts.css"><link rel="stylesheet" href="assets/skins.css">'
+                            '<link rel="stylesheet" href="studio/theme.css"><link rel="stylesheet" href="studio/songs.css">')
+        if args.theme == 'light':
+            html = html.replace('<html lang="ru">', '<html lang="ru" class="st-skin st-light st-neu">')
         start, end = html.index('const core='), html.index('</script>', html.index('const core='))
         mock = '''window.rows=ROWS;const core={on(){},async call(cmd,a){
           if(cmd==='songs_list')return structuredClone(rows);
@@ -58,13 +64,18 @@ def main():
                     if delta:
                         tab.locator('#song-key-up' if delta > 0 else '#song-key-down').click()
                     result = tab.evaluate('''(row)=>{
-                      const es=[...document.querySelectorAll('.song-paper-body > div')];
+                      const es=[...document.querySelectorAll('.song-paper-body .song-paper-chords, .song-paper-body .song-paper-lyrics, .song-paper-body > .song-paper-space')];
                       const visible=es.filter(e=>!e.classList.contains('song-paper-space'));
                       const chords=es.filter(e=>e.classList.contains('song-paper-chords'));
                       const lyrics=es.filter(e=>e.classList.contains('song-paper-lyrics'));
                       const words=s=>s.trim().split(/\\s+/).filter(Boolean).join(' ');
                       return {
                         no_stacks:visible.every((e,i)=>!e.classList.contains('song-paper-chords') || !visible[i-1]?.classList.contains('song-paper-chords')),
+                        attached_to_lyrics:chords.every((e)=>{
+                          const next=visible[visible.indexOf(e)+1];
+                          if(!next)return true; // Instrumental ending has no words.
+                          return next.classList.contains('song-paper-lyrics') && e.parentElement.classList.contains('song-paper-line') && e.parentElement===next.parentElement && Math.abs(next.getBoundingClientRect().top-e.getBoundingClientRect().bottom)<1;
+                        }),
                         one_visual_row:chords.every(e=>e.getBoundingClientRect().height<=parseFloat(getComputedStyle(e).lineHeight)+1),
                         fits:chords.every(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().right<=e.getBoundingClientRect().right+1}),
                         overflow:chords.flatMap(e=>{const r=document.createRange();r.selectNodeContents(e);const a=r.getBoundingClientRect(),b=e.getBoundingClientRect();return a.right>b.right+1?[{text:e.textContent,width:a.width,available:b.width}]:[]}),
@@ -73,12 +84,15 @@ def main():
                         chord_rows:chords.length
                       };
                     }''', row)
-                    assert all(result[k] for k in ('no_stacks', 'one_visual_row', 'fits', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
+                    assert all(result[k] for k in ('no_stacks', 'attached_to_lyrics', 'one_visual_row', 'fits', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
                     outcomes.append({'title': row['title'], 'width': width, 'shift': delta > 0, **result})
             assert tab.evaluate('JSON.stringify(rows)') == before
             if args.report and 'тоже есть душа' in row['title']:
                 args.report.parent.mkdir(parents=True, exist_ok=True)
                 tab.locator('.song-paper').screenshot(path=str(args.report.with_suffix('.png')))
+            if args.report and 'Яцевич' in row.get('artist', ''):
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                tab.locator('.song-paper-line').filter(has_text='Пап, ты без меня сможешь?').first.screenshot(path=str(args.report.with_name('papa-chord-lyric.png')))
             print('OK:', row['title'], '— 3 widths, 3 key states, all words, copy and chord rows')
         assert not errors, errors
         browser.close()

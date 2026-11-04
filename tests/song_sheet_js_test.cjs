@@ -74,6 +74,9 @@ const gaps={guitar_sheet:boundary.guitar_sheet.filter(l=>!l.text)};
 assert.equal(s.sheetRows(gaps).filter(r=>r.kind==='chords').length,1);
 assert.equal(s.sheetRows({guitar_sheet:[...gaps.guitar_sheet,boundary.guitar_sheet[3]]}).filter(r=>r.kind==='chords').length,1);
 console.log('Gap/lyric boundaries, consecutive instrumental blocks and source preservation: OK');
+const pairedHTML=s.sheetHTML(boundary);
+assert.match(pairedHTML, /class="song-paper-line"><div class="song-paper-chords">F#m\s+Bm<\/div><div class="song-paper-lyrics">Next phrase with words\.<\/div><\/div>/);
+console.log('Chord and lyric share one inseparable presentation block: OK');
 
 assert.equal(s.lineTarget([1000,5000,11000],0,1),1000);
 assert.equal(s.lineTarget([1000,5000,11000],3000,-1),null);

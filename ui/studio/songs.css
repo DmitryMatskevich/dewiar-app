@@ -137,6 +137,8 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper-scroll { overflow-x:auto; padding-bottom:6px; }
 .song-paper-body { width:100%; font:400 18px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-ligatures:none; }
 .song-paper-chords, .song-paper-lyrics, .song-paper-space { white-space:pre; }
+.song-paper-line { display:block; margin:0; padding:0; break-inside:avoid; }
+.song-paper-line > .song-paper-chords, .song-paper-line > .song-paper-lyrics { display:block; margin:0; padding:0; min-height:0; }
 .song-paper-chords { font-weight:700; }
 .song-paper-lyrics { white-space:pre-wrap; overflow-wrap:anywhere; scroll-margin-block:90px; }
 .song-paper-word { border-radius:3px; }
