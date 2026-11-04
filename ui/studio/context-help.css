@@ -1,9 +1,7 @@
-/* One help action per section; field explanations use native title attributes.
-   The title row intentionally reaches the window edge.  A section may keep a
-   narrower reading column, but its help action belongs to the far right of
-   the working area, with a small visual gap from the window edge. */
+/* One help action at the right edge of each section heading;
+   field explanations use native title attributes. */
 main { overflow-x:hidden; }
-main section[id^="p-"] h1 { display:flex; align-items:center; gap:10px; min-width:0; width:calc(100vw - 240px - 44px - 12px); max-width:none; }
+main section[id^="p-"] h1 { display:flex; align-items:center; gap:10px; min-width:0; width:100%; max-width:none; box-sizing:border-box; }
 main section[id^="p-"] h1 > span:first-child { min-width:0; }
 .section-help.btn { display:inline-flex; align-items:center; gap:7px; margin-left:auto; margin-right:0; vertical-align:middle; flex:none; font:500 13px/1.4 "Manrope",sans-serif; letter-spacing:0; white-space:nowrap; }
 .help-symbol { display:inline-grid; place-items:center; width:19px; height:19px; border:1.5px solid currentColor; border-radius:50%; font-weight:600; }
@@ -15,8 +13,8 @@ main section[id^="p-"] h1 > span:first-child { min-width:0; }
 .help-result { display:block; width:100%; text-align:left; white-space:normal; margin:8px 0; }
 .section-help:focus-visible { outline:2px solid var(--accent,#859cff); outline-offset:3px; }
 @media(min-width:761px){
-  /* Home has its own header markup, so give only that title row the same edge rail. */
-  #p-home .hm-hi { position:relative; width:calc(100vw - 240px - 44px - 12px); max-width:none; justify-content:flex-start; }
+  /* Keep the home help button on the same right edge as every section heading. */
+  #p-home .hm-hi { position:relative; width:100%; max-width:none; justify-content:flex-start; box-sizing:border-box; }
   #p-home .hm-actions { position:absolute; top:0; right:0; margin-left:0; }
 }
 @media(max-width:760px){
@@ -24,3 +22,12 @@ main section[id^="p-"] h1 > span:first-child { min-width:0; }
   .section-help.btn { margin-left:auto; margin-right:0; }
   #p-home .hm-actions { margin-left:0; }
 }
+
+/* Ctrl+F / Cmd+F searches the current interface section. */
+#ui-find { position:fixed; z-index:10020; top:16px; right:20px; display:flex; align-items:center; gap:8px; width:min(420px,calc(100vw - 32px)); padding:10px; border:1px solid var(--dw-line,rgba(80,100,130,.2)); border-radius:14px; background:var(--dw-panel,#edf3fb); box-shadow:0 8px 28px rgba(30,48,75,.22); }
+#ui-find[hidden] { display:none; }
+#ui-find input { flex:1; min-width:0; }
+#ui-find-count { min-width:50px; text-align:center; font-size:12px; color:var(--muted,#66748a); }
+#ui-find button { flex:none; }
+::highlight(ui-find-match) { background-color:#ffe58a; color:#202b3c; text-decoration:underline 2px #d39a00; }
+::highlight(ui-find-current) { background-color:#ffad42; color:#20202a; text-decoration:underline 3px #b94c00; }

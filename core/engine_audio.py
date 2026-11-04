@@ -1053,6 +1053,7 @@ class AudioMixin:
                 if words:
                     self.emit("dictation", state="partial", text=words, by=by, session=sid)
                 if command[0] in ("cancel", "stop"):
+                    self.emit("voice_command", action=command[0], status="done")
                     self.dictation_cancel()
                 return
             if command and command[0] == "show" and command[1] == "" and words == "" and re.search(r"\b(?:появись|появиться|покажись|покажи себя)\b", text, re.I):
@@ -1080,6 +1081,8 @@ class AudioMixin:
         if command is None:
             return
         action, argument = command
+        if action in ("insert", "copy", "clear", "cancel", "stop"):
+            self.emit("voice_command", action=action, status="received")
         if action == "clear":
             # The HUD owns the selection in the editable background draft.
             # If there is no UI, there can be no selection, so clear it here.
@@ -1088,6 +1091,7 @@ class AudioMixin:
                 self._background_draft.clear()
                 self._background_revision += 1
                 self._background_state("cleared")
+                self.emit("voice_command", action="clear", status="done")
             else:
                 self._background_state("clear_requested")
             return
@@ -1096,6 +1100,7 @@ class AudioMixin:
             draft = " ".join(pasted).strip()
             if not draft:
                 self.note("Нет текста для вставки. Продолжаю слушать.")
+                self.emit("voice_command", action=action, status="error", message="Нет текста для этой команды.")
                 return None
             session = self._dictation_session
             return lambda: self._background_paste(action, draft, pasted, session)
@@ -1105,8 +1110,10 @@ class AudioMixin:
             self._background_draft.clear()
             self._background_revision += 1
             self._background_state("cleared")
+            self.emit("voice_command", action=action, status="done")
         elif action == "stop":
             # Stop listening without discarding already recognised text.
+            self.emit("voice_command", action=action, status="done")
             self.dictation_cancel()
         elif action == "command":
             self._run_dictation_voice_command(argument)
@@ -1125,6 +1132,7 @@ class AudioMixin:
             log.warning("Диктовка: не удалось скопировать текст: %s", exc)
             self.note("Текст сохранён в диктовке. " + str(exc))
             self.emit("background_dictation", state="error", error=str(exc))
+            self.emit("voice_command", action=action, status="error", message=str(exc))
             return
         with self._dictation_lock:
             if result["inserted"]:
@@ -1136,6 +1144,7 @@ class AudioMixin:
                     self._background_revision += 1
                 log.info("Диктовка: команда ⌘V отправлена в «%s»", result.get("app") or "активное приложение")
                 self._background_state("inserted", app=result.get("app", ""))
+                self.emit("voice_command", action=action, status="done", app=result.get("app", ""))
                 self.paste_tone(True)
                 return
             reason = result.get("reason", "")
@@ -1145,6 +1154,8 @@ class AudioMixin:
             self.note("Текст скопирован." if action == "copy" else
                       "Текст скопирован, но не вставлен. " + (reason or "Откройте нужное поле и вставьте его."))
             self._background_state("copied", reason=reason)
+            self.emit("voice_command", action=action, status="error" if reason else "done",
+                      message=reason, reason_code=result.get("reason_code", ""))
 
     def paste_tone(self, ok):
         """Слышно и при скрытом окне Лиры: вставлено — «готово», не вставлено — нисходящий сигнал (причина в окне)."""
@@ -1157,12 +1168,17 @@ class AudioMixin:
 
     def _run_dictation_voice_command(self, argument):
         # Dispatch existing commands outside the STT lock; keep the draft intact.
+        self.emit("voice_command", action="command", status="received", command=argument)
         def run():
             try:
-                if not self._window_cmd(argument) and not self._voice_control_cmd(argument):
+                if self._window_cmd(argument) or self._voice_control_cmd(argument):
+                    self.emit("voice_command", action="command", status="started", command=argument)
+                else:
                     self.ask(argument)
+                    self.emit("voice_command", action="command", status="dispatched", command=argument)
             except Exception as exc:
                 self.note("Команда не выполнена: " + str(exc))
+                self.emit("voice_command", action="command", status="error", command=argument, message=str(exc))
         threading.Thread(target=run, name="dictation-voice-command", daemon=True).start()
 
     def _background_state(self, state="listening", **extra):
@@ -1607,6 +1623,7 @@ class AudioMixin:
                 self.emit("window", do="show")
                 self.listen_for_command()
             else:
+                self.emit("voice_command", action="command", status="received", command=rest)
                 self.ask(rest)
             return
         if self.pending_confirm and text and self._answer_confirm(text):
@@ -1646,7 +1663,10 @@ class AudioMixin:
                 return
             word = _norm(re.sub(r"[^\w ]", "", rest)).strip()
             word = stop_word(word) or word if " " not in word else word      # «Лира, Ctop» → «стоп»
+            if rest:
+                self.emit("voice_command", action="command", status="received", command=rest)
             if self._voice_control_cmd(rest):
+                self.emit("voice_command", action="command", status="started", command=rest)
                 return
             if thanks_phrase(rest):                          # «Лира, спасибо» — «Пожалуйста!» и сон
                 self._thanks(rest)

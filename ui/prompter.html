@@ -214,14 +214,20 @@
   #sheet li .sq { display: block; font-size: 13.5px; color: var(--them); font-weight: 600; margin-bottom: 3px; }
   #sheet li span { font-size: 14.5px; line-height: 1.45; }
   #voice { padding: 18px 20px 18px; z-index: 6; }
-  #endask { position: absolute; inset: 0; z-index: 9; display: flex; align-items: flex-end; padding: 12px; background: rgb(6 6 12 / 55%);
+  #endask, #removeask { position: absolute; inset: 0; z-index: 9; display: flex; align-items: flex-end; padding: 12px; background: rgb(6 6 12 / 55%);
             border-radius: var(--r); animation: fadeIn .15s ease-out; }
-  #endask .card { width: 100%; padding: 20px 20px 16px; border-radius: 20px; background: var(--frost); box-shadow: 0 24px 60px -12px rgb(0 0 0 / 60%);
+  #endask .card, #removeask .card { width: 100%; padding: 20px 20px 16px; border-radius: 20px; background: var(--frost); box-shadow: 0 24px 60px -12px rgb(0 0 0 / 60%);
                   animation: rise .18s ease-out; }
-  #endask h2 { font: 600 16px/1.3 "Unbounded", "Manrope", sans-serif; margin-bottom: 6px; }
-  #endask p { color: var(--muted); font-size: 14px; line-height: 1.45; margin-bottom: 16px; }
-  #endask .row { display: flex; gap: 10px; }
-  #endask .row button { flex: 1; margin: 0; }
+  #endask h2, #removeask h2 { font: 600 16px/1.3 "Unbounded", "Manrope", sans-serif; margin-bottom: 6px; }
+  #endask p, #removeask p { color: var(--muted); font-size: 14px; line-height: 1.45; margin-bottom: 16px; }
+  #endask .row, #removeask .row { display: flex; gap: 10px; }
+  #endask .row button, #removeask .row button { flex: 1; margin: 0; }
+  .sum-actions { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 14px; }
+  .sum-actions button { display:inline-flex; align-items:center; gap:5px; min-height:36px; padding:7px 10px; border-radius:11px; font-size:12px; }
+  .sum-actions button[hidden] { display:none; }
+  .sum-actions svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .sum-actions button:disabled { opacity:.4; cursor:not-allowed; }
+  #meeting-video-result:empty { display:none; }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { #endask, #endask .card { animation: none; } }
@@ -334,7 +340,7 @@
       <button class="ghost blk hidden" id="capture-live-stop" title="Остановить автоматические кадры, не останавливая встречу">Остановить кадры</button>
       <button class="ghost blk hidden" id="capture-live-audio" title="Временно прекратить запись звука, не останавливая встречу">Поставить звук на паузу</button>
     </div>
-    <div id="initial" class="blk"><b>Предварительное summary</b><span id="initial-text"></span></div>
+    <div id="initial" class="blk"><b>Предварительные итоги</b><span id="initial-text"></span></div>
     <section id="card" class="blk" aria-live="polite">
       <div id="cue"><i></i></div>
       <div id="empty"><b>Слушаю разговор</b><span>Подсказка появится здесь, когда собеседник спросит или возразит. Нужна прямо сейчас — нажмите «Подсказать» или <kbd>пробел</kbd>.</span></div>
@@ -370,6 +376,10 @@
     <div class="card"><h2 id="endask-t">Закончить встречу?</h2>
       <p id="endask-d">Подведу итог и сохраню его в папку «Встречи».</p>
       <div class="row"><button class="ghost blk" id="endask-no">Продолжить</button><button class="go" id="endask-yes">Закончить</button></div></div>
+  </div>
+  <div id="removeask" class="hidden" role="alertdialog" aria-labelledby="removeask-t" aria-describedby="removeask-d">
+    <div class="card"><h2 id="removeask-t"></h2><p id="removeask-d"></p>
+      <div class="row"><button class="ghost blk" id="removeask-no">Отмена</button><button class="go" id="removeask-yes">В корзину</button></div></div>
   </div>
 </div>
 <script src="assets/dewiar.js"></script>
@@ -735,21 +745,6 @@ function bindMeetingFiles(root) {
     catch (e) { const out = $("#meeting-video-result"); if (out) out.textContent = e.message || "Файл встречи не открылся"; }
   });
 }
-function renderMeetingMedia(root) {
-  const links = [...root.querySelectorAll("a.meeting-file")].filter(a => /\.(?:wav|mp3|m4a|ogg|flac|opus|aac|mp4|webm|mov|m4v|ogv)$/i.test(decodeURIComponent(a.dataset.file || "")));
-  if (!links.length) return;
-  const row = document.createElement("div"); row.className = "row meeting-media-actions";
-  links.forEach(a => {
-    const rel = decodeURIComponent(a.dataset.file || "");
-    const isVideo = /\.(?:mp4|webm|mov|m4v|ogv)$/i.test(rel);
-    const b = document.createElement("button"); b.type = "button"; b.className = "ghost blk";
-    b.textContent = `▶ ${isVideo ? "Видео" : "Аудио"}`;
-    b.title = isVideo ? "Открыть видео встречи с управлением воспроизведением" : "Открыть аудиозапись встречи с управлением воспроизведением";
-    b.onclick = () => core.call("ws_open", { path: "Встречи/" + rel }).catch(e => { const out = $("#meeting-video-result"); if (out) out.textContent = e.message; });
-    row.appendChild(b);
-  });
-  root.appendChild(row);
-}
 function renderMeetingVideo() {
   const button = $("#create-meeting-video"), result = $("#meeting-video-result");
   if (!button) return;
@@ -759,10 +754,12 @@ function renderMeetingVideo() {
   const error = videoExportResult?.error || rec.video_error;
   button.hidden = !file && (!error || !rec.can_export);
   button.disabled = !!busy;
-  button.textContent = file ? "Открыть видео" : "Повторить создание видео";
+  button.querySelector("span").textContent = file ? "Видео" : "Повторить видео";
+  button.title = file ? "Воспроизвести видео встречи" : "Повторить создание видео встречи";
   button.onclick = file ? () => core.call("ws_open", {path: file}).catch(e => { result.textContent = e.message; }) : createMeetingVideo;
-  result.textContent = busy ? "Видео создаётся в фоне…" : file ? "Видео готово · MP4" : error ? "Видео не создано: " + error : rec.can_export || st?.summary_progress?.phase === "stopping" ? "Видео начнёт создаваться после сохранения записи." : "Видео отсутствует: нет сохранённых кадров или аудиозаписи.";
-  if ($("#again")) $("#again").disabled = st?.can_start === false;
+  result.textContent = busy ? "Видео создаётся…" : error && !file ? "Видео: " + error : "";
+  const remove = $("#remove-video");
+  if (remove) { remove.hidden = !file; remove.disabled = !!(st?.processing || st?.summary_busy || busy); }
 }
 async function createMeetingVideo() {
   videoExportBusy = true; videoExportResult = null; renderMeetingVideo();
@@ -777,16 +774,49 @@ function renderSum(e) {
   show("sum"); $("#title").textContent = "Итог встречи";
   meetingSummaryPath = e.path || e.summary_path || meetingSummaryPath || "";
   const progress = e.phase === "stopping" ? "Сохраняю запись…" : e.phase === "queued" ? "Расшифровка ожидает обработки…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : "Подвожу итог встречи…";
-  $("#sum").innerHTML = '<section class="blk" style="padding:16px;border-radius:16px;margin:12px 0"><b>Видео встречи</b><p class="saved" id="meeting-video-result" role="status" style="margin:8px 0;overflow-wrap:anywhere"></p><button class="ghost blk" type="button" id="create-meeting-video" hidden></button></section>'
-    + (e.busy ? `<div class="wait" role="status"><span class="spin"></span>${progress}</div><p class="saved">Можно закрыть это окно и продолжать работу. Результаты сохранятся в разделе «Встречи».</p>`
-      : md(e.summary || "") + (e.path ? `<p class="saved">Сохранено в папке «Встречи»: ${esc(e.path.split(/[\\/]/).pop())}</p>` : ""))
-    + `<div class="row" style="margin-top:16px"><button class="go" id="again" style="flex:1">Новая встреча</button><button class="ghost blk" id="done">Закрыть</button></div>`;
+  const icon = path => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
+  const play = icon("M8 5v14l11-7z"), trash = icon("M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7");
+  const busy = !!(st?.processing || st?.summary_busy || st?.recording?.export_busy);
+  const body = String(e.summary || "").replace(/<!-- dewiar-meeting-video:start -->[\s\S]*?<!-- dewiar-meeting-video:end -->\n?/g, "")
+    .replace(/^## Summary\s*$/gm, "## Итоги")
+    .replace(/^\*\*(?:Аудиозапись|Дорожки|Видео):\*\*.*(?:\n|$)/gm, "");
+  $("#sum").innerHTML = `<div class="sum-actions" role="toolbar" aria-label="Действия со встречей">
+    <button class="go" id="again" type="button" title="Настроить и начать новую встречу">${icon("M12 4v16M4 12h16")}Новая</button>
+    <button class="ghost blk" id="all-meetings" type="button" title="Открыть раздел со всеми встречами">${icon("M4 5h16M4 12h16M4 19h16")}Встречи</button>
+    <button class="ghost blk" type="button" id="create-meeting-video" hidden>${play}<span>Видео</span></button>
+    <button class="ghost blk" type="button" id="play-meeting-audio" title="Воспроизвести общую аудиозапись встречи" ${st?.recording?.audio_file ? "" : "hidden"}>${play}Аудио</button>
+    <button class="ghost blk" type="button" id="remove-video" title="Удалить видео встречи в корзину" aria-label="Удалить видео встречи" hidden ${busy ? "disabled" : ""}>${trash}<span>Видео</span></button>
+    <button class="ghost blk" type="button" id="remove-meeting" title="Удалить встречу и её файлы в корзину" aria-label="Удалить встречу" ${busy ? "disabled" : ""}>${trash}<span>Удалить</span></button></div>
+    <p class="saved" id="meeting-video-result" role="status"></p>`
+    + (e.busy ? `<div class="wait" role="status"><span class="spin"></span>${progress}</div>` : md(body));
   bindMeetingFiles($("#sum"));
-  renderMeetingMedia($("#sum"));
   renderMeetingVideo();
   if ($("#again")) $("#again").onclick = () => { dismissedSummary = st?.meeting?.id || ""; show("setup"); $("#title").textContent = "Встречи"; };
-  if ($("#done")) $("#done").onclick = closeWin;
+  $("#all-meetings").onclick = () => api()?.open_settings?.("prompter");
+  $("#play-meeting-audio").onclick = () => core.call("ws_open", {path:st.recording.audio_file}).catch(err => { $("#meeting-video-result").textContent = err.message; });
+  $("#remove-video").onclick = () => confirmResultRemoval(true);
+  $("#remove-meeting").onclick = () => confirmResultRemoval(false);
 }
+let pendingResultRemoval = null;
+function confirmResultRemoval(videoOnly) {
+  pendingResultRemoval = {meeting_id:st?.meeting?.id || "", video_only:videoOnly};
+  $("#removeask-t").textContent = videoOnly ? "Удалить видео?" : "Удалить встречу?";
+  $("#removeask-d").textContent = videoOnly ? "Видео переместится в корзину. Остальные файлы встречи сохранятся." : "Итог, аудио, текст, кадры и видео встречи переместятся в корзину.";
+  $("#removeask").classList.remove("hidden"); $("#removeask-no").focus();
+}
+$("#removeask-no").onclick = () => { pendingResultRemoval = null; $("#removeask").classList.add("hidden"); };
+$("#removeask-yes").onclick = async () => {
+  const request = pendingResultRemoval; if (!request) return;
+  $("#removeask-yes").disabled = true;
+  try {
+    await core.call("prompter_result_remove", request);
+    pendingResultRemoval = null; $("#removeask").classList.add("hidden");
+    if (!request.video_only) { dismissedSummary = request.meeting_id; show("setup"); $("#title").textContent = "Встречи"; }
+    else { videoExportResult = null; videoExportBusy = false; }
+    st = await core.call("prompter_state"); render();
+  } catch (err) { $("#removeask-d").textContent = err.message || "Не удалось удалить файлы."; }
+  finally { $("#removeask-yes").disabled = false; }
+};
 $("#ask").onclick = () => { follow = true; core.call("prompter_hint", {}).catch(e => { $("#err").textContent = e.message; }); };
 $("#capture-live-apply").onclick = async () => {
   try {
@@ -824,6 +854,10 @@ function hotkeyMatch(e, spec) {
   return e.key.toLowerCase() === key && e.ctrlKey === ctrl && e.shiftKey === p.includes("shift") && e.altKey === alt && e.metaKey === meta;
 }
 document.addEventListener("keydown", (e) => {
+  if (!$("#removeask").classList.contains("hidden")) {
+    if (e.key === "Escape") { e.preventDefault(); $("#removeask-no").click(); }
+    return;
+  }
   if (!$("#endask").classList.contains("hidden")) {           // открыт вопрос «Закончить встречу?»
     if (e.key === "Escape") { e.preventDefault(); endAsk(false); }
     return;

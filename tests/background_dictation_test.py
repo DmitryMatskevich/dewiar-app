@@ -90,8 +90,10 @@ class Background(unittest.TestCase):
         self.assertFalse(e.dictation_active)
         self.assertEqual(e.events[0][1]['text'], 'Последняя фраза.')
         self.assertEqual(e.events[-1][1]['state'], 'cancelled')
+        self.assertIn(('voice_command', {'action':'stop', 'status':'done'}), e.events)
+        count = len(e.events)
         e._dictation_result('Опоздавший результат', 'test', 3)
-        self.assertEqual(len(e.events), 2)
+        self.assertEqual(len(e.events), count)
 
     def test_named_stop_preserves_background_draft(self):
         e = Engine()
@@ -187,8 +189,25 @@ class Background(unittest.TestCase):
         with patch('background_dictation.copy_and_insert', side_effect=paste):
             e._dictation_result('Лира, вставить', 'test', 3)
         self.assertEqual(e._background_draft, ['Новое.'])
-        self.assertEqual(e.events[-1][1]['state'], 'inserted')
-        self.assertEqual(e.events[-1][1]['app'], 'Заметки')
+        result = [data for kind, data in e.events if kind == 'background_dictation' and data.get('state') == 'inserted'][-1]
+        self.assertEqual(result['app'], 'Заметки')
+        self.assertIn(('voice_command', {'action':'insert', 'status':'done', 'app':'Заметки'}), e.events)
+
+    def test_permission_failure_reports_action_and_reason(self):
+        e = Engine()
+        e._dictation_result('Текст', 'test', 3)
+        failure = {'copied':True, 'inserted':False, 'reason':'Нет разрешения', 'reason_code':'accessibility'}
+        with patch('background_dictation.copy_and_insert', return_value=failure):
+            e._dictation_result('Лира, вставить', 'test', 3)
+        self.assertEqual(e._background_draft, ['Текст'])
+        self.assertIn(('voice_command', {'action':'insert', 'status':'received'}), e.events)
+        self.assertIn(('voice_command', {'action':'insert', 'status':'error', 'message':'Нет разрешения', 'reason_code':'accessibility'}), e.events)
+
+    def test_access_denial_is_structured(self):
+        with patch('background_dictation.copy_text'), patch('background_dictation.paste_into_focus', side_effect=background_dictation.AccessibilityDenied('Доступ запрещён')):
+            result = background_dictation.copy_and_insert('Текст')
+        self.assertEqual(result['reason_code'], 'accessibility')
+        self.assertFalse(result['inserted'])
 
     def test_paste_does_not_remove_concurrent_edit_or_new_session(self):
         for new_session in (False, True):

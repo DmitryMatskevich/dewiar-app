@@ -414,7 +414,7 @@ class MusicMixin:
                 message = 'Задача транскрибации не создана; запущенной обработки нет. Пришлите ссылку или файл с просьбой извлечь текст.'
             elif task.get('status') == 'done':
                 label = 'Перевод подготовлен' if task.get('workflow') == 'video-translation' else 'Транскрибация завершена'
-                message = f'{label}. В задаче «{task["title"]}» сохранено результатов: {len(task.get("outputs") or [])}. Откройте её кнопкой задач в верхней строке.'
+                message = f'{label}. В задаче «{task["title"]}» сохранено результатов: {len(task.get("outputs") or [])}. Откройте её кнопкой задач в нижней панели.'
             elif task.get('status') in ('failed','stopped','paused'):
                 message = f'Задача «{task["title"]}»: {task.get("status_ru") or task["status"]}. ' + (task.get('error') or 'Обработка сейчас не выполняется. Подробности — в журнале задачи.')
             else:
@@ -478,7 +478,7 @@ class MusicMixin:
         self._video_pending = None
         ready = getattr(task, 'status', '') == 'done'
         message = (f'Этот источник уже обработан. Результаты — в задаче «{task.title}»; повторная загрузка не нужна.' if ready else
-                   f'Задача «{task.title}» запущена. Ход обработки — по кнопке задач в верхней строке.')
+                   f'Задача «{task.title}» запущена. Ход обработки — по кнопке задач в нижней панели.')
         self._say_quick(message, text, via, acts=[] if ready else ['start_task'])
         return True
 

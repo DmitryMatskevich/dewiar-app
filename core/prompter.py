@@ -649,6 +649,7 @@ class Prompter:
             audio_ready = audio_bytes > 44  # Один WAV-заголовок ещё не является записью.
             rec = {"enabled": bool(m.get("record")), "deferred": bool(m.get("deferred")),
                    "name": Path(self._record_path).name if self._record_path else "",
+                   "audio_file": self._meeting_relative_path(self._record_path) if audio_ready else "",
                    "ready": audio_ready,
                    "bytes": audio_bytes,
                    "audio_source": m.get("audio_source") or "system",
@@ -2328,12 +2329,64 @@ class Prompter:
         return {"busy": True}
 
     def _video_relative_path(self):
-        if not self._video_path:
+        return self._meeting_relative_path(self._video_path)
+
+    def _meeting_relative_path(self, value):
+        if not value:
             return ""
         try:
-            return Path(self._video_path).resolve().relative_to(self.eng.workspace.ensure().resolve()).as_posix()
+            rel = Path(value).resolve().relative_to(self.eng.workspace.ensure().resolve()).as_posix()
+            return rel if rel.startswith("Встречи/") else ""
         except ValueError:
             return ""
+
+    def remove_completed(self, meeting_id, video_only=False):
+        """Move only the currently displayed, fully processed meeting into Trash."""
+        with self._lock:
+            job = self._completed_job
+            if self.on or self._post_busy or job is None or not meeting_id or job.meeting.get("id") != meeting_id:
+                raise ValueError("Встреча изменилась или ещё сохраняется. Обновите окно и повторите.")
+            with job._lock:
+                if (job._summary_busy or job._video_export_busy or
+                        (job._post_thread and job._post_thread.is_alive()) or
+                        (job._video_thread and job._video_thread.is_alive())):
+                    raise ValueError("Дождитесь завершения обработки встречи перед удалением.")
+                root = (self.eng.workspace.ensure() / "Встречи").resolve()
+                base = job._base_name
+                if not base or Path(base).name != base:
+                    raise ValueError("Не удалось безопасно определить файлы встречи.")
+                candidates = [Path(job._video_path)] if video_only and job._video_path else []
+                if not video_only:
+                    candidates = [root / (base + ".md"), root / "Аудио" / (base + ".wav"),
+                                  root / "Аудио" / base, root / "Расшифровки" / (base + ".txt"),
+                                  root / "Расшифровки" / base]
+                    if job._video_path:
+                        candidates.append(Path(job._video_path))
+                paths = []
+                for path in candidates:
+                    resolved = path.resolve()
+                    if resolved == root or root not in resolved.parents:
+                        raise ValueError("Файл находится вне папки встреч.")
+                    if path.is_symlink():
+                        raise ValueError("Удаление ссылок на файлы встреч недоступно.")
+                    if path.exists() and resolved not in paths:
+                        paths.append(resolved)
+                paths = [p for p in paths if not any(parent in paths for parent in p.parents)]
+                if not paths:
+                    raise ValueError("Файлы для удаления не найдены.")
+                import guard
+                guard.trash(guard.plan_delete(paths))
+                if video_only:
+                    job._video_path = ""
+                    job._video_error = "удалено пользователем"
+                    job._refresh_summary_video()
+                else:
+                    self._completed_job = None
+                    self.meeting, self.summary, self._summary_path = {}, "", ""
+                    self._video_path, self._record_path, self._transcript_path = "", "", ""
+                    self._summary_busy = self._video_export_busy = False
+            self._state()
+        return {"ok": True}
 
     def _with_video_status(self, body):
         """An owned block in Summary is replaceable when MP4 finishes after the text."""
@@ -2350,7 +2403,7 @@ class Prompter:
         pattern = r"<!-- dewiar-meeting-video:start -->.*?<!-- dewiar-meeting-video:end -->"
         if re.search(pattern, body, re.S):
             return re.sub(pattern, lambda _: block, body, flags=re.S)
-        return body.replace("## Summary\n", "## Summary\n" + block + "\n", 1)
+        return re.sub(r"(?m)^## (?:Итоги|Summary)\n", lambda m: m.group(0) + block + "\n", body, count=1)
 
     def _refresh_summary_video(self):
         with self._lock:
@@ -2632,7 +2685,7 @@ class Prompter:
                 decisions = got[:600]
         m["decisions"] = decisions
         preview = self._summary_preview(m)
-        body = (f"# {m.get('title', 'Встреча')}\n\n## Summary\n"
+        body = (f"# {m.get('title', 'Встреча')}\n\n## Итоги\n"
                 f"- Когда: {preview['when']}\n- Участники: {preview['participants']}\n- Темы: {preview['topics']}\n"
                 f"- Что решили: {preview['decisions']}\n\n"
                 f"*{started:%d.%m.%Y %H:%M} · {mins} мин · Встречи Dewiar*\n\n"

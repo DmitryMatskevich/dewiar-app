@@ -251,10 +251,11 @@
   #task .tbtn button:first-child { background: var(--brand); }
   #task .tbtn button:hover { filter: brightness(1.15); } #task .tbtn button:disabled { opacity: .6; }
   #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(214,228,240,.3); border-top-color: #D6E4F0; animation: tspin .9s linear infinite; flex: none; }
-  #corner-l #b-tasks { position: relative; color: #77dfb4; }
+  #bar #b-tasks { position: relative; color: #77dfb4; }
   #b-tasks[hidden] { display: none; }
   #b-tasks.working { animation: taskPulse 1.8s ease-in-out infinite; }
-  #corner-l #b-tasks.attention { color: #ffce77; }
+  #bar #b-tasks.attention { color: #ffce77; }
+  #bar:has(#b-tasks:not([hidden])) { opacity: 1; }
   #b-tasks-count { position: absolute; top: 0; right: 0; min-width: 13px; padding: 0 3px; border-radius: 9px; background: #255c4a; color: white; font: 600 10px/13px sans-serif; }
   #b-tasks-count[hidden], #b-tasks-count:empty { display: none; }
   #b-notes { position: relative; }
@@ -329,6 +330,14 @@
   #a-copy.copied .copied-icon { display: block; }
   #a-copy.copied { color: #63d5a2; }
   #ask-feedback { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #voice-command-feedback { display: flex; align-items: center; gap: 7px; margin: 0 3px 7px; padding: 7px 9px;
+    max-height: 100px; overflow-y: auto; border-radius: 10px; background: var(--glass); color: var(--ink); font-size: 12px; line-height: 1.4; }
+  #voice-command-feedback[hidden] { display: none; }
+  #voice-command-message { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  #voice-command-access, #voice-command-dismiss { flex: none; border: 0; border-radius: 7px; padding: 5px 7px;
+    color: var(--ink); background: rgba(110,130,190,.2); font: inherit; cursor: pointer; }
+  #voice-command-access[hidden] { display: none; }
+  #voice-command-access:focus-visible, #voice-command-dismiss:focus-visible { outline: 2px solid currentColor; }
   #ask-model { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6;
                width: max-content; max-width: min(200px, calc(100% - 244px)); height: 26px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                border: 0; padding: 0 2px; background: transparent; color: var(--muted); font: inherit; font-size: 10.5px; line-height: 1.2; text-align: center; cursor: pointer; }
@@ -432,6 +441,7 @@
   #bar { flex: none; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; }
   #card:hover #bar, #bar.pinned { opacity: 1; }
   .btn { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+  #bar .btn { flex: none; width: clamp(24px, calc(12.5vw - 7px), 28px); }
   .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
   .btn.on { color: #ff7a93; }
   .btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -624,6 +634,7 @@
         <textarea id="background-draft" rows="3" style="width:100%;resize:vertical;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:8px;padding:8px" aria-label="Текст фоновой диктовки"></textarea>
         <div id="background-dictation-status" role="status" style="font-size:12px;margin-top:4px"></div>
       </section>
+      <div id="voice-command-feedback" role="status" aria-live="polite" hidden><span id="voice-command-message"></span><button id="voice-command-access" type="button" hidden title="Открыть настройки управления устройством">Открыть настройки</button><button id="voice-command-dismiss" type="button" aria-label="Скрыть сообщение о команде" title="Скрыть сообщение о команде">×</button></div>
       <div class="askbox" id="askbox">
         <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода произнесите имя текущего помощника отдельно или в конце фразы." autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
@@ -664,7 +675,6 @@
     <button class="btn" id="b-bug" title="Сообщить о проблеме — сниму экран и открою форму жалобы"><svg viewBox="0 0 24 24"><rect x="6.5" y="7" width="11" height="14.5" rx="5.5"/><path d="M8.8 7.6a3.2 3.2 0 0 1 6.4 0M12 11.5v10M6.5 12.5H2.5M21.5 12.5h-4M6.8 17.5 3 19.8M17.2 17.5l3.8 2.3M7.5 9.2 4 6.5M16.5 9.2 20 6.5"/></svg></button>
     <!-- обновление одним нажатием (24.10, владелец: «возле жучка не хватает значка обновления») -->
     <button class="btn" id="b-upd" title="Обновления — проверить и обновить одним нажатием" aria-label="Обновления"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
-    <button class="btn" id="b-tasks" hidden title="Задачи — ход выполнения; справа от обновления" aria-label="Открыть задачи"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12h8M8 16h5"/></svg><span id="b-tasks-count" hidden aria-hidden="true"></span></button>
   </div>
   <div id="corner-r">
     <!-- Глаз всегда доступен справа в первой строке: скрыть/вернуть большой образ помощника. -->
@@ -697,6 +707,7 @@
     <button class="btn" id="a-meet" title="Начать встречу: запись экрана и двух дорожек звука" aria-label="Начать встречу"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h5M8 12h3M16 10v4"/><path d="M6 22h12"/></svg></button>
     <button class="btn" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
     <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
+    <button class="btn" id="b-tasks" hidden title="Задачи — ход выполнения" aria-label="Открыть задачи"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12h8M8 16h5"/></svg><span id="b-tasks-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания" aria-label="Открыть календарь"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg><span id="b-cal-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <!-- Чат расположен в нижней панели рядом с другими разделами. -->
@@ -1510,9 +1521,10 @@ core.on("dictation", e => {
   }
 });
 function copyDraftByVoice(action) {
+  showVoiceCommand({action, status: "received"});
   const editor = !$("background-dictation").hidden && !backgroundState ? $("background-draft") : $("askin");
   const text = editor.value;
-  if (!text.trim()) { $("ask-feedback").textContent = "Нет текста для копирования."; return; }
+  if (!text.trim()) { $("ask-feedback").textContent = "Нет текста для копирования."; showVoiceCommand({action, status:"error", message:"Нет текста для этой команды."}); return; }
   core.call("dictation_copy_text", {text, copy_only: action === "copy"}).then(result => {
     if (action !== "copy" && result.inserted && editor.value.startsWith(text)) {
       editor.value = editor.value.slice(text.length).replace(/^\s+/, "");
@@ -1520,8 +1532,41 @@ function copyDraftByVoice(action) {
       else if (!editor.value && !backgroundState) $("background-dictation").hidden = true;
     }
     $("ask-feedback").textContent = pasteMessage(result, action);
-  }).catch(showErr);
+    showVoiceCommand({action, status: action !== "copy" && !result.inserted ? "error" : "done",
+      app:result.app, message:result.reason, reason_code:result.reason_code});
+  }).catch(error => { showVoiceCommand({action, status:"error", message:error.message || String(error)}); });
 }
+function showVoiceCommand(e) {
+  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", stop:"стоп", cancel:"отмена"};
+  const label = e.action === "command" ? String(e.command || "команда") : (labels[e.action] || "команда");
+  let message = "Команда «" + label + "» получена.";
+  if (e.status === "received") message += " Выполняю…";
+  else if (e.status === "started") message += " Действие запущено.";
+  else if (e.status === "dispatched") message += " Передана ассистенту в обработку.";
+  else if (e.status === "error") message += " Не удалось выполнить. " + (e.reason_code === "accessibility"
+    ? "Нет разрешения «Универсальный доступ». Текст сохранён в буфере и черновике."
+    : (e.message || "Попробуйте ещё раз."));
+  else if (e.status === "done") {
+    if (e.action === "insert") message += " Вставка отправлена в «" + (e.app || "активное приложение") + "». Проверьте поле.";
+    else if (e.action === "copy") message += " Текст скопирован в буфер обмена.";
+    else if (e.action === "stop") message += " Голосовой ввод остановлен.";
+    else if (e.action === "clear" || e.action === "cancel") message += " Текст очищен.";
+  }
+  $("voice-command-message").textContent = message;
+  $("voice-command-access").hidden = e.reason_code !== "accessibility";
+  $("voice-command-feedback").hidden = false;
+  openAsk();
+}
+$("voice-command-dismiss").onclick = () => { $("voice-command-feedback").hidden = true; };
+$("voice-command-access").onclick = async () => {
+  try {
+    const a = api();
+    if (a?.open_accessibility_settings) await a.open_accessibility_settings();
+    else if (a?.open_settings) await a.open_settings("safety", "&mac_access_setup=1");
+    else throw Error("Откройте настройки macOS → Конфиденциальность и безопасность → Универсальный доступ.");
+  } catch (error) { showErr(error); }
+};
+core.on("voice_command", showVoiceCommand);
 function pasteMessage(r, action) {
   if (r.inserted) return "Команда вставки отправлена в «" + (r.app || "активное приложение") + "». Проверьте поле.";
   if (action === "copy" || !r.reason) return "Текст скопирован. Его можно вставить в нужное поле.";
@@ -1551,6 +1596,7 @@ function renderBackgroundDictation(e) {
     const start = editor.selectionStart, end = editor.selectionEnd;
     if (start !== end) editor.setRangeText("", start, end, "start"); else editor.value = "";
     backgroundDirty = true;
+    showVoiceCommand({action:"clear", status:"done"});
     saveBackgroundDraft();
     return;
   }
@@ -2305,7 +2351,7 @@ $("a-meet").onclick = guard($("a-meet"), async () => {
     if (!await hudAccess.ensureScreen()) return;
     const state = await core.call("prompter_state");
     const native = window.api?.();
-    if (state.on || state.processing) { if (native?.open_prompter) await native.open_prompter(); return; }
+    if (state.on) { if (native?.open_prompter) await native.open_prompter(); return; }
     openQuickMeeting();
   } catch (error) { showErr(error); }
 });
@@ -2447,6 +2493,7 @@ function clearDraft(range, restoreFocus) {
 function clearDraftByVoice() {
   const t = $("askin");
   clearDraft(t.selectionStart !== t.selectionEnd ? [t.selectionStart, t.selectionEnd] : null, false);
+  showVoiceCommand({action:"clear", status:"done"});
 }
 $("a-clear").onclick = e => clearDraft(draftActionRange(e, $("askin")), true);
 let draftCopiedTimer;

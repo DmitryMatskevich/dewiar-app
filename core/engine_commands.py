@@ -588,6 +588,8 @@ class CommandsMixin:
                 if not rel.startswith("Встречи/") or "/" in rel[len("Встречи/"):] or not rel.endswith(".md"):
                     raise ValueError("это не итог встречи")
                 return self.workspace.remove(rel)
+            if cmd == "prompter_result_remove":
+                return pr.remove_completed(str(a.get("meeting_id") or ""), video_only=bool(a.get("video_only")))
             if cmd == "prompter_open":
                 self.emit("prompter", kind="open")
                 return True

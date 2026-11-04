@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
         async open_settings(...args){opens.push(args)},async open_prompter(){opens.push(['prompter'])}
       });
       window.core={snapshot:{},_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
-        commands.push([cmd,args]);if(cmd==='prompter_capture_apps')return {apps:[{name:'Fixture',title:'Demo',key:'demo'}]};return {};}};
+        commands.push([cmd,args]);if(cmd==='prompter_state')return window.meetingState||{};if(cmd==='prompter_capture_apps')return {apps:[{name:'Fixture',title:'Demo',key:'demo'}]};return {};}};
       window.fire=(type,data)=>(core._on[type]||[]).forEach(fn=>fn(data));
       window.resolveFiles=state=>{folders.pending='';for(const key of ['documents','workspace'])folders.folders[key]={state,readable:state==='authorized'};};
     ''')
@@ -73,13 +73,18 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert len(page.evaluate('opens'))==1
     page.evaluate("failFiles=false;screenGranted=true;window.dispatchEvent(new Event('focus'))")
     page.wait_for_function("document.getElementById('a-meet').dataset.access==='available'")
+    page.evaluate("meetingState={on:false,processing:true,can_start:true}")
     page.locator('#a-meet').click();page.locator('#quick-meeting-dialog').wait_for()
+    assert not page.evaluate("opens.some(o=>o[0]==='prompter')"), 'Completed meeting processing must not block a new meeting'
     assert not page.locator('#qm-app-wrap').is_visible()
     page.locator('[data-source=application]').click()
     page.locator('#qm-app').select_option('demo');page.locator('#qm-consent').check()
     page.locator('#qm-start').click();page.wait_for_function("opens.some(o=>o[0]==='prompter')")
     args=page.evaluate("commands.find(c=>c[0]==='prompter_start')[1]")
     assert args['capture_application']=='demo' and args['auto_interval']==.5 and args['frame_quality']==100
+    page.evaluate("meetingState={on:true,processing:false};opens=[]")
+    page.locator('#a-meet').click()
+    page.wait_for_function("opens.some(o=>o[0]==='prompter')")
     page.evaluate("screenGranted=false")
     page.locator('#a-meet').click()
     page.wait_for_function("document.getElementById('a-meet').dataset.access==='unavailable'")

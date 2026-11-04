@@ -11,11 +11,13 @@ try:
     shutil.copytree(root / "ui", folder / "ui")
     (folder / "ui/assets/dewiar.js").write_text("""
 window.CALLS = [];
-window.api = () => ({});
+window.api = () => ({open_settings:async page=>CALLS.push(['open_settings',page])});
 window.STATE = {on:false, brain:true, meeting:{}, files:[], lines:[], hints:[], voice:{},
  recording:{can_export:true, export_busy:false, screenshots:1, video_frames:1}};
 window.core={_on:{},on(k,f){(this._on[k] ||= []).push(f);},async call(cmd,a){
- CALLS.push([cmd,a]); if(cmd==='prompter_state') return STATE; return {busy:true};
+ CALLS.push([cmd,a]); if(cmd==='prompter_state') return STATE;
+ if(cmd==='prompter_result_remove' && a.video_only) {STATE.recording.video_file=''; return {ok:true};}
+ return {busy:true};
 }};
 setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
 """, encoding="utf-8")
@@ -44,31 +46,57 @@ setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
         page.screenshot(path=str(Path(tempfile.gettempdir()) / "dewiar-meeting-tracks.png"))
         page.evaluate("STATE.on=false;STATE.can_start=true;STATE.summary_busy=true;STATE.processing=true;STATE.recording.export_busy=true;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
         assert page.locator("#again").is_enabled(), "New meeting must not wait for video/summary"
-        assert page.locator("#done").is_visible(), "Processing result must remain dismissible"
-        assert "создаётся в фоне" in page.locator("#meeting-video-result").inner_text()
-        page.evaluate("STATE.recording.export_busy=false;STATE.recording.video_file='Встречи/Видео/test.mp4';core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
+        assert page.locator("#done").count() == 0
+        assert page.locator("#remove-meeting").is_disabled()
+        assert "создаётся" in page.locator("#meeting-video-result").inner_text()
+        page.evaluate("STATE.recording.export_busy=false;STATE.recording.video_file='Встречи/Видео/test.mp4';STATE.recording.audio_file='Встречи/Аудио/test.wav';core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
         button = page.locator("#create-meeting-video")
-        assert button.inner_text() == "Открыть видео"
+        assert button.inner_text() == "Видео"
         button.click()
         assert page.evaluate("CALLS.some(x=>x[0]==='ws_open' && x[1].path==='Встречи/Видео/test.mp4')")
         assert page.locator("#sum .wait").is_visible(), "Ready video is usable before summary"
         assert not page.evaluate("CALLS.some(x=>x[0]==='prompter_video')")
-        page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',summary:'**Аудиозапись:** [Аудио/test.wav](dwr-file:Аудио/test.wav)\\n\\n**Видео:** [Видео/test.mp4](dwr-file:Видео/test.mp4)',busy:false}))")
-        media = page.locator("#sum .meeting-media-actions button")
-        assert media.count() == 2
-        media.nth(0).click()
+        page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',summary:'## Summary\\n- Решение: тест\\n\\n**Аудиозапись:** [Аудио/test.wav](dwr-file:Аудио/test.wav)',busy:false}))")
+        assert 'Итоги' in page.locator('#sum').inner_text() and 'Summary' not in page.locator('#sum').inner_text()
+        assert page.locator('#sum .sum-actions').count() == 1
+        for width in (300, 440, 640):
+            page.set_viewport_size({'width':width,'height':850})
+            assert page.locator('#sum').evaluate('e=>e.scrollWidth<=e.clientWidth+1'), width
+            assert all(page.locator(f'#{key}').get_attribute('title') for key in ('again','all-meetings','create-meeting-video','play-meeting-audio','remove-meeting'))
+        page.set_viewport_size({'width':440,'height':850})
+        page.locator('#play-meeting-audio').click()
         assert page.evaluate("CALLS.some(x=>x[0]==='ws_open' && x[1].path==='Встречи/Аудио/test.wav')")
+        page.locator('#all-meetings').click()
+        assert page.evaluate("CALLS.some(x=>x[0]==='open_settings' && x[1]==='prompter')")
         page.evaluate("STATE.recording.video_file='';STATE.recording.video_error='Ошибка кодирования';core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
-        assert button.inner_text() == "Повторить создание видео"
+        assert button.inner_text() == "Повторить видео"
         button.click()
         assert button.is_disabled()
         assert page.evaluate("CALLS.some(x=>x[0]==='prompter_video')")
         page.evaluate("core._on.prompter.forEach(f=>f({kind:'video',busy:false,path:'/tmp/Видео встречи.mp4',file:'Встречи/Видео/test.mp4'}))")
         assert button.is_enabled()
-        assert "Видео готово" in page.locator("#meeting-video-result").inner_text()
+        assert button.inner_text() == "Видео"
         page.evaluate("core._on.prompter.forEach(f=>f({kind:'video',busy:false,error:'Нет аудиозаписи'}))")
         assert "Нет аудиозаписи" in page.locator("#meeting-video-result").inner_text()
+        page.evaluate("STATE.processing=false;STATE.summary_busy=false;STATE.recording.video_file='Встречи/Видео/test.mp4';STATE.recording.video_error='';core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
+        page.locator('#remove-video').click()
+        assert 'Остальные файлы встречи сохранятся' in page.locator('#removeask-d').inner_text()
+        page.locator('#removeask-no').click()
+        assert not page.evaluate("CALLS.some(x=>x[0]==='prompter_result_remove')")
+        page.locator('#remove-video').click(); page.locator('#removeask-yes').click()
+        page.wait_for_function("CALLS.some(x=>x[0]==='prompter_result_remove'&&x[1].meeting_id==='first'&&x[1].video_only)")
+        page.wait_for_function("document.getElementById('removeask').classList.contains('hidden')")
+        assert page.locator('#remove-video').is_hidden()
+        page.locator('#remove-meeting').click()
+        assert 'аудио, текст, кадры и видео' in page.locator('#removeask-d').inner_text()
+        page.locator('#removeask-yes').click()
+        page.wait_for_function("CALLS.some(x=>x[0]==='prompter_result_remove'&&x[1].meeting_id==='first'&&!x[1].video_only)")
+        page.evaluate("dismissedSummary=null;STATE.processing=true;STATE.summary_busy=true;STATE.can_start=false;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
+        page.evaluate("STATE.can_start=false;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
+        assert page.locator("#again").is_enabled(), 'Preparing the next meeting should not wait for device cleanup'
         page.locator("#again").click()
+        page.evaluate("STATE.can_start=true;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
+        assert page.locator("#setup").is_visible(), 'State updates must not close the new meeting setup'
         page.evaluate("core._on.prompter.forEach(f=>f({kind:'summary',meeting_id:'first',summary:'Background result',busy:false}))")
         assert page.locator("#setup").is_visible(), "Background summary must not interrupt new meeting setup"
         page.evaluate("STATE.on=true;STATE.meeting={id:'second',title:'Second'};core._on.prompter.forEach(f=>f({kind:'state',state:STATE}));core._on.prompter.forEach(f=>f({kind:'summary',meeting_id:'first',summary:'Old result',busy:false}))")

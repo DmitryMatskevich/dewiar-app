@@ -70,11 +70,32 @@ window.showHelp=showHelp;
     if(!host||!window.DEWIAR_HELP[key]||host.querySelector('[data-section-help]'))return;
     if(!home&&h.id){const span=document.createElement('span');span.id=h.id;h.removeAttribute('id');span.append(...h.childNodes);h.append(span);}
     const b=document.createElement('button');b.type='button';b.className='btn section-help';b.dataset.sectionHelp=key;b.setAttribute('aria-controls','help');b.setAttribute('aria-expanded','false');
-    b.title=`Открыть подробную справку раздела «${window.DEWIAR_HELP[key].title}»: назначение, шаги настройки, примеры и устранение ошибок. Кнопка находится у правого края окна; справка работает без интернета и не запускает команды.`;
-    b.innerHTML='<span class="help-symbol" aria-hidden="true">?</span><span>Помощь</span>';
+    b.title=`Открыть подробную справку раздела «${window.DEWIAR_HELP[key].title}»: назначение, шаги настройки, примеры и устранение ошибок. Кнопка находится у правого края заголовка; справка работает без интернета и не запускает команды.`;
+    b.setAttribute('aria-label','Помощь');
+    b.innerHTML='<span class="help-symbol" aria-hidden="true">?</span>';
     b.onclick=e=>{e.stopPropagation();showHelp(key);};host.append(b);
   }
   document.querySelectorAll('main section[id^="p-"]').forEach(sectionHelp);
+  // The interface find bar is available from every Studio section (Ctrl+F / Cmd+F).
+  const findBar=document.createElement('div');findBar.id='ui-find';findBar.hidden=true;findBar.setAttribute('role','search');
+  findBar.innerHTML='<input type="search" id="ui-find-query" placeholder="Найти текст в разделе…" aria-label="Поиск по тексту текущего раздела" autocomplete="off"><span id="ui-find-count" role="status" aria-live="polite"></span><button type="button" class="btn small" data-find-prev aria-label="Предыдущее совпадение">↑</button><button type="button" class="btn small" data-find-next aria-label="Следующее совпадение">↓</button><button type="button" class="btn small" data-find-close aria-label="Закрыть поиск">×</button>';
+  document.body.append(findBar);
+  const findInput=findBar.querySelector('#ui-find-query'),findCount=findBar.querySelector('#ui-find-count');let findRanges=[],findIndex=-1;
+  const findHighlights=!!(window.CSS?.highlights&&window.Highlight);
+  function findPaint(){if(!findHighlights)return;CSS.highlights.delete('ui-find-match');CSS.highlights.delete('ui-find-current');if(findRanges.length){const all=new Highlight();findRanges.forEach(r=>all.add(r));CSS.highlights.set('ui-find-match',all);}if(findIndex>=0&&findRanges[findIndex])CSS.highlights.set('ui-find-current',new Highlight(findRanges[findIndex]));}
+  function findVisible(el){return !!el&& !el.closest('[hidden],[aria-hidden="true"]')&&getComputedStyle(el).visibility!=='hidden'&&getComputedStyle(el).display!=='none';}
+  function findRun(){
+    const q=helpText(findInput.value).toLocaleLowerCase('ru').replace(/ё/g,'е');findRanges=[];findIndex=-1;
+    const section=document.querySelector('main section.cur[id^="p-"]');
+    if(q&&section){const walker=document.createTreeWalker(section,NodeFilter.SHOW_TEXT,{acceptNode(n){const p=n.parentElement;if(!p||p.closest('script,style,textarea,input,select,option,[contenteditable="true"]')||!findVisible(p))return NodeFilter.FILTER_REJECT;return NodeFilter.FILTER_ACCEPT;}});let n;while(n=walker.nextNode()){const text=n.nodeValue.toLocaleLowerCase('ru').replace(/ё/g,'е');let from=0,at;while((at=text.indexOf(q,from))!==-1){const range=document.createRange();range.setStart(n,at);range.setEnd(n,at+q.length);findRanges.push(range);from=at+Math.max(1,q.length);}}}
+    findCount.textContent=findRanges.length?'0 / '+findRanges.length:'0 совпадений';findPaint();if(findRanges.length)findGo(0);
+  }
+  function findGo(index){if(!findRanges.length)return;findIndex=(index+findRanges.length)%findRanges.length;findCount.textContent=(findIndex+1)+' / '+findRanges.length;findPaint();const r=findRanges[findIndex];r.startContainer.parentElement?.scrollIntoView({block:'center',behavior:'smooth'});if(!findHighlights){const s=getSelection();s.removeAllRanges();s.addRange(r);}}
+  function findOpen(){findBar.hidden=false;findInput.value='';findRun();findInput.focus();}
+  function findClose(){findBar.hidden=true;findRanges=[];findIndex=-1;findCount.textContent='';findPaint();getSelection().removeAllRanges();}
+  findInput.addEventListener('input',findRun);findBar.querySelector('[data-find-prev]').onclick=()=>findGo(findIndex-1);findBar.querySelector('[data-find-next]').onclick=()=>findGo(findIndex+1);findBar.querySelector('[data-find-close]').onclick=findClose;
+  document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&!e.altKey&&e.key.toLowerCase()==='f'){e.preventDefault();findOpen();}else if(e.key==='Escape'&&!findBar.hidden){e.preventDefault();findClose();}else if(!findBar.hidden&&e.key==='Enter'&&document.activeElement===findInput){e.preventDefault();findGo(findIndex+(e.shiftKey?-1:1));}});
+  document.querySelectorAll('nav button[data-p]').forEach(b=>b.addEventListener('click',()=>{if(!findBar.hidden&&findInput.value)findRun();}));
   // Existing controls receive detailed native title attributes, never extra '?' buttons.
   const fieldDescriptions={
     name:'Название профиля для вашего удобства. Оно помогает отличать подключения и не меняет идентификатор модели на сервере.',

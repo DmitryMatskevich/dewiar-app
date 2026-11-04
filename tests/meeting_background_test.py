@@ -84,6 +84,8 @@ class BackgroundMeeting(unittest.TestCase):
             while not job._summary_path and time.monotonic() < deadline:
                 time.sleep(0.01)
             path = Path(job._summary_path)
+            self.assertIn('## Итоги\n', path.read_text())
+            self.assertNotIn('## Summary\n', path.read_text())
             self.assertIn("создаётся в фоне", path.read_text())
             path.write_text(path.read_text() + "\nUser edit\n")
             self.video_release.set()
@@ -99,22 +101,28 @@ class BackgroundMeeting(unittest.TestCase):
             self.assertEqual(self.video_calls, 1, "opening a finished video must not rebuild it")
 
     def test_video_first_and_new_meeting_is_isolated(self):
-        with patch("meeting_video.build_meeting_video", self.video), patch.object(Prompter, "_summary_text", self.summary), patch.object(Prompter, "_preload_stt"):
+        with patch("meeting_video.build_meeting_video", self.video), patch.object(Prompter, "_summary_text", self.summary), patch.object(Prompter, "_preload_stt"), patch.object(Prompter, "_probe_record_source"), patch.object(Prompter, "_them_loop", lambda pr, stop, q, session: pr._capture_done.set()):
             job, thread = self.launch()
             self.video_release.set()
             job._video_thread.join(2)
             state = self.pr.public()
             self.assertTrue(state["summary_busy"])
             self.assertTrue(state["recording"]["video_file"])
-            self.pr.start(title="Second", them=False, me=False, auto_first_frame=False)
+            self.pr.start(title="Second", them=True, me=False, record=True, deferred=True,
+                          consent=True, auto_first_frame=False)
             second = self.pr.meeting["id"]
             self.assertNotEqual(second, "first")
+            second_audio = Path(self.pr._record_path)
+            self.assertNotEqual(second_audio, Path(job._record_path))
+            self.pr._record_write(b"\x11\x11" * 32000)
             self.text_release.set()
             thread.join(3)
             self.assertEqual(self.pr.meeting["id"], second)
             self.assertEqual(self.pr.summary, "")
             self.assertEqual(self.pr._video_path, "")
             self.assertTrue(self.pr.public()["on"])
+            self.assertTrue(second_audio.is_file())
+            self.assertTrue(Path(job._record_path).is_file())
             self.assertIn("Видео: готово", Path(job._summary_path).read_text())
             summaries = [e for e in self.events if e.get("kind") == "summary" and not e.get("busy")]
             self.assertTrue(summaries)
@@ -145,6 +153,39 @@ class BackgroundMeeting(unittest.TestCase):
             build.assert_not_called()
         self.assertIn("нет сохранённых кадров", self.pr.summary)
         self.assertFalse(self.pr.public()["processing"])
+
+    def test_delete_targets_only_completed_meeting_and_respects_processing(self):
+        job = self.pr._completed_snapshot()
+        self.pr.on = False
+        self.pr._completed_job = job
+        root = self.root / 'Встречи'
+        result = root / (job._base_name + '.md')
+        result.write_text('# Тест\n\n## Итоги\n')
+        job._summary_path, job.summary = str(result), result.read_text()
+        video = job._session_dir / 'Видео' / 'Видео встречи.mp4'
+        video.parent.mkdir(parents=True)
+        video.write_bytes(b'synthetic')
+        job._video_path = str(video)
+        unrelated = root / 'Аудио' / 'другая встреча.wav'
+        unrelated.write_bytes(b'not mine')
+        with patch('guard.plan_delete', side_effect=lambda paths: paths) as plan, patch('guard.trash') as trash:
+            job._summary_busy = True
+            with self.assertRaises(ValueError): self.pr.remove_completed('first')
+            job._summary_busy = False
+            with self.assertRaises(ValueError): self.pr.remove_completed('wrong')
+            self.pr.remove_completed('first', video_only=True)
+            self.assertEqual(plan.call_args.args[0], [video.resolve()])
+            self.assertEqual(job._video_path, '')
+            self.assertIn('удалено пользователем', job.summary)
+            self.assertTrue(unrelated.exists())
+            job._video_path = str(video)
+            self.pr.remove_completed('first')
+            paths = plan.call_args.args[0]
+            self.assertIn(job._session_dir.resolve(), paths)
+            self.assertNotIn(video.resolve(), paths)  # parent directory is trashed once
+            self.assertNotIn(unrelated.resolve(), paths)
+            self.assertEqual(trash.call_count, 2)
+            self.assertIsNone(self.pr._completed_job)
 
     def test_transcription_boundaries_use_bounded_arrays(self):
         import numpy as np

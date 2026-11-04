@@ -63,13 +63,13 @@ def main():
         assert not page.locator('#help').is_visible()
         assert page.locator('[data-f=name]').input_value()=='Unsaved fixture'
         assert page.evaluate('document.activeElement.dataset.sectionHelp')=='brain'
-        edge=page.evaluate("""() => {const r=document.querySelector('#p-brain [data-section-help]').getBoundingClientRect();return {right:r.right,gap:innerWidth-r.right};}""")
-        assert 8 <= edge['gap'] <= 28,edge
-        assert 'правого края окна' in page.locator('#p-brain [data-section-help]').get_attribute('title')
+        edge=page.evaluate("""() => {const r=document.querySelector('#p-brain [data-section-help]').getBoundingClientRect();const h=document.querySelector('#p-brain h1').getBoundingClientRect();return {right:r.right,gap:h.right-r.right};}""")
+        assert abs(edge['gap']) <= 2,edge
+        assert 'правого края заголовка' in page.locator('#p-brain [data-section-help]').get_attribute('title')
         page.evaluate("""() => {document.querySelectorAll('main section').forEach(s=>s.classList.toggle('cur',s.id==='p-home'));}""")
-        home_edge=page.evaluate("""() => Object.fromEntries(['#home-help-slot button','#sn'].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return [s,r&&{right:r.right,gap:innerWidth-r.right,visible:r.width>0&&r.height>0}]}))""")
+        home_edge=page.evaluate("""() => Object.fromEntries(['#home-help-slot button','#sn'].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return [s,r&&{right:r.right,gap:document.querySelector('#p-home .hm-hi').getBoundingClientRect().right-r.right,visible:r.width>0&&r.height>0}]}))""")
         assert home_edge['#home-help-slot button']['visible'],home_edge
-        assert 8 <= home_edge['#home-help-slot button']['gap'] <= 28,home_edge
+        assert 0 <= home_edge['#home-help-slot button']['gap'] <= 12,home_edge
         if home_edge['#sn']['visible']:
             assert home_edge['#sn']['gap'] >= home_edge['#home-help-slot button']['gap'],home_edge
         page.evaluate("""() => {document.querySelectorAll('main section').forEach(s=>s.classList.toggle('cur',s.id==='p-brain'));}""")

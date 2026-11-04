@@ -74,11 +74,17 @@ NOT_DELIVERED = ('⌘V отправлено в «{}», но текст в пол
 _prompted = False
 
 
+class AccessibilityDenied(RuntimeError):
+    """macOS denied synthetic keyboard events for this app."""
+
+
 def copy_and_insert(text):
     """⌘C, then ⌘V: the text stays on the clipboard even if pasting fails."""
     copy_text(text)
     try:
         return {'copied': True, 'inserted': True, 'app': paste_into_focus()}
+    except AccessibilityDenied as exc:
+        return {'copied': True, 'inserted': False, 'reason': str(exc), 'reason_code': 'accessibility'}
     except Exception as exc:  # noqa: BLE001 — the reason is shown to the user and logged
         return {'copied': True, 'inserted': False, 'reason': str(exc)}
 
@@ -155,7 +161,7 @@ def _require_access(ax):
                 request()
         except Exception:  # noqa: BLE001
             pass
-    raise RuntimeError(ACCESS_HINT)
+    raise AccessibilityDenied(ACCESS_HINT)
 
 
 def _ax_value(ax, element, key):

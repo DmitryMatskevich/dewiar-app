@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     ui=Path(folder)/'ui'; shutil.copytree(ROOT/'ui', ui)
     (ui/'assets/dewiar.js').write_text('''
-window.calls=[];window.api=()=>({});
+window.calls=[];window.openedAccess=0;window.api=()=>({open_accessibility_settings:async()=>{openedAccess++}});
 window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},
  async call(cmd,a){calls.push([cmd,a]);if(cmd==='background_dictation_edit')return {active:true,session:a.session,revision:a.revision+1,text:a.text};if(cmd==='dictation_copy_text')return window.pendingPaste||window.pasteResult||{copied:true,inserted:false};return {active:false}},
  async sendLater(){return {}}};window.fire=(t,d)=>(core._on[t]||[]).forEach(f=>f(d));
@@ -77,6 +77,25 @@ window.core={connected:true,_on:{},on(k,f){(this._on[k]??=[]).push(f);return thi
     page.evaluate("fire('dictation',{state:'recording',session:10});pasteResult={copied:true,inserted:true,app:'Telegram'};fire('dictation',{state:'copy_requested',action:'insert',session:10})")
     page.wait_for_function("document.getElementById('askin').value==='' ")
     assert page.evaluate('dictating')
+    page.evaluate("fire('voice_command',{action:'command',status:'received',command:'открой таблицу'})")
+    notice=page.locator('#voice-command-feedback')
+    assert notice.is_visible() and 'открой таблицу' in notice.inner_text() and 'Выполняю' in notice.inner_text()
+    page.evaluate("fire('voice_command',{action:'stop',status:'done'})")
+    assert 'Голосовой ввод остановлен' in notice.inner_text()
+    page.locator('#askin').fill('Не терять')
+    page.evaluate("pasteResult={copied:true,inserted:false,reason:'Нет разрешения «Универсальный доступ»',reason_code:'accessibility'};fire('draft_command',{action:'insert'})")
+    page.wait_for_function("document.getElementById('voice-command-message').textContent.includes('Нет разрешения')")
+    assert 'Команда «вставить» получена' in notice.inner_text()
+    assert page.locator('#askin').input_value() == 'Не терять'
+    assert page.locator('#voice-command-access').is_visible()
+    page.locator('#voice-command-access').click()
+    assert page.evaluate('openedAccess') == 1
+    page.evaluate("fire('voice_command',{action:'insert',status:'error',message:'Нет фокуса'})")
+    assert page.locator('#voice-command-access').is_hidden()
+    page.evaluate("fire('voice_command',{action:'copy',status:'done'})")
+    assert 'Текст скопирован' in notice.inner_text()
+    page.locator('#voice-command-dismiss').click()
+    assert notice.is_hidden()
     assert not errors,errors
     browser.close()
 print('OK: editable background draft, copy feedback and voice copy in normal dictation')
