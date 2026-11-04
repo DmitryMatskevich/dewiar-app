@@ -103,6 +103,25 @@ class EvidenceTests(unittest.TestCase):
         mark=next(m for m in lines[1]['chords'] if m['anchor_quality']=='manual')
         self.assertEqual(mark['char_index'],3)
 
+    def test_width_wrap_does_not_leave_one_word_tail_or_move_chord_off_word(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        text='Мы долго смотрели на звёзды, потом решили вернуться домой.'
+        p={'phrase_id':'p','text':text,'start_ms':0,'end_ms':10000}
+        event={'name':'Am','start_ms':8000,'anchor':{'phrase_id':'p','kind':'manual','grapheme_index':text.index('домой')}}
+        lines=readable_sheet(build_guitar_sheet([p],[event]),max_chars=50)
+        self.assertEqual(' '.join(l['text'] for l in lines),text)
+        self.assertTrue(all(len(l['text'].split())>=3 for l in lines))
+        mark=next((l,m) for l in lines for m in l['chords'])
+        self.assertEqual(mark[0]['text'][mark[1]['char_index']:],'домой.')
+
+    def test_short_answer_and_explicit_newline_are_not_rebalanced(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        p={'phrase_id':'p','text':'Ты меня слышишь? Да.\nДо встречи.','start_ms':0,'end_ms':10000}
+        self.assertEqual([l['text'] for l in readable_sheet(build_guitar_sheet([p],[]))],
+                         ['Ты меня слышишь?','Да.','До встречи.'])
+
     def test_decoder_loop_is_flagged_without_rewriting(self):
         phrase = {'text':'Пара'*110+' Пока!', 'start_ms':201820, 'end_ms':204000}
         before = copy.deepcopy(phrase)

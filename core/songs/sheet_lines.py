@@ -2,6 +2,27 @@
 import re
 
 
+def _balance_soft_wraps(text, bounds, soft, max_chars):
+    """Avoid one/two-word tails created by width, keeping semantic breaks intact."""
+    for j in range(1, len(bounds)-1):
+        left, cut, right = bounds[j-1:j+2]
+        if cut not in soft or len(text[cut:right].split()) > 2:
+            continue
+        words = list(re.finditer(r'\S+', text[left:right]))
+        candidates = []
+        for i in range(3, len(words)-2):
+            at = left + words[i].start()
+            if at >= cut or len(text[left:at].rstrip()) > max_chars or len(text[at:right].rstrip()) > max_chars:
+                continue
+            previous = words[i-1].group()
+            if previous.casefold() in {'не','ни','и','а','но','в','на','с','к','по','без','для','о','из','от'}:
+                continue
+            candidates.append((previous.endswith(','), at))
+        if candidates:
+            bounds[j] = max(candidates)[1]
+    return bounds
+
+
 def readable_sheet(rows, max_chars=64, section_starts=()):
     output, group = [], []
     starts = set(section_starts)
@@ -22,7 +43,7 @@ def readable_sheet(rows, max_chars=64, section_starts=()):
                          if m.get('char_index') is not None and not m.get('continued'))
         # Preserve explicit line breaks; otherwise use punctuation and word limits.
         words = list(re.finditer(r'\S+',text))
-        bounds, begin = [0],0
+        bounds, begin, soft = [0],0,set()
         for i,w in enumerate(words):
             if i+1 == len(words):
                 break
@@ -38,7 +59,10 @@ def readable_sheet(rows, max_chars=64, section_starts=()):
                     cut = w.start()
                 if cut > bounds[-1]:
                     bounds.append(cut);begin=cut
+                    if long and not (hard or punctuation or verse):
+                        soft.add(cut)
         bounds.append(len(text))
+        bounds = _balance_soft_wraps(text, bounds, soft, max_chars)
         shown = set()
         for a,b in zip(bounds,bounds[1:]):
             # Do not leave a hanging preposition/conjunction or one-word shard.
