@@ -3,9 +3,10 @@ const assert=require('node:assert/strict');
 global.window={addEventListener(){}};global.escH=s=>s;
 require('../ui/studio/song_sheet.js');global.SongSheet=window.SongSheet;
 require('../ui/studio/song_review.js');const review=window.SongReview;
-let elements, player, requests, pending;
+let elements, player, requests, pending, follows=[];
+SongSheet.updatePlayback=(id,ms,scroll)=>follows.push({id,ms,scroll});
 function setup() {
- elements=new Map();requests=0;pending=null;
+ elements=new Map();requests=0;pending=null;follows=[];
  global.document={activeElement:null,getElementById:id=>elements.get(id),querySelectorAll:()=>[],querySelector:()=>player};
  for(const id of ['song-sheet-play','song-sheet-stop','song-play-full','song-play-status','song-sheet-play-status','song-review-loop']) elements.set(id,{setAttribute(n,v){this[n]=v}});
  player={dataset:{},src:'',paused:true,ended:false,currentTime:0,isConnected:true,listeners:{},
@@ -22,9 +23,9 @@ const button=id=>elements.get(id);
  setup();const play=button('song-sheet-play'),stop=button('song-sheet-stop');
  assert.equal(stop.disabled,true);
  await play.onclick();assert.equal(player.paused,false);assert.match(play.title,/Приостановить/);assert.equal(requests,1);
- player.currentTime=12;await play.onclick();assert.equal(player.paused,true);assert.equal(player.currentTime,12);assert.equal(review.protectedView('song'),true);
+ player.currentTime=12;player.listeners.timeupdate();assert.equal(follows.at(-1).ms,12000);await play.onclick();assert.equal(follows.at(-1).scroll,false);assert.equal(player.paused,true);assert.equal(player.currentTime,12);assert.equal(review.protectedView('song'),true);
  await play.onclick();assert.equal(player.paused,false);assert.equal(player.currentTime,12);assert.equal(requests,1);
- stop.onclick();assert.equal(player.paused,true);assert.equal(player.currentTime,0);assert.equal(review.protectedView('song'),false);
+ stop.onclick();const held=follows.at(-1).ms;player.listeners.timeupdate();assert.equal(follows.at(-1).ms,held);assert.equal(player.paused,true);assert.equal(player.currentTime,0);assert.equal(review.protectedView('song'),false);
  await play.onclick();assert.equal(requests,1);player.ended=true;player.paused=true;player.listeners.ended();assert.equal(review.protectedView('song'),false);assert.match(play.title,/Проиграть/);
  // A phrase and full song share one element; the sheet play action restores full audio.
  player.src='phrase';player.dataset.phraseId='p';player.currentTime=4;

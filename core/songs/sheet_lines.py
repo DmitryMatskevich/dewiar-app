@@ -1,5 +1,6 @@
 """Presentation-only lyric lines; preserve original phrases and manual history."""
 import re
+from .playback_layout import display_words
 
 
 def _balance_soft_wraps(text, bounds, soft, max_chars):
@@ -23,20 +24,22 @@ def _balance_soft_wraps(text, bounds, soft, max_chars):
     return bounds
 
 
-def readable_sheet(rows, max_chars=64, section_starts=()):
+def readable_sheet(rows, max_chars=42, section_starts=()):
     output, group = [], []
     starts = set(section_starts)
 
     def flush():
         if not group:
             return
-        text, marks, spans = '', [], []
+        text, marks, spans, cues = '', [], [], []
         for row in group:
             if text and not text[-1].isspace():
                 text += ' '
             offset = len(text)
             text += row['text']
             spans.append((offset,len(text),row))
+            cues.extend(dict(w, char_start=offset+w['char_start'], char_end=offset+w['char_end'])
+                        for w in display_words(row))
             # The full sheet already shows the original change (including intro/gap rows).
             # Carry-in marks belong to isolated phrase previews, not new changes.
             marks.extend(dict(m,char_index=offset+m['char_index']) for m in row.get('chords',[])
@@ -51,7 +54,7 @@ def readable_sheet(rows, max_chars=64, section_starts=()):
             value = w.group()
             hard = '\n' in text[w.end():following.start()]
             punctuation = bool(re.search(r'[.!?;][»”"\)]?$',value))
-            verse = value.endswith(',') and following.group()[0].isupper() and w.end()-begin>=18
+            verse = following.group()[0].isupper() and w.end()-begin>=18 and not value.endswith((':','—','-'))
             long = following.end()-begin > max_chars
             if hard or punctuation or verse or long:
                 cut = following.start()
@@ -82,7 +85,9 @@ def readable_sheet(rows, max_chars=64, section_starts=()):
             display_id=pid if pid not in shown else f'{pid}:line:{a}'
             shown.add(pid)
             output.append({**source,'phrase_id':display_id,'text':content,'cells':cells,'chords':chosen,
-                'unplaced_chords':[], 'display_only':True,'source_phrase_ids':[r.get('phrase_id') for r in owners]})
+                'unplaced_chords':[], 'display_only':True,'source_phrase_ids':[r.get('phrase_id') for r in owners],
+                'display_words':[dict(w,char_start=w['char_start']-a,char_end=w['char_end']-a)
+                                 for w in cues if a<=w['char_start'] and w['char_end']<=a+len(content)]})
         group.clear()
 
     for row in rows:

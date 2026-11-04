@@ -9,28 +9,122 @@ window.SongSheet = (() => {
     const pitch = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
     return String(name).replace(/(^|\/)([A-G])([#b]?)/g, (_,prefix,n,acc) => prefix + notes[((pitch[n]+(acc==='#'?1:acc==='b'?-1:0)+steps)%12+12)%12]);
   }
+  const widths = new Map(), playback = new Map();
+  const columns = row => widths.get(row.song_id) || 42;
+  function wrapLine(line, width) {
+    if (!line.text || line.text.length <= width) return [line];
+    const tokens = [...line.text.matchAll(/\S+/g)], pieces = [];
+    let i = 0;
+    while (i < tokens.length) {
+      const start = i === 0 ? 0 : tokens[i].index;
+      let j = i+1;
+      while (j < tokens.length && tokens[j].index+tokens[j][0].length-start <= width) j++;
+      if (j < tokens.length && j-i>2 && /^(не|ни|и|а|но|в|на|с|к|по|без|для|о|из|от)$/i.test(tokens[j-1][0])) j--;
+      const end = j < tokens.length ? tokens[j].index : line.text.length;
+      const text = line.text.slice(start,end).trimEnd();
+      const marks = chordCandidates(line).filter(c=>c.char_index>=start && c.char_index<start+text.length).map(c=>({...c,char_index:c.char_index-start}));
+      pieces.push({...line,text,chords:marks,cells:[],unplaced_chords:[],display_words:(line.display_words || []).filter(w=>w.char_start>=start && w.char_end<=start+text.length).map(w=>({...w,char_start:w.char_start-start,char_end:w.char_end-start}))});
+      i=j;
+    }
+    return pieces;
+  }
+  function chordCandidates(line) {
+    const positioned=line.chords?.length ? line.chords : (line.cells || []).flatMap(c=>(c.chords || []).map(name=>({name,char_index:c.char_index || 0})));
+    if(!line.text || !line.unplaced_chords?.length) return positioned;
+    const duration=Math.max(1,(line.end_ms || 0)-(line.start_ms || 0));
+    return [...positioned,...line.unplaced_chords.map(c=>({...c,char_index:Math.max(0,Math.min(line.text.length-1,Math.floor((c.start_ms-(line.start_ms || 0))/duration*line.text.length)))}))];
+  }
+  function compactChords(line, steps, width=42) {
+    let candidates=chordCandidates(line);
+    if (!line.text && line.unplaced_chords?.length) {
+      const events=line.unplaced_chords, a=events[0].start_ms || 0;
+      const b=Math.max(a+1,...events.map(c=>c.end_ms || c.start_ms+1000));
+      candidates=events.map(c=>({...c,char_index:Math.floor((c.start_ms-a)/(b-a)*(width-5))}));
+    }
+    const grouped=new Map();
+    for (const c of candidates) {
+      if (!c.name || c.name==='N') continue;
+      const name=transpose(c.name,steps), at=Math.max(0,Math.min(c.char_index || 0,width-name.length));
+      const weight=Math.max(1,(c.end_ms ?? ((c.start_ms || 0)+1000))-(c.start_ms || 0));
+      const key=at+':'+name, old=grouped.get(key);
+      grouped.set(key,{...c,name,at,end:at+name.length+1,weight:weight+(old?.weight || 0)});
+    }
+    // Weighted interval scheduling: one chord row, maximum sounding duration.
+    const items=[...grouped.values()].sort((a,b)=>a.end-b.end || a.at-b.at);
+    const best=[{weight:0,items:[]}];
+    for(let i=0;i<items.length;i++) {
+      const c=items[i];let previous=i-1;
+      while(previous>=0 && items[previous].end>c.at) previous--;
+      const take={weight:best[previous+1].weight+c.weight,items:[...best[previous+1].items,c]};
+      best.push(take.weight>best[i].weight ? take : best[i]);
+    }
+    return best[items.length].items.sort((a,b)=>a.at-b.at);
+  }
   function sheetRows(row) {
     const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
-    const lines = [];
+    const lines = [], width=columns(row);
     let stanzaLines = 0;
-    for (const line of row.guitar_sheet || []) {
-      if (lines.length && (parts.has(line.phrase_id) || stanzaLines >= 4)) { lines.push({kind:'space',text:''}); stanzaLines=0; }
-      const chordRows = [];
-      for (const cell of line.cells || []) {
-        for (const name of cell.chords || []) {
-          if (!name || name === 'N') continue;
-          const chord = transpose(name, offset(row)), at = cell.char_index || 0;
-          let i = chordRows.findIndex(r => r.length < at);
-          if (i < 0) { i = chordRows.length; chordRows.push(''); }
-          chordRows[i] = chordRows[i].padEnd(at, ' ') + chord;
-        }
+    for (const source of row.guitar_sheet || []) {
+      if (lines.length && (parts.has(source.phrase_id) || stanzaLines >= 4)) { lines.push({kind:'space',text:''}); stanzaLines=0; }
+      for (const line of wrapLine(source,width)) {
+        const chords=compactChords(line,offset(row),width);
+        let text='';
+        for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
+        if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
+        if(text) lines.push({kind:'chords',text});
+        if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++; }
+        else if(text) lines.push({kind:'space',text:''});
       }
-      lines.push(...chordRows.map(text => ({kind:'chords',text})));
-      if (line.text) { lines.push({kind:'lyrics',text:line.text}); stanzaLines++; }
-      const unplaced = (line.unplaced_chords || []).filter(c => c.name && c.name !== 'N');
-      if (unplaced.length) lines.push({kind:'chords',text:unplaced.map(c => transpose(c.name, offset(row))).join('  ')});
     }
     return lines;
+  }
+  function lyricHTML(line) {
+    let cursor=0, html='';
+    for(const w of line.words || []) {
+      if(w.char_start<cursor || w.char_end>line.text.length) continue;
+      html+=esc(line.text.slice(cursor,w.char_start));
+      const hint=w.quality==='aligned' ? 'Подсветка по выравниванию слов' : 'Приблизительная подсветка по времени фразы';
+      html+=`<span class="song-paper-word" data-word-id="${esc(w.word_id)}" data-start="${w.start_ms}" data-end="${w.end_ms}" title="${hint}">${esc(line.text.slice(w.char_start,w.char_end))}</span>`;
+      cursor=w.char_end;
+    }
+    return html+esc(line.text.slice(cursor));
+  }
+  function updatePlayback(songId, ms, scroll=true) {
+    playback.set(songId,ms);
+    const paper=document.querySelector('.song-paper');
+    if(!paper || paper.dataset.songId!==songId) return;
+    const words=[...paper.querySelectorAll('.song-paper-word')];
+    let selected=null;
+    for(const word of words) {
+      if(Number(word.dataset.start)<=ms && (!selected || Number(word.dataset.start)>=Number(selected.dataset.start))) selected=word;
+    }
+    const old=paper.querySelector('.song-paper-word.current-word');
+    if(selected===old) return;
+    const previousLine=old?.closest('.song-paper-lyrics');
+    old?.classList.remove('current-word'); previousLine?.classList.remove('playing-line');
+    selected?.classList.add('current-word');
+    const line=selected?.closest('.song-paper-lyrics'); line?.classList.add('playing-line');
+    if(scroll && line && line!==previousLine) {
+      line.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+    }
+  }
+  let sheetObserver=null;
+  function bindResponsive(row,render) {
+    sheetObserver?.disconnect();
+    if(typeof ResizeObserver==='undefined') return;
+    const container=document.querySelector('.song-paper-scroll');
+    if(!container) return;
+    sheetObserver=new ResizeObserver(()=>{
+      const body=document.querySelector('.song-paper-body');if(!body || !container.isConnected)return;
+      const context=document.createElement('canvas').getContext('2d');context.font=window.getComputedStyle(body).font;
+      const width=Math.max(12,Math.min(42,Math.floor(container.clientWidth/context.measureText('0').width)-1));
+      if(width===columns(row))return;
+      widths.set(row.song_id,width);render();
+      document.getElementById('song-copy-preview').value=plainText(row);
+      if(playback.has(row.song_id))updatePlayback(row.song_id,playback.get(row.song_id),false);
+      sheetObserver.disconnect();bindResponsive(row,render);
+    });
+    sheetObserver.observe(container);
   }
   function plainText(row) {
     return sheetRows(row).map(r=>r.text).join('\n').replace(/^\n+|\n+$/g, '');
@@ -55,7 +149,7 @@ window.SongSheet = (() => {
   function sheetHTML(row) {
     if (!row.guitar_sheet?.length) return '';
     const links = sourceLinks(row);
-    return `<article class="song-paper" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3><div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${sheetRows(row).map(r=>`<div class="song-paper-${r.kind}">${esc(r.text) || '&nbsp;'}</div>`).join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
+    return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${sheetRows(row).map(r=>`<div class="song-paper-${r.kind}">${(r.kind==='lyrics' ? lyricHTML(r) : esc(r.text)) || '&nbsp;'}</div>`).join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
   }
   function icon(name) {
     const paths = {
@@ -93,6 +187,7 @@ window.SongSheet = (() => {
   }
   function bindToolbar(row, getCurrent, render) {
     if (!document.getElementById('song-key-up')) return;
+    bindResponsive(row,render);
     function change(delta, reset=false) {
       shifts.set(row.song_id,reset ? 0 : offset(row)+delta); render();
       const label = document.getElementById('song-key-label');
@@ -100,6 +195,8 @@ window.SongSheet = (() => {
       label.setAttribute('aria-label', `Сдвиг аккордов: ${shiftLabel(row)} полутонов`);
       document.getElementById('song-copy-preview').value = plainText(getCurrent());
       document.getElementById('song-copy-status').textContent = '';
+      if(playback.has(row.song_id))updatePlayback(row.song_id,playback.get(row.song_id),false);
+      bindResponsive(row,render);
     }
     document.getElementById('song-key-up').onclick = () => change(1);
     document.getElementById('song-key-down').onclick = () => change(-1);
@@ -184,14 +281,16 @@ window.SongSheet = (() => {
       const current = getCurrent();
       const lines = [`{title: ${current.title.replace(/[{}\n]/g,' ')}}`, `{artist: ${(current.artist || '').replace(/[{}\n]/g,' ')}}`,
         '{comment: Предварительный подбор Dewiar. B=си, Bb=си-бемоль.}'];
-      for (const line of current.guitar_sheet || []) {
-        lines.push((line.cells || []).map(c => (c.chords || []).map(n => `[${transpose(n,offset(current))}]`).join('')+c.text).join(''));
-        for (const c of line.unplaced_chords || []) lines.push(`{comment: ${(c.start_ms/1000).toFixed(2)} с — ${transpose(c.name,offset(current))}, привязка не проверена}`);
+      for (const source of current.guitar_sheet || []) for (const line of wrapLine(source,columns(current))) {
+        const chords=compactChords(line,offset(current),columns(current));
+        let text='', cursor=0;
+        for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
+        lines.push(text+(line.text || '').slice(cursor));
       }
       const url = URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
       const link = document.createElement('a'); link.href=url; link.download=(current.title.replace(/[\\/:*?"<>|]/g,'_') || 'song')+'.cho'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon,compactChords,wrapLine,updatePlayback};
 })();

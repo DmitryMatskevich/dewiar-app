@@ -135,9 +135,14 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper { margin-top:22px; padding:22px; border-radius:8px; background:var(--field); color:var(--ink); }
 .song-paper .song-paper-title { margin:0 0 26px; font:700 19px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .song-paper-scroll { overflow-x:auto; padding-bottom:6px; }
-.song-paper-body { width:max-content; min-width:100%; font:400 18px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-ligatures:none; }
+.song-paper-body { width:100%; font:400 18px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-ligatures:none; }
 .song-paper-chords, .song-paper-lyrics, .song-paper-space { white-space:pre; }
 .song-paper-chords { font-weight:700; }
+.song-paper-lyrics { white-space:pre-wrap; overflow-wrap:anywhere; scroll-margin-block:90px; }
+.song-paper-word { border-radius:3px; }
+.song-paper-word.current-word { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 28%,var(--field)); outline:2px solid var(--accent,#4d78c9); }
+.song-paper-lyrics.playing-line { background:color-mix(in srgb,var(--accent,#4d78c9) 7%,transparent); border-radius:4px; }
+.song-timing-note { font:12px/1.4 system-ui,sans-serif; color:var(--muted); margin:0 0 16px; }
 .song-paper-space { height:1.5em; }
 .song-paper-sources { margin-top:28px; display:flex; flex-direction:column; gap:8px; font:14px/1.5 var(--font,system-ui); }
 .song-paper-sources > span { color:var(--muted); }
@@ -145,6 +150,7 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 @media(max-width:760px) { .song-paper { padding:12px; } .song-paper-body {font-size:16px;} }
 /* Compact sheet transport: named icon buttons share the existing audio player. */
 .song-sheet-tools { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:14px 0; }
+.song-sheet-tools { position:sticky; top:6px; z-index:5; background:var(--field); padding:6px; border-radius:14px; }
 .song-tool-group { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; }
 .song-sheet-tools .song-icon-btn { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; min-width:44px; padding:10px; }
 .song-icon-btn svg { flex-shrink:0; pointer-events:none; }

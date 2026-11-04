@@ -66,7 +66,7 @@ window.SongReview = (() => {
     const active = document.activeElement;
     return [...drafts.keys()].some(k => k.startsWith(songId + ':')) ||
       !!(active?.matches('input,textarea,select') && active.closest('.song-phrase-editor, .song-properties')) ||
-      !!document.querySelector('#song-review-audio')?.matches(':not([data-idle]),[data-session],[data-loading]');
+      !!document.querySelector('#song-review-audio')?.matches(':not([data-idle]),[data-session],[data-loading],[data-sheet-hold]');
   }
   function stop() {
     audioRequest++;
@@ -99,13 +99,20 @@ window.SongReview = (() => {
     }
     stopPlayback = () => {
       player.pause();
+      player.dataset.sheetStopped = '1';
+      player.dataset.sheetHold = '1';
       if (player.src) player.currentTime = 0;
       delete player.dataset.loading; delete player.dataset.session;
       player.dataset.idle = '1'; clearHighlights(); message(''); sync();
     };
     player.dataset.idle = '1';
-    player.onplay = () => { delete player.dataset.idle; player.dataset.session = '1'; sync(); };
-    player.onpause = () => { player.dataset.idle = '1'; sync(); };
+    function followWords(scroll) {
+      if (!player.dataset.sheetStopped) SongSheet.updatePlayback(row.song_id,Number(player.dataset.clipStart || 0)+player.currentTime*1000,scroll);
+    }
+    player.addEventListener('timeupdate', () => followWords(!player.paused));
+    player.addEventListener('seeked', () => followWords(!player.paused));
+    player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(true); sync(); };
+    player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
     player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); message(''); sync(); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
     document.getElementById('song-review-loop').onchange = e => { player.loop = e.target.checked; };

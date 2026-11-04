@@ -9,6 +9,33 @@ from songs.public import public_song
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_display_cues_keep_aligned_times_and_estimate_only_missing_words(self):
+        from songs.playback_layout import display_words
+        p={'phrase_id':'p','text':'Мы тихо идём домой','start_ms':0,'end_ms':8000,
+           'words':[{'char_start':3,'char_end':7,'start_ms':1000,'end_ms':2500}]}
+        before=copy.deepcopy(p)
+        cues=display_words(p)
+        self.assertEqual(cues[1]['start_ms'],1000)
+        self.assertEqual(cues[1]['end_ms'],2500)
+        self.assertEqual(cues[1]['quality'],'aligned')
+        self.assertEqual(cues[0]['quality'],'estimated_phrase')
+        self.assertEqual(cues[-1]['end_ms'],8000)
+        self.assertTrue(all(a['end_ms']<=b['start_ms'] for a,b in zip(cues,cues[1:])))
+        self.assertEqual(p,before)
+        p['alignment_stale']=True
+        self.assertTrue(all(c['quality']=='estimated_phrase' for c in display_words(p)))
+
+    def test_phrase_display_breaks_keep_cues_at_the_original_word(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        p={'phrase_id':'p','text':'Тихим вечером мы возвращались домой Сердце радовалось встрече.',
+           'start_ms':0,'end_ms':12000}
+        lines=readable_sheet(build_guitar_sheet([p],[]))
+        self.assertTrue(any(l['text'].startswith('Сердце') for l in lines))
+        self.assertTrue(all(len(l['text'])<=42 for l in lines))
+        words=[l['text'][w['char_start']:w['char_end']] for l in lines for w in l['display_words']]
+        self.assertEqual(words,p['text'].split())
+
     def test_missing_opening_uses_two_independent_models(self):
         from songs.consensus import choose_spine, phrases_from_words
         baseline = {'model':'gigaam', 'phrases':[{'text':'one two three four five six seven eight nine ten eleven', 'start_ms':0,'end_ms':20000}]}
