@@ -99,6 +99,45 @@ class GigaAMSTT:
             shutil.rmtree(d, ignore_errors=True)
         log.info("GigaAM: неполный кэш Hugging Face удалён — скачаю заново")
 
+    def load_cached(self):
+        """Открывает только существующие файлы, без скачивания/починки кэша.
+
+        Для песен установка модели — отдельное действие. Передаём onnx-asr
+        существующий каталог явно: его local resolver не обращается к Hub.
+        Ошибка неполного кэша не должна приводить к удалению чужих весов.
+        """
+        with self._lock:
+            if self.model is not None:
+                return True
+            self.loading = True
+            try:
+                prefix = self.model_name.removeprefix("gigaam-").replace("-", "_")
+                candidates = [self.local_dir] if self._local_ok() else []
+                if not candidates:
+                    for path in sorted((MODELS_DIR / "hf" / "hub").glob("models--*gigaam*/snapshots/*")):
+                        if any(path.glob(f"{prefix}*.onnx")) and any(path.glob("*vocab*.txt")):
+                            candidates.append(path)
+                if not candidates:
+                    raise RuntimeError("Модель GigaAM не установлена; автоматическое скачивание для песни отключено")
+                import onnx_asr
+                import onnxruntime as rt
+                so = rt.SessionOptions()
+                so.intra_op_num_threads = max(1, min(4, (os.cpu_count() or 2) // 2))
+                so.inter_op_num_threads = 1
+                path = candidates[-1]
+                q = "int8" if any(path.glob(f"{prefix}*int8*.onnx")) else None
+                with _heavy():
+                    model = onnx_asr.load_model(self.model_name, str(path), quantization=q, sess_options=so)
+                    model.recognize(np.zeros(8000, dtype=np.float32))
+                self.model, self.error = model, ""
+                return True
+            except Exception as exc:  # noqa: BLE001 — ошибка видна пользователю, кэш не изменяем
+                self.error = str(exc)
+                log.warning("Не удалось открыть скачанную GigaAM: %s", exc)
+                return False
+            finally:
+                self.loading = False
+
     def _from_mirror(self, on_progress=None):
         """Архив модели со своего сайта → MODELS_DIR/<модель>/ (с проверкой sha256). Распаковка во временную папку
         и замена целиком — чтобы оборванная распаковка не оставила полупустую папку, которую _local_ok сочтёт годной."""

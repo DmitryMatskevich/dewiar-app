@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "updated": "2026-11-04",
+  "note": "Все девять исходных записей прошли GigaAM, Whisper large-v2 и Qwen3-ASR, выравнивание и Chordino. Это технический результат, не экспертная приёмка текста/аккордов. Источники проверяются отдельно.",
+  "songs": [
+    {
+      "request": "Правда ведь обидно Высоцкий",
+      "title": "Правда ведь, обидно",
+      "artist": "Владимир Высоцкий",
+      "source": "https://www.youtube.com/watch?v=c_JGURU79Jo",
+      "status": "three_asr_chordino_review_required",
+      "source_check": "Официальный канал Высоцкого, архив Мустафиди 1973. 45.95 с — длина выбранного исходного файла; ASR содержит два куплета и два рефрена. Признаков обрезки при импорте нет.",
+      "references": [
+        "https://www.youtube.com/watch?v=c_JGURU79Jo",
+        "https://5536.amdm.ru/akkordi/vysotskiy_vladimir/210643/pravda_ved_obidno/"
+      ]
+    },
+    {
+      "request": "Планы Клявин",
+      "title": "Планы",
+      "artist": "Владимир Клявин",
+      "source": "https://www.youtube.com/watch?v=Bc1JNDHfxOo",
+      "status": "three_asr_chordino_review_required",
+      "references": [
+        "https://www.youtube.com/watch?v=GiJcmVCk5Ew",
+        "https://mychords.net/uk/vladimir-klyavin/228284-vladimir-klyavin-plany.html"
+      ],
+      "source_check": "Авторский разбор Клявина найден; справочный набор Em C G Bm B7 Am D (H в авторской нотации = B). Это не эталон времен смен аккордов выбранной фонограммы."
+    },
+    {
+      "request": "Прошлое Виктор",
+      "status": "three_asr_chordino_review_required",
+      "candidates": [
+        {
+          "artist": "Виктор Виталий",
+          "source": "https://music.apple.com/ru/song/1042266926"
+        }
+      ],
+      "source": "https://www.youtube.com/watch?v=7oYQTwS1yrs",
+      "title": "Прошлое",
+      "artist": "Виктор ♫ Виталий",
+      "note": "Выбрано официальное видео проекта Виктор Виталий; исходный запрос не уточняет исполнителя полностью.",
+      "source_check": "Выбрано официальное видео проекта Виктор Виталий; исходный запрос не уточняет исполнителя полностью."
+    },
+    {
+      "request": "дело было ночью Котляр",
+      "title": "Дело было ночью",
+      "artist": "Марк Котляр",
+      "source": "https://www.youtube.com/watch?v=_YdvGfkdfzI",
+      "status": "three_asr_chordino_review_required",
+      "references": [
+        "https://stihi.ru/2009/05/20/950"
+      ],
+      "source_check": "Найден авторский текст Марка Котляра, 20.05.2009. Повторы и редакция записи проверяются отдельно."
+    },
+    {
+      "request": "Ленинград-МГА Высоцкий",
+      "status": "three_asr_chordino_review_required",
+      "candidates": [
+        {
+          "artist": "Григорий Лепс",
+          "source": "https://music.apple.com/us/song/1524290773"
+        }
+      ],
+      "note": "Найденное исполнение Розенбаума. Запись голоса Высоцкого не подтверждена; не подменять атрибуцию.",
+      "source": "https://www.youtube.com/watch?v=so990K9IWOQ",
+      "title": "Ленинград-МГА",
+      "artist": "Александр Розенбаум",
+      "source_check": "Исполнение Высоцкого не подтверждено. Розенбаум — альтернативная запись; источник не закрывает требование исходного исполнителя."
+    },
+    {
+      "request": "папа соня и маруся",
+      "title": "Папа",
+      "artist": "Соня и Маруся",
+      "source": "https://www.youtube.com/watch?v=Le5M1tuGv30",
+      "status": "three_asr_chordino_review_required",
+      "references": [
+        "https://www.youtube.com/watch?v=Le5M1tuGv30",
+        "https://hitparad.fm/track/5308642"
+      ],
+      "source_check": "Видео MALFA и опубликованный текст; название совпадает. Точность слов и аккордов ещё не подтверждена."
+    },
+    {
+      "request": "у мужчины тоже есть душа",
+      "status": "three_asr_chordino_review_required",
+      "candidates": [
+        {
+          "artist": "Толя Ковальчук",
+          "source": "https://zvuk.com/track/180689548"
+        },
+        {
+          "artist": "Evgeniy Gluhov",
+          "source": "https://zvuk.com/track/187864673"
+        },
+        {
+          "artist": "Alina",
+          "source": "https://zvuk.com/track/180691566"
+        }
+      ],
+      "source": "https://www.youtube.com/watch?v=TakGPAnvJ6g",
+      "title": "У мужчины тоже есть душа",
+      "artist": "Исполнитель не подтверждён (канал MUSI-Z8J)",
+      "note": "Для технического теста выбран вариант 180 с. Возможны другие одноимённые песни.",
+      "source_check": "Для технического теста выбран вариант 180 с. Возможны другие одноимённые песни."
+    },
+    {
+      "request": "почему устают мужчины нагорный",
+      "status": "three_asr_chordino_review_required",
+      "candidate_artist": "Михаил Нагорный",
+      "source": "https://muz-top.me/track/577068-mihail-nagornyj-pochemu-ustayut-muzhchiny-online",
+      "title": "Почему устают мужчины",
+      "artist": "Михаил Нагорный (по каталогу)",
+      "note": "Каталожная запись 3:23. Независимая атрибуция голоса не выполнена.",
+      "source_check": "Запись 202.998 с, каталог указывает Михаила Нагорного и название из запроса. Прежний YouTube-ролик 314 с содержит другой текст и сохранён отдельно.",
+      "candidates": [
+        {
+          "artist": "Михаил Нагорный (метаданные каталога)",
+          "source": "https://muz-top.me/track/577068-mihail-nagornyj-pochemu-ustayut-muzhchiny-online",
+          "catalog_track": "https://zvuk.com/track/174258194",
+          "duration_seconds": 202.998
+        }
+      ],
+      "alternative_recordings": [
+        {
+          "source": "https://www.youtube.com/watch?v=m41VBYTGAhk",
+          "artist": "Версия канала Ruslan SoulKiss",
+          "duration_seconds": 314,
+          "note": "Прежний ролик оказался другой песней; сохранён отдельной карточкой."
+        }
+      ],
+      "processing": {
+        "folder": "work/song-verification/nagorny-candidate",
+        "audio": "work/song-verification/nagorny-candidate/audio.wav",
+        "baseline": "work/song-verification/nagorny-candidate/gigaam-hypothesis.json",
+        "result": "work/song-verification/nagorny-candidate/full.json"
+      }
+    },
+    {
+      "request": "Папа Яцевич",
+      "title": "Папа",
+      "artist": "Варя Яцевич / Михаил Яцевич",
+      "source": "https://www.youtube.com/watch?v=YDxN5zZCiMQ",
+      "status": "three_asr_chordino_review_required",
+      "source_check": "Видео опубликовано на канале Михаила Яцевича; название указывает слова и музыку Вари Яцевич. Отдельного надёжного текста для сравнения пока нет."
+    }
+  ]
+}

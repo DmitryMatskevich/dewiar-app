@@ -158,6 +158,17 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.mic_voice_t = 0.0                             # когда микрофон последний раз слышал речь (monotonic)
         self.prompter = Prompter(self)                     # суфлёр на встречах (core/prompter.py, окно ui/prompter.html)
         self.toolbox.hooks["prompter"] = self.prompter
+        from songs import SongStore
+        from songs.capture import SongCaptureManager
+        self.song_store = SongStore(STATE_DIR / "songs")
+        self.song_store.recover_interrupted()
+        self.song_capture = SongCaptureManager(STATE_DIR / "songs", self.song_store, self.emit)
+        from songs.analysis import SongAnalyzer
+        self.song_analyzer = SongAnalyzer(STATE_DIR / "songs", self.song_store, self, self.emit)
+        from songs.sources import SongSources
+        self.song_sources = SongSources(self.song_store, self.emit)
+        from songs.import_audio import AudioImporter
+        self.song_importer = AudioImporter(self.song_store)
         from mail_service import MailService
         self.mail = MailService(workspace=self.workspace)
         self.mail.on_counts_change = lambda counts: self.emit("mail_counts", **counts)
@@ -430,6 +441,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.cancel_turn()
         if self.capture:
             self.capture.close()
+        if getattr(self, "song_capture", None):
+            self.song_capture.close()
         t = getattr(self, "_audio_thread", None)
         if t and t.is_alive():
             t.join(timeout=4)      # дать аудиопотоку выйти до завершения интерпретатора (иначе падает onnxruntime)
@@ -663,6 +676,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
     # ---------- события наружу ----------
 
     def emit(self, type_, **kw):
+        if type_.startswith('song_') and 'song' in kw:
+            from songs.public import public_song
+            kw['song'] = public_song(kw['song'], summary=True)
         if type_ == "wake":
             self._ui_wake()                                # имя услышано, а виджета нет (закрыт, упал) — открыть
         if type_ == "answer" and not kw.pop("model", False) and kw.get("text"):

@@ -452,6 +452,7 @@
 
   <section id="p-tasks" class="wide">
     <h1>Задачи</h1>
+<div class="actions" role="group" aria-label="Раздел задач"><button class="btn" id="tasks-work-tab" aria-pressed="true">Общие задачи</button><button class="btn" id="tasks-songs-tab" aria-pressed="false">Песни</button></div><div id="tasks-work-content">
     <p class="lead">Большая работа в фоне: ассистент сам составляет план, выполняет шаги, пишет журнал и сообщает голосом, когда готово.
       Скажите «Агент, разберись…», «исправь в проекте…» — или поставьте задачу здесь. Для задач по коду он работает в копии проекта:
       изменения вы смотрите и принимаете сами.</p>
@@ -483,7 +484,31 @@
     <div class="switch"><div>Выполнять команды в проекте без вопроса<span>Тесты, сборка, git — в рабочей копии проекта. Выключено: ассистент спрашивает перед каждой командой.</span></div><label class="tg"><input type="checkbox" data-k="tasks.auto_run"><i></i></label></div>
     <div class="switch"><div>Самопроверка итога моделью<span>Перед «готово» итог ещё раз коротко и независимо смотрит модель: выполнена ли цель, есть ли обещанные файлы (немного расходует заряд). Готовые файлы кодом проверяются всегда — оборванный HTML, битая таблица, сломанный документ ассистент чинит сам.</span></div><label class="tg"><input type="checkbox" data-k="tasks.self_check"><i></i></label></div>
     <div class="switch"><div>Учиться на прошлых задачах<span>Раз в несколько задач ассистент делает выводы из своих ошибок — короткие правила в «Память/Уроки задач.md» (их можно править) — и соблюдает их дальше. А на ваших поправках в разговоре («нет, я же просил…») учится всегда: правила — в «Память/Уроки.md», их тоже можно править.</span></div><label class="tg"><input type="checkbox" data-k="tasks.learn"><i></i></label></div>
-  </section>
+  </div>  <div id="p-songs" hidden>
+    <div class="songs-head">
+      <div><h1>Песни</h1><p class="lead">Личная библиотека песен: запись, текст по фразам, куплеты и припевы, предварительный подбор аккордов.</p></div>
+      <div class="actions songs-actions"><button class="btn primary" id="songs-new-current">Разобрать текущую песню</button><button class="btn" id="songs-new-query">Найти песню</button></div>
+    </div>
+    <div class="songs-toolbar">
+      <label class="f songs-search"><span class="sr-only">Поиск песен</span><input id="songs-query" type="search" placeholder="Название или исполнитель" autocomplete="off"></label>
+      <div class="songs-filters" role="group" aria-label="Фильтр песен">
+        <button class="chip on" aria-pressed="true" data-song-status="">Все</button><button class="chip" aria-pressed="false" data-song-status="running">В работе</button><button class="chip" aria-pressed="false" data-song-status="review">Проверить</button><button class="chip" aria-pressed="false" data-song-status="ready">Готовы</button>
+      </div>
+    </div>
+    <div id="songs-empty" class="prof on songs-empty"><h2>Начните с песни</h2><p class="hint">Можно взять то, что сейчас играет в Яндекс Музыке, найти песню по названию или выбрать файл в следующем этапе.</p><div class="actions"><button class="btn primary" id="songs-empty-current">Разобрать текущую песню</button><button class="btn" id="songs-empty-query">Найти по названию</button></div></div>
+    <div id="songs-list" class="songs-list" aria-live="polite"></div>
+    <div id="songs-detail" class="songs-detail" hidden></div>
+    <div id="song-create-dialog" class="song-create-dialog" role="dialog" aria-modal="true" aria-labelledby="song-create-title" hidden>
+      <div class="song-create-card">
+        <h2 id="song-create-title">Добавить песню</h2>
+        <p class="hint" id="song-create-help">Введите название и исполнителя через тире.</p>
+        <label class="f">Название и исполнитель<input id="song-create-input" autocomplete="off" placeholder="Например: Правда ведь обидно — Высоцкий"></label>
+        <div class="actions"><button class="btn" id="song-create-cancel">Отмена</button><button class="btn primary" id="song-create-submit">Добавить</button></div>
+      </div>
+    </div>
+  </div></section>
+
+
 
   <section id="p-mail" class="wide">
     <h1>Почта</h1>
@@ -1524,6 +1549,7 @@
     <div class="switch"><div>Рядом<span>«Близкие» → «Рядом»: на карте видно, кто из близких где, если они сами делятся местом.</span></div><label class="tg"><input type="checkbox" data-k="features.near"><i></i></label></div>
     <div class="switch"><div>Встречи<span>«Близкие» → «Встречи»: знакомства с людьми, которые сейчас рядом с вашим телефоном.</span></div><label class="tg"><input type="checkbox" data-k="features.meet"><i></i></label></div>
     <div class="switch"><div>Встречи<span>Запись аудио, экрана, расшифровка и протокол переговоров; окно можно закрыть — фоновая запись продолжится.</span></div><label class="tg"><input type="checkbox" data-k="features.prompter"><i></i></label></div>
+    <div class="switch"><div>Песни<span>Личная библиотека песен: распознавание текста, куплетов и припевов, а позже — подбор аккордов. Результаты хранятся на этом компьютере.</span></div><label class="tg"><input type="checkbox" data-k="features.songs"><i></i></label></div>
     <p class="hint">На телефоне — свои переключатели: «Настройки» → «Ещё» → «Возможности».</p>
   </section>
 
@@ -1948,6 +1974,10 @@
 <script src="assets/help-video-notes.js"></script>
 <script src="studio/core.js"></script>
 <script src="studio/tasks.js"></script>
+<link rel="stylesheet" href="studio/songs.css">
+<script src="studio/song_sheet.js"></script>
+<script src="studio/song_review.js"></script>
+<script src="studio/songs.js"></script>
 <script src="studio/day.js"></script>
 <script src="studio/welcome.js"></script>
 <script src="studio/icons.js"></script>

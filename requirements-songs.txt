@@ -1,0 +1,9 @@
+# Optional macOS Songs runtime. Install in a separate Python 3.12 venv.
+qwen-asr==0.0.6
+mlx-whisper==0.4.3
+torch==2.15.0
+transformers==4.57.6
+librosa==0.11.0
+numpy==2.5.4
+soundfile==0.14.0
+huggingface-hub==0.36.2

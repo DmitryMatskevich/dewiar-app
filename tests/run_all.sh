@@ -18,6 +18,12 @@ run() { local name=$1; shift; local out; local ws; ws=$(mktemp -d)   # у каж
   if [ -z "$bad" ] && [ "$rc" = 0 ] && { [ "$ok" -gt 0 ] || grep -qE "ALL OK|^OK$" <<<"$out"; }; then printf "✅ %-34s %s\n" "$name" "$ok"
   else printf "❌ %-34s (код %s)\n%s\n" "$name" "$rc" "$bad$(tail -5 <<<"$out")"; fi; }
 run "текст, имена"                  $PY "$T/unit_test.py"
+run "песни: правки, отмена, разметка" $PY "$T/song_pipeline_unittest.py"
+run "песни: запись PCM без устройств" $PY "$T/song_capture_unittest.py"
+run "песни: готовые модели без скачивания" $PY "$T/song_cached_model_unittest.py"
+run "песни: эталон и метрики" $PY "$T/song_benchmark_unittest.py"
+run "песни: полный проход и импорт" $PY "$T/song_full_unittest.py"
+run "песни: полнота и лист аккордов" $PY "$T/song_evidence_unittest.py"
 run "облики не грузят компьютер"      $PY "$T/ui_light_test.py"
 run "версия: окно читает верно"        $PY "$T/version_read_test.py"
 run "мозг: форматы серверов"          $PY "$T/llm_compat_test.py"

@@ -475,6 +475,8 @@ class TapCapture:
         self.status = ""
         self.warning = ""
         self.error = ""
+        self.rate = 16000
+        self.channels = 1
         self.events = collections.deque(maxlen=50)
         self._ready = threading.Event()
 
@@ -490,8 +492,17 @@ class TapCapture:
                 ev = {"ev": "log", "text": line}
             self.events.append(ev)
             kind = ev.get("ev")
-            if kind == "ready":
+            # Current macOS helper emits the negotiated stream as `tap`
+            # (older builds used a separate `ready` event).  Both mean that
+            # stdout can be consumed; otherwise open() waits the full 60 s.
+            if kind in ("ready", "tap"):
                 self._ready.set()
+            if kind == "tap":
+                try:
+                    self.rate = int(ev.get("rate") or self.rate)
+                    self.channels = int(ev.get("channels") or self.channels)
+                except (TypeError, ValueError):
+                    pass
             elif kind == "status":
                 self.status, self.state = str(ev.get("text") or ""), str(ev.get("state") or "")
             elif kind == "warning":
@@ -526,10 +537,18 @@ class TapCapture:
         return what + " через Core Audio"
 
     def read(self) -> bytes:
+        """Return the legacy 16 kHz/mono-sized chunk expected by STT callers."""
+        return self._read_bytes(FRAME * 2)
+
+    def read_native(self) -> bytes:
+        """Return one native helper frame without discarding channels/rate."""
+        return self._read_bytes(max(1, FRAME * int(self.channels or 1) * 2))
+
+    def _read_bytes(self, need: int) -> bytes:
         proc = self.proc
         if proc is None or proc.stdout is None:
             return b""
-        need, buf = FRAME * 2, b""
+        buf = b""
         import select
         deadline = time.monotonic() + 2
         while len(buf) < need:

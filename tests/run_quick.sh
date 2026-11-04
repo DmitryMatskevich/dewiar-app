@@ -29,6 +29,12 @@ fi
 
 echo "== Ядро"
 run "текст, имена"                  $PY "$T/unit_test.py"
+run "песни: правки, отмена, разметка" $PY "$T/song_pipeline_unittest.py"
+run "песни: запись PCM без устройств" $PY "$T/song_capture_unittest.py"
+run "песни: готовые модели без скачивания" $PY "$T/song_cached_model_unittest.py"
+run "песни: эталон и метрики" $PY "$T/song_benchmark_unittest.py"
+run "песни: полный проход и импорт" $PY "$T/song_full_unittest.py"
+run "песни: полнота и лист аккордов" $PY "$T/song_evidence_unittest.py"
 run "версия: окно читает верно"     $PY "$T/version_read_test.py"
 run "мозг: форматы серверов"        $PY "$T/llm_compat_test.py"
 run "размышления и код не в ответе" $PY "$T/reasoning_test.py"

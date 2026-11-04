@@ -1,6 +1,8 @@
 # сборки и кэш
 dist/
 .venv/
+.songs-venv/
+.songs-separation-venv/
 work/
 build/
 native/macos/bin/

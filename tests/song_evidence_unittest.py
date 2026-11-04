@@ -1,0 +1,143 @@
+"""Checks derived from defects found in the nine real pilot recordings."""
+import copy
+from pathlib import Path
+import sys
+import unittest
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'core'))
+from songs.evidence import phrase_warnings, compare_reference, review_evidence
+from songs.public import public_song
+
+
+class EvidenceTests(unittest.TestCase):
+    def test_missing_opening_uses_two_independent_models(self):
+        from songs.consensus import choose_spine, phrases_from_words
+        baseline = {'model':'gigaam', 'phrases':[{'text':'one two three four five six seven eight nine ten eleven', 'start_ms':0,'end_ms':20000}]}
+        timed = {'model':'Whisper-test','phrases':[{'text':'one','start_ms':0,'end_ms':1000}]}
+        third = dict(baseline,model='qwen')
+        self.assertIs(choose_spine([baseline,timed,third]),baseline)
+        self.assertIs(choose_spine([baseline,timed]),timed)
+        phrases=phrases_from_words([{'text':'One two', 'start':0,'end':3, 'words':[{'word':'two','start':2,'end':3}]}],'test')
+        self.assertEqual(phrases[0]['text'],'One two')
+        self.assertEqual(phrases[0]['words'],[])
+
+    def test_local_omission_recovery_preserves_existing_text_and_requires_peer(self):
+        from songs.consensus import recover_omissions
+        base = [{'phrase_id':'a','text':'Начало фразы', 'start_ms':0,'end_ms':2000},
+                {'phrase_id':'b','text':'Конец фразы', 'start_ms':8000,'end_ms':10000}]
+        other = {'model':'gigaam','phrases':[{'phrase_id':'g','text':'Начало фразы три потерянных важных слова Конец фразы', 'start_ms':0,'end_ms':10000}]}
+        peer = dict(other,model='qwen')
+        before = copy.deepcopy(base)
+        self.assertEqual(recover_omissions(base,[other]),base)
+        restored = recover_omissions(base,[other,peer])
+        self.assertEqual([p['text'] for p in restored],['Начало фразы','три потерянных важных слова','Конец фразы'])
+        self.assertEqual(restored[1]['words'],[])
+        self.assertEqual(base,before)
+        self.assertEqual(recover_omissions(restored,[other,peer]),restored)
+        distant = {'model':'qwen','phrases':[dict(other['phrases'][0],start_ms=60000,end_ms=70000)]}
+        self.assertEqual(recover_omissions(base,[other,distant]),base)
+
+    def test_zero_word_times_do_not_erase_any_segment_text(self):
+        from songs.consensus import phrases_from_words
+        rows = phrases_from_words([{'text':'Полная первая строка', 'start':0,'end':8,
+            'words':[{'word':'строка','start':1,'end':1}]},
+            {'text':'Полная последняя строка', 'start':8,'end':15}], 'preserve')
+        self.assertEqual([p['text'] for p in rows],['Полная первая строка','Полная последняя строка'])
+
+    def test_chord_continues_above_next_lyric_line_but_not_after_silence(self):
+        from songs.chord_layout import build_guitar_sheet
+        phrases=[{'text':'Opening', 'start_ms':5000,'end_ms':8000}]
+        events=[{'name':'Am','start_ms':0,'end_ms':9000}]
+        self.assertEqual(build_guitar_sheet(phrases,events)[-1]['cells'][0]['chords'],['Am'])
+        events.append({'name':'N','start_ms':4000,'end_ms':9000})
+        self.assertEqual(build_guitar_sheet(phrases,events)[-1]['cells'][0]['chords'],[])
+
+    def test_display_lines_join_shards_without_losing_text_or_chords(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        phrases=[{'phrase_id':'a','text':'Тихий вечер на дворе. Не','start_ms':0,'end_ms':5000},
+                 {'phrase_id':'b','text':'Погасли окна вдалеке.','start_ms':5000,'end_ms':9000}]
+        original=copy.deepcopy(phrases)
+        events=[{'name':'Am','start_ms':1000},{'name':'E7','start_ms':5500}]
+        lines=readable_sheet(build_guitar_sheet(phrases,events))
+        self.assertEqual([l['text'] for l in lines],['Тихий вечер на дворе.','Не Погасли окна вдалеке.'])
+        self.assertEqual(phrases,original)
+        for event in events:
+            self.assertTrue(any(m['start_ms']==event['start_ms'] and m['name']==event['name'] for l in lines for m in l['chords']))
+        self.assertTrue(all(not l['unplaced_chords'] for l in lines))
+        self.assertTrue(all(''.join(c['text'] for c in l['cells'])==l['text'] for l in lines))
+
+    def test_complete_sheet_does_not_repeat_carry_in_across_lines_or_sections(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        phrases=[{'phrase_id':'a','text':'Первая строка. Вторая строка.', 'start_ms':1000,'end_ms':6000},
+                 {'phrase_id':'b','text':'Третья строка.', 'start_ms':6000,'end_ms':9000}]
+        events=[{'name':'F#m','start_ms':0,'end_ms':4500},
+                {'name':'Ab','start_ms':4500,'end_ms':10000}]
+        original=copy.deepcopy(events)
+        lines=readable_sheet(build_guitar_sheet(phrases,events),section_starts=['b'])
+        displayed=[c for line in lines for cell in line['cells'] for c in cell['chords']]
+        displayed += [c['name'] for line in lines for c in line['unplaced_chords']]
+        self.assertEqual(sorted(displayed),['Ab','F#m'])
+        self.assertEqual([l['text'] for l in lines if l['text']],
+                         ['Первая строка.','Вторая строка.','Третья строка.'])
+        self.assertEqual(events,original)
+
+    def test_complete_sheet_keeps_return_to_chord_and_after_silence(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        phrases=[{'phrase_id':str(i),'text':'Строка.', 'start_ms':i*2000,'end_ms':(i+1)*2000}
+                 for i in range(4)]
+        events=[{'name':'Am','start_ms':0},{'name':'E7','start_ms':2000},
+                {'name':'Am','start_ms':4000},{'name':'N','start_ms':5500},
+                {'name':'Am','start_ms':6000}]
+        lines=readable_sheet(build_guitar_sheet(phrases,events))
+        self.assertEqual([c for line in lines for cell in line['cells'] for c in cell['chords']],
+                         ['Am','E7','Am','Am'])
+
+    def test_display_split_retains_manual_character_anchor(self):
+        from songs.chord_layout import build_guitar_sheet
+        from songs.sheet_lines import readable_sheet
+        p={'phrase_id':'p','text':'Первая строка. Любовь','start_ms':0,'end_ms':8000}
+        event={'name':'E7','start_ms':6000,'anchor':{'phrase_id':'p','kind':'manual','grapheme_index':18}}
+        lines=readable_sheet(build_guitar_sheet([p],[event]))
+        mark=next(m for m in lines[1]['chords'] if m['anchor_quality']=='manual')
+        self.assertEqual(mark['char_index'],3)
+
+    def test_decoder_loop_is_flagged_without_rewriting(self):
+        phrase = {'text':'Пара'*110+' Пока!', 'start_ms':201820, 'end_ms':204000}
+        before = copy.deepcopy(phrase)
+        self.assertIn('repetition_loop', [w['code'] for w in phrase_warnings(phrase)])
+        self.assertEqual(phrase, before)
+        self.assertEqual(phrase_warnings({'text':'Ла-ла-ла, о-о-о', 'start_ms':0, 'end_ms':5000}), [])
+
+    def test_missing_line_has_estimated_anchor_not_fake_word_time(self):
+        rows = [{'phrase_id':'a', 'text':'Свет погас', 'start_ms':1000},
+                {'phrase_id':'b', 'text':'Настало утро', 'start_ms':5000}]
+        ref = {'plain_lyrics':'Свет погас. Тихая ночь. Настало утро', 'url':'https://example.org'}
+        result = compare_reference(rows, ref)
+        gap = result['differences'][0]
+        self.assertEqual(gap['kind'], 'insert')
+        self.assertTrue(gap['anchor_estimated'])
+        self.assertEqual(gap['phrase_id'], 'b')
+        self.assertFalse(result['version_verified'])
+
+    def test_repeats_are_differences_not_deleted_or_counted_as_errors(self):
+        rows = [{'text':'Свет погас. Свет погас.', 'start_ms':0}]
+        before = copy.deepcopy(rows)
+        result = compare_reference(rows, {'plain_lyrics':'Свет погас'})
+        self.assertEqual(result['differences'][0]['kind'], 'delete')
+        self.assertEqual(rows, before)
+        self.assertNotIn('wer', result)
+        self.assertEqual(compare_reference(rows, {'plain_lyrics':''}), None)
+
+    def test_current_edits_drive_evidence_and_list_stays_compact(self):
+        row = {'song_id':'id', 'revision':1, 'phrases':[{'text':'Редактор', 'phrase_id':'p'}],
+               'source_candidates':[{'kind':'lyrics', 'plain_lyrics':'Свет погас'}]}
+        self.assertTrue(public_song(row)['review_evidence']['issues'])
+        self.assertNotIn('review_evidence', public_song(row, summary=True))
+        row['phrases'][0]['text'] = 'Свет погас'
+        self.assertFalse(review_evidence(row)['issues'])
+        self.assertFalse(review_evidence(row)['references'][0]['differences'])
+
+
+if __name__ == '__main__': unittest.main()

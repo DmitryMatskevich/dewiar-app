@@ -5,6 +5,7 @@ command(cmd, a) — единый разбор: bridge.py вызывает его
 совпадают с вызовами в ui/ (студия, виджет); новую команду добавляйте и сюда, и туда.
 Многие команды лишь передают работу службам (reminders, money, telegram, cloud…) и шлют событие для обновления окна."""
 import sys
+from songs.public import public_song_commands
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
 
@@ -286,6 +287,7 @@ class CommandsMixin:
                 "radio": self.radio.status(),
                 "pending_import": provision.preview(self.pending_import, self.s.snapshot()) if self.pending_import else None}
 
+    @public_song_commands
     def command(self, cmd, a):
         # Bridge commands run concurrently. Starting a turn and switching its context
         # must be ordered, even when two windows send commands together.
@@ -1702,6 +1704,133 @@ class CommandsMixin:
             return self.updater.public()
         if cmd == "tasks_list":
             return self.tasks.list()
+        if cmd == "songs_list":
+            return self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100))
+        if cmd == "song_get":
+            song = self.song_store.get(str(a.get("song_id") or ""))
+            if not song:
+                raise ValueError("Песня не найдена")
+            return song
+        if cmd == "song_create":
+            return self.song_store.create(a.get("title", ""), a.get("artist", ""), a.get("source", "query"), a.get("source_ref", ""))
+        if cmd == "song_patch":
+            changes = a.get("changes") or {}
+            if not isinstance(changes, dict) or set(changes) - {"title", "artist", "recording_version"}:
+                raise ValueError("Эта команда меняет только название, исполнителя и версию записи")
+            if a.get("base_revision") is None:
+                raise ValueError("Для сохранения нужна ревизия карточки")
+            return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
+        if cmd in {"song_edit_phrase", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_finish_review"}:
+            from songs.review import review_command
+            return review_command(self.song_store, cmd, a)
+        if cmd == "song_cancel":
+            self.song_sources.cancel(str(a.get("song_id") or ""))
+            return self.song_analyzer.cancel(str(a.get("song_id") or ""))
+        if cmd in {'song_find_sources', 'song_download_source'}:
+            return self.song_sources.start(str(a.get('song_id') or ''), a.get('candidate_id') if cmd == 'song_download_source' else None)
+        if cmd == "song_delete":
+            if self.song_sources.running(str(a.get('song_id') or '')):
+                raise ValueError('Дождитесь завершения работы с источником после отмены')
+            if self.song_analyzer.running(str(a.get("song_id") or "")):
+                raise ValueError("Дождитесь завершения распознавания после отмены")
+            if self.song_capture.state(str(a.get("song_id") or "")).get("running"):
+                raise ValueError("Сначала остановите запись песни")
+            if not self.song_store.delete(str(a.get("song_id") or "")):
+                raise ValueError("Песня не найдена")
+            return {"ok": True}
+        if cmd == "song_capture":
+            song_id, action = str(a.get("song_id") or ""), str(a.get("action") or "state")
+            if action == "start":
+                if self.song_analyzer.running(song_id) or self.song_sources.running(song_id):
+                    raise ValueError("Дождитесь завершения распознавания")
+                return self.song_capture.start(song_id, a.get("target", "all"), a.get("backend", "auto"))
+            if action == "stop":
+                return self.song_capture.stop(song_id)
+            return self.song_capture.state(song_id)
+        if cmd == "song_attach_audio":
+            # The UI sends a data URL so the file is copied into Dewiar's
+            # private Songs workspace.  We never retain a path supplied by a
+            # browser and reject formats that the transcription worker cannot
+            # hand to ffmpeg reliably.
+            import base64
+            import wave
+            song_id = str(a.get("song_id") or "")
+            song = self.song_store.get(song_id)
+            if not song:
+                raise ValueError("Песня не найдена")
+            if self.song_analyzer.running(song_id) or self.song_sources.running(song_id) or self.song_capture.state(song_id).get("running"):
+                raise ValueError("Сначала завершите обработку текущей записи")
+            if song.get("phrases"):
+                raise ValueError("Для другой записи создайте новую карточку: текст и правки относятся к текущей")
+            raw = str(a.get("data") or "")
+            if not raw:
+                raise ValueError("Аудиофайл не выбран")
+            encoded = raw.split(",", 1)[1] if raw.startswith("data:") and "," in raw else raw
+            if len(encoded) > 360_000_000:
+                raise ValueError("Файл слишком большой для первого импорта (лимит 256 МБ)")
+            try:
+                payload = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("Не удалось прочитать выбранный аудиофайл") from exc
+            if not payload:
+                raise ValueError("Выбран пустой аудиофайл")
+            if len(payload) > 256 * 1024 * 1024:
+                raise ValueError("Файл больше 256 МБ")
+            name = Path(str(a.get("name") or "audio.wav")).name
+            ext = Path(name).suffix.lower()
+            if ext not in {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus", ".webm", ".mp4"}:
+                raise ValueError("Поддерживаются WAV, MP3, M4A, FLAC, OGG, Opus, WebM и MP4")
+            folder = self.song_store.root / song_id / "audio"
+            folder.mkdir(parents=True, exist_ok=True)
+            import uuid
+            path = folder / ("imported-" + uuid.uuid4().hex + ext)
+            tmp = path.with_name("." + path.name + ".upload")
+            try:
+                tmp.write_bytes(payload)
+                tmp.replace(path)
+            finally:
+                tmp.unlink(missing_ok=True)
+            audio = {"path": str(path.relative_to(self.song_store.root)), "format": ext[1:], "owned": True,
+                     "duration_ms": 0, "sample_rate": None, "channels": None, "original_name": name}
+            if ext == ".wav":
+                try:
+                    with wave.open(str(path), "rb") as wav:
+                        rate, channels, frames = wav.getframerate(), wav.getnchannels(), wav.getnframes()
+                        audio.update({"sample_rate": int(rate), "channels": int(channels), "duration_ms": int(frames * 1000 / max(1, rate))})
+                except (OSError, wave.Error) as exc:
+                    path.unlink(missing_ok=True)
+                    raise ValueError("Файл имеет расширение WAV, но не читается как WAV") from exc
+            updated = self.song_store.patch(song_id, {
+                "source": "file", "status": "queued", "analysis_state": "audio_attached",
+                "review_state": "unreviewed", "stage": "lyrics",
+                "stage_label": "Аудиофайл добавлен — можно распознавать", "audio": audio,
+                "coverage": {**(song.get("coverage") or {}), "recorded_ms": audio["duration_ms"]},
+                "capabilities": {**(song.get("capabilities") or {}), "audio": True},
+            })
+            self.emit("song_capture", song_id=song_id, running=False, source="file", song=updated)
+            return updated
+        if cmd in {'song_upload_begin','song_upload_chunk','song_upload_finish','song_upload_cancel'}:
+            return self.song_importer.command(cmd,a)
+        if cmd == "song_transcribe":
+            if self.song_sources.running(str(a.get('song_id') or '')):
+                raise ValueError('Дождитесь загрузки записи')
+            return self.song_analyzer.start(str(a.get("song_id") or ""), full=a.get('full') is True)
+        if cmd == "song_patch_chords":
+            from songs.chord_layout import build_guitar_sheet
+            song_id = str(a.get("song_id") or "")
+            song = self.song_store.get(song_id)
+            if not song:
+                raise ValueError("Песня не найдена")
+            events = a.get("chords") or []
+            if not isinstance(events, list) or len(events) > 2000:
+                raise ValueError("Некорректный список аккордов")
+            sheet = build_guitar_sheet(song.get("phrases") or [], events)
+            updated = self.song_store.patch(song_id, {"chords": events, "guitar_sheet": sheet,
+                                                       "capabilities": {**(song.get("capabilities") or {}), "chords": any(r.get("chords") or r.get("unplaced_chords") for r in sheet)},
+                                                       "stage": "review", "stage_label": "Проверьте аккорды и их привязку к тексту"},
+                                            a.get("base_revision"))
+            self.emit("song_analysis", song_id=song_id, running=False, song=updated)
+            return updated
         if cmd == 'link_action':
             from link_actions import start
             return start(self, a)
