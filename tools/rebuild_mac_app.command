@@ -16,7 +16,8 @@ step "Тесты записи, доступов и поля ввода"
 for t in meeting_player_test prompter_dual_track_test prompter_links_test prompter_recording_test \
          prompter_capture_test meeting_capture_regression_test meeting_video_test prompter_schedule_test \
          mac_access_test macos_screen_startup_test macos_install_test dictation_engine_test \
-         hud_draft_actions_ui_test hud_voice_finish_ui_test screenshot_text_test screenshot_button_ui_test mac_access_ui_test; do
+         hud_draft_actions_ui_test hud_voice_finish_ui_test screenshot_text_test screenshot_button_ui_test mac_access_ui_test \
+         song_source_search_test song_capture_unittest song_cards_ui_test song_capture_assistant_mode_test; do
   if "$PY" "tests/$t.py" >"work/rebuild-$TS-$t.log" 2>&1; then echo "OK   $t"; else fail "тест $t — см. work/rebuild-$TS-$t.log"; fi
 done
 
@@ -25,6 +26,7 @@ bash tools/build_audio_tap.sh || fail "сборка dewiar-audio-tap"
 
 step "Закрываю запущенный Dewiar"
 # Stop only these exact binaries; resolving an app by name can select an old backup.
+osascript -e 'tell application id "pro.dewiar.macos" to quit' >/dev/null 2>&1 || true
 "$PY" - <<'PY' || fail "завершение прежней версии"
 import os, signal, subprocess, time
 from pathlib import Path

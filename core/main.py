@@ -98,8 +98,6 @@ def main():
         log.info("Dewiar %s — запуск ядра", VERSION)
         migrate_from_cortex()
         settings = Settings()
-        if not settings.get("llm", "auto_select"):
-            settings.update({"llm": {"auto_select": True}})
         import egress                                       # стоп-кран и журнал «что уходило наружу» — до первых соединений
         egress.install(settings, STATE_DIR / "egress.json")
         egress.set_local_only(bool(settings.get("privacy", "local_only")))

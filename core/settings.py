@@ -221,6 +221,7 @@ DEFAULTS = {
            "mail_badge_mode": "unread",  # mail icon counter: unread or important inbox messages
            "hud_w": None, "hud_h": None,    # свой размер карточки виджета (растянули за угол), px при масштабе 100 %
            "hud_show_orb": True,              # показывать большой круглый образ агента в окне
+           "hud_orb_height": None,            # высота окна с образом для возврата после скрытия
            "hud_smooth": True,              # Linux с композитором: прозрачное окно и гладкие скругления (ui/app.py)
            "skin": "neusky",                # тема (фон) виджета и телефона — список в ui/assets/skins.js; по умолчанию «Небесный» (20.10)
            "voice_fx": "bars",              # когда говорит: bars (лучи вокруг портрета) | pulse (расходящиеся круги) | wave (волна)

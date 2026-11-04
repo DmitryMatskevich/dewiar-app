@@ -615,8 +615,14 @@ def make_api(app):
                     return self._hud
                 except Exception:
                     self._hud = None
+            ui = app.ui_settings()
+            zoom = app.zoom_of(ui.get("zoom"))
+            width = ui.get("hud_w") or app.CARD_DEFAULT[0]
+            height = ui.get("hud_h") or app.CARD_DEFAULT[1]
+            if ui.get("hud_show_orb") is False and not ui.get("hud_orb_height"):
+                height = max(app.CARD_MIN[1], height - 220)
             window = webview.create_window(
-                "Dewiar", self._url("hud.html", "&mode=card"), width=340, height=500,
+                "Dewiar", self._url("hud.html", "&mode=card"), width=round(width * zoom), height=round(height * zoom),
                 min_size=(180, 250), js_api=self, on_top=True,
                 background_color="#0b0b0e", menu=getattr(self, "_mac_menu_spec", []),
             )

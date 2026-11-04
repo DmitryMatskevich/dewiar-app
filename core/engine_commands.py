@@ -268,6 +268,8 @@ class CommandsMixin:
         одна фраза."""
         if getattr(self, "server", False) and not on:
             raise ValueError("Голосовой ввод недоступен в текстовом режиме. Напишите сообщение в чате.")
+        if getattr(self, "song_mic_capture_active", False) and not on:
+            raise ValueError("Во время записи песни голосовой ввод ассистента выключен")
         self.muted = bool(on)
         if self.muted:
             self.cancel_turn()
@@ -1707,14 +1709,28 @@ class CommandsMixin:
         if cmd == "tasks_list":
             return self.tasks.list()
         if cmd == "songs_list":
-            return self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100))
+            songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100))
+            for song in songs:
+                song["karaoke"] = self.song_instrumental.summary(song["song_id"])
+            return songs
         if cmd == "song_get":
             song = self.song_store.get(str(a.get("song_id") or ""))
             if not song:
                 raise ValueError("Песня не найдена")
+            song["karaoke"] = self.song_instrumental.summary(song["song_id"])
             return song
         if cmd == "song_create":
             return self.song_store.create(a.get("title", ""), a.get("artist", ""), a.get("source", "query"), a.get("source_ref", ""))
+        if cmd == "song_instrumental_get":
+            return {"summary": self.song_instrumental.summary(str(a.get("song_id") or "")),
+                    "manifest": self.song_instrumental.get(str(a.get("song_id") or ""))}
+        if cmd == "song_instrumental_prepare":
+            return self.song_instrumental.start(str(a.get("song_id") or ""), force=a.get("force") is True)
+        if cmd == "song_instrumental_cancel":
+            return self.song_instrumental.cancel(str(a.get("song_id") or ""))
+        if cmd == "song_current_track":
+            import tools as _tools
+            return _tools.media_track_info()
         if cmd == "song_patch":
             changes = a.get("changes") or {}
             if not isinstance(changes, dict) or set(changes) - {"title", "artist", "recording_version"}:
@@ -1723,6 +1739,9 @@ class CommandsMixin:
                 raise ValueError("Для сохранения нужна ревизия карточки")
             return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
         if cmd in {"song_edit_phrase", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_finish_review"}:
+            if cmd == "song_full_audio" and a.get("variant") == "instrumental":
+                from songs.review import instrumental_audio_command
+                return instrumental_audio_command(self.song_store, self.song_instrumental, a)
             from songs.review import review_command
             return review_command(self.song_store, cmd, a)
         if cmd == "song_cancel":
@@ -1730,7 +1749,12 @@ class CommandsMixin:
             return self.song_analyzer.cancel(str(a.get("song_id") or ""))
         if cmd in {'song_find_sources', 'song_download_source'}:
             return self.song_sources.start(str(a.get('song_id') or ''), a.get('candidate_id') if cmd == 'song_download_source' else None)
+        if cmd == 'song_source_add':
+            from songs.manual_sources import add_manual_source
+            return add_manual_source(self.song_store, str(a.get('song_id') or ''), a.get('url'), a.get('lyrics'), a.get('base_revision'))
         if cmd == "song_delete":
+            if self.song_instrumental.running(str(a.get("song_id") or "")):
+                raise ValueError("Сначала отмените подготовку минусовки")
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь завершения работы с источником после отмены')
             if self.song_analyzer.running(str(a.get("song_id") or "")):
@@ -1745,9 +1769,39 @@ class CommandsMixin:
             if action == "start":
                 if self.song_analyzer.running(song_id) or self.song_sources.running(song_id):
                     raise ValueError("Дождитесь завершения распознавания")
-                return self.song_capture.start(song_id, a.get("target", "all"), a.get("backend", "auto"))
+                source = str(a.get("source", "system") or "system")
+                if source == "microphone":
+                    if self.song_mic_capture_active:
+                        raise ValueError("Запись с микрофона уже идёт")
+                    self._song_capture_resume_muted = bool(self.muted)
+                    self.song_mic_capture_active = True
+                    try:
+                        if getattr(self, "dictation_active", False):
+                            self.dictation_cancel()
+                        if getattr(self, "hold", None) is not None:
+                            self.hold_end(cancel=True)
+                        if not getattr(self, "server", False):
+                            self.set_mute(True)
+                        return self.song_capture.start(song_id, a.get("target", "all"), a.get("backend", "auto"), source=source)
+                    except Exception:
+                        self.song_mic_capture_active = False
+                        if not getattr(self, "server", False):
+                            self.set_mute(self._song_capture_resume_muted)
+                        raise
+                return self.song_capture.start(song_id, a.get("target", "all"), a.get("backend", "auto"), source=source)
             if action == "stop":
-                return self.song_capture.stop(song_id)
+                was_mic_capture = self.song_mic_capture_active
+                try:
+                    saved = self.song_capture.stop(song_id)
+                finally:
+                    if was_mic_capture:
+                        self.song_mic_capture_active = False
+                        if not getattr(self, "server", False):
+                            self.set_mute(self._song_capture_resume_muted)
+                if was_mic_capture:
+                    if saved.get("status") == "queued":
+                        return self.song_analyzer.start(song_id, full=True)
+                return saved
             return self.song_capture.state(song_id)
         if cmd == "song_attach_audio":
             # The UI sends a data URL so the file is copied into Dewiar's

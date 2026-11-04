@@ -1,9 +1,4 @@
-"""Bounded local capture for the Songs tab.
-
-The first vertical slice records the current system mix to an owned WAV file.  It
-deliberately does not start transcription in the capture thread: the complete
-recording stays available until the lyric/structure review is finished.
-"""
+"""Bounded local microphone or system-audio capture for the Songs tab."""
 from __future__ import annotations
 
 import threading
@@ -12,7 +7,7 @@ import wave
 import uuid
 from pathlib import Path
 
-from audio_io import LoopbackCapture
+from audio_io import Capture, LoopbackCapture
 
 
 class SongCaptureManager:
@@ -36,7 +31,7 @@ class SongCaptureManager:
                 return public(item) if item else {"running": False, "song_id": song_id}
             return {"running": bool(self._active), "songs": [public(v) for v in self._active.values()]}
 
-    def start(self, song_id: str, target: str = "all", backend: str = "auto"):
+    def start(self, song_id: str, target: str = "all", backend: str = "auto", source: str = "system"):
         song = self.store.get(song_id)
         if not song:
             raise ValueError("Песня не найдена")
@@ -48,7 +43,15 @@ class SongCaptureManager:
             folder = self.root / song_id / "audio"
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"capture-{uuid.uuid4().hex}.wav"
-            cap = LoopbackCapture(backend=str(backend or "auto"), tap_target=str(target or "all"))
+            source_mode = str(source or "system").lower()
+            if source_mode == "microphone":
+                # Direct input capture records a live singer; system capture below is
+                # for songs already playing on this Mac (Yandex Music, browser, etc.).
+                cap = Capture(device="", channels=1)
+            elif source_mode == "system":
+                cap = LoopbackCapture(backend=str(backend or "auto"), tap_target=str(target or "all"))
+            else:
+                raise ValueError("Неизвестный источник записи песни")
             try:
                 source = cap.open()
             except Exception:
@@ -56,15 +59,17 @@ class SongCaptureManager:
                 raise
             native = getattr(cap, "_cap", None) if getattr(cap, "kind", "") == "tap" else None
             rate = int(getattr(native, "rate", 16000) or 16000)
-            channels = int(getattr(native, "channels", 1) or 1)
+            channels = int(getattr(native, "channels", getattr(cap, "channels", 1)) or 1)
             handle = {"song_id": song_id, "path": path, "capture": cap, "native": native, "stop": threading.Event(),
-                      "thread": None, "source": source, "started": time.time(), "frames": 0, "error": ""}
+                      "thread": None, "source": source, "microphone": source_mode == "microphone",
+                      "started": time.time(), "frames": 0, "error": ""}
             handle["rate"], handle["channels"] = rate, channels
             self._active[song_id] = handle
             self.store.patch(song_id, {"status": "recording", "analysis_state": "capturing", "stage": "record",
-                                       "stage_label": "Записываем источник аудио", "audio": {"path": str(path.relative_to(self.root)),
+                                       "stage_label": "Запись с микрофона; голосовой ввод выключен" if source_mode == "microphone" else "Записываем звук компьютера",
+                                       "audio": {"path": str(path.relative_to(self.root)),
                                        "format": "wav", "sample_rate": rate, "channels": channels,
-                                       "owned": True, "duration_ms": 0},
+                                       "owned": True, "duration_ms": 0, "capture_source": source_mode},
                                        "capabilities": {**(song.get("capabilities") or {}), "audio": False}})
             thread = threading.Thread(target=self._run, args=(handle,), name=f"song-capture-{song_id[:8]}", daemon=True)
             handle["thread"] = thread
@@ -114,7 +119,7 @@ class SongCaptureManager:
                 out.setsampwidth(self.sample_width)
                 out.setframerate(int(handle.get("rate") or 16000))
                 while not handle["stop"].is_set():
-                    chunk = handle["native"].read_native() if handle.get("native") else cap.read()
+                    chunk = cap.read() if handle.get("microphone") else handle["native"].read_native() if handle.get("native") else cap.read()
                     if not chunk:
                         continue
                     out.writeframesraw(chunk)

@@ -84,6 +84,9 @@ def make_server(store):
                 elif cmd == 'songs_list': result = store.list(a.get('q',''),a.get('status',''))
                 elif cmd == 'song_get': result = store.get(a['song_id'])
                 elif cmd == 'song_create': result = store.create(a.get('title',''),a.get('artist',''))
+                elif cmd == 'song_source_add':
+                    from songs.manual_sources import add_manual_source
+                    result = add_manual_source(store, a['song_id'], a.get('url'), a.get('lyrics'), a.get('base_revision'))
                 elif cmd == 'song_patch':
                     changes = a.get('changes') or {}
                     if set(changes)-{'title','artist'}: raise ValueError('Только название и исполнитель')

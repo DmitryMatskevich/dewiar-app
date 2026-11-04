@@ -156,7 +156,7 @@ class SongStore:
                 raise ValueError("Песня уже изменилась — обновите карточку и повторите правку")
             allowed = {"title", "artist", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
-                       "analysis_runs", "phrase_history", "active_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
+                       "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
                        "harmony", "analysis_errors", "source_candidates"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
@@ -175,7 +175,7 @@ class SongStore:
         """Вызывать при запуске владельца задач, когда старых workers уже нет."""
         for row in self.list(limit=500):
             if row.get("status") in {"recording", "running"}:
-                self.patch(row["song_id"], {"status": "interrupted", "active_run_id": None,
+                self.patch(row["song_id"], {"status": "interrupted", "interrupted_run_id": row.get("active_run_id"), "active_run_id": None,
                     "stage_label": "Обработка прервана — сохранённые результаты доступны"})
 
     def save_analysis(self, song_id, run_id, phrases, model):

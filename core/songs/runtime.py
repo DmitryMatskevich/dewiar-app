@@ -46,7 +46,9 @@ def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensu
         process = subprocess.Popen([str(python), '-B', str(Path(__file__).with_name('worker.py')),
             '--input', str(decoded), '--output', str(output), '--run-id', run_id, '--steps', steps,
             '--baseline',str(output.parent/'gigaam.json')],
-            env=env, stdout=handle, stderr=handle, stdin=subprocess.DEVNULL)
+            env=env, stdout=handle, stderr=handle, stdin=subprocess.DEVNULL, start_new_session=True)
+        pidfile = output.with_suffix('.pid')
+        pidfile.write_text(str(process.pid), encoding='ascii')
         deadline = time.monotonic()+3600
         last = ''
         try:
@@ -77,3 +79,5 @@ def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensu
             # Only the reproducible decoded temporary; the owned original and
             # raw hypotheses remain. Do not accumulate one WAV per rerun.
             decoded.unlink(missing_ok=True)
+            if 'pidfile' in locals():
+                pidfile.unlink(missing_ok=True)

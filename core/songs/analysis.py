@@ -4,6 +4,10 @@ from __future__ import annotations
 import threading
 import uuid
 import math
+import json
+import os
+import subprocess
+import time
 from pathlib import Path
 
 
@@ -20,6 +24,83 @@ class SongAnalyzer:
     def running(self, song_id):
         with self._lock:
             return song_id in self._running
+
+    def resume_interrupted(self):
+        """Reconnect to detached workers, commit finished work, or restart safely."""
+        resumed=[]
+        for row in self.store.list(limit=500):
+            if row.get('status')!='interrupted' or not (row.get('audio') or {}).get('path'):
+                continue
+            old_run=row.get('interrupted_run_id')
+            audio_path=(self.root/row['audio']['path']).resolve()
+            folder=audio_path.parent.parent/'analysis'/str(old_run) if old_run else None
+            if folder and folder.is_dir() and (folder/'gigaam.json').is_file():
+                try:
+                    baseline=json.loads((folder/'gigaam.json').read_text(encoding='utf-8'))
+                    pidfile=folder/'result.pid';pid=int(pidfile.read_text()) if pidfile.is_file() else 0
+                    if (folder/'result.json').is_file():
+                        result=json.loads((folder/'result.json').read_text(encoding='utf-8'))
+                        self._restore_and_save(row['song_id'],old_run,folder,baseline,result)
+                        resumed.append(row['song_id']);continue
+                    if pid and self._worker_running(pid,old_run):
+                        with self._lock:
+                            self._running.add(row['song_id']);self._cancels[row['song_id']]=threading.Event()
+                        self.store.patch(row['song_id'],{'status':'running','active_run_id':old_run,'interrupted_run_id':None,
+                            'stage_label':'Продолжаем фоновое распознавание'})
+                        threading.Thread(target=self._watch_detached,args=(row['song_id'],old_run,folder,baseline,pid),
+                            name=f"song-resume-{row['song_id'][:8]}",daemon=True).start()
+                        resumed.append(row['song_id']);continue
+                except (OSError,ValueError,TypeError):
+                    pass
+            try:
+                self.start(row['song_id'],full=True)
+                resumed.append(row['song_id'])
+            except (ValueError, OSError):
+                continue
+        return resumed
+
+    @staticmethod
+    def _worker_running(pid,run_id):
+        try:
+            os.kill(pid,0)
+            cmd=subprocess.check_output(['ps','-p',str(pid),'-o','command='],text=True,timeout=2)
+            return 'worker.py' in cmd and run_id in cmd
+        except (OSError,subprocess.SubprocessError):return False
+
+    def _restore_and_save(self,song_id,run_id,folder,baseline,result):
+        row=self.store.get(song_id)
+        if not row:return
+        if row.get('status')=='interrupted':
+            row=self.store.patch(song_id,{'status':'running','active_run_id':run_id,'interrupted_run_id':None,
+                'stage_label':'Сохраняем результат фонового распознавания'})
+        saved=self.store.save_full_analysis(song_id,run_id,baseline.get('phrases') or [],
+            baseline.get('model') or 'background-worker',result)
+        if saved:self.emit('song_analysis',song_id=song_id,running=False,song=saved)
+
+    def _watch_detached(self,song_id,run_id,folder,baseline,pid):
+        try:
+            deadline=time.monotonic()+3600
+            while time.monotonic()<deadline and self._worker_running(pid,run_id):
+                if self._cancels.get(song_id) and self._cancels[song_id].is_set():return
+                try:
+                    label=json.loads((folder/'result.progress.json').read_text())['label']
+                    row=self.store.get(song_id)
+                    if row and row.get('active_run_id')==run_id and label!=row.get('stage_label'):
+                        fresh=self.store.patch(song_id,{'stage_label':label})
+                        self.emit('song_analysis',song_id=song_id,running=True,song=fresh)
+                except (OSError,ValueError,KeyError,TypeError):pass
+                time.sleep(1)
+            output=folder/'result.json'
+            if output.is_file():
+                self._restore_and_save(song_id,run_id,folder,baseline,json.loads(output.read_text(encoding='utf-8')))
+            else:
+                raise RuntimeError('Фоновый worker завершился без результата')
+        except Exception as exc:
+            row=self.store.get(song_id) or {}
+            if row.get('active_run_id')==run_id:
+                self.store.patch(song_id,{'status':'failed','active_run_id':None,'stage_label':'Фоновый разбор: '+str(exc)[:160]})
+        finally:
+            with self._lock:self._running.discard(song_id);self._cancels.pop(song_id,None)
 
     def cancel(self, song_id):
         with self._lock:

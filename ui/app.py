@@ -3078,7 +3078,10 @@ def main():
     token = ensure_token()
     api = Api(token)
 
-    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], uis.get("hud_h") or CARD_DEFAULT[1])   # свой размер карточки
+    hud_h = uis.get("hud_h") or CARD_DEFAULT[1]
+    if uis.get("hud_show_orb") is False and not uis.get("hud_orb_height"):
+        hud_h = max(CARD_MIN[1], hud_h - 220)  # старые настройки со скрытым образом: освободить его место
+    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], hud_h)   # свой размер карточки
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
     TRANSPARENT[0] = composited_x11()                        # гладкие скругления, если есть композитор
     if not TRANSPARENT[0] and nvidia_driver():
@@ -3242,7 +3245,10 @@ def main_win(args, extra):
         threading.Event().wait()
         return
 
-    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], uis.get("hud_h") or CARD_DEFAULT[1])   # свой размер карточки
+    hud_h = uis.get("hud_h") or CARD_DEFAULT[1]
+    if uis.get("hud_show_orb") is False and not uis.get("hud_orb_height"):
+        hud_h = max(CARD_MIN[1], hud_h - 220)  # старые настройки со скрытым образом: освободить его место
+    set_card_base(uis.get("hud_w") or CARD_DEFAULT[0], hud_h)   # свой размер карточки
     set_zoom_sizes(uis.get("zoom"))                          # окна виджета — под масштаб интерфейса
     mode = "card"                                            # шарика больше нет: сохранённый hud_mode «mini» — тоже карточка
     x, y = uis.get("hud_x"), uis.get("hud_y")

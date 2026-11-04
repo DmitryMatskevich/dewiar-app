@@ -21,7 +21,7 @@ with wave.open(stream, 'wb') as wav:
     wav.writeframes(b'\0\0' * 8000 * 30)
 audio = 'data:audio/wav;base64,' + base64.b64encode(stream.getvalue()).decode()
 rows = [dict(song_id=str(i), title='ТЕСТ ' + str(i), revision=1, status='review',
-             capabilities={'audio': i != 3}, phrases=[], chords=[]) for i in (1, 2, 3)]
+             capabilities={'audio': i != 3}, karaoke={'state':'ready','artifact':{'name':'accompaniment.wav','bytes':12000,'seconds':30}} if i == 1 else {'state':'absent'}, phrases=[], chords=[]) for i in (1, 2, 3)]
 with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
     ui = Path(tmp) / 'ui'
     shutil.copytree(ROOT / 'ui', ui)
@@ -44,16 +44,27 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     play = tab.locator('[data-song-play="1"]')
     stop = tab.locator('[data-song-stop="1"]')
     play.wait_for()
-    assert tab.locator('.song-card-actions button').all_text_contents() == [''] * 12
+    assert tab.locator('.song-card-actions button').all_text_contents() == [''] * 15
     assert tab.locator('[data-song-open="1"]').last.get_attribute('title').startswith('Редактировать')
     assert tab.locator('[data-song-play="3"]').is_disabled()
+    assert not tab.locator('[data-song-karaoke="1"]').is_disabled()
+    assert tab.locator('[data-song-karaoke="2"]').is_disabled()
     assert not stop.is_visible()
     play.click()
     tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
     tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Приостановить')")
     assert stop.is_visible() and play.get_attribute('aria-label').startswith('Приостановить')
     assert tab.evaluate('window.scrollY') == 0, 'Card playback must not jump into the editor'
+    tab.locator('[data-song-karaoke="1"]').click()
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused && calls.some(([cmd,args])=>cmd==='song_full_audio'&&args.variant==='instrumental')")
+    tab.wait_for_function("document.querySelector('[data-song-karaoke=\"1\"]').getAttribute('aria-label').startsWith('Приостановить караоке')")
+    assert tab.locator('[data-song-karaoke="1"]').get_attribute('aria-label').startswith('Приостановить караоке')
+    tab.locator('[data-song-karaoke="1"]').click()
+    tab.wait_for_function("document.querySelector('#song-review-audio').paused")
     play.click()
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused && calls.some(([cmd,args])=>cmd==='song_full_audio'&&args.variant==='original')")
+    play.click()
+    tab.wait_for_function("document.querySelector('#song-review-audio').paused")
     assert tab.locator('#song-review-audio').evaluate('(a)=>a.paused')
     tab.evaluate('loadSongs()')
     tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Продолжить')")
@@ -80,6 +91,15 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     for width in (390, 760, 1100):
         tab.set_viewport_size({'width': width, 'height': 800})
         assert tab.locator('.song-card-actions').evaluate_all('(es)=>es.every(e=>e.getBoundingClientRect().right<=innerWidth)'), width
+    tab.locator('.song-card-main[data-song-open="3"]').click()
+    tab.locator('.song-properties > summary').click()
+    tab.locator('#song-start-mic-capture').wait_for()
+    mic_button = tab.locator('#song-start-mic-capture')
+    system_button = tab.locator('#song-start-system-capture')
+    assert mic_button.get_attribute('title') == 'Запись с микрофона' and mic_button.locator('svg').count() == 1
+    assert system_button.get_attribute('title') == 'Запись системного звука' and system_button.locator('svg').count() == 1
+    tab.locator('#song-start-mic-capture').click()
+    tab.wait_for_function("calls.some(([cmd,args])=>cmd==='song_capture'&&args.source==='microphone')")
     assert not errors, errors
     browser.close()
 print('OK: icon cards, shared play/pause/stop, refresh, switching, cancellation and narrow layout')

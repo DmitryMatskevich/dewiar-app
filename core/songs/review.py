@@ -8,6 +8,43 @@ import shutil
 import subprocess
 
 
+def instrumental_audio_command(store, manager, args):
+    """Return the selected owned instrumental through the existing bounded player transport."""
+    song_id = str(args.get("song_id") or "")
+    row = store.get(song_id)
+    if not row:
+        raise ValueError("Песня не найдена")
+    path = manager.path_for(song_id)
+    if not path:
+        raise ValueError("Минусовка ещё не подготовлена")
+    try:
+        result = subprocess.run([_ffmpeg_path(), "-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe",
+            "-i", str(path), "-t", "600", "-vn", "-ac", "2", "-ar", "44100",
+            "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+            capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("Не удалось подготовить минусовку к воспроизведению") from exc
+    if result.returncode or not result.stdout:
+        raise ValueError("Не удалось прочитать подготовленную минусовку")
+    if len(result.stdout) > 11_500_000:
+        raise ValueError("Минусовка слишком велика для текущего плеера")
+    return {"data": "data:audio/mpeg;base64," + base64.b64encode(result.stdout).decode(),
+            "start_ms": 0, "end_ms": row.get("audio", {}).get("duration_ms") or 600_000,
+            "phrase_start_ms": 0, "phrase_end_ms": row.get("audio", {}).get("duration_ms") or 600_000,
+            "variant": "instrumental", "instrumental_revision": manager.get(song_id).get("revision")}
+
+
+def _ffmpeg_path():
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        return ffmpeg
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, RuntimeError) as exc:
+        raise ValueError("Для прослушивания нужен ffmpeg") from exc
+
+
 def review_command(store, cmd, args):
     song_id = str(args.get("song_id") or "")
     if cmd == 'song_finish_review':

@@ -923,6 +923,62 @@ def media_playing():
     return False
 
 
+def media_track_info():
+    """Best-effort title and artist for the active desktop player."""
+    if DRY:
+        return {}
+    if WIN:
+        return {}
+    if MAC:
+        # Read the running player's accessibility tree. The AX tree can expose
+        # the full mini-player title even when the window caption is generic.
+        try:
+            import mac_control
+            if not mac_control.permission().get('granted'):
+                return {}
+            app = next((r for r in mac_control.running()
+                        if r.get('id') == 'ru.yandex.desktop.music' or
+                        re.search(r'yandex.?music|яндекс.?музык', r.get('name', ''), re.I)), None)
+            if not app:
+                return {}
+            _, windows = mac_control.windows(app)
+            for window in windows:
+                data = mac_control.execute({'action': 'inspect', 'application': app['name'],
+                                            'window': window['number']})
+                strings = []
+                def collect(node):
+                    if isinstance(node, dict):
+                        for key in ('title', 'description', 'value', 'help'):
+                            value = node.get(key)
+                            if isinstance(value, str) and value.strip():
+                                strings.append(value.strip())
+                        for child in node.get('children', []):
+                            collect(child)
+                collect(data.get('tree'))
+                # Prefer the player title if present, else a substantial text
+                # label. Never manufacture an artist from a truncated caption.
+                for value in dict.fromkeys(strings):
+                    value = re.sub(r'\s+', ' ', value).strip()
+                    if len(value) > 4 and not re.search(r'яндекс музыка|yandex music|поиск|плейлист', value, re.I):
+                        parts = re.split(r'\s+[—–]\s+', value, maxsplit=1)
+                        return {'title': parts[1] if len(parts) > 1 else parts[0],
+                                'artist': parts[0] if len(parts) > 1 else ''}
+        except Exception:
+            pass
+        return {}
+    env = desktop_env()
+    if shutil.which('playerctl'):
+        try:
+            out = subprocess.run(['playerctl', '-a', 'metadata', '--format', '{{title}}\t{{artist}}'],
+                                 capture_output=True, text=True, env=env, timeout=3).stdout
+            if out.strip():
+                title, _, artist = out.strip().partition('\t')
+                return {'title': title.strip(), 'artist': artist.strip()}
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return {}
+
+
 def t_media(a, ctx):
     action = a.get("action", "play_pause")
     r = ctx.get("radio")

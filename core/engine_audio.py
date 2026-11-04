@@ -940,6 +940,8 @@ class AudioMixin:
 
     def dictation_start(self, background=False):
         """Непрерывная диктовка: пауза отправляет фрагмент в STT, но не выключает запись."""
+        if getattr(self, "song_mic_capture_active", False):
+            raise ValueError("Идёт запись песни с микрофона. Остановите её, чтобы включить голосовой ввод.")
         if getattr(self, "server", False):
             raise ValueError("Голосовой ввод недоступен в текстовом режиме")
         if getattr(self, "hold", None) is not None:

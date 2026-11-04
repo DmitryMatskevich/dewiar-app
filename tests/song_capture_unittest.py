@@ -31,10 +31,17 @@ class FakeCapture:
         return b''
 
 
+class FakeMicCapture(FakeCapture):
+    kind = ''
+    rate, channels = 16000, 1
+    def read(self):
+        return self.read_native()
+
+
 class CaptureTest(unittest.TestCase):
     def test_stereo_duration_public_state_and_previous_capture_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.dict(sys.modules, {'audio_io': types.SimpleNamespace(LoopbackCapture=FakeCapture)}):
+            with patch.dict(sys.modules, {'audio_io': types.SimpleNamespace(LoopbackCapture=FakeCapture, Capture=FakeMicCapture)}):
                 module = importlib.import_module('songs.capture')
             store = SongStore(Path(tmp))
             sid = store.create('ТЕСТ стерео')['song_id']
@@ -57,6 +64,23 @@ class CaptureTest(unittest.TestCase):
             self.assertNotEqual(second['audio']['path'], saved['audio']['path'])
             self.assertTrue(old.exists())
             self.assertFalse(manager.state(sid)['running'])
+
+    def test_microphone_mode_saves_mono_recording_for_transcription(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(sys.modules, {'audio_io': types.SimpleNamespace(LoopbackCapture=FakeCapture, Capture=FakeMicCapture)}):
+                module = importlib.import_module('songs.capture')
+            store = SongStore(Path(tmp))
+            sid = store.create('ТЕСТ микрофон')['song_id']
+            manager = module.SongCaptureManager(Path(tmp), store, lambda *a, **kw: None)
+            state = manager.start(sid, source='microphone')
+            self.assertEqual(state['source'], 'Синтетический источник')
+            self.assertTrue(manager._active[sid]['capture'].sent.wait(2))
+            saved = manager.stop(sid)
+            self.assertEqual(saved['status'], 'queued')
+            with wave.open(str(Path(tmp) / saved['audio']['path'])) as wav:
+                self.assertEqual(wav.getnchannels(), 1)
+                self.assertEqual(wav.getframerate(), 16000)
+                self.assertEqual(wav.getnframes(), 16000)
 
 
 if __name__ == '__main__': unittest.main()

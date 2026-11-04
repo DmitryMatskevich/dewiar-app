@@ -197,8 +197,12 @@ window.SongSheet = (() => {
       copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
       text:'<path d="M4 5h16M12 5v15M8 20h8M4 5v3m16-3v3"/>',
       play:'<path d="m8 4 12 8-12 8Z"/>',
+      karaoke:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5"/>',
       pause:'<path d="M8 4v16M16 4v16"/>',
-      stop:'<rect x="5" y="5" width="14" height="14" rx="1"/>'
+      stop:'<rect x="5" y="5" width="14" height="14" rx="1"/>',
+      mic:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/>',
+      system:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M7 10h2l2-3 3 7 2-4h1"/>',
+      upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/>'
     };
     return `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ''}</svg>`;
   }

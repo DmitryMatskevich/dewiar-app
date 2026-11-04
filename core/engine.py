@@ -31,6 +31,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.muted = (settings.get("privacy", "mic") == "button" or
                       settings.get("audio", "start_listening") is False)   # «Голос» → запуск: слушать сразу или кнопкой
         self._mute_pass = False                          # микрофон выключен, но нажали «говорить» — слушаем одну фразу
+        self.song_mic_capture_active = False             # исполнение песни записывается отдельно, в чат звук не попадает
+        self._song_capture_resume_muted = self.muted
         self.stopping = threading.Event()
         self.aec = EchoCancel()
         self.capture = None
@@ -165,6 +167,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.song_capture = SongCaptureManager(STATE_DIR / "songs", self.song_store, self.emit)
         from songs.analysis import SongAnalyzer
         self.song_analyzer = SongAnalyzer(STATE_DIR / "songs", self.song_store, self, self.emit)
+        self.song_analyzer.resume_interrupted()
+        from songs.instrumental import InstrumentalManager
+        self.song_instrumental = InstrumentalManager(STATE_DIR / "songs", self.song_store, self.emit)
+        self.song_instrumental._heavy_lock = self.song_analyzer._heavy_lock
         from songs.sources import SongSources
         self.song_sources = SongSources(self.song_store, self.emit)
         from songs.import_audio import AudioImporter

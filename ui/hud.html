@@ -740,8 +740,10 @@ const hudAccess = DewiarHudAccess.create({api: () => window.api?.(), notify: tex
 // «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
 const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars", voiceLevels: true, lookGain: 0.5 });
 const VOICE_FX = ["bars", "pulse", "wave"];
-let orbShown = true;
-function setOrbVisible(on, persist = false) {
+let orbShown = null, orbUi = {};
+function setOrbVisible(on, persist = false, ui = null) {
+  ui = ui || orbUi;
+  const previous = orbShown;
   orbShown = !!on;
   $("card").classList.toggle("no-orb", !orbShown);
   const b = $("b-orb");
@@ -751,11 +753,27 @@ function setOrbVisible(on, persist = false) {
     b.setAttribute("aria-label", b.title);
     b.setAttribute("aria-pressed", String(!orbShown));
   }
-  if (persist && typeof core !== "undefined") core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
+  if (previous !== null && previous !== orbShown) {
+    const show = orbShown, a = api(), zoom = Math.max(.7, Math.min(1.5, +(ui.zoom || 1)));
+    if (a && a.card_size && a.resize_card) a.card_size().then(size => {
+      const currentHeight = Math.round(size[1] / zoom);
+      const restoreHeight = Number(ui.hud_orb_height) || (show ? (Number(ui.hud_h) || 520) : currentHeight);
+      const nextHeight = show ? restoreHeight : Math.max(360, currentHeight - 220);
+      return a.resize_card(size[0], Math.round(nextHeight * zoom), true).then(() => {
+        const patch = { hud_h: nextHeight, hud_orb_height: show ? null : restoreHeight };
+        if (persist) patch.hud_show_orb = show;
+        return core.call("settings_save", { patch: { ui: patch } });
+      });
+    }).catch(() => {});
+    else if (persist) core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
+  } else if (persist && typeof core !== "undefined") {
+    core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
+  }
   requestAnimationFrame(() => { fitCap(); fitAsk(); });
 }
 function applyLook(ui) {                      // тема карточки и облика (assets/skins.*) + чем голос отзывается вокруг портрета
   ui = ui || {};
+  orbUi = ui;
   const sk = window.dewiarSkin ? dewiarSkin(ui.skin) : { id: "brand" };
   (window.DEWIAR_SKIN_IDS || ["brand"]).forEach(k => document.body.classList.toggle("skin-" + k, k === sk.id));
   document.body.classList.toggle("light", !!sk.light);
@@ -763,7 +781,7 @@ function applyLook(ui) {                      // тема карточки и о
   entity.tone = sk.tone || "mono";
   entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
   applyZoom(ui);
-  setOrbVisible(ui.hud_show_orb !== false);
+  setOrbVisible(ui.hud_show_orb !== false, false, ui);
   lookOn = ui.cursor_look === true;
   if (!lookOn) { clearTimeout(lookT); entity.look(null); }   // выключено — сразу прямо
 }

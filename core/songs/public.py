@@ -7,7 +7,7 @@ import copy
 from functools import wraps
 
 CARD_KEYS = ('song_id','revision','title','artist','recording_version','source','source_ref',
-             'status','stage','stage_label','updated_at','created_at','capabilities')
+             'status','stage','stage_label','updated_at','created_at','capabilities','karaoke')
 
 
 def public_song(row, summary=False):

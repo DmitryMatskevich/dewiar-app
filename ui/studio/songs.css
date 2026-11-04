@@ -93,6 +93,20 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-player { display:flex; flex-direction:column; gap:10px; margin:16px 0; }
 .song-player audio { width:100%; min-width:0; }
 .song-player label { display:flex; gap:8px; align-items:center; }
+.song-instrumental-stage { margin:16px 0; padding:16px 18px; border:1px solid var(--line); border-radius:14px; background:var(--field); }
+.song-instrumental-stage h3 { margin:0 0 6px; }
+.song-stage-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.song-stage-head .hint { margin:0; }
+.song-instrumental-file { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin:12px 0; padding:10px 12px; border-radius:10px; background:var(--surface); color:var(--muted); font-size:13px; }
+.song-player-actions { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
+.song-player-actions select { min-width:130px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); color:var(--ink); }
+.song-source-stage { margin:18px 0; padding:16px 18px; border:1px solid var(--line); border-radius:14px; background:var(--field); }
+.song-source-stage-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+.song-source-stage h3 { margin:0 0 5px; }
+.song-source-stage .hint { margin:0 0 10px; }
+.song-source-options { display:grid; gap:8px; margin-top:12px; }
+.song-source-option { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-radius:10px; background:var(--surface); }
+.song-source-option p { margin:4px 0 0; color:var(--muted); }
 .song-create-card { background:var(--glass); }
 .song-title, .songs-detail-head h2, .song-audio-hint { overflow-wrap:anywhere; }
 @media (max-width:760px) {

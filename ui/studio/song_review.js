@@ -3,7 +3,7 @@
    конфликт ревизий показан рядом с полем и не перезаписывает введённый текст. */
 window.SongReview = (() => {
   const drafts = new Map(), timers = new Map();
-  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null;
+  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null;
   window.addEventListener('beforeunload', event => {
     if (drafts.size) { event.preventDefault(); event.returnValue = ''; }
   });
@@ -37,7 +37,7 @@ window.SongReview = (() => {
   function html(row) {
     const header = `<p class="song-note">${row.timing_quality === 'word_estimated' ? 'Времена слов определены моделью и требуют проверки. Подчёркнуты слова без согласия двух распознавателей.' : 'Время определено для фраз. Точные времена слов ещё не получены.'}</p>
       ${row.candidate_run_id ? `<details class="song-note"><summary>Новый вариант распознавания — ваши правки сохранены</summary>${(row.analysis_runs || []).find(r => r.run_id === row.candidate_run_id)?.phrases.map(p => `<p>${esc(p.text)}</p>`).join('') || 'В новом варианте нет текста'}</details>` : ''}
-      <div class="song-player"><audio id="song-review-audio" controls preload="none" aria-label="Прослушивание песни"></audio><button class="btn small" id="song-play-full">Слушать всю песню</button><label><input id="song-review-loop" type="checkbox"> Повторять фрагмент</label><span id="song-play-status" role="status"></span></div>`;
+      `;
     if (!row.phrases?.length) return (row.capabilities?.audio ? header : '') + '<p class="song-note">После распознавания здесь появятся фразы для прослушивания и правки.</p>';
     const starts = new Map((row.sections || []).map(s => [s.phrase_indexes?.[0], s]));
     return header + evidenceHtml(row) + row.phrases.map((p, i) => {
@@ -82,7 +82,7 @@ window.SongReview = (() => {
     const full = document.getElementById('song-play-full');
     const status = document.getElementById('song-play-status');
     const sheetStatus = document.getElementById('song-sheet-play-status');
-    let fullData = null, followSheet = true;
+    let fullData = new Map(), followSheet = true, variant = 'original';
     const message = text => { status.textContent = text; if (sheetStatus) sheetStatus.textContent = text; };
     function sync() {
       if (!player.isConnected) return;
@@ -100,7 +100,7 @@ window.SongReview = (() => {
           SongSheet.lineTarget(SongSheet.lineStarts(row.song_id),player.currentTime*1000,direction)===null;
       }
       full.disabled = loading || !row.capabilities?.audio;
-      window.onSongPlayback?.(row.song_id,{loading,playing,active:loading || !!player.dataset.session || playing || player.currentTime>0});
+      window.onSongPlayback?.(row.song_id,{loading,playing,variant,active:loading || !!player.dataset.session || playing || player.currentTime>0});
     }
     function clearHighlights() {
       document.querySelectorAll('.song-phrase.playing, .song-word.current-word').forEach(el => el.classList.remove('playing','current-word'));
@@ -124,18 +124,28 @@ window.SongReview = (() => {
     player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); message(''); sync(); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
     document.getElementById('song-review-loop').onchange = e => { player.loop = e.target.checked; };
-    async function playFull(restart=false) {
+    async function playFull(restart=false, autoplay=true, seekTo=null) {
       const request = ++audioRequest;
       player.pause(); player.dataset.loading = '1'; sync();
       message(fullData ? '' : 'Подготавливаем запись…');
       try {
-        if (!fullData) {
-          const clip = await core.call('song_full_audio',{song_id:row.song_id});
+        if (!fullData.has(variant)) {
+          const clip = await core.call('song_full_audio',{song_id:row.song_id,variant});
           if (request !== audioRequest || !player.isConnected) return;
-          fullData = clip.data;
+          fullData.set(variant, clip.data);
         }
         if (request !== audioRequest || !player.isConnected) return;
-        if (player.src !== fullData) player.src = fullData;
+        const source = fullData.get(variant);
+        if (player.src !== source) {
+          player.src = source;
+          if (typeof player.load === 'function') await new Promise((resolve,reject) => {
+            const done=()=>{cleanup();resolve();}, fail=()=>{cleanup();reject(new Error('Не удалось загрузить дорожку'))};
+            const cleanup=()=>{player.removeEventListener('loadedmetadata',done);player.removeEventListener('error',fail)};
+            player.addEventListener('loadedmetadata',done,{once:true});player.addEventListener('error',fail,{once:true});player.load();
+          });
+          if (request !== audioRequest || !player.isConnected) return;
+        }
+        if (seekTo !== null && Number.isFinite(seekTo)) player.currentTime=Math.min(seekTo,Math.max(0,(player.duration||seekTo)-0.05));
         if (restart || player.ended) player.currentTime = 0;
         player.dataset.clipStart = '0'; delete player.dataset.phraseId;
         player.loop = false; document.getElementById('song-review-loop').checked = false;
@@ -149,12 +159,34 @@ window.SongReview = (() => {
           });
         };
         player.onended = null;
-        await player.play();
+        if (autoplay) await player.play();
         if (request === audioRequest) message('');
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
     }
     full.onclick = () => { followSheet=true; return playFull(true); };
+    const variantSelect = document.getElementById('song-play-variant');
+    setPlaybackVariant = value => {
+      if (!variantSelect || (value === 'instrumental' && row.karaoke?.state !== 'ready')) return false;
+      variant=variantSelect.value=value;
+      return true;
+    };
+    selectPlaybackVariant = value => {
+      if (!setPlaybackVariant(value)) return Promise.resolve();
+      followSheet=true;
+      return playFull(false,true,player.dataset.session ? player.currentTime : null);
+    };
+    if (variantSelect) variantSelect.onchange = async () => {
+      const wasPlaying = !player.paused && !player.ended;
+      const position = player.currentTime;
+      const next = variantSelect.value;
+      if (next === 'instrumental' && row.karaoke?.state !== 'ready') { variantSelect.value = variant; return; }
+      variant = next;
+      if (player.dataset.session) {
+        player.pause();
+        await playFull(false,wasPlaying,position);
+      }
+    };
     togglePlayback = (follow=true) => { followSheet=follow; if (!player.paused && !player.ended) { player.pause(); return; } return playFull(); };
     if (play) play.onclick = () => togglePlayback(true);
     if (stopButton) stopButton.onclick = stop;
@@ -258,5 +290,10 @@ window.SongReview = (() => {
       };
     });
   }
-  return {html, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow)};
+  function playerHtml(row) {
+    const state=row.karaoke?.state||'absent', busy=['queued','preparing','separating','checking'].includes(state);
+    const status=state==='ready' ? `Минусовка готова${row.karaoke.quality_status==='acceptable'?' и проверена на слух':row.karaoke.quality_status==='defects'?' · есть замечания':' · ожидает оценки качества'}` : state==='failed' ? `Ошибка подготовки: ${row.karaoke.error||'см. состояние этапа'}` : busy ? 'Идёт отдельный этап подготовки минусовки…' : 'Минусовка ещё не подготовлена';
+    return `<section class="song-instrumental-stage" aria-label="Воспроизведение и минусовка"><h3>Воспроизведение</h3><div class="song-player"><audio id="song-review-audio" controls preload="none" aria-label="Прослушивание песни"></audio><div class="song-player-actions"><label>Дорожка <select id="song-play-variant"><option value="original">Оригинал</option><option value="instrumental" ${state==='ready'?'':'disabled'}>Минусовка</option></select></label><button class="btn small" id="song-play-full">Слушать всю песню</button><label><input id="song-review-loop" type="checkbox"> Повторять фрагмент</label></div><span id="song-play-status" role="status">${esc(status)}</span></div></section>`;
+  }
+  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:value=>selectPlaybackVariant?.(value), setVariant:value=>setPlaybackVariant?.(value)};
 })();

@@ -55,8 +55,8 @@ function hmNav() {
 window.hmNav = hmNav;
 
 /* Группы меню сворачиваются (24.10, владелец: «„Настройка“, „Знания“ — сворачиваемыми, с запоминанием»): щелчок по
-   заголовку; что свёрнуто — ui.nav_fold (в настройках, переживает перезапуск). Открытый раздел в свёрнутой группе
-   остаётся виден — чтобы было понятно, где вы. */
+   заголовку; что свёрнуто — ui.nav_fold (в настройках, переживает перезапуск). При сворачивании скрываются все пункты,
+   включая текущий раздел. */
 const ngKey = (g) => g.dataset.k || (g.dataset.k = g.textContent.trim());
 function ngApply() {
   const f = new Set(((S && S.ui) || {}).nav_fold || []);
@@ -64,7 +64,7 @@ function ngApply() {
     const on = f.has(ngKey(g));
     g.classList.toggle("fold", on); g.setAttribute("aria-expanded", String(!on));
     let n = g.nextElementSibling;
-    while (n && !n.classList.contains("ng")) { if (n.tagName === "BUTTON") n.classList.toggle("folded", on && !n.classList.contains("cur")); n = n.nextElementSibling; }
+    while (n && !n.classList.contains("ng")) { if (n.tagName === "BUTTON") n.classList.toggle("folded", on); n = n.nextElementSibling; }
   });
 }
 function ngToggle(g) {
