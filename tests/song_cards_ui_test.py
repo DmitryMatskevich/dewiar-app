@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
 const core={on(){},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='songs_list')return structuredClone(rows);
  if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
+ if(cmd==='songs_instrumental_prepare_all')return {started:[{song_id:'1'}],ready:[{song_id:'2'}],already_running:[],missing_audio:[],errors:[]};
  if(cmd==='song_full_audio'){if(window.failAudio)throw Error('fixture audio error');if(window.delayAudio)await new Promise(r=>window.releaseAudio=r);return {data:audioData};}
  return {};}};
 '''.replace('ROWS', json.dumps(rows)).replace('AUDIO', json.dumps(audio))
@@ -91,6 +92,12 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     for width in (390, 760, 1100):
         tab.set_viewport_size({'width': width, 'height': 800})
         assert tab.locator('.song-card-actions').evaluate_all('(es)=>es.every(e=>e.getBoundingClientRect().right<=innerWidth)'), width
+    tab.locator('#songs-instrumental-all').click()
+    tab.wait_for_function("calls.some(([cmd])=>cmd==='songs_instrumental_prepare_all')")
+    tab.locator('.song-card-main[data-song-open="1"]').click()
+    assert tab.locator('.song-instrumental-stage[aria-label="Этап создания минусовки"]').is_visible()
+    assert tab.locator('#song-instrumental').get_attribute('title') is None
+    assert 'минусовку' in tab.locator('#song-instrumental').inner_text().lower()
     tab.locator('.song-card-main[data-song-open="3"]').click()
     tab.locator('.song-properties > summary').click()
     tab.locator('#song-start-mic-capture').wait_for()

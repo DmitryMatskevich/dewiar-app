@@ -5,7 +5,7 @@
   const state = { rows: [], query: "", status: "", current: null };
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
-  const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["review", "Проверяем"]];
+  const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["review", "Проверяем"], ["karaoke", "Минусовка"]];
   const esc = (v) => escH(v == null ? "" : v);
   const call = (name, args) => core.call(name, args || {});
   const $s = (id) => document.getElementById(id);
@@ -21,16 +21,31 @@
     const bytes=Number(value)||0;
     return bytes>=1024*1024 ? `${(bytes/1024/1024).toFixed(1)} МБ` : `${Math.max(1,Math.round(bytes/1024))} КБ`;
   }
+  function instrumentalPanel(row, state) {
+    const busy = ["queued", "preparing", "separating", "checking"].includes(state);
+    const hasAudio = !!(row.capabilities?.audio || row.audio?.path);
+    const message = state === "ready" ? "Минусовка создана." : state === "failed" ? `Не удалось создать минусовку: ${row.karaoke?.error || "ошибка подготовки"}` : busy ? "Идёт подготовка минусовки…" : hasAudio ? "Создайте версию песни без вокала." : "Добавьте аудиозапись, чтобы создать минусовку.";
+    const action = hasAudio
+      ? `<button type="button" class="btn primary" id="song-instrumental" ${busy ? "disabled" : ""}>${busy ? "Готовится…" : state === "ready" ? "Пересоздать минусовку" : state === "failed" || state === "interrupted" ? "Повторить" : "Создать минусовку"}</button>${busy ? '<button type="button" class="btn" id="song-instrumental-cancel">Отменить</button>' : ""}`
+      : `<button type="button" class="btn" id="song-instrumental-add-audio">Добавить аудиозапись</button>`;
+    const artifact = state === "ready" && row.karaoke?.artifact ? `<div class="song-instrumental-file"><span><b>Минусовка:</b> ${esc(row.karaoke.artifact.name)} · ${formatBytes(row.karaoke.artifact.bytes)}${row.karaoke.artifact.seconds ? ` · ${Math.round(row.karaoke.artifact.seconds)} с` : ""}</span><button type="button" class="btn small" id="song-download-instrumental" title="Скачать подготовленную минусовку отдельным аудиофайлом">Скачать файл</button></div>` : "";
+    return `<section class="song-instrumental-stage" aria-label="Этап создания минусовки"><div class="song-stage-head"><div><h3>Минусовка</h3><p class="hint" id="song-instrumental-status">${esc(message)}</p></div><div class="actions">${action}</div></div>${artifact}${hasAudio ? SongReview.playerHtml(row) : ""}</section>`;
+  }
   function stageIndex(row) {
+    const instrumental = row.karaoke?.state;
+    if (instrumental === "ready") return stages.length;
+    if (["queued", "preparing", "separating", "checking"].includes(instrumental)) return stages.length - 1;
     const i = stages.findIndex((x) => x[0] === row.stage);
     return i < 0 ? 0 : i;
   }
   function card(row) {
     const artist = row.artist ? `<div class="song-artist">${esc(row.artist)}</div>` : `<div class="song-artist">Исполнитель пока не определён</div>`;
+    const ks = row.karaoke?.state;
+    const karaokeBadge = ks === "ready" ? '<span class="song-karaoke-status" data-state="ready">Минусовка готова</span>' : ["queued", "preparing", "separating", "checking"].includes(ks) ? '<span class="song-karaoke-status" data-state="busy">Минусовка готовится</span>' : ks === "failed" || ks === "interrupted" ? '<span class="song-karaoke-status" data-state="failed">Минусовка: повторить</span>' : "";
     return `<article class="song-card" data-song-id="${esc(row.song_id)}">
       <div class="song-card-main" data-song-open="${esc(row.song_id)}" tabindex="0" role="button" aria-label="Открыть ${esc(row.title)}">
         <div class="song-title">${esc(row.title)}</div>${artist}
-        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>
+        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${karaokeBadge}${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>
       </div>
       <div class="song-card-actions">
         <button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}»" aria-label="Проиграть ${esc(row.title)}" ${row.capabilities?.audio ? '' : 'disabled'}>${SongSheet.icon('play')}</button>
@@ -84,8 +99,7 @@
     state.current = row;
     const active = stageIndex(row);
     detail.hidden = false;
-    const instrumentalState = row.karaoke?.state;
-    const instrumentalAction = row.capabilities?.audio ? `<button class="btn" id="song-instrumental" ${['queued','preparing','separating','checking'].includes(instrumentalState) ? 'disabled' : ''}>${['queued','preparing','separating','checking'].includes(instrumentalState) ? 'Готовим минусовку…' : instrumentalState === 'ready' ? 'Пересобрать минусовку' : 'Подготовить минусовку'}</button>${['queued','preparing','separating','checking'].includes(instrumentalState) ? '<button class="btn" id="song-instrumental-cancel">Отменить</button>' : ''}<span class="hint" id="song-instrumental-status">${instrumentalState === 'failed' ? esc(row.karaoke.error || 'Не удалось подготовить минусовку') : instrumentalState === 'ready' ? 'Минусовка подготовлена; прослушивание подключается следующим шагом.' : ''}</span>` : '';
+    const instrumentalState = row.karaoke?.state || "absent";
     const captureAction = row.status === "running" && row.stage === 'sources' ? '' : row.status === "running" ? `<button class="btn" id="song-cancel-analysis">Отменить обработку</button>` : row.status === "recording" ? captureButton("song-stop-capture", "stop", "Остановить запись") : row.capabilities?.audio ? `<button class="btn primary" id="song-start-full">Полный разбор песни</button><button class="btn" id="song-start-transcribe">Распознать текст</button>` : `${captureButton("song-start-mic-capture", "mic", "Запись с микрофона")}${captureButton("song-start-system-capture", "system", "Запись системного звука")}`;
     const guitar = guitarHtml(row);
     const sourceOptions=(row.source_candidates||[]).filter(c=>c.kind==='youtube').sort((a,b)=>(b.match_score||0)-(a.match_score||0)).slice(0,5);
@@ -95,7 +109,7 @@
     detail.innerHTML = `<div class="songs-detail-head"><div><h2>${esc(row.title)}</h2><p class="hint">${esc(row.artist || "Исполнитель определяется по источникам")} · ${esc(currentStatus(row))}</p></div><button class="btn songs-detail-close" id="songs-detail-close">Закрыть</button></div>
       <div class="song-steps" aria-label="Этапы разбора">${stages.map((s, i) => `<div class="song-step ${i < active ? "done" : ""} ${i === active ? "on" : ""}"><b>${i + 1}. ${esc(s[1])}</b>${i < active ? "" : i === active ? esc(row.stage_label || "Выполняется") : "Ожидает"}</div>`).join("")}</div>
       ${sourceStage}
-      ${row.capabilities?.audio ? `<section class="song-instrumental-stage" aria-label="Отдельный этап: минусовка"><div class="song-stage-head"><div><h3>Минусовка</h3><p class="hint">${instrumentalState==='ready' ? 'Подготовлена и доступна для отдельного воспроизведения.' : instrumentalState==='failed' ? esc(row.karaoke?.error||'Ошибка подготовки') : ['queued','preparing','separating','checking'].includes(instrumentalState) ? 'Идёт подготовка отдельной дорожки…' : 'Отдельно подготовьте версию без вокала.'}</p></div><div class="actions">${instrumentalAction}</div></div>${instrumentalState==='ready'&&row.karaoke?.artifact ? `<div class="song-instrumental-file"><span><b>Файл минусовки:</b> ${esc(row.karaoke.artifact.name)} · ${formatBytes(row.karaoke.artifact.bytes)}${row.karaoke.artifact.seconds?` · ${Math.round(row.karaoke.artifact.seconds)} с`:''}</span><button type="button" class="btn small" id="song-download-instrumental" title="Скачать подготовленную минусовку отдельным аудиофайлом">Скачать файл</button></div>` : ''}${SongReview.playerHtml(row)}</section>` : ''}
+      ${instrumentalPanel(row, instrumentalState)}
       <div class="song-detail-grid"><div class="song-preview">${guitar ? `<h3>Текст с аккордами</h3>${SongSheet.toolbar(row)}<p class="song-note">Предварительный подбор по звуку. B — си, Bb — си-бемоль. Аккорды над словами: точные привязки сохранены, остальные расположены приблизительно по времени фразы. Позицию можно поправить вручную.</p><div id="song-guitar-content">${guitar}</div>` : ""}<details><summary>Проверить и исправить распознавание</summary>${SongReview.html(row)}</details></div>
       <details class="song-properties" ${row.status === 'needs_input' ? 'open' : ''}><summary>Источники, свойства и правка аккордов</summary>${row.recording_version ? `<p class="song-note"><b>Выбранная запись:</b> ${esc(row.recording_version)}</p>` : ""}${errors}<label class="f">Название<input id="song-edit-title" value="${esc(row.title)}"></label><label class="f">Исполнитель<input id="song-edit-artist" value="${esc(row.artist || "")}"></label><p class="hint">Источник: ${esc(row.source || "поиск")}. Правки сохраняются отдельной ревизией.</p><div class="actions"><button class="btn" id="song-save-meta">Сохранить название</button><button class="btn" id="song-refresh">Обновить карточку</button><button class="btn" id="song-find-sources" ${row.status === "running" || row.status === "recording" ? "disabled" : ""}>Найти записи и текст</button>${captureButton("song-attach-audio", "upload", "Добавить аудиофайл")}${captureAction}</div><input id="song-audio-input" type="file" accept="audio/*,video/*" hidden><p class="hint" id="song-audio-hint">${row.audio?.path ? `Файл: ${esc(row.audio.original_name || row.audio.format || "аудио")}${row.audio.duration_ms ? ` · ${Math.round(row.audio.duration_ms / 1000)} с` : ""}` : "Можно импортировать локальную запись, если системный захват недоступен."}</p><h3>Добавить свой источник</h3><label class="f">Ссылка на запись или публикацию<input id="song-manual-url" type="url" maxlength="2048" placeholder="https://…"></label><label class="f">Текст песни для сверки (необязательно)<textarea id="song-manual-lyrics" maxlength="100000" rows="4"></textarea></label><p class="hint">YouTube-запись можно выбрать после добавления. Другие ссылки сохраняются для проверки; для автоматической сверки вставьте текст. Существующая запись и правки сохраняются.</p><button class="btn" id="song-add-manual-source" ${row.status === 'running' || row.status === 'recording' ? 'disabled' : ''}>Добавить источник</button><p class="hint" id="song-manual-source-result" role="status"></p>${SongSheet.html(row)}${sources ? `<h3>Источники</h3>${sources}` : ""}</details></div>`;
     SongSheet.bind(row, () => state.current, acceptSaved);
@@ -139,6 +153,7 @@
       try { await call("song_instrumental_cancel", {song_id: row.song_id}); renderDetail(await call("song_get", {song_id: row.song_id})); await load(); }
       catch (error) { toast(error.message || "Не удалось отменить подготовку", 5000, "bad"); }
     });
+    $s("song-instrumental-add-audio")?.addEventListener("click", () => $s("song-audio-input")?.click());
     $s("song-download-instrumental")?.addEventListener("click", async event => {
       const button=event.currentTarget;button.disabled=true;button.textContent='Готовим файл…';
       try {
@@ -297,6 +312,21 @@
     ["songs-new-current", "songs-empty-current"].forEach((id) => $s(id)?.addEventListener("click", () => queryCreate("current")));
     ["songs-new-query", "songs-empty-query"].forEach((id) => $s(id)?.addEventListener("click", () => queryCreate("query")));
     ["songs-new-mic","songs-empty-mic"].forEach(id=>$s(id)?.addEventListener('click',createMicSong));
+    $s("songs-instrumental-all")?.addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const result = await call("songs_instrumental_prepare_all");
+        const started = result.started?.length || 0;
+        const ready = result.ready?.length || 0;
+        const active = result.already_running?.length || 0;
+        const missing = result.missing_audio?.length || 0;
+        const errors = result.errors?.length || 0;
+        toast(`В очереди: ${started} · готовы: ${ready} · уже готовятся: ${active}${missing ? ` · без аудио: ${missing}` : ""}${errors ? ` · ошибки: ${errors}` : ""}`, 6000);
+        await load();
+      } catch (error) { toast(error.message || "Не удалось запустить минусовки", 5000, "bad"); }
+      finally { button.disabled = false; }
+    });
     $s("song-create-cancel")?.addEventListener("click", closeCreateDialog);
     $s("song-create-submit")?.addEventListener("click", async () => {
       const input = $s("song-create-input"), value = input?.value.trim();

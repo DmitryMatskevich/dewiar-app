@@ -1728,6 +1728,32 @@ class CommandsMixin:
             return self.song_instrumental.start(str(a.get("song_id") or ""), force=a.get("force") is True)
         if cmd == "song_instrumental_cancel":
             return self.song_instrumental.cancel(str(a.get("song_id") or ""))
+        if cmd == "songs_instrumental_prepare_all":
+            started, ready, active, missing, errors = [], [], [], [], []
+            for row in self.song_store.list(limit=500):
+                song_id = str(row.get("song_id") or "")
+                audio = row.get("audio") or {}
+                source = (self.song_store.root / str(audio.get("path") or "")).resolve()
+                if self.song_store.root.resolve() not in source.parents or not source.is_file():
+                    missing.append({"song_id": song_id, "title": row.get("title", "")})
+                    continue
+                summary = self.song_instrumental.summary(song_id)
+                if summary.get("state") == "ready" and summary.get("artifact"):
+                    ready.append({"song_id": song_id, "title": row.get("title", "")})
+                    continue
+                if self.song_instrumental.running(song_id):
+                    active.append({"song_id": song_id, "title": row.get("title", "")})
+                    continue
+                try:
+                    result = self.song_instrumental.start(song_id)
+                    if result.get("reused"):
+                        ready.append({"song_id": song_id, "title": row.get("title", "")})
+                    else:
+                        started.append({"song_id": song_id, "title": row.get("title", "")})
+                except Exception as exc:  # one bad card must not prevent the rest from entering the queue
+                    errors.append({"song_id": song_id, "title": row.get("title", ""), "error": str(exc)[:240]})
+            return {"started": started, "ready": ready, "already_running": active,
+                    "missing_audio": missing, "errors": errors}
         if cmd == "song_current_track":
             import tools as _tools
             return _tools.media_track_info()

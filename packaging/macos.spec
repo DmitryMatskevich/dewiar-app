@@ -8,7 +8,8 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 root = Path(SPECPATH).parent
 datas = [(str(root / name), name) for name in ("core", "ui", "data", "icons")]
-datas += [(str(root / "tools/subscription_ui_smoke.js"), "tools")]
+datas += [(str(root / name), "tools") for name in
+          ("tools/subscription_ui_smoke.js", "tools/song_separation_probe.py")]
 binaries = []
 hidden = [p.stem for p in (root / "core").glob("*.py")] + ["macshell", "Vision", "ScreenCaptureKit", "webview.platforms.cocoa", "logging.handlers"]
 for package in ("onnxruntime", "onnx_asr", "huggingface_hub", "vosk", "piper", "imageio_ffmpeg"):

@@ -171,14 +171,39 @@ class InstrumentalManager:
                     m["active_job"].update(state="separating", stage="separating", progress=None)
                     m["revision"] += 1
                     self._write(folder / "manifest.json", m)
-                probe = Path(__file__).resolve().parents[2] / "tools" / "song_separation_probe.py"
-                py = Path(os.environ["DEWIAR_SEPARATION_PYTHON"]) if os.environ.get("DEWIAR_SEPARATION_PYTHON") else Path(__file__).resolve().parents[2] / ".songs-separation-venv/bin/python"
-                if not py.is_file():
+                configured = os.environ.get("DEWIAR_SEPARATION_PYTHON")
+                candidates = ([Path(configured)] if configured else [])
+                candidates += [Path.home() / "Library/Application Support/Dewiar/runtimes/separation/bin/python"]
+                if not getattr(sys, "frozen", False):
+                    candidates.append(Path(__file__).resolve().parents[2] / ".songs-separation-venv/bin/python")
+                py = next((candidate for candidate in candidates if candidate.is_file()), None)
+                if getattr(sys, "frozen", False):
+                    probe = Path(sys._MEIPASS) / "tools" / "song_separation_probe.py"
+                else:
+                    probe = Path(__file__).resolve().parents[2] / "tools" / "song_separation_probe.py"
+                if py is None:
                     raise RuntimeError("Локальная среда разделения не найдена; установите runtime минусовок")
+                if not probe.is_file():
+                    raise RuntimeError("Worker минусовок не включён в сборку приложения")
                 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
                 env.pop("PYTHONHOME", None); env.pop("PYTHONPATH", None); env.pop("DYLD_LIBRARY_PATH", None)
+                worker_source = source
+                # The external HTDemucs environment's libsndfile cannot decode
+                # WebM/Opus (used by YouTube captures). Decode a temporary PCM
+                # copy with the app's bundled ffmpeg; keep hashing the original.
+                if source.suffix.lower() in {".webm", ".opus", ".m4a", ".mp3", ".aac", ".mp4"}:
+                    import imageio_ffmpeg
+                    worker_source = run_dir / "input.wav"
+                    decoded = subprocess.run(
+                        [imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-nostdin", "-y",
+                         "-protocol_whitelist", "file,pipe", "-i", str(source), "-vn",
+                         "-c:a", "pcm_f32le", str(worker_source)],
+                        capture_output=True, timeout=180,
+                    )
+                    if decoded.returncode or not worker_source.is_file() or not worker_source.stat().st_size:
+                        raise RuntimeError("Не удалось декодировать аудио для создания минусовки")
                 with (run_dir / "worker.log").open("w", encoding="utf-8") as log:
-                    proc = subprocess.Popen([str(py), "-B", str(probe), str(source), str(candidate_dir)],
+                    proc = subprocess.Popen([str(py), "-B", str(probe), str(worker_source), str(candidate_dir)],
                                             stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                             text=True, env=env)
                     with self._lock:

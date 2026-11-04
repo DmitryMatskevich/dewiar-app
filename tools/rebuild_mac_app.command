@@ -17,9 +17,13 @@ for t in meeting_player_test prompter_dual_track_test prompter_links_test prompt
          prompter_capture_test meeting_capture_regression_test meeting_video_test prompter_schedule_test \
          mac_access_test macos_screen_startup_test macos_install_test dictation_engine_test \
          hud_draft_actions_ui_test hud_voice_finish_ui_test screenshot_text_test screenshot_button_ui_test mac_access_ui_test \
-         song_source_search_test song_capture_unittest song_cards_ui_test song_capture_assistant_mode_test; do
+         song_source_search_test song_capture_unittest song_cards_ui_test song_capture_assistant_mode_test \
+         song_instrumental_batch_test; do
   if "$PY" "tests/$t.py" >"work/rebuild-$TS-$t.log" 2>&1; then echo "OK   $t"; else fail "тест $t — см. work/rebuild-$TS-$t.log"; fi
 done
+
+step "Установка локального runtime минусовок"
+"$PY" tools/install_song_separation_runtime.py || fail "runtime минусовок"
 
 step "Хелпер звука dewiar-audio-tap"
 bash tools/build_audio_tap.sh || fail "сборка dewiar-audio-tap"
