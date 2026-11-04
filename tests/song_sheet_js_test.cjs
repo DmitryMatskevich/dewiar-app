@@ -51,6 +51,30 @@ const last=wrapped.find(l=>l.display_words.length);
 assert.equal(last.text.slice(last.display_words[0].char_start,last.display_words[0].char_end),'word');
 console.log('Single chord row, duration dominance, transpose fit and responsive cues: OK');
 
+// Real regression shape: a change in a short vocal gap was a separate API row,
+// then the next lyric had its own changes. Per-row compaction left a staircase.
+const boundary={guitar_sheet:[
+ {text:'Previous phrase.',chords:[{name:'C#',char_index:0,start_ms:1000,end_ms:2000}]},
+ {text:'',unplaced_chords:[{name:'Abmaj7',start_ms:2000,end_ms:2427}]},
+ {text:'',unplaced_chords:[{name:'F6',start_ms:2427,end_ms:2600}]},
+ {text:'Next phrase with words.',chords:[{name:'F#m',char_index:0,start_ms:2600,end_ms:6000},{name:'Bm',char_index:17,start_ms:6000,end_ms:7000}]},
+ {text:'',unplaced_chords:[{name:'E',start_ms:7000,end_ms:8000}]},
+ {text:'',unplaced_chords:[{name:'Am',start_ms:8000,end_ms:9000}]}
+]};
+const boundaryBefore=JSON.stringify(boundary);
+const visible=s.sheetRows(boundary).filter(r=>r.kind!=='space');
+assert.ok(visible.every((r,i)=>r.kind!=='chords' || visible[i-1]?.kind!=='chords'));
+assert.equal(visible.filter(r=>r.kind==='lyrics').map(r=>r.text).join(' '),'Previous phrase. Next phrase with words.');
+assert.equal(visible.filter(r=>r.kind==='chords')[1].text,'F#m              Bm');
+assert.equal(visible.at(-1).kind,'chords');
+assert.equal(s.presentationLines(boundary).length,3);
+assert.equal(JSON.stringify(boundary),boundaryBefore);
+// All-instrumental tracks and multiple intro blocks also have just one row.
+const gaps={guitar_sheet:boundary.guitar_sheet.filter(l=>!l.text)};
+assert.equal(s.sheetRows(gaps).filter(r=>r.kind==='chords').length,1);
+assert.equal(s.sheetRows({guitar_sheet:[...gaps.guitar_sheet,boundary.guitar_sheet[3]]}).filter(r=>r.kind==='chords').length,1);
+console.log('Gap/lyric boundaries, consecutive instrumental blocks and source preservation: OK');
+
 assert.equal(s.lineTarget([1000,5000,11000],0,1),1000);
 assert.equal(s.lineTarget([1000,5000,11000],3000,-1),null);
 assert.equal(s.lineTarget([1000,5000,11000],3000,1),5000);

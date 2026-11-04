@@ -60,21 +60,44 @@ window.SongSheet = (() => {
     }
     return best[items.length].items.sort((a,b)=>a.at-b.at);
   }
+  function presentationLines(row, width=columns(row)) {
+    const lines=[], pending=[];
+    // Gap events used to render as a separate row immediately above the next
+    // lyric's chord row. Compact the entire boundary together, not each API row.
+    // Keep the API/editor data intact; these are approximate display anchors.
+    for (const source of row.guitar_sheet || []) {
+      if (!source.text) {
+        pending.push(...chordCandidates(source),...(source.unplaced_chords || []));
+        continue;
+      }
+      const wrapped=wrapLine(source,width);
+      if (pending.length) {
+        const first=wrapped[0];
+        wrapped[0]={...first,cells:[],unplaced_chords:[],chords:[
+          ...pending.splice(0).map(c=>({...c,char_index:0,anchor_quality:'estimated_gap'})),
+          ...chordCandidates(first)
+        ]};
+      }
+      lines.push(...wrapped);
+    }
+    if (pending.length) lines.push({text:'',unplaced_chords:pending});
+    return lines;
+  }
   function sheetRows(row) {
     const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
-    const lines = [], width=columns(row);
+    const lines = [], width=columns(row), seenParts=new Set();
     let stanzaLines = 0;
-    for (const source of row.guitar_sheet || []) {
-      if (lines.length && (parts.has(source.phrase_id) || stanzaLines >= 4)) { lines.push({kind:'space',text:''}); stanzaLines=0; }
-      for (const line of wrapLine(source,width)) {
-        const chords=compactChords(line,offset(row),width);
-        let text='';
-        for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
-        if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
-        if(text) lines.push({kind:'chords',text});
-        if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++; }
-        else if(text) lines.push({kind:'space',text:''});
-      }
+    for (const line of presentationLines(row,width)) {
+      const newPart=parts.has(line.phrase_id) && !seenParts.has(line.phrase_id);
+      seenParts.add(line.phrase_id);
+      if (lines.length && (newPart || stanzaLines >= 4)) { lines.push({kind:'space',text:''}); stanzaLines=0; }
+      const chords=compactChords(line,offset(row),width);
+      let text='';
+      for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
+      if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
+      if(text) lines.push({kind:'chords',text});
+      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++; }
+      else if(text) lines.push({kind:'space',text:''});
     }
     return lines;
   }
@@ -132,8 +155,14 @@ window.SongSheet = (() => {
     if(!container) return;
     sheetObserver=new ResizeObserver(()=>{
       const body=document.querySelector('.song-paper-body');if(!body || !container.isConnected)return;
-      const context=document.createElement('canvas').getContext('2d');context.font=window.getComputedStyle(body).font;
-      const width=Math.max(12,Math.min(42,Math.floor(container.clientWidth/context.measureText('0').width)-1));
+      const context=document.createElement('canvas').getContext('2d'), style=window.getComputedStyle(body);
+      // The computed font shorthand can be empty with font-variant-ligatures.
+      // Canvas would then silently measure its 10px default and overfill the row.
+      context.font=`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const lyricWidth=context.measureText('0').width;
+      context.font=`700 ${style.fontSize} ${style.fontFamily}`;
+      const charWidth=Math.max(lyricWidth,context.measureText('0').width)+(parseFloat(style.letterSpacing) || 0);
+      const width=Math.max(1,Math.min(42,Math.floor(container.clientWidth/charWidth)-1));
       if(width===columns(row))return;
       widths.set(row.song_id,width);render();
       document.getElementById('song-copy-preview').value=plainText(row);
@@ -300,7 +329,7 @@ window.SongSheet = (() => {
       const current = getCurrent();
       const lines = [`{title: ${current.title.replace(/[{}\n]/g,' ')}}`, `{artist: ${(current.artist || '').replace(/[{}\n]/g,' ')}}`,
         '{comment: Предварительный подбор Dewiar. B=си, Bb=си-бемоль.}'];
-      for (const source of current.guitar_sheet || []) for (const line of wrapLine(source,columns(current))) {
+      for (const line of presentationLines(current)) {
         const chords=compactChords(line,offset(current),columns(current));
         let text='', cursor=0;
         for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
@@ -311,5 +340,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon,compactChords,wrapLine,updatePlayback,lineStarts,lineTarget};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon,compactChords,wrapLine,presentationLines,updatePlayback,lineStarts,lineTarget};
 })();
