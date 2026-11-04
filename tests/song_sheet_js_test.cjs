@@ -20,11 +20,11 @@ assert.equal(s.sheetRows(sheetExample).map(r=>r.text).join('\n'),s.plainText(she
 assert.ok(s.sheetHTML(sheetExample).includes('song-paper-sources'));assert.ok(!s.plainText(sheetExample).includes('https://'));console.log('Paper layout and three deduplicated source links: OK');
 
 const toolbar=s.toolbar({...fixture,capabilities:{audio:true}});
-for(const id of ['song-key-down','song-key-up','song-key-reset','song-show-text','song-copy-sheet','song-sheet-play','song-sheet-stop']) {
+for(const id of ['song-key-down','song-key-up','song-show-text','song-copy-sheet','song-sheet-play','song-sheet-stop','song-sheet-previous','song-sheet-next']) {
  const button=toolbar.match(new RegExp('<button[^>]*id="'+id+'"[^>]*>[\\s\\S]*?</button>'))?.[0];
  assert.ok(button && button.includes('title="') && button.includes('aria-label="') && button.includes('<svg'),id);
 }
-assert.ok(!toolbar.includes('½ тона'));assert.ok(!toolbar.includes('Сдвиг:'));
+assert.ok(!toolbar.includes('song-key-reset'));assert.ok(!toolbar.includes('½ тона'));assert.ok(!toolbar.includes('Сдвиг:'));
 console.log('Compact named icon controls: OK');
 
 // Dense candidates become one row by sounding duration; source/editor is intact.
@@ -50,3 +50,13 @@ assert.equal(wrapped.flatMap(l=>l.chords).length,2);
 const last=wrapped.find(l=>l.display_words.length);
 assert.equal(last.text.slice(last.display_words[0].char_start,last.display_words[0].char_end),'word');
 console.log('Single chord row, duration dominance, transpose fit and responsive cues: OK');
+
+assert.equal(s.lineTarget([1000,5000,11000],0,1),1000);
+assert.equal(s.lineTarget([1000,5000,11000],3000,-1),null);
+assert.equal(s.lineTarget([1000,5000,11000],3000,1),5000);
+assert.equal(s.lineTarget([1000,5000,11000],8500,-1),1000);
+assert.equal(s.lineTarget([1000,5000,11000],8500,1),11000);
+assert.equal(s.lineTarget([1000,5000,11000],4999.999,1),11000);
+assert.equal(s.lineTarget([1000,5000,11000],11000,1),null);
+assert.equal(s.lineTarget([],0,1),null);
+console.log('Previous/next displayed lyric lines and first/last boundaries: OK');

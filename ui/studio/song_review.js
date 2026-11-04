@@ -77,6 +77,8 @@ window.SongReview = (() => {
     if (!player) return;
     const play = document.getElementById('song-sheet-play');
     const stopButton = document.getElementById('song-sheet-stop');
+    const previousButton = document.getElementById('song-sheet-previous');
+    const nextButton = document.getElementById('song-sheet-next');
     const full = document.getElementById('song-play-full');
     const status = document.getElementById('song-play-status');
     const sheetStatus = document.getElementById('song-sheet-play-status');
@@ -92,6 +94,10 @@ window.SongReview = (() => {
         play.disabled = loading || !row.capabilities?.audio;
       }
       if (stopButton) stopButton.disabled = !(loading || player.dataset.session || playing || player.currentTime > 0);
+      for (const [button,direction] of [[previousButton,-1],[nextButton,1]]) {
+        if(button) button.disabled = loading || !player.dataset.session || !!player.dataset.phraseId ||
+          SongSheet.lineTarget(SongSheet.lineStarts(row.song_id),player.currentTime*1000,direction)===null;
+      }
       full.disabled = loading || !row.capabilities?.audio;
     }
     function clearHighlights() {
@@ -109,8 +115,8 @@ window.SongReview = (() => {
     function followWords(scroll) {
       if (!player.dataset.sheetStopped) SongSheet.updatePlayback(row.song_id,Number(player.dataset.clipStart || 0)+player.currentTime*1000,scroll);
     }
-    player.addEventListener('timeupdate', () => followWords(!player.paused));
-    player.addEventListener('seeked', () => followWords(!player.paused));
+    player.addEventListener('timeupdate', () => { followWords(!player.paused); sync(); });
+    player.addEventListener('seeked', () => { followWords(!player.paused); sync(); });
     player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(true); sync(); };
     player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
     player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); message(''); sync(); });
@@ -149,6 +155,16 @@ window.SongReview = (() => {
     full.onclick = () => playFull(true);
     if (play) play.onclick = () => { if (!player.paused && !player.ended) { player.pause(); return; } return playFull(); };
     if (stopButton) stopButton.onclick = stop;
+    function seekLine(direction) {
+      if(player.dataset.loading || !player.dataset.session || player.dataset.phraseId) return;
+      const target=SongSheet.lineTarget(SongSheet.lineStarts(row.song_id),player.currentTime*1000,direction);
+      if(target===null) return;
+      // Round forward so browser microsecond precision cannot land before the cue.
+      player.currentTime=Math.ceil(target)/1000;
+      followWords(true); sync();
+    }
+    if(previousButton) previousButton.onclick=()=>seekLine(-1);
+    if(nextButton) nextButton.onclick=()=>seekLine(1);
     sync();
     document.querySelectorAll('.song-phrase[data-phrase-id]').forEach(el => {
       const pid = el.dataset.phraseId, k = key(row.song_id, pid);

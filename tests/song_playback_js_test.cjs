@@ -4,11 +4,12 @@ global.window={addEventListener(){}};global.escH=s=>s;
 require('../ui/studio/song_sheet.js');global.SongSheet=window.SongSheet;
 require('../ui/studio/song_review.js');const review=window.SongReview;
 let elements, player, requests, pending, follows=[];
+SongSheet.lineStarts=()=>[0,10000,20000];
 SongSheet.updatePlayback=(id,ms,scroll)=>follows.push({id,ms,scroll});
 function setup() {
  elements=new Map();requests=0;pending=null;follows=[];
  global.document={activeElement:null,getElementById:id=>elements.get(id),querySelectorAll:()=>[],querySelector:()=>player};
- for(const id of ['song-sheet-play','song-sheet-stop','song-play-full','song-play-status','song-sheet-play-status','song-review-loop']) elements.set(id,{setAttribute(n,v){this[n]=v}});
+ for(const id of ['song-sheet-play','song-sheet-stop','song-sheet-previous','song-sheet-next','song-play-full','song-play-status','song-sheet-play-status','song-review-loop']) elements.set(id,{setAttribute(n,v){this[n]=v}});
  player={dataset:{},src:'',paused:true,ended:false,currentTime:0,isConnected:true,listeners:{},
  addEventListener(n,fn){this.listeners[n]=fn},
  pause(){this.paused=true;this.onpause?.()},
@@ -21,15 +22,26 @@ function setup() {
 const button=id=>elements.get(id);
 (async()=>{
  setup();const play=button('song-sheet-play'),stop=button('song-sheet-stop');
- assert.equal(stop.disabled,true);
+ assert.equal(stop.disabled,true);assert.equal(button('song-sheet-next').disabled,true);
  await play.onclick();assert.equal(player.paused,false);assert.match(play.title,/Приостановить/);assert.equal(requests,1);
  player.currentTime=12;player.listeners.timeupdate();assert.equal(follows.at(-1).ms,12000);await play.onclick();assert.equal(follows.at(-1).scroll,false);assert.equal(player.paused,true);assert.equal(player.currentTime,12);assert.equal(review.protectedView('song'),true);
  await play.onclick();assert.equal(player.paused,false);assert.equal(player.currentTime,12);assert.equal(requests,1);
  stop.onclick();const held=follows.at(-1).ms;player.listeners.timeupdate();assert.equal(follows.at(-1).ms,held);assert.equal(player.paused,true);assert.equal(player.currentTime,0);assert.equal(review.protectedView('song'),false);
  await play.onclick();assert.equal(requests,1);player.ended=true;player.paused=true;player.listeners.ended();assert.equal(review.protectedView('song'),false);assert.match(play.title,/Проиграть/);
+ // Line seeking reuses the full audio and preserves playing/paused state.
+ setup();await button('song-sheet-play').onclick();
+ assert.equal(button('song-sheet-previous').disabled,true);
+ await button('song-sheet-next').onclick();assert.equal(player.currentTime,10);assert.equal(player.paused,false);assert.equal(follows.at(-1).scroll,true);
+ await button('song-sheet-play').onclick();assert.equal(player.paused,true);
+ button('song-sheet-next').onclick();assert.equal(player.currentTime,20);assert.equal(player.paused,true);assert.equal(button('song-sheet-next').disabled,true);
+ button('song-sheet-previous').onclick();assert.equal(player.currentTime,10);assert.equal(player.paused,true);assert.equal(requests,1);
+ player.dataset.phraseId='clip';player.listeners.timeupdate();assert.equal(button('song-sheet-next').disabled,true);delete player.dataset.phraseId;
+ SongSheet.lineStarts=()=>[0,13225.551020408164,20000];player.currentTime=0;button('song-sheet-next').onclick();assert.equal(player.currentTime,13.226);assert.ok(player.currentTime*1000>=13225.551020408164);SongSheet.lineStarts=()=>[0,10000,20000];
+ button('song-sheet-stop').onclick();assert.equal(button('song-sheet-next').disabled,true);
+ setup();await button('song-sheet-play').onclick();
  // A phrase and full song share one element; the sheet play action restores full audio.
- player.src='phrase';player.dataset.phraseId='p';player.currentTime=4;
- await play.onclick();assert.match(player.src,/data:audio/);assert.equal(player.dataset.phraseId,undefined);
+ player.pause();player.src='phrase';player.dataset.phraseId='p';player.currentTime=4;
+ await button('song-sheet-play').onclick();assert.match(player.src,/data:audio/);assert.equal(player.dataset.phraseId,undefined);
  review.stop();assert.equal(player.currentTime,0);
  // Stop while preparing: a late bridge response must never start audio.
  setup();let resolve;pending=new Promise(r=>{resolve=r});

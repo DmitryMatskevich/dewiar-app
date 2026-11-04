@@ -108,6 +108,22 @@ window.SongSheet = (() => {
       line.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
     }
   }
+  function lineStarts(songId) {
+    const paper=document.querySelector('.song-paper');
+    if(!paper || paper.dataset.songId!==songId) return [];
+    return [...paper.querySelectorAll('.song-paper-lyrics')].map(line=>{
+      const times=[...line.querySelectorAll('.song-paper-word')].map(w=>Number(w.dataset.start)).filter(Number.isFinite);
+      return times.length ? Math.min(...times) : null;
+    }).filter(t=>t!==null);
+  }
+  function lineTarget(starts, ms, direction) {
+    const times=[...new Set(starts)].filter(Number.isFinite).sort((a,b)=>a-b);
+    let current=-1;
+    // Tolerate sub-millisecond rounding of currentTime after a seek.
+    while(current+1<times.length && times[current+1]<=ms+1) current++;
+    const target=current+direction;
+    return target>=0 && target<times.length ? times[target] : null;
+  }
   let sheetObserver=null;
   function bindResponsive(row,render) {
     sheetObserver?.disconnect();
@@ -155,7 +171,8 @@ window.SongSheet = (() => {
     const paths = {
       down:'<path d="M12 4v16m-6-6 6 6 6-6"/>',
       up:'<path d="M12 20V4m-6 6 6-6 6 6"/>',
-      reset:'<path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5"/>',
+      previous:'<path d="M5 5v14m14-14L7 12l12 7Z"/>',
+      next:'<path d="M19 5v14M5 5l12 7-12 7Z"/>',
       copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
       text:'<path d="M4 5h16M12 5v15M8 20h8M4 5v3m16-3v3"/>',
       play:'<path d="m8 4 12 8-12 8Z"/>',
@@ -172,14 +189,15 @@ window.SongSheet = (() => {
         ${button('song-key-down','down','Понизить аккорды на один полутон; звук записи не меняется')}
         <span id="song-key-label" role="status" title="Сдвиг аккордов относительно исходной тональности, в полутонах" aria-label="Сдвиг аккордов: ${shiftLabel(row)} полутонов">${shiftLabel(row)}</span>
         ${button('song-key-up','up','Повысить аккорды на один полутон; звук записи не меняется')}
-        ${button('song-key-reset','reset','Вернуть аккорды к исходной тональности')}
       </div>
       <div class="song-tool-group song-copy-group" role="group" aria-label="Текст и копирование">
         ${button('song-show-text','text','Показать текст с аккордами для копирования в выбранной тональности','aria-controls="song-copy-panel" aria-expanded="false"')}
         ${button('song-copy-sheet','copy','Скопировать текст с аккордами')}
       </div>
       <div class="song-tool-group" role="group" aria-label="Прослушивание песни">
+        ${button('song-sheet-previous','previous','Перейти к началу предыдущей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-play','play',row.capabilities?.audio ? 'Проиграть всю песню в исходной тональности записи' : 'Для прослушивания добавьте аудиозапись',row.capabilities?.audio ? '' : 'disabled')}
+        ${button('song-sheet-next','next','Перейти к началу следующей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-stop','stop','Остановить воспроизведение и вернуться к началу песни','disabled')}
       </div>
       <span id="song-copy-status" role="status"></span><span id="song-sheet-play-status" role="status"></span>
@@ -188,8 +206,8 @@ window.SongSheet = (() => {
   function bindToolbar(row, getCurrent, render) {
     if (!document.getElementById('song-key-up')) return;
     bindResponsive(row,render);
-    function change(delta, reset=false) {
-      shifts.set(row.song_id,reset ? 0 : offset(row)+delta); render();
+    function change(delta) {
+      shifts.set(row.song_id,offset(row)+delta); render();
       const label = document.getElementById('song-key-label');
       label.textContent = shiftLabel(row);
       label.setAttribute('aria-label', `Сдвиг аккордов: ${shiftLabel(row)} полутонов`);
@@ -200,7 +218,6 @@ window.SongSheet = (() => {
     }
     document.getElementById('song-key-up').onclick = () => change(1);
     document.getElementById('song-key-down').onclick = () => change(-1);
-    document.getElementById('song-key-reset').onclick = () => change(0,true);
     function showText(open) {
       document.getElementById('song-copy-panel').hidden = !open;
       document.getElementById('song-show-text').setAttribute('aria-expanded', String(open));
@@ -292,5 +309,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon,compactChords,wrapLine,updatePlayback};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,icon,compactChords,wrapLine,updatePlayback,lineStarts,lineTarget};
 })();
