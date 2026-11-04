@@ -61,27 +61,9 @@ window.SongSheet = (() => {
     return best[items.length].items.sort((a,b)=>a.at-b.at);
   }
   function presentationLines(row, width=columns(row)) {
-    const lines=[], pending=[];
-    // Gap events used to render as a separate row immediately above the next
-    // lyric's chord row. Compact the entire boundary together, not each API row.
-    // Keep the API/editor data intact; these are approximate display anchors.
-    for (const source of row.guitar_sheet || []) {
-      if (!source.text) {
-        pending.push(...chordCandidates(source),...(source.unplaced_chords || []));
-        continue;
-      }
-      const wrapped=wrapLine(source,width);
-      if (pending.length) {
-        const first=wrapped[0];
-        wrapped[0]={...first,cells:[],unplaced_chords:[],chords:[
-          ...pending.splice(0).map(c=>({...c,char_index:0,anchor_quality:'estimated_gap'})),
-          ...chordCandidates(first)
-        ]};
-      }
-      lines.push(...wrapped);
-    }
-    if (pending.length) lines.push({text:'',unplaced_chords:pending});
-    return lines;
+    // Instrumental passages retain their own changes, separate from sung words.
+    // The label is presentation metadata, never a new lyric or timed word.
+    return (row.guitar_sheet || []).flatMap(source=>source.text ? wrapLine(source,width) : [{...source,instrumental:true}]);
   }
   function sheetRows(row) {
     const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
@@ -97,7 +79,7 @@ window.SongSheet = (() => {
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       if(text) lines.push({kind:'chords',text});
       if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++; }
-      else if(text) lines.push({kind:'space',text:''});
+      else if(text) { lines.push({kind:'instrumental',text:'Проигрыш'});lines.push({kind:'space',text:''}); }
     }
     return lines;
   }
@@ -199,8 +181,8 @@ window.SongSheet = (() => {
       const r=rows[i];
       if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
       const chords=r.kind==='chords' ? `<div class="song-paper-chords">${esc(r.text)}</div>` : '';
-      const lyric=r.kind==='lyrics' ? r : rows[i+1]?.kind==='lyrics' ? rows[++i] : null;
-      blocks.push(`<div class="song-paper-line">${chords}${lyric ? `<div class="song-paper-lyrics">${lyricHTML(lyric)}</div>` : ''}</div>`);
+      const lyric=r.kind==='lyrics' ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
+      blocks.push(`<div class="song-paper-line">${chords}${lyric ? `<div class="song-paper-${lyric.kind}">${lyric.kind==='lyrics' ? lyricHTML(lyric) : esc(lyric.text)}</div>` : ''}</div>`);
     }
     return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
   }
@@ -342,6 +324,7 @@ window.SongSheet = (() => {
         let text='', cursor=0;
         for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
         lines.push(text+(line.text || '').slice(cursor));
+        if(line.instrumental && chords.length) lines.push('{comment: Проигрыш}');
       }
       const url = URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
       const link = document.createElement('a'); link.href=url; link.download=(current.title.replace(/[\\/:*?"<>|]/g,'_') || 'song')+'.cho'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);

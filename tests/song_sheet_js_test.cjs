@@ -7,9 +7,9 @@ const elements=new Map();global.document={getElementById:id=>{if(!elements.has(i
 let copied;Object.defineProperty(global,'navigator',{value:{clipboard:{writeText:async text=>{copied=text}}},configurable:true});
 s.bindToolbar(fixture,()=>fixture,()=>{});
 document.getElementById('song-key-up').onclick();
-assert.equal(s.plainText(fixture),'C7/E     Gm\nOne two\n\nB');
+assert.equal(s.plainText(fixture),'C7/E     Gm\nOne two\n\nB\nПроигрыш');
 assert.equal(document.getElementById('song-copy-preview').value,s.plainText(fixture));
-(async()=>{await document.getElementById('song-copy-sheet').onclick();assert.equal(copied,s.plainText(fixture));document.getElementById('song-key-down').onclick();assert.equal(s.plainText(fixture),'B7/D#    F#m\nOne two\n\nBb');assert.ok(!copied.includes('Must not copy'));assert.ok(!copied.includes('Verse'));assert.ok(!copied.includes('1234'));console.log('Clean preview, selected key, clipboard equality and reset: OK');})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await document.getElementById('song-copy-sheet').onclick();assert.equal(copied,s.plainText(fixture));document.getElementById('song-key-down').onclick();assert.equal(s.plainText(fixture),'B7/D#    F#m\nOne two\n\nBb\nПроигрыш');assert.ok(!copied.includes('Must not copy'));assert.ok(!copied.includes('Verse'));assert.ok(!copied.includes('1234'));console.log('Clean preview, selected key, clipboard equality and reset: OK');})().catch(e=>{console.error(e);process.exitCode=1});
 
 assert.equal(s.plainText({guitar_sheet:[{text:'One two',cells:[{char_index:4,chords:['Am']}]}]}),'    Am\nOne two');
 const refs=s.sourceLinks({source_ref:'https://audio.example/song',source_candidates:[{url:'javascript:bad',title:'аккорды'},{url:'https://chords.example/a#one',title:'Аккорды'},{url:'https://chords.example/a#two',title:'Аккорды копия'},{url:'https://lyrics.example/a',kind:'lyrics',title:'Текст'},{url:'https://video.example/a',title:'Запись'},{url:'https://extra.example/a'}]});
@@ -65,16 +65,20 @@ const boundaryBefore=JSON.stringify(boundary);
 const visible=s.sheetRows(boundary).filter(r=>r.kind!=='space');
 assert.ok(visible.every((r,i)=>r.kind!=='chords' || visible[i-1]?.kind!=='chords'));
 assert.equal(visible.filter(r=>r.kind==='lyrics').map(r=>r.text).join(' '),'Previous phrase. Next phrase with words.');
-assert.equal(visible.filter(r=>r.kind==='chords')[1].text,'F#m              Bm');
-assert.equal(visible.at(-1).kind,'chords');
-assert.equal(s.presentationLines(boundary).length,3);
+assert.equal(visible.filter(r=>r.kind==='chords')[3].text,'F#m              Bm');
+assert.equal(visible.at(-1).kind,'instrumental');
+assert.equal(s.presentationLines(boundary).length,6);
 assert.equal(JSON.stringify(boundary),boundaryBefore);
-// All-instrumental tracks and multiple intro blocks also have just one row.
+// Each instrumental passage has one chord row followed immediately by its label.
 const gaps={guitar_sheet:boundary.guitar_sheet.filter(l=>!l.text)};
-assert.equal(s.sheetRows(gaps).filter(r=>r.kind==='chords').length,1);
-assert.equal(s.sheetRows({guitar_sheet:[...gaps.guitar_sheet,boundary.guitar_sheet[3]]}).filter(r=>r.kind==='chords').length,1);
+assert.equal(s.sheetRows(gaps).filter(r=>r.kind==='chords').length,4);
+assert.equal(s.sheetRows({guitar_sheet:[...gaps.guitar_sheet,boundary.guitar_sheet[3]]}).filter(r=>r.kind==='chords').length,5);
 console.log('Gap/lyric boundaries, consecutive instrumental blocks and source preservation: OK');
 const pairedHTML=s.sheetHTML(boundary);
+assert.equal(visible.filter(r=>r.kind==='instrumental').length,4);
+assert.ok(visible.every((r,i)=>r.kind!=='instrumental' || visible[i-1]?.kind==='chords'));
+assert.match(pairedHTML,/song-paper-chords">Abmaj7<\/div><div class="song-paper-instrumental">Проигрыш/);
+assert.equal(s.sheetRows({guitar_sheet:[{text:'',unplaced_chords:[{name:'N',start_ms:0}]}]}).length,0);
 assert.match(pairedHTML, /class="song-paper-line"><div class="song-paper-chords">F#m\s+Bm<\/div><div class="song-paper-lyrics">Next phrase with words\.<\/div><\/div>/);
 console.log('Chord and lyric share one inseparable presentation block: OK');
 

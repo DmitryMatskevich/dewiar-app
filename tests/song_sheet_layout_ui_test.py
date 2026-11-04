@@ -64,7 +64,7 @@ def main():
                     if delta:
                         tab.locator('#song-key-up' if delta > 0 else '#song-key-down').click()
                     result = tab.evaluate('''(row)=>{
-                      const es=[...document.querySelectorAll('.song-paper-body .song-paper-chords, .song-paper-body .song-paper-lyrics, .song-paper-body > .song-paper-space')];
+                      const es=[...document.querySelectorAll('.song-paper-body .song-paper-chords, .song-paper-body .song-paper-lyrics, .song-paper-body .song-paper-instrumental, .song-paper-body > .song-paper-space')];
                       const visible=es.filter(e=>!e.classList.contains('song-paper-space'));
                       const chords=es.filter(e=>e.classList.contains('song-paper-chords'));
                       const lyrics=es.filter(e=>e.classList.contains('song-paper-lyrics'));
@@ -73,9 +73,9 @@ def main():
                         no_stacks:visible.every((e,i)=>!e.classList.contains('song-paper-chords') || !visible[i-1]?.classList.contains('song-paper-chords')),
                         attached_to_lyrics:chords.every((e)=>{
                           const next=visible[visible.indexOf(e)+1];
-                          if(!next)return true; // Instrumental ending has no words.
-                          return next.classList.contains('song-paper-lyrics') && e.parentElement.classList.contains('song-paper-line') && e.parentElement===next.parentElement && Math.abs(next.getBoundingClientRect().top-e.getBoundingClientRect().bottom)<1;
+                          return next && (next.classList.contains('song-paper-lyrics') || next.classList.contains('song-paper-instrumental')) && e.parentElement.classList.contains('song-paper-line') && e.parentElement===next.parentElement && Math.abs(next.getBoundingClientRect().top-e.getBoundingClientRect().bottom)<1;
                         }),
+                        instrumental_labels:es.filter(e=>e.classList.contains('song-paper-instrumental')).length===row.guitar_sheet.filter(l=>!l.text && [...(l.chords||[]),...(l.unplaced_chords||[])].some(c=>c.name && c.name!=='N')).length,
                         one_visual_row:chords.every(e=>e.getBoundingClientRect().height<=parseFloat(getComputedStyle(e).lineHeight)+1),
                         fits:chords.every(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().right<=e.getBoundingClientRect().right+1}),
                         overflow:chords.flatMap(e=>{const r=document.createRange();r.selectNodeContents(e);const a=r.getBoundingClientRect(),b=e.getBoundingClientRect();return a.right>b.right+1?[{text:e.textContent,width:a.width,available:b.width}]:[]}),
@@ -84,7 +84,7 @@ def main():
                         chord_rows:chords.length
                       };
                     }''', row)
-                    assert all(result[k] for k in ('no_stacks', 'attached_to_lyrics', 'one_visual_row', 'fits', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
+                    assert all(result[k] for k in ('no_stacks', 'attached_to_lyrics', 'instrumental_labels', 'one_visual_row', 'fits', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
                     outcomes.append({'title': row['title'], 'width': width, 'shift': delta > 0, **result})
             assert tab.evaluate('JSON.stringify(rows)') == before
             if args.report and 'тоже есть душа' in row['title']:
