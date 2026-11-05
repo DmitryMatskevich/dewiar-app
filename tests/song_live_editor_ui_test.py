@@ -130,6 +130,8 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-mode').input_value() == 'phrase', page.locator('#song-live-edit-mode').input_value()
     assert page.locator('#song-live-edit-text').input_value() == phrase_text
     assert page.locator('#song-live-edit-save').evaluate("e=>e.closest('.song-live-editor-head')!==null")
+    assert page.locator('#song-live-edit-save').inner_text() == 'Сохранить'
+    assert page.locator('#song-live-edit-close').count() == 0
     assert page.locator('#song-live-edit-target').inner_text().startswith('0.000–8.000 с')
     chord_preview=page.locator('#song-live-edit-preview-chords')
     assert chord_preview.is_visible()
@@ -153,6 +155,7 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert 'C' not in chord_preview.inner_text()
     page.locator('#song-live-edit-save').click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_phrase')")
+    assert page.locator('#song-live-editor').is_hidden()
     assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
     assert 'времена слов нужно проверить заново' in page.locator('#song-live-edit-status').inner_text()
     assert page.evaluate("row.phrases[0].text") == 'Я тихо смеюсь.'

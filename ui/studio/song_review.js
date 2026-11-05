@@ -313,7 +313,8 @@ window.SongReview = (() => {
       document.getElementById('song-live-edit-target').textContent=`${(liveTarget.startMs/1000).toFixed(3)}–${(liveTarget.endMs/1000).toFixed(3)} с · ${mode==='chords'?'Аккорды фразы':displayLine?'Текст строки':'Текст фразы'}`;
       liveEditor.classList.toggle('song-live-editor--chords',mode==='chords');
       document.querySelector('#song-live-editor .song-live-editor-head b').textContent=mode==='chords'?'Правка аккордов фразы':'Правка фразы';
-      document.getElementById('song-live-edit-save').textContent=mode==='chords'?'Сохранить аккорды':'Сохранить текст и аккорды';
+      document.getElementById('song-live-edit-save').textContent='Сохранить';
+      document.getElementById('song-live-edit-save').title='Сохранить правку и закрыть редактор';
       document.getElementById('song-live-reviewed').checked=sourcePhrases.every(item=>item.review_state==='verified');
       liveChordDraft=phraseChords(phrase).map(c=>({...structuredClone(c),original_start_ms:Number(c.start_ms)||0}));
       renderLiveChords();updateLivePreview();liveStatus.textContent='Песня приостановлена. Правки сохраняются в карточке песни.';
@@ -339,7 +340,6 @@ window.SongReview = (() => {
         anchor:liveTarget?{kind:'manual',phrase_id:phrase.phrase_id,grapheme_index:liveTarget.charStart}:null,
         method:'manual',verified:true});renderLiveChords();
     });
-    document.getElementById('song-live-edit-close')?.addEventListener('click',()=>{liveEditor.hidden=true;});
     document.getElementById('song-live-edit-save')?.addEventListener('click',async()=>{
       const button=document.getElementById('song-live-edit-save');button.disabled=true;liveStatus.textContent='Сохраняем…';
       try {
@@ -389,6 +389,7 @@ window.SongReview = (() => {
           : mode==='word'
             ? 'Слово и времена слов сохранены; аккорды фразы обновлены. Воспроизведение осталось на паузе.'
             : 'Текст и аккорды сохранены. Для изменённой фразы времена слов нужно проверить заново. Воспроизведение осталось на паузе.';
+        liveEditor.hidden=true;
       } catch(error) { liveStatus.textContent=`${error.message||'Не удалось сохранить правку'}. Исправления оставлены в редакторе.`; }
       finally { button.disabled=false; }
     });
