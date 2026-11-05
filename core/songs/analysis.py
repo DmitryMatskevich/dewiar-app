@@ -168,7 +168,10 @@ class SongAnalyzer:
                 raise
             return updated
 
-    _heavy_lock = threading.Lock()
+    # Full song passes use an external worker and must not serialize unrelated
+    # cards.  Keep a small bounded slot pool so two independent songs can run
+    # together while still protecting the machine from an unbounded model fanout.
+    _heavy_slots = threading.BoundedSemaphore(max(2, min(8, int(os.environ.get('DEWIAR_SONG_ANALYSIS_PARALLEL', '2')))))
 
     def _run(self, song_id: str, path: Path, run_id: str, full=False):
         try:
@@ -238,7 +241,7 @@ class SongAnalyzer:
                 folder.mkdir(parents=True, exist_ok=True)
                 import json
                 (folder/'gigaam.json').write_text(json.dumps({'model': model, 'phrases': phrases}, ensure_ascii=False))
-                while not self._heavy_lock.acquire(timeout=.5):
+                while not self._heavy_slots.acquire(timeout=.5):
                     if cancel.is_set():
                         return
                 try:
@@ -250,7 +253,7 @@ class SongAnalyzer:
                 except Exception as exc:
                     result = {'hypotheses': [], 'errors': [{'step': 'runtime', 'error': str(exc)}]}
                 finally:
-                    self._heavy_lock.release()
+                    self._heavy_slots.release()
                 if basic_error:
                     result.setdefault('errors', []).insert(0, basic_error)
                 updated = self.store.save_full_analysis(song_id, run_id, phrases, model, result)

@@ -16,7 +16,9 @@ from pathlib import Path
 class InstrumentalManager:
     """Owns separation jobs and their files under the Songs data directory."""
 
-    _heavy_lock = threading.Lock()
+    # Separation is also a worker process.  Allow independent songs to be
+    # prepared concurrently, with a bounded default rather than a global lock.
+    _heavy_slots = threading.BoundedSemaphore(max(2, min(8, int(os.environ.get('DEWIAR_SONG_SEPARATION_PARALLEL', '2')))))
 
     def __init__(self, root: Path, store, emit):
         self.root = Path(root).resolve()
@@ -159,7 +161,7 @@ class InstrumentalManager:
         run_dir.mkdir(parents=True, exist_ok=True)
         candidate_dir.mkdir(parents=True, exist_ok=True)
         try:
-            if not self._heavy_lock.acquire(timeout=3600):
+            if not self._heavy_slots.acquire(timeout=3600):
                 raise TimeoutError("Очередь музыкальной обработки превысила час")
             try:
                 with self._lock:
@@ -244,7 +246,7 @@ class InstrumentalManager:
                     m["revision"] += 1
                     self._write(folder / "manifest.json", m)
             finally:
-                self._heavy_lock.release()
+                self._heavy_slots.release()
         except Exception as exc:
             with self._lock:
                 m = self._manifest(song_id)

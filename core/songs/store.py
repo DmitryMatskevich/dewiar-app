@@ -78,7 +78,7 @@ class SongStore:
             return None
         return data if isinstance(data, dict) else None
 
-    def list(self, query: str = "", status: str = "", limit: int = 100) -> list[dict]:
+    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False) -> list[dict]:
         query = _clean(query, 120).casefold()
         with self._lock:
             rows = []
@@ -92,7 +92,17 @@ class SongStore:
                 selected_statuses = {"queued", "recording", "running"} if status == "running" else {status}
                 if status and row.get("status") not in selected_statuses:
                     continue
-                rows.append(copy.deepcopy(row))
+                if compact:
+                    # The songs list only needs card/progress metadata. Avoid
+                    # copying hypotheses, words and guitar sheets while an
+                    # analysis worker is writing large song records.
+                    fields = {'song_id', 'title', 'artist', 'status', 'stage', 'stage_label',
+                              'capabilities', 'audio', 'phrases', 'analysis_state',
+                              'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
+                              'revision', 'source', 'source_ref', 'recording_version'}
+                    rows.append({key: copy.deepcopy(row[key]) for key in fields if key in row})
+                else:
+                    rows.append(copy.deepcopy(row))
                 if len(rows) >= max(1, min(int(limit or 100), 500)):
                     break
             return rows

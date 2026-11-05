@@ -196,6 +196,15 @@ class FullSongTests(unittest.TestCase):
         self.assertNotIn('edits',Commands().command('song_get',{}))
         self.assertIs(Commands().command('unrelated',{}),row)
 
+    def test_song_card_list_has_compact_projection(self):
+        row = self.store.patch(self.sid, {'status': 'review', 'phrases': self.phrases,
+            'analysis_runs': [{'run_id': 'large', 'hypotheses': [{'text': 'archive'}]}]})
+        compact = self.store.list(compact=True)[0]
+        self.assertEqual(compact['song_id'], row['song_id'])
+        self.assertIn('capabilities', compact)
+        self.assertNotIn('analysis_runs', compact)
+        self.assertNotIn('guitar_sheet', compact)
+
     def test_chordino_preserves_bass_and_half_diminished_without_fake_score(self):
         events=parse_chords('0.000: N\n0.100: B7/D#\n2.500: Bm7b5\n',4000)
         self.assertEqual([e['name'] for e in events],['N','B7/D#','Bm7b5'])

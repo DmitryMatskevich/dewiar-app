@@ -199,6 +199,10 @@
   @keyframes hdots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
   #health button { display: block; margin: 6px auto 0; border: 0; border-radius: 9px; padding: 4px 11px; font: inherit; font-size: 12px; cursor: pointer;
                    background: rgba(255,255,255,.14); color: var(--ink); } #health button:hover { background: rgba(255,255,255,.22); }
+  /* The optional assistant top bar is absolute. When the orb is hidden the
+     flex column starts at the same top edge, so a long health notice could
+     paint over that bar. Reserve its 30px row instead of letting text overlap. */
+  #card.has-assistant-topbar.no-orb.health-visible #mid { flex: 0 0 auto; padding-top: 42px; }
   #task, #upd { display: none; text-align: center; font-size: 12px; line-height: 1.35; color: #D6E4F0; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.05); cursor: pointer; }
   #task.on, #upd.on { display: block; }
   #task { text-align: left; padding: 8px 12px; }
@@ -1295,6 +1299,7 @@ core.on("hello", () => { connectedAt = Date.now(); });
    кнопка перезапуска (api().restart_core). */
 function health(text, bad, restart, calm) {
   const el = $("health"); el.textContent = text || ""; el.classList.toggle("on", !!text); el.classList.toggle("bad", !!bad);
+  $("card").classList.toggle("health-visible", !!text);
   el.classList.toggle("calm", !!calm && !bad);
   if (text && calm) { const d = document.createElement("span"); d.className = "dots"; el.appendChild(d); }
   if (text && restart && api() && api().restart_core) {                      // ядро молчит давно — предложить перезапуск

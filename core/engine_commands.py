@@ -1730,7 +1730,7 @@ class CommandsMixin:
         if cmd == "tasks_list":
             return self.tasks.list()
         if cmd == "songs_list":
-            songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100))
+            songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True)
             for song in songs:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
                 song["processing"] = self.song_processing.describe(song)
