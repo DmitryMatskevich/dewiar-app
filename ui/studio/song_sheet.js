@@ -68,7 +68,7 @@ window.SongSheet = (() => {
   function sheetRows(row) {
     const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
     const lines = [], width=columns(row), seenParts=new Set();
-    let stanzaLines = 0;
+    let stanzaLines = 0, hasLyrics = false;
     for (const line of presentationLines(row,width)) {
       const newPart=parts.has(line.phrase_id) && !seenParts.has(line.phrase_id);
       seenParts.add(line.phrase_id);
@@ -78,8 +78,8 @@ window.SongSheet = (() => {
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       if(text) lines.push({kind:'chords',text});
-      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++; }
-      else if(text) { lines.push({kind:'instrumental',text:'Проигрыш'});lines.push({kind:'space',text:''}); }
+      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || []});stanzaLines++;hasLyrics=true; }
+      else if(text) { lines.push({kind:'instrumental',text:hasLyrics?'Проигрыш':'Вступление'});lines.push({kind:'space',text:''}); }
     }
     return lines;
   }
@@ -158,11 +158,14 @@ window.SongSheet = (() => {
   }
   function sourceLinks(row) {
     const all = [...(row.source_candidates || [])];
-    if (row.source_ref) all.push({url:row.source_ref,title:'Исходная запись'});
+    if (row.source_ref) all.push({url:row.source_ref,title:'Исходная запись',kind:'youtube'});
     const rank = c => /аккорд|chord/i.test(c.title || '') ? 0 : c.kind === 'lyrics' ? 1 : 2;
     all.sort((a,b)=>rank(a)-rank(b));
     const seen = new Set(), links = [];
     for (const c of all) {
+      const verified = c.source_check?.status === 'available' ||
+        (c.kind === 'youtube' && c.url && c.url === row.source_ref && row.audio?.path);
+      if (!verified) continue;
       let url;
       try { url = new URL(c.url); } catch (_) { continue; }
       if (!['http:','https:'].includes(url.protocol)) continue;

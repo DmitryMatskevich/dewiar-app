@@ -1773,11 +1773,25 @@ class CommandsMixin:
         if cmd == "song_cancel":
             self.song_sources.cancel(str(a.get("song_id") or ""))
             return self.song_analyzer.cancel(str(a.get("song_id") or ""))
-        if cmd in {'song_find_sources', 'song_download_source'}:
-            return self.song_sources.start(str(a.get('song_id') or ''), a.get('candidate_id') if cmd == 'song_download_source' else None)
+        if cmd == 'song_source_check':
+            return self.song_sources.check_candidate(str(a.get('song_id') or ''),str(a.get('candidate_id') or ''))
+        if cmd == 'song_source_select':
+            return self.song_sources.select_reference(str(a.get('song_id') or ''),str(a.get('candidate_id') or ''))
+        if cmd in {'song_find_sources', 'song_download_source', 'song_process_source'}:
+            return self.song_sources.start(str(a.get('song_id') or ''),
+                a.get('candidate_id') if cmd != 'song_find_sources' else None,
+                process=cmd == 'song_process_source')
         if cmd == 'song_source_add':
-            from songs.manual_sources import add_manual_source
-            return add_manual_source(self.song_store, str(a.get('song_id') or ''), a.get('url'), a.get('lyrics'), a.get('base_revision'))
+            from songs.manual_sources import add_manual_source, youtube_video_id
+            song_id = str(a.get('song_id') or '')
+            saved = add_manual_source(self.song_store, song_id, a.get('url'), a.get('lyrics'), a.get('base_revision'))
+            # A direct YouTube link supplied for a song is an explicit recording
+            # choice: download it and continue into the full batch pipeline.
+            candidate = next((c for c in reversed(saved.get('source_candidates', []))
+                if c.get('kind') == 'youtube' and c.get('candidate_id', '').startswith('reference:')), None)
+            if youtube_video_id(a.get('url')) and candidate and not (saved.get('audio') or {}).get('path') and not saved.get('phrases'):
+                return self.song_sources.start(song_id, candidate['candidate_id'], process=True)
+            return saved
         if cmd == "song_delete":
             if self.song_instrumental.running(str(a.get("song_id") or "")):
                 raise ValueError("Сначала отмените подготовку минусовки")
@@ -1824,9 +1838,8 @@ class CommandsMixin:
                         self.song_mic_capture_active = False
                         if not getattr(self, "server", False):
                             self.set_mute(self._song_capture_resume_muted)
-                if was_mic_capture:
-                    if saved.get("status") == "queued":
-                        return self.song_analyzer.start(song_id, full=True)
+                if saved.get("status") == "queued":
+                    return self.song_analyzer.start(song_id, full=True)
                 return saved
             return self.song_capture.state(song_id)
         if cmd == "song_attach_audio":

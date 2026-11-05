@@ -157,7 +157,7 @@ class SongStore:
             allowed = {"title", "artist", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
-                       "harmony", "analysis_errors", "source_candidates"}
+                       "harmony", "analysis_errors", "source_candidates", "selected_source_id"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
             if "status" in changes and changes["status"] not in STATUS:
