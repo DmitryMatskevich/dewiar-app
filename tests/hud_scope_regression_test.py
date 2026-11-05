@@ -14,7 +14,8 @@ with tempfile.TemporaryDirectory() as td,sync_playwright() as pw:
  page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
  select=page.get_by_label('Область работы Лиры');select.select_option('follow');page.mouse.move(400,450)
  assert page.evaluate('drag===null&&moves.length===0')
- assert page.locator('#assistant-topbar #b-voice-inline').count()==1
+ assert page.locator('#assistant-topbar #b-voice-inline').count()==0
+ assert page.locator('.ask-actions #b-voice-inline').count()==1
  for width in (340,440,640):
   page.set_viewport_size({'width':width,'height':850})
   assert page.evaluate("(()=>{const a=document.querySelector('#assistant-topbar').getBoundingClientRect();return a.left>=0&&a.right<=innerWidth})()")
@@ -27,4 +28,4 @@ with tempfile.TemporaryDirectory() as td,sync_playwright() as pw:
  assert not page.evaluate("calls.includes('dictation_start')")
  assert not errors,errors
  (ROOT/'work/hud-scope-fix').mkdir(exist_ok=True);page.screenshot(path=str(ROOT/'work/hud-scope-fix'/('hud-'+os.environ.get('DEWIAR_TEST_BROWSER','chromium')+'.png')))
- browser.close();print('PASS: mode select no pointer capture/window movement; top sound; stale voice state Allow before activation; denied opens settings')
+ browser.close();print('PASS: mode select no pointer capture/window movement; voice control stays left of microphone; stale voice state Allow before activation; denied opens settings')

@@ -3,8 +3,8 @@
  const label=document.createElement('span'),select=document.createElement('select'),log=document.createElement('div');
  label.id='canvas-scope-status';label.setAttribute('role','status');log.id='canvas-scope-log';
  select.setAttribute('aria-label','Область работы Лиры');for(const [v,t] of [['general','Общий разговор'],['follow','Работа с холстом'],['pinned','Закрепить холст']])select.add(new Option(t,v));
- const input=document.getElementById('askin'),model=document.getElementById('ask-model'),sound=document.getElementById('b-voice-inline');
- if(input&&model){root.append(select,model);if(sound)root.append(sound);const card=document.getElementById('card');card.classList.add('has-assistant-topbar');card.prepend(root);input.parentElement.parentElement.prepend(label,log);}else{root.append(select,label,log);document.body.append(root);}
+ const input=document.getElementById('askin'),model=document.getElementById('ask-model');
+ if(input&&model){root.append(select,model);const card=document.getElementById('card');card.classList.add('has-assistant-topbar');card.prepend(root);input.parentElement.parentElement.prepend(label,log);}else{root.append(select,label,log);document.body.append(root);}
  // Native selects may consume pointerup. Never let their pointerdown start window dragging.
  root.addEventListener('pointerdown',e=>e.stopPropagation());
  let latest=null;
