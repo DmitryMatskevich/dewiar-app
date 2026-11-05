@@ -172,7 +172,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.song_instrumental = InstrumentalManager(STATE_DIR / "songs", self.song_store, self.emit)
         self.song_instrumental._heavy_lock = self.song_analyzer._heavy_lock
         from songs.sources import SongSources
-        self.song_sources = SongSources(self.song_store, self.emit)
+        self.song_sources = SongSources(self.song_store, self.emit, self.song_analyzer)
         from songs.import_audio import AudioImporter
         self.song_importer = AudioImporter(self.song_store)
         from mail_service import MailService

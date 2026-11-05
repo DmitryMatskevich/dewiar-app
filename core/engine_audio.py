@@ -938,6 +938,15 @@ class AudioMixin:
         self.stt_q.put((pcm, True, False, None, "hold"))
         return {"ok": True, "sec": sec}
 
+    def _dictation_emit(self, **data):
+        target = getattr(self, '_visual_dictation_target', None)
+        if target:
+            self.emit('visual_dictation', asset_id=target, **data)
+            if data.get('state') in ('done', 'cancelled'):
+                self._visual_dictation_target = None
+        else:
+            self.emit('dictation', **data)
+
     def dictation_start(self, background=False):
         """Непрерывная диктовка: пауза отправляет фрагмент в STT, но не выключает запись."""
         if getattr(self, "song_mic_capture_active", False):
@@ -948,6 +957,8 @@ class AudioMixin:
             self.hold_end(cancel=True)
         with self._dictation_lock:
             if self.dictation_active:
+                if getattr(self, '_visual_dictation_target', None):
+                    raise ValueError('Диктовка уже идёт в редакторе снимка. Сначала завершите её там.')
                 if getattr(self, "_background_dictation", False) and not background:
                     raise ValueError("Фоновая диктовка уже идёт. Скажите «Лира, вставить» или «Лира, отмени» и «Лира, закончи диктовку».")
                 return {"ok": True, "state": "finishing" if self._dictation_closed else "recording",
@@ -974,7 +985,7 @@ class AudioMixin:
             if background:
                 self._background_state("recording")
             else:
-                self.emit("dictation", state="recording", session=self._dictation_session)
+                self._dictation_emit(state="recording", session=self._dictation_session)
             return {"ok": True, "state": "recording", "session": self._dictation_session}
 
     def dictation_cancel(self):
@@ -990,7 +1001,7 @@ class AudioMixin:
             if getattr(self, "_background_dictation", False):
                 self._background_state("stopped")
             else:
-                self.emit("dictation", state="cancelled", session=sid)
+                self._dictation_emit(state="cancelled", session=sid)
         return {"ok": was, "state": "cancelled", "session": sid}
 
     def dictation_finish(self, submit=False, wait_for_pause=False, keep_draft=False):
@@ -1007,7 +1018,7 @@ class AudioMixin:
                 self._dictation_wait_for_pause = self._dictation_wait_for_pause or wait_for_pause
             if not self.dictation_finish_requested:
                 self.dictation_finish_requested = True
-                self.emit("dictation", state="finishing", session=self._dictation_session)
+                self._dictation_emit(state="finishing", session=self._dictation_session)
         return {"ok": True, "state": "finishing"}
 
     def _dictation_flush(self, pcm):
@@ -1036,24 +1047,32 @@ class AudioMixin:
 
     def _foreground_dictation_result(self, text, by, sid):
         with self._dictation_lock:
+            if getattr(self, '_visual_dictation_target', None):
+                # In this field, recognized words are a drawing command draft.
+                # Never send them to the chat, clipboard or desktop command router.
+                if re.fullmatch(r'(?:лира[, ]+)?(?:стоп|закончи диктовку)[.! ]*', text.strip(), re.I):
+                    self.dictation_finish(submit=False, keep_draft=True)
+                elif text:
+                    self._dictation_emit(state='partial', text=text, by=by, session=sid)
+                return
             aliases = self.aliases.get(self.s.get("persona"), [])
             from background_dictation import parse
             words, command = parse(text, aliases)
             if command and command[0] in ("insert", "copy", "clear"):
                 if words:
-                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
-                self.emit("dictation", state="copy_requested", action=command[0], session=sid)
+                    self._dictation_emit(state="partial", text=words, by=by, session=sid)
+                self._dictation_emit(state="copy_requested", action=command[0], session=sid)
                 return
             # Addressed voice commands are controls, not part of the dictated
             # message. Keep any words spoken before the assistant's name.
             if command and command[0] == "command":
                 if words:
-                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
+                    self._dictation_emit(state="partial", text=words, by=by, session=sid)
                 self._run_dictation_voice_command(command[1])
                 return
             if command and command[0] in ("cancel", "stop", "listen"):
                 if words:
-                    self.emit("dictation", state="partial", text=words, by=by, session=sid)
+                    self._dictation_emit(state="partial", text=words, by=by, session=sid)
                 if command[0] in ("cancel", "stop"):
                     self.emit("voice_command", action=command[0], status="done")
                     self.dictation_cancel()
@@ -1066,7 +1085,7 @@ class AudioMixin:
             if match:
                 text = text[:match.start()].rstrip(" ,;:—-")
             if text:
-                self.emit("dictation", state="partial", text=text, by=by, session=sid)
+                self._dictation_emit(state="partial", text=text, by=by, session=sid)
             if match:
                 self.dictation_finish(submit=True)
 
@@ -1220,7 +1239,7 @@ class AudioMixin:
             self.dictation_finish_requested = False
             self._dictation_wait_for_pause = False
             self.set_state("idle")
-            self.emit("dictation", state="done", submit=self._dictation_submit, session=sid)
+            self._dictation_emit(state="done", submit=self._dictation_submit, session=sid)
 
     def _transcribe_long(self, stt, pcm):
         """Длинная запись (диктовка удержанием): распознаватели рассчитаны на фразы до ~20 с — режем по самым тихим

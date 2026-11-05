@@ -5,6 +5,9 @@
 вариант. На других системах используется только tesseract, если он есть.
 """
 import logging
+import re
+import csv
+import io
 import os
 import shutil
 import subprocess
@@ -85,11 +88,26 @@ def _vision(data, languages=("ru-RU", "en-US"), strict=False, details=False):
         for obs in request.results() or []:
             candidate = obs.topCandidates_(1)
             if candidate:
-                text = str(candidate[0].string() or "").strip()
+                raw_text = str(candidate[0].string() or "")
+                text = raw_text.strip()
                 if text:
                     out.append(text)
                     box = obs.boundingBox()
-                    lines.append({"text": text, "confidence": float(candidate[0].confidence()),
+                    words = []
+                    if details:
+                        for match in re.finditer(r"\S+", raw_text):
+                            # NSString ranges use UTF-16, including surrogate pairs.
+                            offset = len(raw_text[:match.start()].encode('utf-16-le')) // 2
+                            length = len(match.group().encode('utf-16-le')) // 2
+                            try:
+                                observation, error = candidate[0].boundingBoxForRange_error_((offset, length), None)
+                                if observation is not None and error is None:
+                                    wb = observation.boundingBox()
+                                    words.append({'text': match.group(), 'confidence': float(candidate[0].confidence()),
+                                                  'box': [float(wb.origin.x), float(wb.origin.y), float(wb.size.width), float(wb.size.height)]})
+                            except Exception:
+                                pass  # Keep the real line box; never invent word coordinates.
+                    lines.append({"text": text, "words": words, "confidence": float(candidate[0].confidence()),
                                   "box": [float(box.origin.x), float(box.origin.y),
                                           float(box.size.width), float(box.size.height)]})
         text = "\n".join(out)
@@ -111,7 +129,7 @@ def tessdata_dir(languages="rus+eng"):
     return ""
 
 
-def _tesseract(data, languages="rus+eng", strict=False, psm=6):
+def _tesseract(data, languages="rus+eng", strict=False, psm=6, details=False):
     exe = shutil.which("tesseract")
     if not exe:
         if strict:
@@ -123,7 +141,10 @@ def _tesseract(data, languages="rus+eng", strict=False, psm=6):
             src.write_bytes(data)
             models = tessdata_dir(languages)
             command = [exe, str(src), "stdout"] + (["--tessdata-dir", models] if models else [])
-            r = subprocess.run(command + ["-l", languages, "--psm", str(psm)],
+            # Dewiar bundles traineddata, but not Tesseract's configs/tsv file.
+            # Select the renderer explicitly so missing config files can't silently
+            # turn a coordinate request into plain text with exit code zero.
+            r = subprocess.run(command + ["-l", languages, "--psm", str(psm)] + (["-c", "tessedit_create_tsv=1"] if details else []),
                                capture_output=True, text=True, timeout=30)
             if strict and "Failed loading language" in r.stderr:
                 raise RuntimeError("Tesseract: не установлен русский языковой пакет rus. " + r.stderr.strip()[:200])
@@ -132,7 +153,7 @@ def _tesseract(data, languages="rus+eng", strict=False, psm=6):
                     raise RuntimeError("Tesseract: " + r.stderr.strip()[-200:])
                 log.info("tesseract OCR завершился с кодом %s: %s", r.returncode, r.stderr[-200:])
                 return ""
-            return r.stdout.strip()
+            return _tesseract_details(r.stdout, data) if details else r.stdout.strip()
     except (OSError, subprocess.SubprocessError) as exc:
         if strict:
             raise RuntimeError("Tesseract: " + str(exc)) from exc
@@ -140,12 +161,37 @@ def _tesseract(data, languages="rus+eng", strict=False, psm=6):
         return ""
 
 
+def _tesseract_details(tsv, data):
+    """TSV word boxes expressed like Vision: normalized, origin at bottom left."""
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as image:
+        width, height = image.size
+    groups = {}
+    for row in csv.DictReader(io.StringIO(tsv), delimiter='\t', quoting=csv.QUOTE_NONE):
+        if row.get('level') != '5' or not row.get('text', '').strip():
+            continue
+        confidence = float(row['conf'])
+        if confidence < 0:
+            continue
+        x, y, w, h = [int(row[k]) for k in ('left','top','width','height')]
+        key = tuple(row[k] for k in ('page_num','block_num','par_num','line_num'))
+        groups.setdefault(key, []).append({'text':row['text'], 'confidence':confidence/100,
+                                           'box':[x/width, 1-(y+h)/height, w/width, h/height]})
+    lines = []
+    for words in groups.values():
+        x=min(w['box'][0] for w in words); y=min(w['box'][1] for w in words)
+        right=max(w['box'][0]+w['box'][2] for w in words); top=max(w['box'][1]+w['box'][3] for w in words)
+        lines.append({'text':' '.join(w['text'] for w in words), 'words':words,
+                      'confidence':min(w['confidence'] for w in words), 'box':[x,y,right-x,top-y]})
+    return {'text':'\n'.join(line['text'] for line in lines),'lines':lines}
+
+
 def recognize_result(data, languages=("ru-RU", "en-US")):
     """Full local OCR result: distinguish an empty screen from failed engines."""
     engines = ([("macOS Vision", lambda: _vision(data, languages, strict=True, details=True))] if MAC else [])
     if shutil.which("tesseract"):
         lang = "+".join({"ru-RU": "rus", "en-US": "eng"}.get(x, x) for x in languages)
-        engines.append(("Tesseract", lambda: _tesseract(data, languages=lang, strict=True, psm=3)))
+        engines.append(("Tesseract", lambda: _tesseract(data, languages=lang, strict=True, psm=3, details=True)))
     errors, empty = [], ""
     for name, run in engines:
         try:

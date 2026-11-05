@@ -47,14 +47,20 @@ def _codex_profile(settings):
     profiles = llm.get("profiles") or {}
     active = llm.get("active")
     ordered = sorted(profiles.items(), key=lambda item: (item[1].get("priority", 9), item[0] != active, item[0]))
+    configured = False
     for pid, profile in ordered:
         if profile.get("kind") != "codex_subscription" or "images" not in modelrouter.roles(profile):
             continue
-        if not profile.get("routing_enabled", True) or not modelrouter.in_schedule(profile) or modelrouter.blocked(profile):
+        if not profile.get("routing_enabled", True):
+            continue
+        configured = True
+        if not modelrouter.in_schedule(profile) or modelrouter.blocked(profile):
             continue
         if egress.local_only():
             continue
         return dict(profile, _profile_id=pid)
+    if configured:
+        raise RuntimeError("Профиль Codex для изображений сейчас недоступен. Автоматический переход на OpenAI API отключён.")
     return None
 
 
@@ -94,6 +100,8 @@ def generate(settings, workspace, prompt, input_images=(), output_dir=None):
         raise ValueError("Опишите, какое изображение создать или как изменить фотографию")
     if len(prompt) > 8000:
         raise ValueError("Описание изображения слишком длинное (максимум 8000 знаков)")
+    if egress.local_only():
+        raise RuntimeError("Генерация через Codex/OpenAI API недоступна в локальном режиме.")
     images = list(input_images or [])[:4]
     subscription = _codex_profile(settings)
     provider = "OpenAI API"
@@ -104,12 +112,10 @@ def generate(settings, workspace, prompt, input_images=(), output_dir=None):
             raw = base64.b64decode(encoded, validate=True)
             provider = "Подписка Codex"
         except Exception as subscription_error:
-            # A confirmed operation may fall back to an API key; the confirmation warns about API billing.
-            try:
-                raw = _api_image(_openai_profile(settings), prompt, images)
-                provider = "OpenAI API (резерв после недоступности Codex)"
-            except Exception:
-                raise subscription_error
+            raise RuntimeError(
+                "Codex не создал изображение. Автоматический переход на OpenAI API отключён. "
+                "Повторите запрос позже или явно измените исполнителя в очереди «Изображения»."
+            ) from subscription_error
     else:
         raw = _api_image(_openai_profile(settings), prompt, images)
     if not raw or len(raw) > 20 * 1024 * 1024:

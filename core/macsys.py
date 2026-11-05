@@ -310,3 +310,16 @@ def transcription_browser_url(browser_id):
     if not valid:
         return {"error": f"В {name} нет активной вкладки с веб-ссылкой. Откройте страницу с видео или аудио."}
     return {"url": url, "browser": name}
+
+
+def copy_png_file(path, board=None):
+    """Copy an already composed PNG directly from disk."""
+    from Foundation import NSData
+    from AppKit import NSPasteboard
+    from pathlib import Path
+    data = Path(path).read_bytes()
+    board = board if board is not None else NSPasteboard.generalPasteboard()
+    board.clearContents()
+    if not board.setData_forType_(NSData.dataWithBytes_length_(data, len(data)), 'public.png'):
+        raise ValueError('Не удалось скопировать PNG')
+    return True

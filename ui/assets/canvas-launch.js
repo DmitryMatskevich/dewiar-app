@@ -1,0 +1,1 @@
+(() => {for(const button of document.querySelectorAll('[data-open-canvas]'))button.onclick=async()=>{const native=window.api?.();if(native?.open_canvas)await native.open_canvas('');else{const target=new URL('canvas.html',location.href);target.search=location.search;target.searchParams.delete('id');window.open(target.href,'dewiar-canvas');}};})();

@@ -88,7 +88,7 @@ class ChatLog:
             groups.setdefault(key, []).append(item)
         return groups
 
-    def screenshot(self, message_id, note_path=None, dismiss=False, text=None, revision=None):
+    def screenshot(self, message_id, note_path=None, dismiss=False, text=None, revision=None, markup=None):
         """Read/update only a screenshot message, retaining originals after dismissal."""
         with self._lock:
             item = next((x for x in self.items if x['id'] == message_id and not x.get('dismissed')
@@ -103,11 +103,13 @@ class ChatLog:
                 if text == capture['text']:
                     return copy.deepcopy(item)
                 capture.update(text=text, text_revision=revision + 1, text_edited=True)
+            if markup is not None:
+                item['att'][0]['capture']['markup'] = markup
             if note_path is not None:
                 item['att'][0]['note_path'] = note_path
             if dismiss:
                 item['dismissed'] = True
-            if note_path is not None or dismiss or text is not None:
+            if note_path is not None or dismiss or text is not None or markup is not None:
                 try:
                     self._write_all()
                 except Exception:

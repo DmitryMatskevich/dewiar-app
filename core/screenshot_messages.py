@@ -115,6 +115,11 @@ def capture(engine, source='screen', application='', window_id=None, draft_id=''
             result = recognize_result(data)
         except Exception as error:
             result = dict(status='error', text='', engine='', error=str(error))
+        try:
+            from visual_commands import cache_result
+            cache_result(path,data,result,image.size)
+        except OSError:
+            pass  # Capturing the original still succeeds if the optional cache fails.
         preview, _, _ = prepare(data)
         summary = {'done': 'Текст распознан локально.', 'empty': 'Читаемый текст не найден.',
                    'error': 'Распознать текст не удалось; изображение сохранено.'}.get(result['status'], 'Снимок готов.')

@@ -13,6 +13,7 @@ WebKitGTK (форма окна — X Shape, см. shape_window), на Windows We
 """
 
 import argparse
+import http.server
 import json
 import os
 import re
@@ -23,6 +24,12 @@ import sys
 import time
 import urllib.parse
 from pathlib import Path
+
+class LocalHTTPServer(http.server.ThreadingHTTPServer):
+    # ES module graphs open bursts of local connections. The default backlog of
+    # five can reset a chunk request and leave the editor uninitialized.
+    request_queue_size = 128
+
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -494,7 +501,7 @@ def ui_http_base():
             self.send_error(404)
             return None
 
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(HERE)))
+    srv = LocalHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(HERE)))
     threading.Thread(target=srv.serve_forever, name="ui-http", daemon=True).start()
     _UI_HTTP.append(f"http://127.0.0.1:{srv.server_address[1]}/")
     return _UI_HTTP[0]
@@ -643,6 +650,80 @@ class Api:
         # и показывают «Файл не найден» — поэтому там страницы отдаёт маленький локальный веб-сервер (только папка ui).
         base = ui_http_base() if WIN or MAC or os.environ.get("DEWIAR_UI_HTTP") else None
         return (base + page if base else (HERE / page).as_uri()) + f"?token={self.token}&port={WS_PORT}{extra}"
+
+    def open_visual_editor(self, kind, identifier):
+        import re
+        import webview
+        if kind != 'screenshot' or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(identifier)):
+            raise ValueError('Неверный снимок')
+        windows = getattr(self, '_visual_windows', None)
+        if windows is None:
+            windows = self._visual_windows = {}
+        if identifier in windows:
+            windows[identifier].show(); windows[identifier].restore(); return True
+        window = webview.create_window('Dewiar — Пометки на снимке', self._url('visual-editor.html', '&id=' + identifier),
+            width=1200, height=850, min_size=(640,480), js_api=self)
+        windows[identifier] = window
+        window.events.closed += lambda: windows.pop(identifier, None)
+        def request_close():
+            if getattr(window, '_visual_close_ready', False):
+                return True
+            # Cocoa calls this on its UI thread. Never wait for evaluate_js here:
+            # WebKit needs that same thread to save and answer the request.
+            def finish():
+                if window.evaluate_js('window.visualRequestClose ? window.visualRequestClose() : true'):
+                    self.close_visual_editor(identifier)
+            import threading
+            threading.Thread(target=finish, daemon=True).start()
+            return False
+        window.events.closing += request_close
+        return True
+
+    def close_visual_editor(self, identifier):
+        window = getattr(self, '_visual_windows', {}).get(identifier)
+        if window:
+            window._visual_close_ready = True
+            # Return to the JS bridge before destroying its page. Otherwise the
+            # bridge can leave a response thread waiting on an already closed view.
+            import threading
+            later = threading.Timer(0.15, window.destroy)
+            later.daemon = True
+            later.start()
+        return True
+
+    def open_canvas(self, identifier=''):
+        import re
+        import webview
+        import threading
+        if identifier and not re.fullmatch(r'[a-f0-9]{32}', str(identifier)):
+            raise ValueError('Неверный холст')
+        window = getattr(self, '_canvas_window', None)
+        if window:
+            window.show(); window.restore()
+            if identifier:
+                window.evaluate_js("window.dispatchEvent(new CustomEvent('canvas-open',{detail:" + json.dumps(identifier) + "}))")
+            return True
+        window = webview.create_window('Dewiar — Холст и схемы', self._url('canvas.html', '&id=' + identifier),
+            width=1280, height=900, min_size=(640,580), js_api=self)
+        self._canvas_window = window
+        window.events.closed += lambda: setattr(self, '_canvas_window', None)
+        def closing():
+            if getattr(window, '_canvas_close_ready', False): return True
+            def finish():
+                if window.evaluate_js('window.canvasRequestClose ? window.canvasRequestClose() : true'):
+                    self.close_canvas()
+            threading.Thread(target=finish, daemon=True).start()
+            return False
+        window.events.closing += closing
+        return True
+
+    def close_canvas(self):
+        import threading
+        window = getattr(self, '_canvas_window', None)
+        if window:
+            window._canvas_close_ready = True
+            later = threading.Timer(0.15, window.destroy); later.daemon = True; later.start()
+        return True
 
     def open_screenshot_window(self, mode, identifier):
         """Open a large image/selection surface without resizing the user's HUD."""

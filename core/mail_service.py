@@ -680,13 +680,22 @@ class MailService:
                 "FROM messages WHERE folder='INBOX' AND importance='important' AND from_self=0").fetchone()
         return int(row[0] or 0)
 
+    def important_unread_count(self):
+        """Count unread important inbox messages, deduplicating copies in several accounts."""
+        with self._db() as db:
+            row = db.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), "
+                "account_id || ':' || uidvalidity || ':' || uid)) "
+                "FROM messages WHERE folder='INBOX' AND unread=1 AND importance='important' AND from_self=0").fetchone()
+        return int(row[0] or 0)
+
     def attention_count(self):
         """Сколько ящиков ждут пароль. Связку ключей не читает: только то, что выяснилось при входе на сервер."""
         enabled = [x["id"] for x in self.rules.get("accounts", []) if x.get("enabled")]
         return sum(1 for aid in enabled if getattr(self._accounts.get(aid), "_secret_state", "") in ATTENTION_STATES)
 
     def badge_counts(self):
-        return {"unread": self.unread_count(), "important": self.important_count(), "attention": self.attention_count()}
+        return {"unread": self.unread_count(), "important": self.important_count(),
+                "important_unread": self.important_unread_count(), "attention": self.attention_count()}
 
     def check(self, force=False):
         if force:

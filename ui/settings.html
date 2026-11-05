@@ -70,6 +70,7 @@
   <button data-p="contacts">Контакты</button>
   <button data-p="calendar">Календарь</button>
   <button data-p="reminders">Дела и напоминания</button>
+  <button data-open-canvas title="Локальный холст: картинки, фигуры и схемы">Холст и схемы</button>
   <button data-p="notes" title="Все заметки: поиск, фото и файлы">Заметки</button>
   <button data-p="pay" title="Деньги: счета, долги, сроки, возвраты и итоги">Деньги<i class="ndot" id="pay-dot"></i></button>
   <button data-p="vault" title="Пароли, пин-коды, коды от домофона — найти и скопировать">Сейф паролей</button>
@@ -522,9 +523,6 @@
             <button type="button" class="ml-view-item" data-ml-view="important" aria-pressed="false"><span>Важные</span></button>
             <button type="button" class="ml-view-item" data-ml-view="unanswered" aria-pressed="false"><span>Без ответа</span></button>
           </div>
-          <label class="ml-badge-preference" for="ml-badge-mode">Счётчик на значке
-            <select id="ml-badge-mode"><option value="unread">Непрочитанные</option><option value="important">Важные</option></select>
-          </label>
           <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
           <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>
           <p class="ml-sidebar-note">Заголовки обновляются каждые пять минут. Пароли хранятся в Связке ключей macOS.</p>
@@ -2029,5 +2027,6 @@
 <link rel="stylesheet" href="assets/image-ocr.css">
 <script src="assets/image-ocr.js"></script>
 <script src="assets/translate-panel.js"></script>
+<script src="assets/canvas-launch.js"></script>
 </body>
 </html>

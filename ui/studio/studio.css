@@ -17,8 +17,11 @@
 html, body { height: 100%; }
 /* фирменный фон Dewiar (--scene): три цветных сияния на глубоком сине-фиолетовом */
 body { font: 14.5px/1.55 "Manrope", "Ubuntu", "Noto Sans", sans-serif; color: var(--ink); display: grid; grid-template-columns: 240px 1fr; overflow: hidden;
-  background-color: #0a0a0f;
+  background-color: #0a0a0f; user-select: text; -webkit-user-select: text;
   background: var(--scene); }
+/* На всех страницах студии текст можно выделить и скопировать. */
+main, main * { user-select: text; -webkit-user-select: text; }
+main :is(button, input[type="button"], input[type="submit"], select) { user-select: none; -webkit-user-select: none; }
 .glass { background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 h1, h2, h3 { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; letter-spacing: .01em; }
 h1 { font-size: 22px; margin-bottom: 6px; }

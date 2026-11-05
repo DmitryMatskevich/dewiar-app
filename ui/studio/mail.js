@@ -80,7 +80,7 @@ function mlRemoveImportanceRule(id) {
 function mlSetView(view) {
   mlClearMessage();
   mlView = view; mlAccountFilter = "";
-  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", unanswered: "Без ответа" };
+  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", important_unread: "Важные непрочитанные", unanswered: "Без ответа" };
   document.querySelectorAll("[data-ml-view]").forEach(b => {
     const selected = b.dataset.mlView === view;
     b.classList.toggle("selected", selected); b.setAttribute("aria-pressed", String(selected));
@@ -131,17 +131,17 @@ async function mlLoad() {
   if (waiting) mlAskPassword(waiting);
   const r = await core.call("mail_rules_get"); mlRulesData = r.rules; $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
   mlRenderImportanceRules(r.rules.importance_rules || []);
-  $("#ml-badge-mode").value = (typeof S !== "undefined" && S?.ui?.mail_badge_mode === "important") ? "important" : "unread";
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
   const params = new URLSearchParams(location.search);
-  if (params.has("important")) mlSetView("important"); else if (params.has("unread")) mlSetView("unread");
+  if (params.has("important") && params.has("unread")) mlSetView("important_unread");
+  else if (params.has("important")) mlSetView("important"); else if (params.has("unread")) mlSetView("unread");
 }
 async function mlList() {
   try {
-    const important = mlView === "important" || mlView === "unanswered";
+    const important = mlView === "important" || mlView === "important_unread" || mlView === "unanswered";
     const unanswered = mlView === "unanswered";
     const items = await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
-      account_id: mlAccountFilter, important, unanswered, unread: mlView === "unread" });
+      account_id: mlAccountFilter, important, unanswered, unread: mlView === "unread" || mlView === "important_unread" });
     const box = $("#ml-list"); box.replaceChildren();
     if (!items.length) {
       const empty = document.createElement("div"); empty.className = "ml-empty";
@@ -287,14 +287,6 @@ $("#ml-refresh").onclick = async ev => { ev.target.disabled = true; $("#ml-sync-
     $("#ml-sync-state").textContent = "Проверено ящиков: " + ok + "." + (bad.length ? " Ошибки: " + bad.map(x => x.account_id + ": " + x.error).join("; ") : " Ошибок нет.");
   } catch (e) { $("#ml-sync-state").textContent = e.message; } finally { ev.target.disabled = false; } };
 document.querySelectorAll("[data-ml-view]").forEach(b => b.onclick = () => mlSetView(b.dataset.mlView));
-$("#ml-badge-mode").onchange = async ev => {
-  const select = ev.target, previous = select.value === "important" ? "unread" : "important";
-  select.disabled = true;
-  try { S = await core.call("settings_save", { patch: { ui: { mail_badge_mode: select.value } } });
-    toast("Счётчик на значке обновлён."); }
-  catch (e) { select.value = previous; toast(e.message); }
-  finally { select.disabled = false; }
-};
 $("#ml-query").oninput = () => mlList();
 $("#ml-reply-prepare").onclick = async ev => { if (!mlCurrentMessage) return; ev.target.disabled = true;
   try { await mlShowDraft(await core.call("mail_reply_prepare", { message_id: mlCurrentMessage.id, body: $("#ml-reply-body").value })); }

@@ -710,6 +710,7 @@
     <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
     <button class="btn" id="a-meet" title="Начать встречу: запись экрана и двух дорожек звука" aria-label="Начать встречу"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h5M8 12h3M16 10v4"/><path d="M6 22h12"/></svg></button>
+    <button class="btn" data-open-canvas title="Холст и схемы" aria-label="Холст и схемы"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m6 16 4-4 4 3 4-7"/></svg></button>
     <button class="btn" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
     <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-tasks" hidden title="Задачи — ход выполнения" aria-label="Открыть задачи"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12h8M8 16h5"/></svg><span id="b-tasks-count" hidden aria-hidden="true"></span></button>
@@ -2159,14 +2160,11 @@ core.on('hello',d=>setCalendarBadgeSettings((((d||{}).settings||{}).ui||{})));
 for(const event of ['reminders','calendars','money_saved','note_saved','tasks']) core.on(event,()=>refreshCalendarBadge());
 setInterval(()=>{if(!document.hidden) refreshCalendarBadge();},60000);
 window.addEventListener('focus',()=>refreshCalendarBadge());
-let mailBadgeMode = "unread", mailBadgeCounts = { unread: 0, important: 0 };
-function setMailBadgeMode(mode) {
-  mailBadgeMode = mode === "important" ? "important" : "unread";
-  setMailBadgeCounts(mailBadgeCounts);
-}
+let mailBadgeCounts = { important_unread: 0 };
+function setMailBadgeMode() { setMailBadgeCounts(mailBadgeCounts); }
 function setMailBadgeCounts(counts) {
   mailBadgeCounts = { ...mailBadgeCounts, ...(counts || {}) };
-  const n = Math.max(0, Number(mailBadgeCounts[mailBadgeMode]) || 0), button = $("b-mail"), badge = $("b-mail-count");
+  const n = Math.max(0, Number(mailBadgeCounts.important_unread) || 0), button = $("b-mail"), badge = $("b-mail-count");
   const attention = Math.max(0, Number(mailBadgeCounts.attention) || 0);
   button.classList.toggle("has-mail-count", n > 0 || attention > 0); badge.hidden = n === 0 && !attention;
   badge.textContent = attention ? "!" : n > 99 ? "99+" : String(n);
@@ -2174,13 +2172,11 @@ function setMailBadgeCounts(counts) {
     const label = attention === 1 ? "Почта: один ящик ждёт пароль. Открыть и ввести" : "Почта: ящиков ждут пароль — " + attention + ". Открыть и ввести";
     button.title = label; button.setAttribute("aria-label", label); return;
   }
-  const kind = mailBadgeMode === "important" ? "Важных писем" : "Непрочитанных писем";
-  const target = mailBadgeMode === "important" ? "важные письма" : "непрочитанные письма";
-  const label = n ? kind + ": " + n + ". Открыть " + target : "Открыть почту: " + (mailBadgeMode === "important" ? "важных писем нет" : "непрочитанных писем нет");
+  const label = n ? "Важных непрочитанных писем: " + n + ". Открыть список" : "Открыть почту: важных непрочитанных писем нет";
   button.title = label; button.setAttribute("aria-label", label);
 }
 async function refreshMailCounts() { try { setMailBadgeCounts(await core.call("mail_badge_counts")); } catch (_) {} }
-$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : mailBadgeMode === "important" ? "&important=1" : "&unread=1"); };
+$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : "&important=1&unread=1"); };
 core.on("mail_counts", counts => setMailBadgeCounts(counts));
 core.on("hello", d => { setMailBadgeMode((((d || {}).settings || {}).ui || {}).mail_badge_mode); setTimeout(refreshMailCounts, 700); });
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */
@@ -2671,5 +2667,6 @@ window.getTranscriptionAttachments = () => atts.filter(a => a.kind === 'file');
 window.consumeTranscriptionAttachments = files => { atts = atts.filter(a => !files.includes(a)); renderAtts(); };
 document.addEventListener('media-task-started', e => { tasks[e.detail.id] = e.detail; renderTask(); });
 </script>
+<script src="assets/canvas-launch.js"></script>
 </body>
 </html>
