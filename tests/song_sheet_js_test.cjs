@@ -37,7 +37,7 @@ console.log('Compact named icon controls: OK');
 
 const editable=s.sheetHTML({song_id:'edit-check',title:'Edit',phrases:[],guitar_sheet:[{phrase_id:'phrase-1:line:12',source_phrase_ids:['phrase-1'],text:'A lyric phrase.',chords:[{name:'Am',char_index:0,start_ms:0,end_ms:1000}]}]});
 assert.match(editable,/data-song-edit-phrase="phrase-1" data-song-edit-kind="chords" title="Редактировать аккорды этой фразы"/);
-assert.match(editable,/data-song-edit-phrase="phrase-1" data-song-edit-kind="lyrics" title="Редактировать текст этой фразы"/);
+assert.match(editable,/data-song-edit-phrase="phrase-1" data-song-edit-line="phrase-1:line:12" data-song-edit-kind="lyrics" title="Редактировать текст этой фразы"/);
 assert.ok(editable.indexOf('song-paper-edit-chords')<editable.indexOf('song-paper-chords'));
 assert.ok(editable.indexOf('song-paper-edit-lyrics')<editable.indexOf('song-paper-lyrics'));
 console.log('Inline phrase and chord edit controls: OK');

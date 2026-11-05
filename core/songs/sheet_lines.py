@@ -76,6 +76,18 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
                 continue
             owners = [r for lo,hi,r in spans if lo < b and hi > a]
             source = owners[0]
+            source_spans = []
+            for lo, hi, owner in spans:
+                left, right = max(lo, a), min(hi, a + len(content))
+                if left >= right:
+                    continue
+                source_spans.append({
+                    'phrase_id': owner.get('phrase_id'),
+                    'phrase_char_start': left - lo,
+                    'phrase_char_end': right - lo,
+                    'display_char_start': left - a,
+                    'display_char_end': right - a,
+                })
             chosen = [dict(m,char_index=m['char_index']-a) for m in marks if a<=m['char_index']<a+len(content)]
             grouped = {}
             for m in chosen:
@@ -88,6 +100,7 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
             shown.add(pid)
             output.append({**source,'phrase_id':display_id,'text':content,'cells':cells,'chords':chosen,
                 'unplaced_chords':[], 'display_only':True,'source_phrase_ids':[r.get('phrase_id') for r in owners],
+                'source_spans':source_spans,
                 'display_words':[dict(w,char_start=w['char_start']-a,char_end=w['char_end']-a)
                                  for w in cues if a<=w['char_start'] and w['char_end']<=a+len(content)]})
         group.clear()

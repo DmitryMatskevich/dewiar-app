@@ -21,7 +21,7 @@ def public_song(row, summary=False):
                               for r in row.get('analysis_runs',[]) if r['run_id']==row.get('candidate_run_id')]
     result['phrase_history'] = {pid:{'cursor':h['cursor'],'version_count':len(h['versions'])}
         for pid,h in row.get('phrase_history',{}).items() if isinstance(h,dict) and 'versions' in h}
-    keys = ('phrase_id','source_phrase_ids','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words')
+    keys = ('phrase_id','source_phrase_ids','source_spans','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words')
     from .chord_layout import build_guitar_sheet
     from .sheet_lines import readable_sheet
     starts = [row.get('phrases',[])[s['phrase_indexes'][0]].get('phrase_id')

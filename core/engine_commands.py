@@ -1774,7 +1774,7 @@ class CommandsMixin:
             if a.get("base_revision") is None:
                 raise ValueError("Для сохранения нужна ревизия карточки")
             return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
-        if cmd in {"song_edit_phrase", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_finish_review"}:
+        if cmd in {"song_edit_phrase", "song_edit_display_line", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_finish_review"}:
             if cmd == "song_full_audio" and a.get("variant") == "instrumental":
                 from songs.review import instrumental_audio_command
                 return instrumental_audio_command(self.song_store, self.song_instrumental, a)

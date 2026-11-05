@@ -68,6 +68,45 @@ class LiveWordEditStoreTest(unittest.TestCase):
         first = display_words(phrase)[0]
         self.assertEqual((first['start_ms'], first['end_ms'], first['quality']), (300, 1100, 'estimated_manual'))
 
+    def test_editing_joined_display_line_includes_both_timed_phrase_fragments(self):
+        first = {'phrase_id': 'phrase-a', 'start_ms': 0, 'end_ms': 2000,
+                 'text': 'Перед ним напрочь', 'review_state': 'needs_review',
+                 'words': [{'text': 'Перед', 'char_start': 0, 'char_end': 5,
+                            'start_ms': 0, 'end_ms': 500}]}
+        second = {'phrase_id': 'phrase-b', 'start_ms': 2020, 'end_ms': 3200,
+                  'text': 'цельный четвертак.', 'review_state': 'needs_review',
+                  'words': [{'text': 'четвертак.', 'char_start': 8, 'char_end': 18,
+                             'start_ms': 2500, 'end_ms': 3100}]}
+        row = self.store.patch(self.song_id, {'phrases': [first, second], 'chords': [],
+                                              'audio': {'duration_ms': 4000}})
+        from core.songs.public import public_song
+        line = next(item for item in public_song(row)['guitar_sheet']
+                    if item.get('text', '').endswith('напрочь цельный четвертак.'))
+        self.assertEqual(line['text'], 'Перед ним напрочь цельный четвертак.')
+        self.assertEqual([span['phrase_id'] for span in line['source_spans']], ['phrase-a', 'phrase-b'])
+
+        edited = self.store.edit_display_line(self.song_id, line['phrase_id'],
+            'Перед ним напрочь цельной четверта.', False, row['revision'])
+        by_id = {phrase['phrase_id']: phrase for phrase in edited['phrases']}
+        self.assertEqual(by_id['phrase-a']['text'], 'Перед ним напрочь')
+        self.assertEqual(by_id['phrase-b']['text'], 'цельной четверта.')
+        self.assertEqual((by_id['phrase-a']['start_ms'], by_id['phrase-a']['end_ms']), (0, 2000))
+        self.assertEqual((by_id['phrase-b']['start_ms'], by_id['phrase-b']['end_ms']), (2020, 3200))
+        self.assertEqual(by_id['phrase-a']['words'][0]['text'], 'Перед')
+        self.assertEqual(by_id['phrase-b']['words'], [])
+        self.assertIn('phrase-b', edited['phrase_history'])
+
+    def test_editing_joined_display_line_rejects_stale_revision(self):
+        from core.songs.public import public_song
+        row = self.store.patch(self.song_id, {'phrases': [
+            {'phrase_id': 'phrase-a', 'start_ms': 0, 'end_ms': 1000, 'text': 'до конца'},
+            {'phrase_id': 'phrase-b', 'start_ms': 1020, 'end_ms': 2000, 'text': 'строки.'}],
+            'chords': [], 'audio': {'duration_ms': 2500}})
+        line = next(item for item in public_song(row)['guitar_sheet'] if item.get('source_spans') and len(item['source_spans']) > 1)
+        with self.assertRaisesRegex(ValueError, 'Карточка уже изменилась'):
+            self.store.edit_display_line(self.song_id, line['phrase_id'], 'до конца строки.', False,
+                                         row['revision'] - 1)
+
 
 if __name__ == '__main__':
     unittest.main()

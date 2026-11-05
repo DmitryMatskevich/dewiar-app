@@ -343,6 +343,95 @@ class SongStore:
                 "words": [w for p in phrases for w in p.get('words',[])], "chords": chords, "guitar_sheet": build_guitar_sheet(phrases,chords), "review_state": "lyrics_verified" if verified else "needs_review",
                 "stage_label": "Текст проверен; аккорды ещё не проверены" if verified else "Проверьте текст по записи"}, base_revision)
 
+    def edit_display_line(self, song_id, line_id, text, reviewed, base_revision):
+        """Edit one displayed lyric row even when it joins adjacent timed ASR phrases."""
+        if base_revision is None:
+            raise ValueError("Для сохранения нужна ревизия карточки")
+        text = re.sub(r"\s+", " ", str(text or "")).strip()
+        if not text or len(text) > 4000:
+            raise ValueError("Введите текст строки (до 4000 символов) или [неразборчиво]")
+        with self._lock:
+            row = self.get(song_id)
+            if not row:
+                raise ValueError("Песня не найдена")
+            if row.get('revision') != base_revision:
+                raise ValueError("Карточка уже изменилась — обновите песню и повторите правку")
+            from .public import public_song
+            display_line = next((line for line in public_song(row).get('guitar_sheet', [])
+                                 if line.get('phrase_id') == line_id and line.get('text')), None)
+            spans = (display_line or {}).get('source_spans') or []
+            if not display_line or len(spans) < 2:
+                raise ValueError("Строка уже изменилась — обновите лист песни")
+            phrase_by_id = {phrase.get('phrase_id'): phrase for phrase in row.get('phrases', [])}
+            source_ids = []
+            for span in spans:
+                phrase_id = span.get('phrase_id')
+                if not phrase_id or phrase_id not in phrase_by_id:
+                    raise ValueError("Исходные части строки изменились — обновите лист песни")
+                if phrase_id not in source_ids:
+                    source_ids.append(phrase_id)
+                original = phrase_by_id[phrase_id].get('text', '')
+                a, b = span.get('phrase_char_start'), span.get('phrase_char_end')
+                da, db = span.get('display_char_start'), span.get('display_char_end')
+                if not all(isinstance(value, int) and not isinstance(value, bool) for value in (a, b, da, db)):
+                    raise ValueError("Не удалось проверить границы строки — обновите лист песни")
+                if not (0 <= a < b <= len(original) and 0 <= da < db <= len(display_line['text'])):
+                    raise ValueError("Границы строки уже изменились — обновите лист песни")
+                if original[a:b] != display_line['text'][da:db]:
+                    raise ValueError("Текст строки уже изменился — обновите лист песни")
+            if len(source_ids) < 2:
+                raise ValueError("Строка уже изменилась — обновите лист песни")
+            tokens = list(re.finditer(r"\S+", text))
+            if len(tokens) < len(spans):
+                raise ValueError("Оставьте хотя бы по одному слову в каждой временной части строки")
+            weights = [max(1, span['display_char_end'] - span['display_char_start']) for span in spans]
+            total = sum(weights)
+            cuts = [0]
+            cumulative = 0
+            for index in range(1, len(spans)):
+                cumulative += weights[index - 1]
+                target = len(text) * cumulative / total
+                low, high = cuts[-1] + 1, len(tokens) - (len(spans) - index)
+                chosen = min(range(low, high + 1), key=lambda i: abs(tokens[i].start() - target))
+                cuts.append(chosen)
+            cuts.append(len(tokens))
+            chunks = [text[tokens[a].start():tokens[b - 1].end()] for a, b in zip(cuts, cuts[1:])]
+            phrases = row.get('phrases', [])
+            histories = row.get('phrase_history', {})
+            for span, chunk in zip(spans, chunks):
+                phrase_id = span['phrase_id']
+                phrase = phrase_by_id[phrase_id]
+                a, b = span['phrase_char_start'], span['phrase_char_end']
+                new_phrase_text = phrase['text'][:a] + chunk + phrase['text'][b:]
+                updated = {**phrase, 'text': new_phrase_text,
+                           'review_state': 'verified' if reviewed else 'needs_review'}
+                if new_phrase_text != phrase['text']:
+                    updated.update(words=[], agreement=[], timing_quality='phrase', alignment_stale=True)
+                    for chord in row.get('chords', []):
+                        anchor = chord.get('anchor') or {}
+                        at = anchor.get('grapheme_index')
+                        if anchor.get('phrase_id') == phrase_id and isinstance(at, int) and at >= a:
+                            chord['previous_anchor'] = chord.pop('anchor')
+                            chord['verified'] = False
+                history = histories.get(phrase_id, {'versions': [copy.deepcopy(phrase)], 'cursor': 0})
+                if (updated.get('text') != phrase.get('text') or
+                        updated.get('review_state') != phrase.get('review_state')):
+                    history['versions'] = history['versions'][:history['cursor'] + 1] + [updated]
+                    history['cursor'] += 1
+                    histories[phrase_id] = history
+                    phrase.clear()
+                    phrase.update(copy.deepcopy(updated))
+            verified = bool(phrases) and all(phrase.get('review_state') == 'verified' for phrase in phrases)
+            from .chord_layout import build_guitar_sheet
+            chords = row.get('chords', [])
+            return self.patch(song_id, {'phrases': phrases, 'phrase_history': histories,
+                'words': [word for phrase in phrases for word in phrase.get('words', [])], 'chords': chords,
+                'guitar_sheet': build_guitar_sheet(phrases, chords),
+                'status': 'review' if row.get('status') == 'ready' else row.get('status', 'review'),
+                'review_state': 'lyrics_verified' if verified else 'needs_review',
+                'stage_label': 'Текст проверен; аккорды ещё не проверены' if verified else 'Проверьте текст по записи'},
+                base_revision)
+
     def delete(self, song_id: str) -> bool:
         """Remove only the owned card metadata; audio cleanup is a separate explicit step."""
         with self._lock:

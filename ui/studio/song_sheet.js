@@ -114,7 +114,8 @@ window.SongSheet = (() => {
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
       if(text) lines.push({kind:'chords',text,phrase_id:phraseId});
-      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId});stanzaLines++;hasLyrics=true; }
+      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
+        display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true; }
       else if(text) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
         phrase_id:line.phrase_id,start_ms:line.start_ms,end_ms:line.end_ms,next_section_label:line.next_section_label});lines.push({kind:'space',text:''}); }
     }
@@ -330,10 +331,11 @@ window.SongSheet = (() => {
     }
     return pieces.map((part,index)=>`<span class="song-paper-cue-part" data-cue-step="${3-index}">${esc(part)}</span>`).join('');
   }
-  function editButton(phraseId,kind) {
+  function editButton(phraseId,kind,lineId='') {
     if(!phraseId) return '';
     const title=kind==='chords'?'Редактировать аккорды этой фразы':'Редактировать текст этой фразы';
-    return `<button type="button" class="btn song-paper-edit song-paper-edit-${kind}" data-song-edit-phrase="${esc(phraseId)}" data-song-edit-kind="${kind}" title="${title}" aria-label="${title}">${icon('edit')}</button>`;
+    const lineAttr=kind==='lyrics'&&lineId?` data-song-edit-line="${esc(lineId)}"`:'';
+    return `<button type="button" class="btn song-paper-edit song-paper-edit-${kind}" data-song-edit-phrase="${esc(phraseId)}"${lineAttr} data-song-edit-kind="${kind}" title="${title}" aria-label="${title}">${icon('edit')}</button>`;
   }
   function sheetHTML(row) {
     if (!row.guitar_sheet?.length) return '';
@@ -351,7 +353,7 @@ window.SongSheet = (() => {
       }
       const timing=lyric?.kind==='instrumental'&&Number.isFinite(lyric.start_ms)&&Number.isFinite(lyric.end_ms)
         ? ` data-start-ms="${lyric.start_ms}" data-end-ms="${lyric.end_ms}" data-next-section="${esc(lyric.next_section_label||'вокала')}"` : '';
-      const lyricEdit=lyric?.kind==='lyrics' ? editButton(lyric.phrase_id,'lyrics') : '';
+      const lyricEdit=lyric?.kind==='lyrics' ? editButton(lyric.phrase_id,'lyrics',lyric.display_line_id) : '';
       blocks.push(`<div class="song-paper-line${chords?' has-chords':''}${lyricEdit?' has-lyrics-edit':''}">${chords}${lyric ? `${lyricEdit}<div class="song-paper-${lyric.kind}"${lyric.phrase_id ? ` data-phrase-id="${esc(lyric.phrase_id)}"` : ''}${timing}>${lyric.kind==='lyrics' ? lyricHTMLContent : lyric.kind==='instrumental' ? lyricHTMLContent : esc(lyric.text)}</div>` : ''}</div>`);
     }
     return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;

@@ -38,7 +38,9 @@ row = {
     'artist': 'Тестовые данные', 'revision': 1, 'status': 'review',
     'capabilities': {'audio': True, 'lyrics': True, 'chords': True},
     'phrases': [{'phrase_id': 'phrase-1', 'start_ms': 0, 'end_ms': 8000,
-                 'text': phrase_text, 'words': [], 'review_state': 'needs_review', 'note': ''}],
+                 'text': phrase_text, 'words': [], 'review_state': 'needs_review', 'note': ''},
+                {'phrase_id': 'phrase-2', 'start_ms': 8000, 'end_ms': 10000,
+                 'text': 'цельный четвертак.', 'words': [], 'review_state': 'needs_review', 'note': ''}],
     'chords': [
         {'name': 'Em', 'start_ms': 500, 'end_ms': 1000, 'method': 'test'},
         {'name': 'Am', 'start_ms': 0, 'end_ms': 2500,
@@ -48,10 +50,19 @@ row = {
     ],
     'sections': [],
     'guitar_sheet': [{'text': '', 'unplaced_chords': [{'name': 'Em', 'start_ms': 0, 'end_ms': 1000}]},
-                     {'phrase_id': 'phrase-1', 'text': phrase_text, 'start_ms': 1000, 'end_ms': 8000,
+                     {'phrase_id': 'phrase-1', 'source_phrase_ids': ['phrase-1'], 'text': phrase_text, 'start_ms': 1000, 'end_ms': 8000,
                       'display_words': [dict(word, quality='estimated_phrase') for word in words],
                       'chords': [{'name': 'Am', 'char_index': 0, 'start_ms': 0, 'end_ms': 2500},
-                                 {'name': 'E7', 'char_index': 10, 'start_ms': 2500, 'end_ms': 6000}]}],
+                                 {'name': 'E7', 'char_index': 10, 'start_ms': 2500, 'end_ms': 6000}]},
+                     {'phrase_id': 'joined-line-1', 'source_phrase_ids': ['phrase-1', 'phrase-2'],
+                      'source_spans': [
+                          {'phrase_id': 'phrase-1', 'phrase_char_start': phrase_text.index('улыбаюсь.'),
+                           'phrase_char_end': len(phrase_text), 'display_char_start': 0,
+                           'display_char_end': len('улыбаюсь.')},
+                          {'phrase_id': 'phrase-2', 'phrase_char_start': 0,
+                           'phrase_char_end': len('цельный четвертак.'), 'display_char_start': len('улыбаюсь. '),
+                           'display_char_end': len('улыбаюсь. цельный четвертак.')}],
+                      'text': 'улыбаюсь. цельный четвертак.', 'start_ms': 7000, 'end_ms': 10000}],
 }
 
 with tempfile.TemporaryDirectory(prefix='dewiar-live-editor-ui-') as temp, sync_playwright() as pw:
@@ -72,6 +83,11 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
    p.review_state=args.reviewed?'verified':'needs_review';row.revision++;return structuredClone(row);
  }
  if(cmd==='song_edit_chords'){row.chords=args.chords;row.revision++;return structuredClone(row);}
+ if(cmd==='song_edit_display_line'){
+   if(args.line_id!=='joined-line-1')throw Error('Unexpected display line: '+args.line_id);
+   row.phrases.find(x=>x.phrase_id==='phrase-2').text='цельной четверта.';
+   row.revision++;return structuredClone(row);
+ }
  throw Error('Unexpected command: '+cmd);
 }};
 '''.replace('ROW', json.dumps(row, ensure_ascii=False)).replace('AUDIO', json.dumps(audio))
@@ -107,7 +123,7 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert not page.locator('.song-paper-instrumental').inner_text().startswith('До ')
     player.evaluate("a=>{a.currentTime=3.2;a.dispatchEvent(new Event('timeupdate'))}")
     page.wait_for_function("document.querySelector('.song-paper-word.current-word')?.textContent==='улыбаюсь.'")
-    page.locator('.song-paper-edit-lyrics[data-song-edit-phrase="phrase-1"]').click()
+    page.locator('.song-paper-edit-lyrics[data-song-edit-line="phrase-1"]').click()
     assert page.locator('#song-live-editor').is_visible()
     assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
     assert page.locator('#song-live-editor').is_visible()
@@ -133,7 +149,19 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_chords')")
     assert 'Аккорды фразы сохранены' in page.locator('#song-live-edit-status').inner_text()
     assert page.evaluate("row.chords.find(ch=>ch.start_ms===2500).name") == 'G7'
+
+    page.locator('.song-paper-edit-lyrics[data-song-edit-line="joined-line-1"]').click()
+    assert page.locator('#song-live-edit-text').input_value() == 'улыбаюсь. цельный четвертак.'
+    assert page.locator('#song-live-edit-preview').inner_text() == 'улыбаюсь. цельный четвертак.'
+    page.locator('#song-live-edit-text').fill('улыбаюсь. цельной четверта.')
+    assert page.locator('#song-live-edit-preview').inner_text() == 'улыбаюсь. цельной четверта.'
+    page.locator('#song-live-edit-save').click()
+    page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_display_line')")
+    args=page.evaluate("calls.find(([cmd])=>cmd==='song_edit_display_line')[1]")
+    assert args['line_id']=='joined-line-1'
+    assert args['text']=='улыбаюсь. цельной четверта.'
+    assert page.evaluate("row.phrases.find(p=>p.phrase_id==='phrase-2').text")=='цельной четверта.'
     assert not errors, errors
     browser.close()
 
-print('OK: current word highlight, inline phrase/chord editing, pause-on-edit and independent chord save')
+print('OK: current word highlight, inline phrase/chord editing, joined-line editing and independent chord save')

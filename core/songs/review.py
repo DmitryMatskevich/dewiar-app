@@ -78,6 +78,9 @@ def review_command(store, cmd, args):
                                  args.get("note", ""), args.get("reviewed") is True,
                                  args.get("base_revision"), args.get("action", "edit"),
                                  args.get("word_start"), args.get("word_start_ms"), args.get("word_end_ms"))
+    if cmd == "song_edit_display_line":
+        return store.edit_display_line(song_id, str(args.get("line_id") or ""), args.get("text"),
+                                       args.get("reviewed") is True, args.get("base_revision"))
     if cmd not in {"song_phrase_audio", "song_full_audio"}:
         raise ValueError("Неизвестная команда проверки")
     row = store.get(song_id)
