@@ -38,7 +38,7 @@ row = {
     'artist': 'Тестовые данные', 'revision': 1, 'status': 'review',
     'capabilities': {'audio': True, 'lyrics': True, 'chords': True},
     'phrases': [{'phrase_id': 'phrase-1', 'start_ms': 0, 'end_ms': 8000,
-                 'text': phrase_text, 'words': [], 'review_state': 'needs_review', 'note': ''},
+                 'text': phrase_text, 'words': words, 'review_state': 'needs_review', 'note': ''},
                 {'phrase_id': 'phrase-2', 'start_ms': 8000, 'end_ms': 10000,
                  'text': 'цельный четвертак.', 'words': [], 'review_state': 'needs_review', 'note': ''}],
     'chords': [
@@ -76,6 +76,7 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
  if(cmd==='songs_list')return [structuredClone(row)];
  if(cmd==='song_get')return structuredClone(row);
  if(cmd==='song_full_audio')return {data:audioData};
+ if(cmd==='song_phrase_audio')return {data:audioData,start_ms:0,end_ms:8000,phrase_start_ms:0,phrase_end_ms:8000};
  if(cmd==='song_edit_phrase'){
    const p=row.phrases.find(x=>x.phrase_id===args.phrase_id);
    if(args.word_start!==undefined){let w=p.words.find(x=>x.char_start===args.word_start);if(!w){const token=[...p.text.matchAll(/\\S+/g)].find(x=>x.index===args.word_start);w={text:token[0],char_start:token.index,char_end:token.index+token[0].length,start_ms:args.word_start_ms,end_ms:args.word_end_ms,method:'manual_word_edit_estimated'};p.words.push(w);}const from=w.char_start,to=w.char_end,delta=args.text.length-(to-from);p.text=p.text.slice(0,from)+args.text+p.text.slice(to);p.words.forEach(x=>{if(x===w){x.text=args.text;x.char_end=from+args.text.length;}else if(x.char_start>=to){x.char_start+=delta;x.char_end+=delta;}});}
@@ -132,6 +133,19 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-save').evaluate("e=>e.closest('.song-live-editor-head')!==null")
     assert page.locator('#song-live-edit-save').inner_text() == 'Сохранить'
     assert page.locator('#song-live-edit-close').count() == 0
+    live_play = page.locator('#song-live-edit-play')
+    assert live_play.count() == 1
+    assert live_play.get_attribute('aria-label') == 'Проиграть текущую фразу'
+    live_play.click()
+    page.wait_for_function("calls.some(([cmd])=>cmd==='song_phrase_audio')")
+    page.wait_for_function("!document.querySelector('#song-review-audio').paused")
+    page.locator('#song-review-audio').evaluate("(a)=>{a.currentTime=1.5;a.dispatchEvent(new Event('timeupdate'))}")
+    assert page.locator('.song-phrase[data-phrase-id="phrase-1"] .song-word.current-word').text_content() == 'молчу'
+    assert page.locator('.song-paper-word.current-word').inner_text() == 'молчу'
+    assert live_play.get_attribute('aria-label') == 'Приостановить проигрывание текущей фразы'
+    live_play.click()
+    page.wait_for_function("document.querySelector('#song-review-audio').paused")
+    page.wait_for_function("document.querySelector('#song-live-edit-play')?.getAttribute('aria-label')==='Проиграть текущую фразу'")
     assert page.locator('#song-live-edit-target').inner_text().startswith('0.000–8.000 с')
     chord_preview=page.locator('#song-live-edit-preview-chords')
     assert chord_preview.is_visible()

@@ -110,6 +110,8 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-live-editor-head, .song-live-chord-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .song-live-editor-head { flex-wrap:wrap; }
 .song-live-editor-head .actions { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 0 auto; }
+.song-live-editor-head .song-icon-btn { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; min-width:44px; padding:10px; }
+.song-live-editor-head .song-icon-btn svg { width:24px; height:24px; flex-shrink:0; pointer-events:none; }
 .song-live-editor-head .hint { margin:4px 0 10px; }
 .song-live-preview { margin:4px 0 14px; padding:10px 12px; border-radius:10px; background:var(--field); overflow-x:auto; }
 .song-live-preview b { display:block; font-size:13px; color:var(--muted); }
