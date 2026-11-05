@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
 const core={on(){},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='songs_list')return structuredClone(rows);
  if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
- if(cmd==='song_process_source'){const r=rows.find(item=>item.song_id===a.song_id);r.status='running';r.stage='sources';r.stage_label='Сохраняем выбранную запись';return structuredClone(r);}
+ if(cmd==='song_resume'){const r=rows.find(item=>item.song_id===a.song_id);r.status='running';r.processing={busy:true,can_resume:false};r.stage='sources';r.stage_label='Сохраняем выбранную запись';return structuredClone(r);}
  if(cmd==='songs_instrumental_prepare_all')return {started:[{song_id:'1'}],ready:[{song_id:'2'}],already_running:[],missing_audio:[],errors:[]};
  if(cmd==='song_full_audio'){if(window.failAudio)throw Error('fixture audio error');if(window.delayAudio)await new Promise(r=>window.releaseAudio=r);return {data:audioData};}
  return {};}};
@@ -52,16 +52,31 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     assert not tab.locator('[data-song-karaoke="1"]').is_disabled()
     assert tab.locator('[data-song-karaoke="2"]').is_disabled()
     assert not stop.is_visible()
-    tab.evaluate("rows.push({song_id:'selected-source',title:'Выбрана запись',artist:'Исполнитель',revision:1,status:'needs_input',stage:'sources',stage_label:'Запись выбрана; нажмите «Обработать пакетно», чтобы начать разбор',capabilities:{audio:false},selected_source_id:'youtube:chosen',source_candidates:[{candidate_id:'youtube:chosen',kind:'youtube',title:'Выбранное исполнение',url:'https://youtu.be/abcdefghijk'}],phrases:[],karaoke:{state:'absent'}})")
+    tab.evaluate("rows.push({song_id:'selected-source',title:'Выбрана запись',artist:'Исполнитель',revision:1,status:'needs_input',stage:'sources',stage_label:'Запись выбрана; нажмите «Обработать пакетно», чтобы начать разбор',capabilities:{audio:false},processing:{busy:false,can_resume:true,label:'Обработать пакетно'},phrases:[],karaoke:{state:'absent'}})")
     tab.evaluate('loadSongs()')
     process=tab.locator('[data-song-process-selected="selected-source"]')
     assert process.inner_text()=='Обработать пакетно'
     assert not tab.locator('[data-song-play="selected-source"]').count()
     process.click()
-    tab.wait_for_function("calls.some(([cmd,args])=>cmd==='song_process_source'&&args.song_id==='selected-source'&&args.candidate_id==='youtube:chosen')")
+    tab.wait_for_function("calls.some(([cmd,args])=>cmd==='song_resume'&&args.song_id==='selected-source')")
     tab.wait_for_function("rows.find(r=>r.song_id==='selected-source').status==='running'")
     assert not tab.locator('[data-song-process-selected="selected-source"]').count()
     assert tab.locator('[data-song-play="selected-source"]').is_disabled()
+    # Production cards deliberately omit audio paths, phrases and candidates.
+    for status in ('partial', 'failed', 'interrupted', 'cancelled'):
+        tab.evaluate("status=>rows.push({song_id:status,title:'ТЕСТ '+status,revision:1,status,capabilities:{audio:true},processing:{can_resume:true,busy:false,label:'Продолжить обработку'}})", status)
+    tab.evaluate('loadSongs()')
+    tab.locator('[data-song-open="partial"]').first.click()
+    assert tab.locator('#song-resume').is_visible()
+    tab.locator('#song-resume').click()
+    tab.wait_for_function("calls.some(([cmd,args])=>cmd==='song_resume'&&args.song_id==='partial')")
+    for status in ('failed', 'interrupted', 'cancelled'):
+        button=tab.locator(f'[data-song-process-selected="{status}"]')
+        assert button.inner_text()=='Продолжить обработку'
+        assert tab.locator(f'[data-song-play="{status}"]').is_enabled()
+        button.click()
+        tab.wait_for_function("sid=>calls.some(([cmd,args])=>cmd==='song_resume'&&args.song_id===sid)", arg=status)
+    tab.locator('#songs-detail-close').click()
     play.click()
     tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
     tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Приостановить')")

@@ -1722,12 +1722,14 @@ class CommandsMixin:
             songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100))
             for song in songs:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
+                song["processing"] = self.song_processing.describe(song)
             return songs
         if cmd == "song_get":
             song = self.song_store.get(str(a.get("song_id") or ""))
             if not song:
                 raise ValueError("Песня не найдена")
             song["karaoke"] = self.song_instrumental.summary(song["song_id"])
+            song["processing"] = self.song_processing.describe(song)
             return song
         if cmd == "song_create":
             return self.song_store.create(a.get("title", ""), a.get("artist", ""), a.get("source", "query"), a.get("source_ref", ""))
@@ -1916,6 +1918,8 @@ class CommandsMixin:
             return updated
         if cmd in {'song_upload_begin','song_upload_chunk','song_upload_finish','song_upload_cancel'}:
             return self.song_importer.command(cmd,a)
+        if cmd == "song_resume":
+            return self.song_processing.resume(str(a.get("song_id") or ""))
         if cmd == "song_transcribe":
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь загрузки записи')

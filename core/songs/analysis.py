@@ -7,6 +7,7 @@ import math
 import json
 import os
 import subprocess
+import signal
 import time
 from pathlib import Path
 
@@ -25,11 +26,15 @@ class SongAnalyzer:
         with self._lock:
             return song_id in self._running
 
-    def resume_interrupted(self):
+    def resume_interrupted(self, song_id=None):
         """Reconnect to detached workers, commit finished work, or restart safely."""
         resumed=[]
         for row in self.store.list(limit=500):
-            if row.get('status')!='interrupted' or not (row.get('audio') or {}).get('path'):
+            if song_id and row['song_id'] != song_id:
+                continue
+            if self.running(row['song_id']):
+                continue
+            if row.get('status') not in {'interrupted', 'queued'} or not (row.get('audio') or {}).get('path'):
                 continue
             old_run=row.get('interrupted_run_id')
             audio_path=(self.root/row['audio']['path']).resolve()
@@ -38,10 +43,6 @@ class SongAnalyzer:
                 try:
                     baseline=json.loads((folder/'gigaam.json').read_text(encoding='utf-8'))
                     pidfile=folder/'result.pid';pid=int(pidfile.read_text()) if pidfile.is_file() else 0
-                    if (folder/'result.json').is_file():
-                        result=json.loads((folder/'result.json').read_text(encoding='utf-8'))
-                        self._restore_and_save(row['song_id'],old_run,folder,baseline,result)
-                        resumed.append(row['song_id']);continue
                     if pid and self._worker_running(pid,old_run):
                         with self._lock:
                             self._running.add(row['song_id']);self._cancels[row['song_id']]=threading.Event()
@@ -50,12 +51,24 @@ class SongAnalyzer:
                         threading.Thread(target=self._watch_detached,args=(row['song_id'],old_run,folder,baseline,pid),
                             name=f"song-resume-{row['song_id'][:8]}",daemon=True).start()
                         resumed.append(row['song_id']);continue
+                    # result.json is also a checkpoint: its existence alone is
+                    # not evidence that all requested steps have finished.
+                    if (folder/'result.json').is_file():
+                        result=json.loads((folder/'result.json').read_text(encoding='utf-8'))
+                        progress=json.loads((folder/'result.progress.json').read_text(encoding='utf-8')) if (folder/'result.progress.json').is_file() else {}
+                        if result.get('completed') or progress.get('label') == 'Разбор завершён; требуется проверка по записи':
+                            self._restore_and_save(row['song_id'],old_run,folder,baseline,result)
+                            resumed.append(row['song_id']);continue
                 except (OSError,ValueError,TypeError):
                     pass
             try:
                 self.start(row['song_id'],full=True)
                 resumed.append(row['song_id'])
-            except (ValueError, OSError):
+            except (ValueError, OSError) as exc:
+                self.store.patch(row['song_id'], {'status': 'failed', 'active_run_id': None,
+                    'stage_label': 'Не удалось продолжить: ' + str(exc)[:160]})
+                if song_id:
+                    raise
                 continue
         return resumed
 
@@ -70,7 +83,7 @@ class SongAnalyzer:
     def _restore_and_save(self,song_id,run_id,folder,baseline,result):
         row=self.store.get(song_id)
         if not row:return
-        if row.get('status')=='interrupted':
+        if row.get('status') in {'interrupted', 'queued'}:
             row=self.store.patch(song_id,{'status':'running','active_run_id':run_id,'interrupted_run_id':None,
                 'stage_label':'Сохраняем результат фонового распознавания'})
         saved=self.store.save_full_analysis(song_id,run_id,baseline.get('phrases') or [],
@@ -90,9 +103,16 @@ class SongAnalyzer:
                         self.emit('song_analysis',song_id=song_id,running=True,song=fresh)
                 except (OSError,ValueError,KeyError,TypeError):pass
                 time.sleep(1)
+            if self._worker_running(pid, run_id):
+                os.kill(pid, signal.SIGTERM)
+                raise TimeoutError('Фоновый разбор превысил час; можно повторить обработку')
             output=folder/'result.json'
             if output.is_file():
-                self._restore_and_save(song_id,run_id,folder,baseline,json.loads(output.read_text(encoding='utf-8')))
+                result = json.loads(output.read_text(encoding='utf-8'))
+                progress = json.loads((folder/'result.progress.json').read_text()) if (folder/'result.progress.json').is_file() else {}
+                if not result.get('completed') and progress.get('label') != 'Разбор завершён; требуется проверка по записи':
+                    raise RuntimeError('Разбор прервался; промежуточные результаты сохранены, повторите обработку')
+                self._restore_and_save(song_id,run_id,folder,baseline,result)
             else:
                 raise RuntimeError('Фоновый worker завершился без результата')
         except Exception as exc:
@@ -100,6 +120,12 @@ class SongAnalyzer:
             if row.get('active_run_id')==run_id:
                 self.store.patch(song_id,{'status':'failed','active_run_id':None,'stage_label':'Фоновый разбор: '+str(exc)[:160]})
         finally:
+            cancel = self._cancels.get(song_id)
+            if cancel and cancel.is_set() and self._worker_running(pid, run_id):
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    pass
             with self._lock:self._running.discard(song_id);self._cancels.pop(song_id,None)
 
     def cancel(self, song_id):

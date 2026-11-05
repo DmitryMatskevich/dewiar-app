@@ -173,6 +173,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.song_instrumental._heavy_lock = self.song_analyzer._heavy_lock
         from songs.sources import SongSources
         self.song_sources = SongSources(self.song_store, self.emit, self.song_analyzer)
+        from songs.processing import SongProcessing
+        self.song_processing = SongProcessing(self.song_store, self.song_analyzer, self.song_sources, self.song_capture)
         from songs.import_audio import AudioImporter
         self.song_importer = AudioImporter(self.song_store)
         from mail_service import MailService

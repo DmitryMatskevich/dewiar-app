@@ -289,6 +289,7 @@ def main():
     def progress(label):
         save(progress_path, {'label': label, 'at': time.time()})
     result = json.loads(args.output.read_text()) if args.resume and args.output.is_file() else {'hypotheses': [], 'errors': [], 'harmony': None}
+    result['completed'] = False
     result['errors'] = [e for e in result.get('errors', []) if e.get('step') not in args.steps.split(',')]
     for step in args.steps.split(','):
         start = time.monotonic()
@@ -334,6 +335,8 @@ def main():
             result['errors'].append({'step': step, 'error': str(exc)[:1000]})
         save(args.output, result)
         gc.collect()
+    result['completed'] = True
+    save(args.output, result)
     progress('Разбор завершён; требуется проверка по записи')
 
 
