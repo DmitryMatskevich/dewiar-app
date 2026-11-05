@@ -170,7 +170,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         self.song_analyzer.resume_interrupted()
         from songs.instrumental import InstrumentalManager
         self.song_instrumental = InstrumentalManager(STATE_DIR / "songs", self.song_store, self.emit)
-        self.song_instrumental._heavy_lock = self.song_analyzer._heavy_lock
+        # Share the bounded worker slots across recognition and separation.
+        # Older builds used the single `_heavy_lock`; keeping one semaphore
+        # here preserves the resource budget while allowing two songs at once.
+        self.song_instrumental._heavy_slots = self.song_analyzer._heavy_slots
         from songs.sources import SongSources
         self.song_sources = SongSources(self.song_store, self.emit, self.song_analyzer)
         from songs.processing import SongProcessing
