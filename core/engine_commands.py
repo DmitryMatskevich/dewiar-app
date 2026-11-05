@@ -141,6 +141,9 @@ class CommandsMixin:
                 from padai import PadAI
                 self.padai = PadAI(self)
             return self.padai.start(a) if cmd == "pad_ai" else self.padai.stop(a.get("id", ""))
+        if cmd == "pad_text_clean":
+            from transcript_editor import clean_text
+            return clean_text(a.get("text", ""))
         try:
             if cmd == "pad_tabs":
                 return P.tabs()
@@ -1086,6 +1089,12 @@ class CommandsMixin:
                 text = self._attach_files(text, files, images)
             self.ask(text, images)
             return True
+        if cmd.startswith("canvas_"):
+            from canvases import command
+            return command(self, cmd, a)
+        if cmd.startswith("visual_"):
+            from visual_assets import command
+            return command(self, cmd, a)
         if cmd == "screenshot_attach":               # кнопка «снимок экрана» в поле вопроса
             from screenshot_messages import capture
             return capture(self, source=a.get('source', 'screen'), application=a.get('application', ''),

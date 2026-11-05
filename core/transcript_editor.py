@@ -219,6 +219,13 @@ def edit(segments, title='Расшифровка'):
                 removed_count=len(removals),review_count=len(review),audio_review_completed=False)
 
 
+def clean_text(text):
+    """Apply the transcript cleanup rules to plain text, without audio timing or a document heading."""
+    result = edit([(0, 0, str(text or ""))], title="Текст")
+    return dict(text=result["markdown"].split("\n\n", 1)[1].rstrip() if "\n\n" in result["markdown"] else "",
+                removed_count=result["removed_count"], review_count=result["review_count"])
+
+
 def _review_link(source, seconds):
     if str(source).startswith(('http://','https://')):
         u=urlsplit(source)

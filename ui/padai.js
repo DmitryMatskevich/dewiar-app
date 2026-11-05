@@ -92,6 +92,7 @@
   function closeMenu() { menu.hidden = true; AI.open = false; }
 
   menu.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-text-op]")) return;
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.lang) {
       let lang = b.dataset.lang;
@@ -146,6 +147,49 @@
     btn.onmousedown = (e) => e.preventDefault();
     btn.onclick = () => { const r = btn.getBoundingClientRect(); openMenu(r.left, r.bottom + 6, true); };
   }
+
+  const textBtn = document.querySelector("#b-text");
+  if (textBtn) {
+    textBtn.onmousedown = (e) => e.preventDefault();
+    textBtn.onclick = () => {
+      const r = textBtn.getBoundingClientRect();
+      menu.innerHTML = `<div class="aig">Обработка текста · вся вкладка</div>
+        <button role="menuitem" data-text-op="clean"><span>Обработать текст</span><small>Убрать «э», междометия, точные повторы</small></button>
+        <button role="menuitem" data-text-op="cyr"><span>Латиницу → кириллицу</span></button>
+        <button role="menuitem" data-text-op="lat"><span>Кириллицу → латиницу</span></button>`;
+      menu.hidden = false;
+      menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + "px";
+      menu.style.top = Math.max(8, Math.min(r.bottom + 6, innerHeight - menu.offsetHeight - 8)) + "px";
+      AI.open = true;
+    };
+  }
+  menu.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-text-op]"); if (!b) return;
+    const op = b.dataset.textOp;
+    closeMenu();
+    const source = docMd();
+    let converted;
+    if (op === "clean") {
+      try {
+        const result = await core.call("pad_text_clean", { text: source });
+        converted = result.text;
+        document.querySelector("#st").textContent = result.removed_count || result.review_count
+          ? `Удалено: ${result.removed_count}; на проверку: ${result.review_count}` : "Заполнители и повторы не найдены";
+      } catch (err) { document.querySelector("#st").textContent = err.message || "Не удалось обработать текст"; return; }
+    } else {
+      const latin = "qwertyuiopasdfghjklzxcvbnm", russian = "йцукенгшщзфывапролдячсмить";
+      converted = Array.from(source, ch => {
+        const lower = ch.toLowerCase();
+        let i = (op === "cyr" ? latin : russian).indexOf(lower);
+        if (i < 0) return ch;
+        const mapped = (op === "cyr" ? russian : latin)[i];
+        return ch !== lower ? mapped.toUpperCase() : mapped;
+      }).join("");
+    }
+    ED.innerHTML = PadMD.md2html(converted);
+    window.padAfterAi && padAfterAi();
+    ED.focus({ preventScroll: true });
+  });
 
   function restore() {
     if (!AI.range) return;
