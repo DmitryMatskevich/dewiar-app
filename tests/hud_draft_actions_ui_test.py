@@ -74,18 +74,29 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert model.get_attribute("aria-expanded") == "false"
     field, clear, copy = [page.locator(s) for s in ["#askin", "#a-clear", "#a-copy"]]
     assert clear.is_hidden() and copy.is_hidden()
+    assert page.locator('#a-text-menu').is_hidden()
     layout = page.locator('#a-layout')
     assert layout.is_disabled()
     field.fill('До Ghbdtn, vbh! Привет 😀 42 После')
+    assert page.locator('#a-text-menu').is_visible()
     field.evaluate("e=>{e.focus();e.setSelectionRange(3,e.value.length-6);e.dispatchEvent(new Event('select'))}")
     assert layout.is_enabled()
+    page.locator('#a-text-menu').click()
     layout.click()
     assert field.input_value() == 'До Привет, мир! Ghbdtn 😀 42 После'
     assert field.evaluate("e=>e.value.slice(e.selectionStart,e.selectionEnd)") == 'Привет, мир! Ghbdtn 😀 42'
-    layout.focus(); page.keyboard.press('Enter')
+    page.locator('#a-text-menu').click(); layout.focus(); page.keyboard.press('Enter')
     assert field.input_value() == 'До Ghbdtn, vbh! Привет 😀 42 После'
     field.evaluate("e=>{e.setSelectionRange(0,0);e.dispatchEvent(new Event('select'))}")
-    assert layout.is_disabled()
+    assert layout.is_enabled()
+    page.locator('#a-text-menu').click(); layout.click()
+    assert field.input_value() == 'Lj Привет, мир! Ghbdtn 😀 42 Gjckt'
+    assert layout.is_enabled()
+    field.fill('ghbdtn')
+    page.evaluate("fire('draft_command',{action:'layout_cyr'})")
+    assert field.input_value() == 'привет'
+    page.evaluate("fire('draft_command',{action:'layout_lat'})")
+    assert field.input_value() == 'ghbdtn'
     field.fill('')
     text = "  Привет 😀\nВторая строка\n  "
     field.fill(text)
@@ -192,7 +203,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
                     page.wait_for_timeout(30)
                     layout = page.evaluate("""() => {
                       const box=document.querySelector('#askbox').getBoundingClientRect();
-                      const ids=['a-att','b-voice-inline','a-mic','a-mic-pick','a-layout','a-clear','a-copy','a-send'].filter(id=>document.getElementById(id).getBoundingClientRect().width);
+                      const ids=['a-att','a-mic','a-mic-pick','a-text-menu','a-clear','a-copy','a-send'].filter(id=>document.getElementById(id).getBoundingClientRect().width);
                       return {box:{left:box.left,right:box.right},buttons:ids.map(id=>{
                         const r=document.getElementById(id).getBoundingClientRect();
                         return {id,left:r.left,right:r.right,top:r.top,bottom:r.bottom}}),

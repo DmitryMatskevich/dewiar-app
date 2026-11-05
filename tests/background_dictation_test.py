@@ -44,6 +44,12 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Добрый день. Лира, вставить', ['лира']), ('Добрый день.', ('insert','')))
         self.assertEqual(parse('Лира, добавить', ['лира']), ('', ('insert','')))
         self.assertEqual(parse('Лира, текст', ['лира']), ('', ('insert','')))
+        for phrase in ('обработать', 'обработай', 'обработка', 'обработать текст', 'обработай текст', 'обработка текста'):
+            self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('process','')))
+        for phrase in ('кириллица', 'кириллицу', 'русский', 'на кириллицу', 'на русский'):
+            self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('layout_cyr','')))
+        for phrase in ('латиница', 'латиницу', 'английский', 'на латиницу', 'на английский'):
+            self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('layout_lat','')))
         self.assertEqual(parse('Мы обсудили Лира и другие вопросы', ['лира'])[1], None)
         self.assertEqual(parse('Лира', ['лира']), ('', ('show','')))
         self.assertEqual(parse('Лира, снимок экрана', ['лира']), ('', ('command','снимок экрана')))

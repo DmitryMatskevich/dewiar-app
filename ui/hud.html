@@ -328,6 +328,7 @@
   .ask-tools { display: flex; flex: 1 1 0; min-width: 0; align-items: center; gap: 2px; }
   .ask-actions { display: flex; flex: none; align-items: center; gap: 2px; margin-left: auto; }
   .askrow .ab { width: clamp(24px, calc(12.5vw - 8.25px), 34px); height: 34px; min-width: 0; }
+  #a-text-menu[hidden] { display:none; }
   #a-clear:disabled, #a-copy:disabled, #a-layout:disabled { opacity: .35; cursor: default; background: none; }
   #a-clear[hidden], #a-copy[hidden] { display: none !important; }
   :is(#a-shot, #a-meet, #b-cal, #b-notes).access-unavailable svg { opacity: .35; }
@@ -423,6 +424,13 @@
                      text-align: left; font: inherit; font-size: 11.5px; }
   #att-menu button:hover { background: rgba(255,255,255,.1); }
   body.light #att-menu { background: #fff; box-shadow: 0 15px 35px rgba(20,30,60,.2); }
+  #a-text-menu-popup { position:absolute; right:8px; bottom:48px; z-index:25; min-width:210px; padding:6px; border-radius:15px; background:#171a25; color:var(--ink); box-shadow:0 15px 35px rgba(0,0,0,.42); }
+  #a-text-menu-popup[hidden] { display:none; }
+  #a-text-menu-popup button { display:block; width:100%; min-height:38px; border:0; border-radius:10px; padding:6px 9px; background:none; color:inherit; cursor:pointer; text-align:left; font:inherit; font-size:11.5px; }
+  #a-text-menu-popup button:hover:not(:disabled) { background:rgba(255,255,255,.1); }
+  #a-text-menu-popup button:disabled { opacity:.45; cursor:default; }
+  #a-text-menu-popup small { display:block; color:var(--muted); font-size:10px; }
+  body.light #a-text-menu-popup { background:#fff; box-shadow:0 15px 35px rgba(20,30,60,.2); }
   .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
   .askbox.has .ab.send { background: var(--brand); color: #fff; }
   .ab.send svg { width: 15px; height: 15px; }
@@ -650,7 +658,7 @@
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><svg class="record-icon" viewBox="0 0 34 34" aria-hidden="true"><circle id="dictation-ring" cx="17" cy="17" fill="#ff922e" stroke="none"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#17181d" stroke="none"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
-          <button class="ab" id="a-layout" type="button" disabled title="Переключить раскладку выделенных букв: русская ↔ английская. Выделите текст." aria-label="Переключить раскладку выделенного текста"><svg viewBox="0 0 24 24" aria-hidden="true"><text x="1" y="10" fill="currentColor" stroke="none" font-size="9" font-weight="700">A</text><text x="14" y="21" fill="currentColor" stroke="none" font-size="9" font-weight="700">Я</text><path d="M11 5h7l-2-2M18 5l-2 2M13 17H6l2-2M6 17l2 2"/></svg></button>
+          <button class="ab" id="a-text-menu" type="button" title="Обработка текста" aria-label="Обработка текста" aria-haspopup="menu" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><text x="2" y="16" fill="currentColor" stroke="none" font-size="14" font-weight="700">T</text><text x="13" y="16" fill="currentColor" stroke="none" font-size="10" font-weight="700">т</text><path d="M3 20h18"/></svg></button>
           <button class="ab" id="a-clear" type="button" hidden disabled title="Стереть выделенный текст или весь текст, если ничего не выделено. Вложения и переписка сохранятся." aria-label="Стереть текст ввода"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <button class="ab" id="a-copy" type="button" hidden disabled title="Скопировать выделенный текст или весь черновик, если выделения нет" aria-label="Скопировать текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
           <button class="ab send" id="a-send" title="Отправить сообщение и вложения. Во время диктовки — завершить распознавание и отправить весь текст." aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -665,6 +673,7 @@
       <div id="atts"></div>
       <span id="askn" aria-hidden="true"></span>
     </div>
+        <div id="a-text-menu-popup" role="menu" aria-label="Обработка текста" hidden><button type="button" role="menuitem" id="a-clean-text">Обработка текста <small>Убрать слова-паразиты и повторы</small></button><button type="button" role="menuitem" id="a-layout" disabled>Кириллица ↔ латиница</button></div>
   </div>
   <div id="team" role="dialog" aria-modal="true" aria-label="Выбор помощника">
     <div class="team-head"><b>Выберите помощника</b><button class="team-close" id="team-close" type="button" title="Закрыть выбор помощника (Esc)" aria-label="Закрыть">×</button></div>
@@ -697,7 +706,7 @@
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире. Название модели в центре верхней строки открывает выбор модели.</p>
     <h3>Голосовой ввод</h3><p>Нажмите микрофон и произнесите фразу. Нажатие квадрата останавливает запись и дожидается распознавания последних слов, оставляя текст в поле без отправки. Команда «Лира, стоп» останавливает запись. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Пока Лира думает или отвечает, в области ответа видна кнопка остановки: она прерывает текущий ответ и не очищает черновик. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
     <h3>Диктовка в другие приложения</h3><p>Включите микрофон, поставьте курсор в нужное поле и скажите «Лира, слушай» или «Лира, записывай». Продиктуйте текст и скажите «Лира, вставить», «Лира, добавить» или «Лира, текст». Текст заменит предыдущее содержимое буфера обмена; если подходящее поле активно, Лира также вставит текст в него, не отправляя сообщение. Если поле недоступно, текст останется в буфере для ручной вставки, а черновик — в диктовке. Лира продолжит слушать.</p><p>Когда окно Лиры открыто, черновик фоновой диктовки виден в отдельном поле и доступен для редактирования. Команда «Лира, текст» также копирует текст при диктовке через кнопку микрофона. «Лира, отмена» очищает фоновый черновик; «Лира, стоп» или «Лира, закончи диктовку» останавливает запись и сохраняет распознанный черновик. Одно имя показывает ассистента. Для автоматической вставки требуется разрешение «Универсальный доступ» в настройках macOS; защищённые поля не поддерживаются.</p>
-    <h3>Текст и снимок экрана</h3><p>Выделите текст и нажмите A↔Я под полем, чтобы переключить раскладку букв между русской и английской. Регистр сохраняется, знаки и буквы без парной буквенной клавиши не меняются. Кнопки копирования и стирания появляются, когда в поле есть текст. Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» работает как крестик: удаляет выделение, а если выделения нет — весь текст. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
+    <h3>Текст и снимок экрана</h3><p>Меню обработки текста появляется, когда в поле есть текст. «Обработка текста» убирает слова-паразиты и повторы; кириллица ↔ латиница меняет раскладку. Действие применяется к выделенному тексту, а без выделения — ко всему черновику. Скажите «Лира, обработать» или «Лира, обработка», чтобы убрать слова-паразиты и повторы. Для переключения текста скажите «Лира, кириллица» или «Лира, русский», либо «Лира, латиница» или «Лира, английский». Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» удаляет выделение, а если выделения нет — весь черновик. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
@@ -1561,7 +1570,7 @@ function copyDraftByVoice(action) {
   }).catch(error => { showVoiceCommand({action, status:"error", message:error.message || String(error)}); });
 }
 function showVoiceCommand(e) {
-  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", stop:"стоп", cancel:"отмена"};
+  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", process:"обработать текст", layout_cyr:"кириллица", layout_lat:"латиница", stop:"стоп", cancel:"отмена"};
   const label = e.action === "command" ? String(e.command || "команда") : (labels[e.action] || "команда");
   let message = "Команда «" + label + "» получена.";
   if (e.status === "received") message += " Выполняю…";
@@ -1584,6 +1593,9 @@ function showVoiceCommand(e) {
 $("voice-command-dismiss").onclick = () => { $("voice-command-feedback").hidden = true; };
 $("voice-command-access").onclick = async () => {
   try {
+    else if (e.action === "process") message += " Слова-паразиты и повторы обработаны.";
+    else if (e.action === "layout_cyr") message += " Текст переключён на кириллицу.";
+    else if (e.action === "layout_lat") message += " Текст переключён на латиницу.";
     const a = api();
     if (a?.open_accessibility_settings) await a.open_accessibility_settings();
     else if (a?.open_settings) await a.open_settings("safety", "&mac_access_setup=1");
@@ -1596,7 +1608,13 @@ function pasteMessage(r, action) {
   if (action === "copy" || !r.reason) return "Текст скопирован. Его можно вставить в нужное поле.";
   return "Текст скопирован, но не вставлен. " + r.reason;
 }
-core.on("draft_command", e => { if (e.action === "clear") clearDraftByVoice(); else copyDraftByVoice(e.action); });
+core.on("draft_command", e => {
+  if (e.action === "clear") clearDraftByVoice();
+  else if (e.action === "process") cleanDraftText(true);
+  else if (e.action === "layout_cyr") applyDraftLayout("cyr", true);
+  else if (e.action === "layout_lat") applyDraftLayout("lat", true);
+  else copyDraftByVoice(e.action);
+});
 let backgroundState = null, backgroundSaving = false, backgroundDirty = false, backgroundPending = null;
 function renderBackgroundDictation(e) {
   if (!e) return;
@@ -1729,6 +1747,7 @@ core.on("cloud", c => {
 });
 $("cloudlow").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
 /* объявления для всех (core: _ann_fetch, событие ann): строка «📣 заголовок»; нажали — студия покажет окно с фото и ссылкой */
+  if (!e.target.closest("#a-text-menu-popup, #a-text-menu")) { $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false"); }
 let annHidden = 0;
 function annSet(it) {
   const el = $("annb"); if (!it || it.id <= annHidden) { el.className = ""; return; }
@@ -2456,7 +2475,9 @@ $("a-send").addEventListener("pointerdown", e => {
 });
 $("a-send").onclick = sendAsk;
 function updateDraftActions() {
-  const t = $("askin"), clear = $("a-clear"), copy = $("a-copy"), layout = $("a-layout");
+  const t = $("askin"), clear = $("a-clear"), copy = $("a-copy"), layout = $("a-layout"), textMenu = $("a-text-menu");
+  textMenu.hidden = !t.value.length;
+  if (textMenu.hidden) { $("a-text-menu-popup").hidden = true; textMenu.setAttribute("aria-expanded", "false"); }
   copy.hidden = copy.disabled = !t.value.length;
   clear.hidden = !t.value.length;
   clear.disabled = clear.hidden;
@@ -2488,8 +2509,18 @@ function draftActionRange(e, input) {
 }
 $("askin").addEventListener("select", updateDraftActions);
 $("a-layout").onclick = e => {
-  const t = $("askin"), range = draftActionRange(e, t);
-  if (!range) return;
+  applyDraftLayout(null, false, e);
+};
+function applyDraftLayout(target, fromVoice, event) {
+  $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false");
+  const t = $("askin"), range = fromVoice
+    ? (t.selectionStart !== t.selectionEnd ? [t.selectionStart,t.selectionEnd] : null)
+    : draftActionRange(event, t);
+  const actualRange = range || (t.value.length ? [0,t.value.length] : null);
+  if (!actualRange) {
+    if (fromVoice) showVoiceCommand({action:target === "cyr" ? "layout_cyr" : "layout_lat",status:"error",message:"В поле нет текста."});
+    return;
+  }
   const latin = "qwertyuiopasdfghjklzxcvbnm", russian = "йцукенгшщзфывапролдячсмить";
   const source = t.value.slice(...range);
   const converted = Array.from(source, letter => {
@@ -2501,9 +2532,45 @@ $("a-layout").onclick = e => {
   }).join("");
   t.setRangeText(converted, range[0], range[1], "select");
   lastDictationSelection = null;
-  fitAsk(); t.focus({preventScroll: true});
-  $("ask-feedback").textContent = "Раскладка выделенных букв изменена";
+$("a-text-menu").addEventListener("mousedown", e => { if (e.button === 0) e.preventDefault(); });
+$("a-text-menu").onclick = () => {
+  const popup = $("a-text-menu-popup"); popup.hidden = !popup.hidden;
+  $("a-text-menu").setAttribute("aria-expanded", String(!popup.hidden));
+  updateDraftActions();
 };
+$("a-text-menu-popup").addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  if (e.target.closest("#a-layout")) {
+    const t = $("askin"); draftActionSelections.set($("a-layout"), {start:t.selectionStart, end:t.selectionEnd, value:t.value});
+  }
+  e.preventDefault();
+});
+$("a-clean-text").onclick = () => cleanDraftText(false);
+async function cleanDraftText(fromVoice) {
+  const t = $("askin"), start = t.selectionStart, end = t.selectionEnd;
+  const selected = start !== end, source = selected ? t.value.slice(start, end) : t.value;
+  $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false");
+  if (!source.trim()) {
+    $("ask-feedback").textContent = "Нет текста для очистки";
+    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:"Нет текста для обработки."});
+    return;
+  }
+  try {
+    const result = await core.call("pad_text_clean", {text: source});
+    if (selected) t.setRangeText(result.text, start, end, "select"); else t.value = result.text;
+    lastDictationSelection = null; fitAsk(); t.focus({preventScroll:true}); updateDraftActions();
+    $("ask-feedback").textContent = result.removed_count || result.review_count
+      ? `Удалено: ${result.removed_count}; на проверку: ${result.review_count}` : "Слова-паразиты и повторы не найдены";
+    if (fromVoice) showVoiceCommand({action:"process",status:"done"});
+  } catch (err) {
+    $("ask-feedback").textContent = err.message || "Не удалось очистить текст";
+    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:err.message || "Не удалось обработать текст."});
+  }
+}
+  fitAsk(); t.focus({preventScroll: true});
+  $("ask-feedback").textContent = target === "cyr" ? "Текст переключён на кириллицу" : target === "lat" ? "Текст переключён на латиницу" : "Раскладка текста изменена";
+  if (fromVoice) showVoiceCommand({action:target === "cyr" ? "layout_cyr" : "layout_lat",status:"done"});
+}
 function clearDraft(range, restoreFocus) {
   const t = $("askin");
   const selected = !!range;

@@ -10,12 +10,13 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl, urlencode, urlunsplit
 
-VERSION = 'ru-editor-2'
+VERSION = 'ru-editor-3'
 WORD = r'[A-Za-zА-Яа-яЁё0-9]+(?:[-‑][A-Za-zА-Яа-яЁё0-9]+)*'
 PHRASES = [
     'сразу хочу сказать','как я говорил','как я говорю','да то есть','вот то есть',
     'у нас сейчас','таким образом','соответственно','вообщем то','в общем-то','в общем то',
-    'так сказать','это самое','в целом','как бы','то есть','допустим','короче',
+    'так сказать','это самое','в целом','в общем','в принципе','по сути','в смысле','как сказать',
+    'как бы','то есть','допустим','короче',
     'значит','кстати','скажем','у нас','вот','там','ну','да',
 ]
 PHRASE_RX = re.compile(r'(?<![\w-])(?:' + '|'.join(re.escape(p).replace(r'\ ',r'\s+') for p in sorted(PHRASES,key=len,reverse=True)) + r')(?![\w-])', re.I)
@@ -155,7 +156,9 @@ def edit(segments, title='Расшифровка'):
             answer = bool(re.search(r'\?\s*$',left)) or bool(left and left[-1] in ':—')
             if standalone or answer:
                 continue
-            if left.endswith(',') and (not right or right[0] in '.!'):
+            if right and right[0] in '.!?…' :
+                drop(a,b,'Конечная частица «да» после завершённой мысли')
+            elif left.endswith(',') and (not right or right[0] in '.!'):
                 drop(a,b,'Частица «да» в конце фразы')
             elif at_start and right.startswith(','):
                 check(a,b,'Начальное «да» может быть осмысленным утверждением, а не частицей')
@@ -170,8 +173,8 @@ def edit(segments, title='Расшифровка'):
             check(a,b,'«Вот» связывает смысловую конструкцию, а не только заполняет паузу')
         elif value=='как бы' and re.match(r'(?:не|ни|вы|ты|мы|нам|мне)\b',right,re.I):
             check(a,b,'Возможна условная конструкция или опасение, а не слово-паразит')
-        elif value in ('там','у нас','у нас сейчас','значит','соответственно','допустим','скажем','таким образом','в целом','это самое','то есть'):
-            if isolated(a,b) and value!='там' and not (value in ('допустим','скажем') and at_start):
+        elif value in ('там','у нас','у нас сейчас','значит','соответственно','допустим','скажем','таким образом','в целом','в общем','в принципе','по сути','в смысле','как сказать','это самое','то есть'):
+            if isolated(a,b) and value not in ('там','в смысле','по сути') and not (value in ('допустим','скажем') and at_start):
                 drop(a,b,'Обособленное вводное выражение из списка очистки')
             else:
                 check(a,b,'Возможен содержательный смысл: место, принадлежность, условие, пояснение или связь терминов')

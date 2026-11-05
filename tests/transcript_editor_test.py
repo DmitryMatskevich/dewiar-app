@@ -24,6 +24,10 @@ class EditorTest(unittest.TestCase):
   r=self.clean('Да, система работает. Ввод исправен, да.')
   self.assertIn('Да, система работает.',r['markdown']);self.assertIn('Ввод исправен.',r['markdown'])
   self.assertTrue(any(x['text']=='Да' for x in r['review']))
+ def test_terminal_yes_and_isolated_discourse_fillers(self):
+  r=self.clean('Сервер запущен, да. Соединение есть да. В принципе, проверка завершена. В общем, всё готово.')
+  self.assertIn('Сервер запущен.',r['markdown']);self.assertIn('Соединение есть.',r['markdown'])
+  self.assertIn('Проверка завершена.',r['markdown']);self.assertIn('Всё готово.',r['markdown'])
  def test_comparative_koroche_and_discourse_marker(self):
   r=self.clean('Короче, нужен резерв. Кабель короче прежнего. Короче кабель не берите.')
   self.assertIn('Нужен резерв.',r['markdown']);self.assertIn('Кабель короче прежнего.',r['markdown'])
