@@ -9,6 +9,7 @@ window.SongReview = (() => {
   });
   const esc = (s) => escH(s == null ? '' : s);
   const time = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+  const formatSeconds = (ms) => `${(Number(ms || 0) / 1000).toFixed(3)} с`;
   const notes = [['', 'Без пометки'], ['unclear', 'Неразборчиво'], ['sung_differently', 'Спето иначе'], ['vocalization', 'Вокализ'], ['sustain', 'Предполагаемый распев']];
   const parts = [['continue','Продолжение части'],['verse','Начало куплета'],['chorus','Начало припева'],['prechorus','Предприпев'],['bridge','Бридж'],['unknown','Новая часть']];
   const key = (song, phrase) => `${song}:${phrase}`;
@@ -235,6 +236,12 @@ window.SongReview = (() => {
       const events=liveChordDraft.map((chord,index)=>{
         const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
         const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
+        const fingering=rowElement?.querySelector('[data-live-chord-fingering]');
+        const shapes=window.SongSheet?.chordFingerings(name,3)||[];
+        if(fingering) {
+          fingering.textContent=shapes[0]?`1→6 ${shapes[0]}`:'—';
+          fingering.title=window.SongSheet?.chordTooltip(name)||'Аппликатура не найдена';
+        }
         const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
         const startMs=Number.isFinite(seconds)&&seconds>=0?Math.round(seconds*1000):Number(chord.start_ms)||0;
         const phraseId=chord.anchor?.phrase_id;
@@ -263,11 +270,17 @@ window.SongReview = (() => {
       livePreviewChords.hidden=!chordLine;
     }
     function renderLiveChords() {
-      liveChords.innerHTML=liveChordDraft.map((chord,index)=>`<div class="song-live-chord" data-live-chord="${index}">
-        <label class="f">Аккорд<input data-live-chord-name value="${esc(chord.name||'')}" maxlength="24" placeholder="Am, D7"></label>
-        <label class="f">Секунда<input data-live-chord-time type="number" min="0" step="0.01" value="${(Number(chord.start_ms)||0)/1000}"></label>
+      liveChords.innerHTML=liveChordDraft.map((chord,index)=>{
+        const rangeStart=Number(liveTarget?.startMs)||0, rangeEnd=Number(liveTarget?.endMs)||rangeStart;
+        const original=Number(chord.start_ms)||0;
+        const min=Math.min(rangeStart,original), max=Math.max(rangeEnd,original);
+        return `<div class="song-live-chord" data-live-chord="${index}">
+        <label class="f">Аккорд<input data-live-chord-name value="${esc(chord.name||'')}" maxlength="6" placeholder="Am, D7" aria-label="Аккорд ${index+1}"></label>
+        <label class="f">Секунда<input data-live-chord-time type="number" min="${(min/1000).toFixed(3)}" max="${(max/1000).toFixed(3)}" step="0.001" value="${(original/1000).toFixed(3)}" aria-label="Время аккорда ${index+1}, в пределах фразы"></label>
+        <span class="song-live-chord-fingering" data-live-chord-fingering aria-label="Аппликатура аккорда ${index+1}"></span>
         <button type="button" class="btn small" data-live-chord-remove="${index}" aria-label="Убрать аккорд ${index+1}" title="Убрать аккорд">×</button>
-      </div>`).join('') || '<p class="hint">В этой фразе пока нет аккордов.</p>';
+      </div>`;
+      }).join('') || '<p class="hint">В этой фразе пока нет аккордов.</p>';
       liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
         liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
       });
@@ -296,7 +309,7 @@ window.SongReview = (() => {
       liveMode.value=mode;
       livePhraseText=liveTarget.text;
       liveText.value=liveTarget.text;
-      document.getElementById('song-live-edit-target').textContent=`${time(liveTarget.startMs)}–${time(liveTarget.endMs)} · ${mode==='chords'?'Аккорды фразы':displayLine?'Текст строки':'Текст фразы'}`;
+      document.getElementById('song-live-edit-target').textContent=`${(liveTarget.startMs/1000).toFixed(3)}–${(liveTarget.endMs/1000).toFixed(3)} с · ${mode==='chords'?'Аккорды фразы':displayLine?'Текст строки':'Текст фразы'}`;
       liveEditor.classList.toggle('song-live-editor--chords',mode==='chords');
       document.querySelector('#song-live-editor .song-live-editor-head b').textContent=mode==='chords'?'Правка аккордов фразы':'Правка фразы';
       document.getElementById('song-live-edit-save').textContent=mode==='chords'?'Сохранить аккорды':'Сохранить текст и аккорды';
@@ -358,6 +371,9 @@ window.SongReview = (() => {
           const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
           if(!name)throw Error(`Введите название аккорда ${index+1}`);
           if(!Number.isFinite(seconds)||seconds<0)throw Error(`Проверьте время аккорда ${index+1}`);
+          const timeField=rowElement?.querySelector('[data-live-chord-time]');
+          if(seconds<Number(timeField?.min)-0.0005||seconds>Number(timeField?.max)+0.0005)
+            throw Error(`Время аккорда ${index+1} должно находиться в границах текущей фразы: ${formatSeconds(liveTarget.startMs)}–${formatSeconds(liveTarget.endMs)}`);
           return {...draft,name,start_ms:Math.round(seconds*1000),verified:true,method:draft.method||'manual'};
         });
         const signature=events=>JSON.stringify(events.map(({name,start_ms,anchor})=>({name,start_ms,anchor})));

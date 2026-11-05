@@ -119,8 +119,12 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-live-editor textarea { display:block; width:100%; min-height:64px; resize:vertical; }
 .song-live-editor select, .song-live-editor input:not([type=checkbox]) { width:100%; }
 .song-live-chord-head { margin:14px 0 8px; }
-.song-live-chord { display:grid; grid-template-columns:minmax(100px,1fr) minmax(100px,.7fr) auto; gap:8px; align-items:end; margin:8px 0; }
+.song-live-chord { display:grid; grid-template-columns:minmax(6ch,7ch) minmax(8ch,9ch) minmax(14ch,1fr) 44px; gap:8px; align-items:end; margin:8px 0; }
 .song-live-chord .f { margin:0; }
+.song-live-chord .f input { box-sizing:border-box; min-width:0; width:100%; padding:8px 9px; }
+.song-live-chord [data-live-chord-time] { text-align:right; font-variant-numeric:tabular-nums; }
+.song-live-chord-fingering { min-width:0; overflow:hidden; padding:9px 0; white-space:nowrap; text-overflow:ellipsis; font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); cursor:help; }
+.song-live-chord-fingering[title="Аппликатура не найдена"] { color:var(--muted); }
 .song-live-chord .btn { margin-bottom:2px; }
 .song-live-editor .song-save-status { margin-bottom:0; }
 .song-source-stage { margin:18px 0; padding:16px 18px; border:1px solid var(--line); border-radius:14px; background:var(--field); }

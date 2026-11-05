@@ -130,12 +130,18 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-mode').input_value() == 'phrase', page.locator('#song-live-edit-mode').input_value()
     assert page.locator('#song-live-edit-text').input_value() == phrase_text
     assert page.locator('#song-live-edit-save').evaluate("e=>e.closest('.song-live-editor-head')!==null")
+    assert page.locator('#song-live-edit-target').inner_text().startswith('0.000–8.000 с')
     chord_preview=page.locator('#song-live-edit-preview-chords')
     assert chord_preview.is_visible()
     assert 'Am' in chord_preview.inner_text() and 'E7' in chord_preview.inner_text()
     assert '\n' not in chord_preview.inner_text()
     assert 'струны 1→6' in chord_preview.locator('.song-chord-tip').first.get_attribute('title')
     assert 'струны 1→6' in page.locator('[data-live-chord-name]').first.get_attribute('title')
+    assert page.locator('[data-live-chord-name]').first.get_attribute('maxlength') == '6'
+    assert page.locator('[data-live-chord-time]').first.get_attribute('step') == '0.001'
+    assert page.locator('[data-live-chord-time]').first.get_attribute('min') == '0.000'
+    assert page.locator('[data-live-chord-time]').first.get_attribute('max') == '8.000'
+    assert page.locator('[data-live-chord-fingering]').first.inner_text().startswith('1→6 ')
 
     page.locator('#song-live-edit-text').fill('Я тихо смеюсь.')
     assert page.locator('#song-live-edit-preview').inner_text() == 'Я тихо смеюсь.'
