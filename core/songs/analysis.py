@@ -233,6 +233,9 @@ class SongAnalyzer:
             if logical in {"lyrics", "align"} and selected_phrases:
                 # Never overwrite a phrase which the user has already edited;
                 # the rerun remains available in analysis_runs for comparison.
+                # Timing is independent evidence, however: an improved vocal
+                # onset must still move a previously edited phrase away from
+                # the artificial 0 ms intro while preserving its text.
                 if not row.get("phrase_history"):
                     changes.update(
                         phrases=selected_phrases,
@@ -241,6 +244,29 @@ class SongAnalyzer:
                         sections=infer_sections(selected_phrases),
                     )
                 else:
+                    current_phrases = copy.deepcopy(row.get("phrases") or [])
+                    for index, fresh in enumerate(selected_phrases):
+                        if index >= len(current_phrases):
+                            break
+                        current = current_phrases[index]
+                        for key in ("start_ms", "end_ms", "timing_quality", "alignment_warning"):
+                            if key in fresh:
+                                current[key] = copy.deepcopy(fresh[key])
+                        if fresh.get("words") and current.get("words"):
+                            # Keep edited word text, but accept improved word
+                            # boundaries when the word sequence is unchanged.
+                            if len(fresh["words"]) == len(current["words"]):
+                                for old_word, new_word in zip(current["words"], fresh["words"]):
+                                    for key in ("start_ms", "end_ms", "timing_quality"):
+                                        if key in new_word:
+                                            old_word[key] = copy.deepcopy(new_word[key])
+                    if current_phrases:
+                        changes.update(
+                            phrases=current_phrases,
+                            words=[word for phrase in current_phrases for word in phrase.get("words", [])],
+                            timing_quality="word_estimated" if any(phrase.get("words") for phrase in current_phrases) else "phrase",
+                            sections=infer_sections(current_phrases),
+                        )
                     changes["candidate_run_id"] = base_run_id
             elif logical == "structure":
                 phrases = row.get("phrases") or selected_phrases
