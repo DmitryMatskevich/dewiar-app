@@ -253,9 +253,13 @@ window.SongReview = (() => {
       }).filter(chord=>chord.name);
       const width=Math.max(42,text.length+Math.max(1,...events.map(chord=>chord.name.length)));
       const placed=window.SongSheet?.compactChords({text,start_ms:liveTarget.startMs,end_ms:liveTarget.endMs,chords:events},0,width)||[];
-      let chordLine='';
-      for(const chord of placed) chordLine=chordLine.padEnd(chord.at,' ')+chord.name;
-      livePreviewChords.textContent=chordLine;
+      let chordLine='',cursor=0;
+      for(const chord of placed) {
+        const at=Math.max(cursor,chord.at);
+        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(window.SongSheet.chordTooltip(chord.name))}">${esc(chord.name)}</span>`;
+        cursor=at+chord.name.length;
+      }
+      livePreviewChords.innerHTML=chordLine;
       livePreviewChords.hidden=!chordLine;
     }
     function renderLiveChords() {
@@ -267,7 +271,11 @@ window.SongReview = (() => {
       liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
         liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
       });
-      liveChords.querySelectorAll('[data-live-chord-name], [data-live-chord-time]').forEach(input=>input.addEventListener('input',updateLivePreview));
+      liveChords.querySelectorAll('[data-live-chord-name]').forEach(input=>{
+        input.title=window.SongSheet?.chordTooltip(input.value)||'Название аккорда';
+        input.addEventListener('input',()=>{input.title=window.SongSheet?.chordTooltip(input.value)||'Название аккорда';updateLivePreview();});
+      });
+      liveChords.querySelectorAll('[data-live-chord-time]').forEach(input=>input.addEventListener('input',updateLivePreview));
       updateLivePreview();
     }
     function openPhraseEditor(phraseId,mode='phrase',displayLineId='') {

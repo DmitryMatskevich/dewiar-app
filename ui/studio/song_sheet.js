@@ -113,7 +113,7 @@ window.SongSheet = (() => {
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
-      if(text) lines.push({kind:'chords',text,phrase_id:phraseId});
+      if(text) lines.push({kind:'chords',text,phrase_id:phraseId,chord_marks:chords.map(c=>({name:c.name,at:c.at}))});
       if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
         display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true; }
       else if(text) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
@@ -251,10 +251,11 @@ window.SongSheet = (() => {
     '13':[0,2,4,7,9,10],m13:[0,2,3,7,9,10],maj13:[0,2,4,7,9,11]
   };
   const fingeringCache=new Map();
-  function chordFingering(symbol) {
-    if(fingeringCache.has(symbol)) return fingeringCache.get(symbol);
+  function chordFingerings(symbol,limit=3) {
+    const cacheKey=String(symbol);
+    if(fingeringCache.has(cacheKey)) return fingeringCache.get(cacheKey).slice(0,limit);
     const match=String(symbol).match(/^([A-G])([#b]?)(.*?)(?:\/([A-G])([#b]?))?$/i);
-    if(!match) { fingeringCache.set(symbol,'');return ''; }
+    if(!match) { fingeringCache.set(cacheKey,[]);return []; }
     const [,letter,accidental,suffix,slashLetter,slashAccidental]=match;
     const root=NOTE_PC[letter.toUpperCase()];
     const pc=(base,acc)=>((base+(acc==='#'?1:acc==='b'?-1:0))%12+12)%12;
@@ -264,12 +265,12 @@ window.SongSheet = (() => {
       const normalized=suffix.toLowerCase();
       intervals=CHORD_INTERVALS[normalized];
     }
-    if(!intervals) { fingeringCache.set(symbol,'');return ''; }
+    if(!intervals) { fingeringCache.set(cacheKey,[]);return []; }
     const tones=[...new Set(intervals.map(n=>(rootPc+n)%12))];
-    if(slashLetter&&!tones.includes(bassPc)) { fingeringCache.set(symbol,'');return ''; }
+    if(slashLetter&&!tones.includes(bassPc)) { fingeringCache.set(cacheKey,[]);return []; }
     const requiredMask=tones.reduce((mask,n)=>mask|(1<<n),0);
     const options=STRING_PC.map(open=>[-1,...Array.from({length:13},(_,f)=>f).filter(f=>tones.includes((open+f)%12))]);
-    let best=null;
+    const found=new Map();
     function visit(string,mask,positions,lowestPc) {
       if(string===6) {
         if(mask!==requiredMask || lowestPc!==bassPc) return;
@@ -280,7 +281,9 @@ window.SongSheet = (() => {
         const score=fretted.reduce((sum,f)=>sum+f,0)+max*1.25+distinct*0.7+
           positions.filter(f=>f<0).length*7+Math.max(0,spread-4)*2-
           positions.filter(f=>f===0).length*0.8;
-        if(!best||score<best.score) best={score,positions:[...positions]};
+        const shape=positions.map(f=>f<0?'x':String(f)).join('-');
+        const previous=found.get(shape);
+        if(!previous||score<previous.score) found.set(shape,{score,shape});
         return;
       }
       for(const fret of options[string]) {
@@ -293,8 +296,25 @@ window.SongSheet = (() => {
     }
     // Search from the first string through the sixth so bass-note validation is exact.
     visit(0,0,[],null);
-    const result=best ? best.positions.map(f=>f<0?'x':String(f)).join('-') : '';
-    fingeringCache.set(symbol,result);return result;
+    const result=[...found.values()].sort((a,b)=>a.score-b.score||a.shape.localeCompare(b.shape)).slice(0,Math.max(3,limit)).map(item=>item.shape);
+    fingeringCache.set(cacheKey,result);return result.slice(0,limit);
+  }
+  function chordFingering(symbol) { return chordFingerings(symbol,1)[0]||''; }
+  function chordTooltip(symbol) {
+    const shapes=chordFingerings(symbol,3);
+    if(!shapes.length) return `${symbol}: аппликатура не найдена`;
+    return `${symbol} · струны 1→6 (лад; 0 — открытая, x — не играть): ${shapes[0]}${shapes.length>1?` · другие варианты: ${shapes.slice(1).join(' / ')}`:''}`;
+  }
+  function chordLineHTML(line) {
+    if(!line.chord_marks?.length) return esc(line.text);
+    let cursor=0,html='';
+    for(const chord of line.chord_marks) {
+      const at=Math.max(cursor,Math.min(line.text.length,Number(chord.at)||0));
+      html+=esc(line.text.slice(cursor,at));
+      html+=`<span class="song-chord-tip" title="${esc(chordTooltip(chord.name))}" aria-label="${esc(chordTooltip(chord.name))}">${esc(chord.name)}</span>`;
+      cursor=at+chord.name.length;
+    }
+    return html+esc(line.text.slice(cursor));
   }
   function sourceLinks(row) {
     const all = [...(row.source_candidates || [])];
@@ -344,7 +364,7 @@ window.SongSheet = (() => {
     for(let i=0;i<rows.length;i++) {
       const r=rows[i];
       if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
-      const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${esc(r.text)}</div>` : '';
+      const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
       const lyric=r.kind==='lyrics' ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
       let lyricHTMLContent='';
       if(lyric?.kind==='lyrics') lyricHTMLContent=lyricHTML(lyric);
@@ -441,7 +461,7 @@ window.SongSheet = (() => {
     if (!row.phrases?.length) return '';
     return `<details class="song-chord-editor"><summary>Править аккорды и положение над текстом</summary>
       <p class="hint">Выберите смену или добавьте новую. Время задаётся от начала песни. Чтобы поставить аккорд над гласной распева, нажмите на эту букву.</p>
-      <label class="f">Смена<select id="song-chord-select"><option value="new">Новая смена</option>${(row.chords || []).map((c,i) => c.name === 'N' ? '' : `<option value="${i}">${(c.start_ms/1000).toFixed(2)} с — ${esc(c.name)}</option>`).join('')}</select></label>
+      <label class="f">Смена<select id="song-chord-select"><option value="new">Новая смена</option>${(row.chords || []).map((c,i) => c.name === 'N' ? '' : `<option value="${i}" title="${esc(chordTooltip(c.name))}">${(c.start_ms/1000).toFixed(2)} с — ${esc(c.name)}</option>`).join('')}</select></label>
       <label class="f">Аккорд<input id="song-chord-name" placeholder="Am, E7, Bb"></label>
       <label class="f">Время, секунды<input id="song-chord-time" type="number" min="0" step="0.01" value="0"></label>
       <p id="song-chord-letters" class="song-chord-letters"></p>
@@ -458,6 +478,9 @@ window.SongSheet = (() => {
     const name = document.getElementById('song-chord-name'), time = document.getElementById('song-chord-time');
     const status = document.getElementById('song-chord-status'), letters = document.getElementById('song-chord-letters');
     let anchor = null;
+    const updateChordTitle=()=>{name.title=chordTooltip(name.value)||'Введите название аккорда';};
+    name.addEventListener('input',updateChordTitle);
+    updateChordTitle();
     function showLetters() {
       const ms = Number(time.value)*1000;
       const phrase = getCurrent().phrases.find(p => p.start_ms <= ms && ms < p.end_ms);
@@ -471,6 +494,7 @@ window.SongSheet = (() => {
     select.onchange = () => {
       const event = getCurrent().chords?.[Number(select.value)];
       name.value = event?.name || ''; time.value = (event?.start_ms || 0)/1000;
+      updateChordTitle();
       anchor = event?.anchor || null; showLetters();
     };
     time.oninput = () => { anchor = null; showLetters(); };
@@ -517,5 +541,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,icon,compactChords,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,icon,compactChords,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
 })();

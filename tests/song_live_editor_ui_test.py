@@ -134,6 +134,8 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert chord_preview.is_visible()
     assert 'Am' in chord_preview.inner_text() and 'E7' in chord_preview.inner_text()
     assert '\n' not in chord_preview.inner_text()
+    assert 'струны 1→6' in chord_preview.locator('.song-chord-tip').first.get_attribute('title')
+    assert 'струны 1→6' in page.locator('[data-live-chord-name]').first.get_attribute('title')
 
     page.locator('#song-live-edit-text').fill('Я тихо смеюсь.')
     assert page.locator('#song-live-edit-preview').inner_text() == 'Я тихо смеюсь.'

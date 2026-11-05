@@ -4,6 +4,8 @@ const row={title:'Test',guitar_sheet:[{text:'One two',cells:[{text:'One ',char_i
 assert.equal(s.chordFingering('Em'),'0-0-0-2-2-0');
 assert.equal(s.chordFingering('Am'),'0-1-2-2-0-x');
 assert.equal(s.chordFingering('C/G'),'0-1-0-2-3-3');
+assert.equal(s.chordFingerings('Am').length,3);
+assert.match(s.chordTooltip('Am'),/струны 1→6.*0-1-2-2-0-x.*другие варианты/);
 // The preview and clipboard must use the same current semitone offset.
 const fixture={song_id:'copy-check',title:'Must not copy',artist:'Artist',phrases:[{phrase_id:'p'}],sections:[{label:'Verse',phrase_indexes:[0]}],guitar_sheet:[{phrase_id:'p',text:'One two',cells:[{char_index:0,chords:['B7/D#']},{char_index:9,chords:['F#m']}]},{text:'',unplaced_chords:[{name:'Bb',start_ms:1234},{name:'N',start_ms:1500}]}]};
 const elements=new Map();global.document={getElementById:id=>{if(!elements.has(id))elements.set(id,{value:'',textContent:'',setAttribute(name,value){this[name]=value}});return elements.get(id)}};
@@ -96,10 +98,10 @@ console.log('Gap/lyric boundaries, consecutive instrumental blocks and source pr
 const pairedHTML=s.sheetHTML(boundary);
 assert.equal(visible.filter(r=>r.kind==='instrumental').length,2);
 assert.ok(visible.every((r,i)=>r.kind!=='instrumental' || visible[i-1]?.kind==='chords'));
-assert.match(pairedHTML,/song-paper-chords">Abmaj7\s+F6<\/div><div class="song-paper-instrumental"[^>]*data-start-ms="2000"[^>]*data-end-ms="2600"/);
+assert.match(pairedHTML,/song-paper-chords"><span class="song-chord-tip" title="Abmaj7[^>]+>Abmaj7<\/span>\s+<span class="song-chord-tip" title="F6[^>]+>F6<\/span><\/div><div class="song-paper-instrumental"[^>]*data-start-ms="2000"[^>]*data-end-ms="2600"/);
 assert.match(pairedHTML,/song-paper-cue-part" data-cue-step="3">Про<\/span><span class="song-paper-cue-part" data-cue-step="2">и<\/span><span class="song-paper-cue-part" data-cue-step="1">грыш<\/span>/);
 assert.equal(s.sheetRows({guitar_sheet:[{text:'',unplaced_chords:[{name:'N',start_ms:0}]}]}).length,0);
-assert.match(pairedHTML, /<div class="song-paper-chords">F#m\s+Bm<\/div>[\s\S]*?<div class="song-paper-lyrics">Next phrase with words\.<\/div>/);
+assert.match(pairedHTML, /<div class="song-paper-chords"><span class="song-chord-tip" title="F#m[^>]+>F#m<\/span>\s+<span class="song-chord-tip" title="Bm[^>]+>Bm<\/span><\/div>[\s\S]*?<div class="song-paper-lyrics">Next phrase with words\.<\/div>/);
 console.log('Chord and lyric share one inseparable presentation block: OK');
 
 const intro=s.sheetHTML({song_id:'intro',title:'Intro',phrases:[],guitar_sheet:[{text:'',unplaced_chords:[{name:'Em',start_ms:0,end_ms:3000}]},{phrase_id:'next',text:'First lyric.',start_ms:3000,end_ms:5000,chords:[{name:'Am',char_index:0,start_ms:3000,end_ms:5000}]}]});

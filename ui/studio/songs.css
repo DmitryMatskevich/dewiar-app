@@ -190,6 +190,7 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper-cue-part.countdown-lit { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 32%,var(--field)); transform:translateY(-1px); }
 .song-paper-line.playing-line { background:color-mix(in srgb,var(--accent,#4d78c9) 7%,transparent); border-radius:4px; }
 .song-paper-chords { font-weight:700; }
+.song-chord-tip { cursor:help; text-decoration:underline dotted color-mix(in srgb,currentColor 35%,transparent); text-underline-offset:3px; }
 .song-paper-lyrics { white-space:pre-wrap; overflow-wrap:anywhere; scroll-margin-block:90px; }
 .song-paper-word { border-radius:3px; }
 .song-paper-word.current-word { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 28%,var(--field)); outline:2px solid var(--accent,#4d78c9); }
