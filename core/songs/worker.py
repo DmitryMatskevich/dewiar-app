@@ -237,6 +237,37 @@ def _separate_vocals_for_intro(audio, output, progress):
     return None
 
 
+def _vocal_onset_ms(vocals):
+    """Estimate the first sung moment from a separated vocal stem.
+
+    This is deliberately conservative: a few consecutive energetic windows are
+    required, and the first 250 ms are ignored so separator leakage cannot move
+    a phrase to the beginning of the file.
+    """
+    import numpy as np
+    import soundfile as sf
+    samples, sr = sf.read(str(vocals), dtype='float32', always_2d=True)
+    samples = np.mean(samples, axis=1)
+    if not len(samples):
+        return 0
+    hop = max(1, round(sr * .05))
+    frame = max(hop, round(sr * .10))
+    rms = []
+    for start in range(0, max(1, len(samples) - frame + 1), hop):
+        block = samples[start:start + frame]
+        rms.append(float(np.sqrt(np.mean(block * block) + 1e-12)))
+    if not rms:
+        return 0
+    noise = float(np.percentile(rms[:max(1, min(len(rms), round(1.0 * sr / hop)))], 70))
+    threshold = max(noise * 2.4, float(np.percentile(rms, 55)) * .75, 1e-4)
+    needed = max(2, round(.15 * sr / hop))
+    first = max(0, round(.25 * sr / hop))
+    for index in range(first, max(first + 1, len(rms) - needed + 1)):
+        if all(value >= threshold for value in rms[index:index + needed]):
+            return round(index * hop * 1000 / sr)
+    return 0
+
+
 def align_intro_from_vocals(audio, output, hypothesis, context, progress, original_start_ms=None):
     """Retry a false zero-second first phrase on vocal-only audio, if available offline."""
     phrases = hypothesis.get('phrases') or []
@@ -263,6 +294,16 @@ def align_intro_from_vocals(audio, output, hypothesis, context, progress, origin
     aligned = retry['phrases'][0]
     if (aligned.get('timing_quality') != 'word_estimated' or
             not aligned.get('words') or aligned['words'][0]['start_ms'] - original_start < 1500):
+        onset = _vocal_onset_ms(vocals)
+        if onset >= original_start + 1200:
+            first['start_ms'] = onset
+            first['alignment_warning'] = 'Начало вокала найдено по отделённому голосу; слова требуют проверки'
+            hypothesis.setdefault('alignment', {})['intro_vocal_check'] = {
+                'source': 'HTDemucs vocal stem onset', 'start_ms': onset,
+                'end_ms': int(first.get('end_ms') or 0)}
+            import shutil
+            shutil.rmtree(vocals.parent, ignore_errors=True)
+            return True
         import shutil
         shutil.rmtree(vocals.parent, ignore_errors=True)
         return False
@@ -297,6 +338,7 @@ def main():
             progress({'whisper': 'Whisper large-v2: слова и времена',
                       'qwen': 'Qwen3: независимый вариант текста',
                       'align': 'Уточняем времена слов',
+                      'structure': 'Размечаем куплеты и припевы',
                       'consensus': 'Сверяем слова трёх распознавателей',
                       'chords': 'Определяем смены аккордов по звуку'}[step])
             if step == 'whisper':
@@ -312,6 +354,11 @@ def main():
             elif step == 'chords':
                 from songs.harmony import infer_chords
                 result['harmony'] = infer_chords(args.input)
+            elif step == 'structure':
+                from songs.structure import infer_sections
+                selected = result.get('selected') or {}
+                selected['sections'] = infer_sections(selected.get('phrases') or [])
+                result['selected'] = selected
             elif step == 'align':
                 timed = result.get('selected')
                 if timed:

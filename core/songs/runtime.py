@@ -18,7 +18,7 @@ def python_path():
     return next((p for p in candidates if p.is_file()), None)
 
 
-def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensus,align,chords'):
+def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensus,align,chords', resume=False):
     python = python_path()
     if not python:
         raise RuntimeError('Модуль полного разбора песен не установлен; доступен базовый текст')
@@ -43,9 +43,12 @@ def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensu
     for key in ('PYTHONHOME', 'PYTHONPATH', '_MEIPASS2', 'DYLD_LIBRARY_PATH'):
         env.pop(key, None)
     with log.open('w') as handle:
-        process = subprocess.Popen([str(python), '-B', str(Path(__file__).with_name('worker.py')),
+        command = [str(python), '-B', str(Path(__file__).with_name('worker.py')),
             '--input', str(decoded), '--output', str(output), '--run-id', run_id, '--steps', steps,
-            '--baseline',str(output.parent/'gigaam.json')],
+            '--baseline', str(output.parent/'gigaam.json')]
+        if resume:
+            command.append('--resume')
+        process = subprocess.Popen(command,
             env=env, stdout=handle, stderr=handle, stdin=subprocess.DEVNULL, start_new_session=True)
         pidfile = output.with_suffix('.pid')
         pidfile.write_text(str(process.pid), encoding='ascii')

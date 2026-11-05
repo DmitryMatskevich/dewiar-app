@@ -45,6 +45,17 @@
     const i = stages.findIndex((x) => x[0] === row.stage);
     return i < 0 ? 0 : i;
   }
+  function stageRestart(row, key) {
+    if (row.processing?.busy || ['recording'].includes(row.status)) return '';
+    if (['identify', 'sources'].includes(key) && row.status !== 'recording') {
+      return `<button type="button" class="btn small song-step-retry" data-song-restart-sources="${esc(row.song_id)}" title="Повторить поиск источников и продолжить обработку песни">Повторить</button>`;
+    }
+    if (['lyrics', 'structure', 'chords'].includes(key) && row.audio?.path && (row.analysis_runs?.length || row.capabilities?.lyrics)) {
+      const labels = {lyrics: 'распознавание слов', structure: 'разметку куплетов и припевов', chords: 'проверку аккордов'};
+      return `<button type="button" class="btn small song-step-retry" data-song-rerun-step="${key}" data-song-id="${esc(row.song_id)}" title="Перезапустить ${labels[key]}; результаты остальных этапов и пользовательские правки сохранятся">Повторить этап</button>`;
+    }
+    return '';
+  }
   function card(row) {
     const artist = row.artist ? `<div class="song-artist">${esc(row.artist)}</div>` : `<div class="song-artist">Исполнитель пока не определён</div>`;
     const ks = row.karaoke?.state;
@@ -146,7 +157,7 @@
     }).join('');
     const errors = (row.analysis_errors || []).map(e => `<p class="song-errors">${esc(e.step)}: ${esc(e.error)}</p>`).join('');
     detail.innerHTML = `<div class="songs-detail-head"><div><h2>${esc(row.title)}</h2><p class="hint">${esc(row.artist || "Исполнитель определяется по источникам")} · ${esc(currentStatus(row))}</p></div><button class="btn songs-detail-close" id="songs-detail-close">Закрыть</button></div>
-      <div class="song-steps" aria-label="Этапы разбора">${stages.map((s, i) => `<div class="song-step ${i < active ? "done" : ""} ${i === active ? "on" : ""}"><b>${i + 1}. ${esc(s[1])}</b>${i < active ? "" : i === active ? esc(row.stage_label || "Выполняется") : "Ожидает"}</div>`).join("")}</div>
+      <div class="song-steps" aria-label="Этапы разбора">${stages.map((s, i) => `<div class="song-step ${i < active ? "done" : ""} ${i === active ? "on" : ""}"><div><b>${i + 1}. ${esc(s[1])}</b>${i < active ? "" : i === active ? esc(row.stage_label || "Выполняется") : "Ожидает"}</div>${stageRestart(row, s[0])}</div>`).join("")}</div>
       ${row.processing?.can_resume?`<div class="actions"><button class="btn primary" id="song-resume" data-song-process-selected="${esc(row.song_id)}" title="Продолжить пакетный разбор записи; сохранить пользовательские правки">${esc(row.processing.label)}</button></div>`:''}
       ${row.processing?.busy&&row.status!=='recording'?'<div class="actions"><button class="btn" id="song-stop-processing" title="Отменить текущий разбор. После остановки можно продолжить обработку; запись и пользовательские правки сохранятся">Остановить обработку</button></div>':''}
       ${sourceStage}
@@ -158,6 +169,29 @@
       try { await call('song_cancel',{song_id:row.song_id}); await load(); }
       catch(error) { toast(error.message||'Не удалось остановить обработку',5000,'bad'); event.currentTarget.disabled=false; }
     });
+    detail.querySelectorAll('[data-song-rerun-step]').forEach(button => button.addEventListener('click', async () => {
+      const step = button.dataset.songRerunStep;
+      button.disabled = true;
+      try {
+        await call('song_rerun_step', {song_id: row.song_id, step});
+        renderDetail(await call('song_get', {song_id: row.song_id}));
+        await load();
+      } catch (error) {
+        toast(error.message || 'Не удалось перезапустить этап', 5000, 'bad');
+        button.disabled = false;
+      }
+    }));
+    detail.querySelectorAll('[data-song-restart-sources]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await call('song_find_sources', {song_id: row.song_id});
+        renderDetail(await call('song_get', {song_id: row.song_id}));
+        await load();
+      } catch (error) {
+        toast(error.message || 'Не удалось повторить поиск источников', 5000, 'bad');
+        button.disabled = false;
+      }
+    }));
     $s("song-resume")?.addEventListener("click", event => processSelectedSource(event.currentTarget));
     SongSheet.bind(row, () => state.current, acceptSaved);
     SongSheet.bindToolbar(row, () => state.current, () => { document.getElementById("song-guitar-content").innerHTML = guitarHtml(state.current); });

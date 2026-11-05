@@ -1935,6 +1935,10 @@ class CommandsMixin:
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь загрузки записи')
             return self.song_analyzer.start(str(a.get("song_id") or ""), full=a.get('full') is True)
+        if cmd == "song_rerun_step":
+            if self.song_sources.running(str(a.get('song_id') or '')):
+                raise ValueError('Дождитесь завершения работы с источником')
+            return self.song_analyzer.rerun_step(str(a.get("song_id") or ""), a.get("step"))
         if cmd == "song_patch_chords":
             from songs.chord_layout import build_guitar_sheet
             song_id = str(a.get("song_id") or "")

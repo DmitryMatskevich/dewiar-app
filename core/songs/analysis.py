@@ -6,6 +6,7 @@ import uuid
 import math
 import json
 import os
+import copy
 import subprocess
 import signal
 import time
@@ -13,6 +14,17 @@ from pathlib import Path
 
 
 class SongAnalyzer:
+    STEP_LABELS = {
+        "lyrics": "Распознаём слова",
+        "structure": "Размечаем части",
+        "chords": "Подбираем аккорды",
+    }
+    STEP_WORKERS = {
+        "lyrics": "whisper,qwen,consensus,align",
+        "structure": "structure",
+        "chords": "chords",
+    }
+
     def __init__(self, root: Path, store, host, emit):
         self.root = Path(root).resolve()
         self.store = store
@@ -138,6 +150,156 @@ class SongAnalyzer:
                 "stage_label": "Отменено; сохранённый текст и запись оставлены"})
             self.emit("song_analysis", song_id=song_id, running=False, song=updated)
             return updated
+
+    def _latest_analysis_folder(self, row):
+        """Return the most recent completed worker folder for a song."""
+        audio = row.get("audio") or {}
+        path = (self.root / str(audio.get("path") or "")).resolve()
+        if self.root not in path.parents or not path.is_file():
+            raise ValueError("Сначала сохраните полную запись песни")
+        analysis_root = path.parent.parent / "analysis"
+        preferred = [row.get("selected_run_id"), row.get("candidate_run_id")]
+        preferred.extend(run.get("run_id") for run in reversed(row.get("analysis_runs") or []))
+        for run_id in preferred:
+            if not run_id:
+                continue
+            folder = analysis_root / str(run_id)
+            if (folder / "result.json").is_file():
+                return path, str(run_id), folder
+        raise ValueError("Для этого шага нет сохранённого результата; запустите полный разбор")
+
+    def rerun_step(self, song_id, step):
+        """Restart one deterministic song stage without discarding other stages."""
+        logical = str(step or "").strip().lower()
+        if logical not in self.STEP_WORKERS:
+            raise ValueError("Этот этап нельзя перезапустить отдельно")
+        row = self.store.get(song_id)
+        if not row:
+            raise ValueError("Песня не найдена")
+        if self.running(song_id):
+            raise ValueError("Для этой песни уже выполняется другой этап")
+        path, base_run_id, folder = self._latest_analysis_folder(row)
+        with self._lock:
+            if song_id in self._running:
+                raise ValueError("Для этой песни уже выполняется другой этап")
+            rerun_id = str(uuid.uuid4())
+            cancel = threading.Event()
+            self._running.add(song_id)
+            self._cancels[song_id] = cancel
+            updated = self.store.patch(song_id, {
+                "status": "running", "active_run_id": rerun_id,
+                "stage": logical, "analysis_state": "full_partial",
+                "stage_label": f"Перезапускаем этап: {self.STEP_LABELS[logical]}",
+            })
+            self.emit("song_analysis", song_id=song_id, running=True, song=updated)
+            threading.Thread(target=self._run_step,
+                             args=(song_id, path, rerun_id, base_run_id, folder, logical, cancel),
+                             name=f"song-{logical}-{song_id[:8]}", daemon=True).start()
+            return updated
+
+    def _apply_step_result(self, song_id, rerun_id, base_run_id, logical, result):
+        from .structure import infer_sections
+        from .chord_layout import build_guitar_sheet
+        with self.store._lock:
+            row = self.store.get(song_id)
+            if not row or row.get("active_run_id") != rerun_id:
+                return None
+            runs = copy.deepcopy(row.get("analysis_runs") or [])
+            run = next((item for item in runs if item.get("run_id") == base_run_id), None)
+            if run is None:
+                raise ValueError("Исходный запуск анализа не найден")
+            if result.get("hypotheses"):
+                # A step retry may not emit the cached GigaAM baseline again;
+                # merge by model so the evidence from earlier stages remains
+                # available for review and future retries.
+                merged = {item.get("model"): item for item in (run.get("hypotheses") or [])
+                          if item.get("model")}
+                merged.update({item.get("model"): item for item in result["hypotheses"]
+                               if item.get("model")})
+                run["hypotheses"] = list(merged.values())
+            selected = copy.deepcopy(result.get("selected") or {})
+            selected_phrases = selected.get("phrases") or []
+            if selected_phrases:
+                run["phrases"] = selected_phrases
+            harmony = result.get("harmony")
+            if harmony is not None:
+                run["harmony"] = copy.deepcopy(harmony)
+            changes = {
+                "analysis_runs": runs, "active_run_id": None, "status": "review",
+                "stage": "review", "analysis_state": "full_partial" if result.get("errors") else "full_ready",
+                "analysis_errors": copy.deepcopy(result.get("errors") or []),
+                "review_state": "needs_review",
+            }
+            if logical in {"lyrics", "align"} and selected_phrases:
+                # Never overwrite a phrase which the user has already edited;
+                # the rerun remains available in analysis_runs for comparison.
+                if not row.get("phrase_history"):
+                    changes.update(
+                        phrases=selected_phrases,
+                        words=[word for phrase in selected_phrases for word in phrase.get("words", [])],
+                        timing_quality="word_estimated" if any(phrase.get("words") for phrase in selected_phrases) else "phrase",
+                        sections=infer_sections(selected_phrases),
+                    )
+                else:
+                    changes["candidate_run_id"] = base_run_id
+            elif logical == "structure":
+                phrases = row.get("phrases") or selected_phrases
+                changes["sections"] = infer_sections(phrases)
+                changes["capabilities"] = {**(row.get("capabilities") or {}), "structure": bool(phrases)}
+            elif logical == "chords":
+                events = (harmony or {}).get("events") or []
+                changes.update(
+                    chords=events,
+                    harmony=copy.deepcopy(harmony or {}),
+                    guitar_sheet=build_guitar_sheet(row.get("phrases") or [], events),
+                    capabilities={**(row.get("capabilities") or {}),
+                                  "chords": any(event.get("name") != "N" for event in events)},
+                )
+            changes["stage_label"] = {
+                "lyrics": "Распознавание слов обновлено; проверьте текст по записи",
+                "structure": "Разметка частей обновлена; проверьте куплеты и припевы",
+                "chords": "Проверка аккордов завершена; проверьте результат",
+            }[logical]
+            return self.store.patch(song_id, changes)
+
+    def _run_step(self, song_id, path, rerun_id, base_run_id, folder, logical, cancel):
+        try:
+            while not self._heavy_slots.acquire(timeout=.5):
+                if cancel.is_set():
+                    return
+            try:
+                from .runtime import analyze
+                def progress(label):
+                    row = self.store.get(song_id) or {}
+                    if row.get("active_run_id") != rerun_id or cancel.is_set():
+                        return
+                    fresh = self.store.patch(song_id, {"stage_label": label})
+                    self.emit("song_analysis", song_id=song_id, running=True, song=fresh)
+                result = analyze(path, folder / "result.json", rerun_id, cancel, progress,
+                                 steps=self.STEP_WORKERS[logical], resume=True)
+                if cancel.is_set():
+                    return
+                updated = self._apply_step_result(song_id, rerun_id, base_run_id, logical, result)
+                if updated:
+                    self.emit("song_analysis", song_id=song_id, running=False, song=updated)
+            finally:
+                self._heavy_slots.release()
+        except InterruptedError:
+            return
+        except Exception as exc:
+            row = self.store.get(song_id) or {}
+            if row.get("active_run_id") == rerun_id:
+                updated = self.store.patch(song_id, {
+                    "status": "failed", "active_run_id": None,
+                    "analysis_state": "full_partial", "stage": logical,
+                    "stage_label": f"Этап не завершён: {str(exc)[:160]}",
+                    "analysis_errors": [{"step": logical, "error": str(exc)[:1000]}],
+                })
+                self.emit("song_analysis", song_id=song_id, running=False, song=updated, error=str(exc))
+        finally:
+            with self._lock:
+                self._running.discard(song_id)
+                self._cancels.pop(song_id, None)
 
     def start(self, song_id: str, full=False):
         row = self.store.get(song_id)
