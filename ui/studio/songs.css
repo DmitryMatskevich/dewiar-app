@@ -25,7 +25,8 @@
 html.st-light .song-status[data-status="review"] { color:#704100; background:#ffe7b9; }
 html.st-light .song-status[data-status="ready"] { color:#175c40; background:#d3f0e2; }
 html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ffdde4; }
-.song-card-actions { display:flex; gap:6px; align-items:center; }
+.song-card-actions { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.song-card-process { min-height:44px; white-space:nowrap; }
 .songs-detail { margin-top:18px; padding:20px; border:1px solid var(--line); border-radius:18px; background:var(--glass); }
 .songs-detail[hidden] { display:none; }
 .songs-detail-head { display:flex; gap:14px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; }

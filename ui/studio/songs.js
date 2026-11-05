@@ -4,6 +4,7 @@
   "use strict";
   const state = { rows: [], query: "", status: "", current: null };
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
+  const processingSongs = new Set();
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
   const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["review", "Проверяем"], ["karaoke", "Минусовка"]];
   const esc = (v) => escH(v == null ? "" : v);
@@ -47,6 +48,9 @@
   function card(row) {
     const artist = row.artist ? `<div class="song-artist">${esc(row.artist)}</div>` : `<div class="song-artist">Исполнитель пока не определён</div>`;
     const ks = row.karaoke?.state;
+    const selectedRecording=row.source_candidates?.find(c=>c.candidate_id===row.selected_source_id&&c.kind==='youtube');
+    const canProcessSelected=!!selectedRecording&&!row.audio?.path&&!row.phrases?.length&&!['running','recording'].includes(row.status);
+    const processing=processingSongs.has(row.song_id);
     const karaokeBadge = ks === "ready" ? '<span class="song-karaoke-status" data-state="ready">Минусовка готова</span>' : ["queued", "preparing", "separating", "checking"].includes(ks) ? '<span class="song-karaoke-status" data-state="busy">Минусовка готовится</span>' : ks === "failed" || ks === "interrupted" ? '<span class="song-karaoke-status" data-state="failed">Минусовка: повторить</span>' : "";
     return `<article class="song-card" data-song-id="${esc(row.song_id)}">
       <div class="song-card-main" data-song-open="${esc(row.song_id)}" tabindex="0" role="button" aria-label="Открыть ${esc(row.title)}">
@@ -54,7 +58,7 @@
         <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${karaokeBadge}${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>
       </div>
       <div class="song-card-actions">
-        <button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}»" aria-label="Проиграть ${esc(row.title)}" ${row.capabilities?.audio ? '' : 'disabled'}>${SongSheet.icon('play')}</button>
+        ${canProcessSelected?`<button class="btn primary song-card-process" data-song-process-selected="${esc(row.song_id)}" title="Запустить пакетную обработку выбранной записи: сохранить аудио, распознать текст и подобрать аккорды" aria-label="Обработать выбранную запись: ${esc(row.title)}" ${processing?'disabled aria-busy="true"':''}>${processing?'Запускаем…':'Обработать пакетно'}</button>`:`<button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}»" aria-label="Проиграть ${esc(row.title)}" ${row.capabilities?.audio ? '' : 'disabled'}>${SongSheet.icon('play')}</button>`}
         <button class="btn song-icon-btn" data-song-karaoke="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}» в режиме караоке (минусовка)" aria-label="Караоке: ${esc(row.title)}" ${row.karaoke?.state === 'ready' ? '' : 'disabled'}>${SongSheet.icon('karaoke')}</button>
         <button class="btn song-icon-btn" data-song-stop="${esc(row.song_id)}" title="Остановить песню «${esc(row.title)}» и вернуться к началу; отменить подготовку записи" aria-label="Остановить ${esc(row.title)}" hidden>${SongSheet.icon('stop')}</button>
         <button class="btn song-icon-btn" data-song-open="${esc(row.song_id)}" title="Редактировать текст, аккорды и свойства песни «${esc(row.title)}»" aria-label="Редактировать ${esc(row.title)}">${SongSheet.icon('edit')}</button>
@@ -74,6 +78,7 @@
       if (el.tagName !== "BUTTON") el.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openSong(el.dataset.songOpen); } });
     });
     list.querySelectorAll('[data-song-play]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songPlay)));
+    list.querySelectorAll('[data-song-process-selected]').forEach(el=>el.addEventListener('click',()=>processSelectedSource(el)));
     list.querySelectorAll('[data-song-karaoke]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songKaraoke,'instrumental')));
     list.querySelectorAll('[data-song-stop]').forEach(el=>el.addEventListener('click',stopCard));
     list.querySelectorAll("[data-song-delete]").forEach((el) => el.addEventListener("click", async (event) => {
@@ -297,6 +302,22 @@
   window.onSongPlayback=(songId,status)=>{cardPlayback={songId,...status};updateCardPlayback();};
   function stopCard() {
     cardRequest++;openRequest++;SongReview.stop();cardPlayback={};updateCardPlayback();
+  }
+  async function processSelectedSource(button) {
+    const songId=button.dataset.songProcessSelected;
+    if(!songId||processingSongs.has(songId))return;
+    const row=state.rows.find(item=>item.song_id===songId);
+    const candidate=row?.source_candidates?.find(item=>item.candidate_id===row.selected_source_id&&item.kind==='youtube');
+    if(!row||!candidate){toast('Сначала выберите запись YouTube для пакетной обработки',4000,'bad');return;}
+    processingSongs.add(songId);button.disabled=true;button.setAttribute('aria-busy','true');button.textContent='Запускаем…';
+    try {
+      await call('song_process_source',{song_id:songId,candidate_id:candidate.candidate_id});
+      await load();
+    } catch(error) { toast(error.message||'Не удалось запустить пакетную обработку',5000,'bad'); }
+    finally {
+      processingSongs.delete(songId);
+      if(state.rows.some(item=>item.song_id===songId))renderList();
+    }
   }
   async function playCard(id,variant='original') {
     const request=++cardRequest;
