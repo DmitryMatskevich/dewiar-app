@@ -110,9 +110,12 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-live-editor-head { flex-wrap:wrap; }
 .song-live-editor-head .actions { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 0 auto; }
 .song-live-editor-head .hint { margin:4px 0 10px; }
-.song-live-preview { margin:4px 0 14px; padding:10px 12px; border-radius:10px; background:var(--field); }
+.song-live-preview { margin:4px 0 14px; padding:10px 12px; border-radius:10px; background:var(--field); overflow-x:auto; }
 .song-live-preview b { display:block; font-size:13px; color:var(--muted); }
-.song-live-preview p { margin:5px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.song-live-preview-chords, .song-live-preview p { font:400 16px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-ligatures:none; }
+.song-live-preview-chords { min-height:1.5em; margin-top:5px; color:var(--ink); font-weight:700; white-space:pre; }
+.song-live-preview-chords[hidden] { display:none; }
+.song-live-preview p { margin:0; white-space:pre; }
 .song-live-editor textarea { display:block; width:100%; min-height:64px; resize:vertical; }
 .song-live-editor select, .song-live-editor input:not([type=checkbox]) { width:100%; }
 .song-live-chord-head { margin:14px 0 8px; }

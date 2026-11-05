@@ -130,9 +130,19 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-mode').input_value() == 'phrase', page.locator('#song-live-edit-mode').input_value()
     assert page.locator('#song-live-edit-text').input_value() == phrase_text
     assert page.locator('#song-live-edit-save').evaluate("e=>e.closest('.song-live-editor-head')!==null")
+    chord_preview=page.locator('#song-live-edit-preview-chords')
+    assert chord_preview.is_visible()
+    assert 'Am' in chord_preview.inner_text() and 'E7' in chord_preview.inner_text()
+    assert '\n' not in chord_preview.inner_text()
 
     page.locator('#song-live-edit-text').fill('Я тихо смеюсь.')
     assert page.locator('#song-live-edit-preview').inner_text() == 'Я тихо смеюсь.'
+    page.locator('#song-live-chord-add').click()
+    page.locator('[data-live-chord="3"] [data-live-chord-name]').fill('C')
+    page.locator('[data-live-chord="3"] [data-live-chord-time]').fill('8.0')
+    assert 'C' in chord_preview.inner_text(), chord_preview.inner_text()
+    page.locator('[data-live-chord-remove="3"]').click()
+    assert 'C' not in chord_preview.inner_text()
     page.locator('#song-live-edit-save').click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_phrase')")
     assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
@@ -144,11 +154,15 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-mode').input_value() == 'chords'
     assert page.locator('#song-live-text-field').is_hidden()
     assert page.locator('[data-live-chord-name]').count() == 3
+    old_preview_line=chord_preview.inner_text()
     page.locator('[data-live-chord="2"] [data-live-chord-name]').fill('G7')
+    page.locator('[data-live-chord="2"] [data-live-chord-time]').fill('5.5')
+    assert 'G7' in chord_preview.inner_text()
+    assert chord_preview.inner_text()!=old_preview_line
     page.locator('#song-live-edit-save').click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_chords')")
     assert 'Аккорды фразы сохранены' in page.locator('#song-live-edit-status').inner_text()
-    assert page.evaluate("row.chords.find(ch=>ch.start_ms===2500).name") == 'G7'
+    assert page.evaluate("row.chords.find(ch=>ch.start_ms===5500).name") == 'G7'
 
     page.locator('.song-paper-edit-lyrics[data-song-edit-line="joined-line-1"]').click()
     assert page.locator('#song-live-edit-text').input_value() == 'улыбаюсь. цельный четвертак.'

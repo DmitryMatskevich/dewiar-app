@@ -204,6 +204,7 @@ window.SongReview = (() => {
     const liveMode=document.getElementById('song-live-edit-mode');
     const liveText=document.getElementById('song-live-edit-text');
     const livePreview=document.getElementById('song-live-edit-preview');
+    const livePreviewChords=document.getElementById('song-live-edit-preview-chords');
     const liveChords=document.getElementById('song-live-chords');
     const liveStatus=document.getElementById('song-live-edit-status');
     let liveTarget=null, livePhraseText='', liveChordDraft=[];
@@ -222,9 +223,40 @@ window.SongReview = (() => {
     }
     function updateLivePreview() {
       if(!livePreview||!liveTarget)return;
-      if(liveMode.value!=='word') { livePreview.textContent=(liveMode.value==='phrase'?liveText.value:livePhraseText).trim()||'…';return; }
-      const start=liveTarget.charStart,end=liveTarget.charEnd;
-      livePreview.textContent=livePhraseText.slice(0,start)+liveText.value+livePhraseText.slice(end);
+      let text=livePhraseText;
+      if(liveMode.value==='phrase') text=liveText.value;
+      else if(liveMode.value==='word') {
+        const start=liveTarget.charStart,end=liveTarget.charEnd;
+        text=livePhraseText.slice(0,start)+liveText.value+livePhraseText.slice(end);
+      }
+      text=(text||'').trim();
+      livePreview.textContent=text||'…';
+      if(!livePreviewChords)return;
+      const events=liveChordDraft.map((chord,index)=>{
+        const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
+        const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
+        const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
+        const startMs=Number.isFinite(seconds)&&seconds>=0?Math.round(seconds*1000):Number(chord.start_ms)||0;
+        const phraseId=chord.anchor?.phrase_id;
+        const span=liveTarget.sourceSpans?.find(item=>item.phrase_id===phraseId &&
+          Number(chord.anchor?.grapheme_index)>=Number(item.phrase_char_start) &&
+          Number(chord.anchor?.grapheme_index)<=Number(item.phrase_char_end));
+        const anchorIndex=span
+          ? Number(span.display_char_start)+Number(chord.anchor.grapheme_index)-Number(span.phrase_char_start)
+          : liveTarget.phraseIds?.includes(phraseId)?Number(chord.anchor?.grapheme_index):null;
+        const changedTime=startMs!==Number(chord.original_start_ms??chord.start_ms);
+        const ratio=(startMs-liveTarget.startMs)/Math.max(1,liveTarget.endMs-liveTarget.startMs);
+        const charIndex=changedTime||!Number.isFinite(anchorIndex)
+          ? Math.round(Math.max(0,Math.min(1,ratio))*Math.max(0,text.length-1))
+          : anchorIndex;
+        return {...chord,name,char_index:Math.max(0,Math.min(Math.max(0,text.length-1),charIndex)),start_ms:startMs};
+      }).filter(chord=>chord.name);
+      const width=Math.max(42,text.length+Math.max(1,...events.map(chord=>chord.name.length)));
+      const placed=window.SongSheet?.compactChords({text,start_ms:liveTarget.startMs,end_ms:liveTarget.endMs,chords:events},0,width)||[];
+      let chordLine='';
+      for(const chord of placed) chordLine=chordLine.padEnd(chord.at,' ')+chord.name;
+      livePreviewChords.textContent=chordLine;
+      livePreviewChords.hidden=!chordLine;
     }
     function renderLiveChords() {
       liveChords.innerHTML=liveChordDraft.map((chord,index)=>`<div class="song-live-chord" data-live-chord="${index}">
@@ -235,6 +267,8 @@ window.SongReview = (() => {
       liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
         liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
       });
+      liveChords.querySelectorAll('[data-live-chord-name], [data-live-chord-time]').forEach(input=>input.addEventListener('input',updateLivePreview));
+      updateLivePreview();
     }
     function openPhraseEditor(phraseId,mode='phrase',displayLineId='') {
       const current=getCurrent();
@@ -248,6 +282,7 @@ window.SongReview = (() => {
       const sourcePhrases=sourcePhraseIds.map(id=>current.phrases.find(item=>item.phrase_id===id)).filter(Boolean);
       liveTarget={phraseId:phrase.phrase_id,phraseIds:sourcePhraseIds,displayLineId:displayLine?.phrase_id||'',
         text:displayLine?.text||phrase.text,charStart:0,charEnd:(displayLine?.text||phrase.text).length,
+        sourceSpans:displayLine?.source_spans||[],
         startMs:Math.min(...sourcePhrases.map(item=>Number(item.start_ms)||0)),
         endMs:Math.max(...sourcePhrases.map(item=>Number(item.end_ms)||0))};
       liveMode.value=mode;
@@ -258,7 +293,7 @@ window.SongReview = (() => {
       document.querySelector('#song-live-editor .song-live-editor-head b').textContent=mode==='chords'?'Правка аккордов фразы':'Правка фразы';
       document.getElementById('song-live-edit-save').textContent=mode==='chords'?'Сохранить аккорды':'Сохранить текст и аккорды';
       document.getElementById('song-live-reviewed').checked=sourcePhrases.every(item=>item.review_state==='verified');
-      liveChordDraft=phraseChords(phrase).map(c=>structuredClone(c));
+      liveChordDraft=phraseChords(phrase).map(c=>({...structuredClone(c),original_start_ms:Number(c.start_ms)||0}));
       renderLiveChords();updateLivePreview();liveStatus.textContent='Песня приостановлена. Правки сохраняются в карточке песни.';
       liveEditor.hidden=false;
       liveEditor.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
@@ -278,7 +313,7 @@ window.SongReview = (() => {
     liveText?.addEventListener('input',updateLivePreview);
     document.getElementById('song-live-chord-add')?.addEventListener('click',()=>{
       const phrase=targetPhrase();if(!phrase)return;
-      liveChordDraft.push({name:'',start_ms:liveTarget?.startMs ?? phrase.start_ms,
+      liveChordDraft.push({name:'',start_ms:liveTarget?.startMs ?? phrase.start_ms,original_start_ms:liveTarget?.startMs ?? phrase.start_ms,
         anchor:liveTarget?{kind:'manual',phrase_id:phrase.phrase_id,grapheme_index:liveTarget.charStart}:null,
         method:'manual',verified:true});renderLiveChords();
     });
