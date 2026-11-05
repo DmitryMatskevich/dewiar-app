@@ -52,6 +52,20 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     assert not tab.locator('[data-song-karaoke="1"]').is_disabled()
     assert tab.locator('[data-song-karaoke="2"]').is_disabled()
     assert not stop.is_visible()
+    create_button = tab.locator('#songs-new-create')
+    karaoke_button = tab.locator('#songs-instrumental-all')
+    assert create_button.get_attribute('title').startswith('Создать новую песню')
+    assert create_button.locator('svg').count() == 1
+    assert karaoke_button.get_attribute('title').startswith('Караоке:')
+    assert karaoke_button.locator('svg').count() == 1
+    assert create_button.locator('svg').bounding_box()['width'] >= 20
+    assert karaoke_button.locator('svg').bounding_box()['width'] >= 20
+    for status, label in [('batch', 'Пакетная обработка'), ('stopped', 'Остановились')]:
+        chip = tab.locator(f'[data-song-status="{status}"]')
+        assert chip.inner_text() == label and chip.is_visible()
+    create_button.click()
+    assert tab.locator('#song-create-dialog').is_visible()
+    tab.locator('#song-create-cancel').click()
     tab.evaluate("rows.push({song_id:'selected-source',title:'Выбрана запись',artist:'Исполнитель',revision:1,status:'needs_input',stage:'sources',stage_label:'Запись выбрана; нажмите «Обработать пакетно», чтобы начать разбор',capabilities:{audio:false},processing:{busy:false,can_resume:true,label:'Обработать пакетно'},phrases:[],karaoke:{state:'absent'}})")
     tab.evaluate('loadSongs()')
     process=tab.locator('[data-song-process-selected="selected-source"]')

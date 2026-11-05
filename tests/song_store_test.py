@@ -25,3 +25,18 @@ def test_song_store_rejects_stale_revision(tmp_path):
         assert "изменилась" in str(exc)
     else:
         raise AssertionError("stale revision was accepted")
+
+
+def test_song_store_processing_filters_include_active_and_stopped_jobs(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    active = store.create("Активная", "Исполнитель")
+    waiting = store.create("Ожидает выбора", "Исполнитель")
+    stopped = store.create("Остановилась", "Исполнитель")
+    ready = store.create("Готовая", "Исполнитель")
+    store.patch(active["song_id"], {"status": "running"}, active["revision"])
+    store.patch(waiting["song_id"], {"status": "needs_input"}, waiting["revision"])
+    store.patch(stopped["song_id"], {"status": "interrupted"}, stopped["revision"])
+    store.patch(ready["song_id"], {"status": "ready"}, ready["revision"])
+
+    assert {row["title"] for row in store.list(status="batch")} == {"Активная", "Ожидает выбора", "Остановилась"}
+    assert {row["title"] for row in store.list(status="stopped")} == {"Остановилась"}

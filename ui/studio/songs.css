@@ -211,7 +211,7 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-sheet-tools { position:sticky; top:6px; z-index:5; background:var(--field); padding:6px; border-radius:14px; }
 .song-tool-group { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; }
 .song-sheet-tools .song-icon-btn, .song-card-actions .song-icon-btn { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; min-width:44px; padding:10px; }
-.song-icon-btn svg { flex-shrink:0; pointer-events:none; }
+.song-icon-btn svg { width:24px; height:24px; flex-shrink:0; pointer-events:none; }
 .song-icon-btn:focus-visible { outline:2px solid var(--ink); outline-offset:3px; }
 #song-key-label { min-width:3ch; text-align:center; font-variant-numeric:tabular-nums; }
 .song-copy-group { gap:0; border-radius:14px; box-shadow:var(--raise,none); }

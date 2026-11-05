@@ -395,7 +395,7 @@
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     });
     ["songs-new-current", "songs-empty-current"].forEach((id) => $s(id)?.addEventListener("click", () => queryCreate("current")));
-    ["songs-new-query", "songs-empty-query"].forEach((id) => $s(id)?.addEventListener("click", () => queryCreate("query")));
+    ["songs-new-query", "songs-new-create", "songs-empty-query"].forEach((id) => $s(id)?.addEventListener("click", () => queryCreate("query")));
     ["songs-new-mic","songs-empty-mic"].forEach(id=>$s(id)?.addEventListener('click',createMicSong));
     $s("songs-instrumental-all")?.addEventListener("click", async (event) => {
       const button = event.currentTarget;

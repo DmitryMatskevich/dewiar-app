@@ -89,7 +89,17 @@ class SongStore:
                 haystack = f"{row.get('title', '')} {row.get('artist', '')}".casefold()
                 if query and query not in haystack:
                     continue
-                selected_statuses = {"queued", "recording", "running"} if status == "running" else {status}
+                selected_statuses = {
+                    "running": {"queued", "recording", "running"},
+                    # The batch view contains jobs that can still be resumed
+                    # or are currently being processed in the background,
+                    # including jobs that stopped and await a retry.
+                    "batch": {"queued", "recording", "running", "needs_input",
+                               "interrupted", "failed", "cancelled", "partial"},
+                    # A separate view makes interrupted/failed work visible
+                    # instead of leaving it mixed into the main library.
+                    "stopped": {"interrupted", "failed", "cancelled", "partial"},
+                }.get(status, {status})
                 if status and row.get("status") not in selected_statuses:
                     continue
                 if compact:
