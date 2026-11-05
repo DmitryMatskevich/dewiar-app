@@ -400,17 +400,23 @@ class Settings:
             selection_role = role if role in ROLE_MAX_TOKENS_DEFAULT else "communication"
             if llm.get('auto_select'):
                 choices = modelrouter.candidates(llm, role=selection_role)
+                # Specialist queues are optional. If automatic routing has no match,
+                # the general assistant can still answer (including tool-based web search).
+                if not choices and selection_role in ("analytics", "planning", "coding"):
+                    choices = modelrouter.candidates(llm, role="communication")
                 if not choices:
                     return None
                 limited = [_with_role_token_limit(candidate, llm, selection_role) for candidate in choices]
                 return copy.deepcopy(dict(limited[0], _route_candidates=limited))
             profile = llm["profiles"].get(llm["active"])
-            if role and profile and role not in modelrouter.roles(profile):
-                choices = modelrouter.candidates(llm, role=selection_role)
-                if choices:
-                    limited = [_with_role_token_limit(candidate, llm, selection_role) for candidate in choices]
-                    return copy.deepcopy(dict(limited[0], _route_candidates=limited))
-                return None
+            # Manual selection is authoritative. Role assignments constrain only
+            # automatic text routing; image input still requires an image-capable profile.
+            if selection_role == "images" and profile and selection_role not in modelrouter.roles(profile):
+                choices = modelrouter.candidates(llm, role="images")
+                if not choices:
+                    return None
+                limited = [_with_role_token_limit(candidate, llm, selection_role) for candidate in choices]
+                return copy.deepcopy(dict(limited[0], _route_candidates=limited))
             return _with_role_token_limit(profile, llm, selection_role) if profile else None
 
     def apply_llm_role_limit(self, profile, role=None):

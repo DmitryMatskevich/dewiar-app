@@ -1,15 +1,16 @@
-import {convertToExcalidrawElements,CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
+import {CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
+import {localElement} from './local-elements.js';
 const $=id=>document.getElementById(id);
 export function installCanvasChat(host){
+ let scopeTimer,scopeRequest=null,stopped=false,lastText='';
  let pending=null,stamp='',running=false,refreshTimer,enabled=false,objects=[];
  const log=$('canvas-chat-log');
  function line(role,text){const el=document.createElement('p');el.className='chat-message '+role;const label=document.createElement('strong');label.textContent=role==='user'?'Вы':'Холст';const body=document.createElement('span');body.textContent=text;el.append(label,body);log.append(el);log.scrollTop=log.scrollHeight;}
  async function say(role,text){line(role,text);await host.call('canvas_chat_log',{role,text:text.slice(0,4000)});}
  function stateStamp(){return JSON.stringify({elements:host.api.getSceneElementsIncludingDeleted(),background:host.api.getAppState().viewBackgroundColor});}
- function mode(){const value=$('canvas-chat-model').value;const local=!value;$('canvas-chat-send').textContent=local?'Выполнить локально':'Отправить выбранной модели';$('canvas-chat-mode').textContent=local?'Локальные команды · без модели и отправки в сеть':'Модель получит текст команды, недавнюю переписку и список объектов с подписями. Картинки не отправляются. Правки — после просмотра.';}
- function controls(){for(const id of ['canvas-chat-send','canvas-chat-input','canvas-chat-model','canvas-chat-apply','canvas-chat-dismiss'])$(id).disabled=!enabled||running;}
+ function controls(){for(const id of ['canvas-chat-send','canvas-chat-input','canvas-chat-apply','canvas-chat-dismiss'])$(id).disabled=!enabled||running;}
  function showProposal(answer){
-  pending=answer;$('canvas-chat-proposal').hidden=false;
+  pending=answer;host.call('canvas_chat_pending',{pending:{answer,stamp,text:lastText}}).catch(()=>{});$('canvas-chat-proposal').hidden=false;
   const names={outline:'Обвести',underline:'Подчеркнуть',delete:'Удалить',move:'Переместить',color:'Изменить цвет',fill:'Закрасить',text:'Добавить текст',background:'Изменить фон',select:'Выбрать'};
   $('canvas-chat-changes').replaceChildren();
   for(const op of answer.operations){const row=document.createElement('li');row.textContent=(names[op.op]||op.op)+(op.target?' · '+op.target.ids.map(id=>'#'+objects.find(e=>e.id===id)?.number).join(', '):'')+(op.color?' · '+op.color:'')+(op.text?' · '+op.text:'')+(op.x!==undefined?` · (${op.x}, ${op.y})`:'');$('canvas-chat-changes').append(row);}
@@ -29,9 +30,10 @@ export function installCanvasChat(host){
   $('canvas-object-count').textContent=String(objects.length);
  }
  function modify(answer){
+  if(stopped)throw Error('Запрос остановлен.');
   if(stateStamp()!==stamp)throw Error('Холст изменился после запроса. Повторите команду.');
   let elements=structuredClone(host.api.getSceneElementsIncludingDeleted()),appState={};
-  const add=spec=>{elements.push(...convertToExcalidrawElements([spec]));};
+  const add=spec=>{elements.push(localElement(spec));};
   const updated=e=>({...e,version:e.version+1,versionNonce:Math.floor(Math.random()*2147483647),updated:Date.now()});
   let ops=answer.operations;
   if(answer.ocr){const value=(pending===answer?document.querySelector('#canvas-chat-candidates input:checked')?.value:null)||'0';const candidates=value==='all'?answer.ocr.candidates:[answer.ocr.candidates[Number(value)]];ops=candidates.map(c=>({op:answer.ocr.op,color:c.color||answer.ocr.color,box:[c.x,c.y,c.x+c.width,c.y+c.height],shape:c.shape,corners:c.corners,imageId:c.image_id}));}
@@ -44,7 +46,7 @@ export function installCanvasChat(host){
    if(op.op==='select'){appState.selectedElementIds=Object.fromEntries([...ids].map(id=>[id,true]));continue;}
    if(op.op==='cover'){
     const image=elements.find(e=>e.id===op.imageId&&!e.isDeleted);if(!image||image.locked)throw Error('Картинка отсутствует или заблокирована.');
-    const mask=convertToExcalidrawElements([{type:'rectangle',...op.shape,strokeColor:op.color,backgroundColor:op.color,strokeWidth:0,fillStyle:'solid',roughness:0,opacity:100,customData:{dewiarTextCover:true}}]);
+    const mask=[localElement({type:'rectangle',...op.shape,strokeColor:op.color,backgroundColor:op.color,strokeWidth:0,fillStyle:'solid',roughness:0,opacity:100,customData:{dewiarTextCover:true}})];
     // Insert directly above the raster so existing captions/marks stay visible.
     elements.splice(elements.indexOf(image)+1,0,...mask);continue;
    }
@@ -81,16 +83,17 @@ export function installCanvasChat(host){
   // The server checks the final scene before it can enter the editor or its undo stack.
   await host.call('canvas_chat_validate',{base_revision:host.doc.revision,scene:{...host.scene(),elements:update.elements,appState:{...host.scene().appState,...update.appState}}});
   if(stateStamp()!==stamp)throw Error('Холст изменился. Повторите команду.');
-  host.api.updateScene({...update,captureUpdate:CaptureUpdateAction.IMMEDIATELY});await host.flush();pending=null;$('canvas-chat-proposal').hidden=true;
+  host.doc.applyRunId=crypto.randomUUID();host.api.updateScene({...update,captureUpdate:CaptureUpdateAction.IMMEDIATELY});await host.flush();pending=null;await host.call('canvas_chat_pending',{pending:null});$('canvas-chat-proposal').hidden=true;
+  await host.call('canvas_scope_done');scopeRequest=null;
   await say('assistant',answer.ocr?.op==='cover'?'Готово. Надпись закрыта сплошной заливкой. Исходная картинка сохранена; «Отмени» вернёт надпись.':'Готово. Правки применены; ⌘Z / Ctrl+Z на холсте отменяет всю команду.');
  }
  async function execute(){
   if(running||!enabled)return;const text=$('canvas-chat-input').value.trim();if(!text)return;
-  running=true;controls();$('canvas-chat-progress').textContent='Обрабатываю…';pending=null;$('canvas-chat-proposal').hidden=true;
+  stopped=false;lastText=text;running=true;controls();$('canvas-chat-progress').textContent='Обрабатываю…';pending=null;$('canvas-chat-proposal').hidden=true;
   try{
    await host.run(async()=>{
-    await say('user',text);$('canvas-chat-input').value='';stamp=stateStamp();
-    const profile=$('canvas-chat-model').value;
+    await host.call('canvas_scope_begin',{request_id:scopeRequest?.id});await say('user',text);$('canvas-chat-input').value='';stamp=stateStamp();
+    const profile=null;$('canvas-model-settings').hidden=true;
     if(!profile&&/^(отмени(?: последнюю команду)?|верни(?: последнюю команду)?)$/i.test(text)){
      const root=document.querySelector('.excalidraw');root.focus();
      const mac=/Mac|iPhone|iPad/.test(navigator.platform);
@@ -98,27 +101,35 @@ export function installCanvasChat(host){
      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));await host.flush();
      await say('assistant',stateStamp()===stamp?'Нет действия для отмены или повтора.':'Готово. История холста обновлена.');return;
     }
-    const answer=await host.call('canvas_chat_plan',{text,base_revision:host.doc.revision,selected_ids:Object.keys(host.api.getAppState().selectedElementIds||{}),profile_id:profile||null,use_model:!!profile});
+    const answer=await host.call('canvas_chat_plan',{text,base_revision:host.doc.revision,selected_ids:Object.keys(host.api.getAppState().selectedElementIds||{}),auto_model:true});
+    if(stopped)throw Error('Запрос остановлен.');
     if(stateStamp()!==stamp)throw Error('Холст изменился во время ответа. Повторите запрос.');
+    if(answer.needs_model_setup)$('canvas-model-settings').hidden=false;
     if(!answer.operations.length&&!answer.ocr){await say('assistant',answer.reply);return;}
-    if(profile||(answer.ocr&&(answer.ocr.candidates.length>1||answer.ocr.review))){await say('assistant',answer.reply);showProposal(answer);}
+    if(answer.model_used||(answer.ocr&&(answer.ocr.candidates.length>1||answer.ocr.review))){await say('assistant',answer.reply);showProposal(answer);}
     else await apply(answer);
    });
   }catch(e){$('canvas-chat-input').value=text;if(host.doc)await say('assistant',e.message).catch(()=>{});else line('assistant',e.message);}
-  finally{running=false;controls();$('canvas-chat-progress').textContent='';await refresh().catch(()=>{});if(pending){$('canvas-chat-apply').focus();$('canvas-chat-proposal').scrollIntoView({block:'nearest'});}else $('canvas-chat-input').focus();}
+  finally{if(!pending){await host.call('canvas_scope_done').catch(()=>{});scopeRequest=null;}running=false;controls();$('canvas-chat-progress').textContent='';await refresh().catch(()=>{});if(pending){$('canvas-chat-apply').focus();$('canvas-chat-proposal').scrollIntoView({block:'nearest'});}else $('canvas-chat-input').focus();}
  }
  $('canvas-chat-form').onsubmit=e=>{e.preventDefault();execute();};
  $('canvas-chat-input').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();execute();}};
- $('canvas-chat-model').onchange=mode;
  $('canvas-chat-apply').onclick=async()=>{if(!pending||running)return;running=true;controls();try{await host.run(()=>apply(pending));}catch(e){await say('assistant',e.message);}finally{running=false;controls();refresh().catch(()=>{});}};
- $('canvas-chat-dismiss').onclick=()=>{pending=null;$('canvas-chat-proposal').hidden=true;say('assistant','Предложение отменено. Холст не изменён.').catch(()=>{});};
+ $('canvas-chat-dismiss').onclick=()=>{host.call('canvas_chat_pending',{pending:null}).catch(()=>{});host.call('canvas_scope_done').catch(()=>{});scopeRequest=null;pending=null;$('canvas-chat-proposal').hidden=true;say('assistant','Предложение отменено. Холст не изменён.').catch(()=>{});};
  $('canvas-chat-toggle').onclick=()=>{const hidden=$('canvas-assistant').hidden; $('canvas-assistant').hidden=!hidden;$('canvas-chat-toggle').setAttribute('aria-expanded',String(hidden));if(hidden)$('canvas-chat-input').focus();};
  document.querySelectorAll('[data-canvas-example]').forEach(button=>button.onclick=()=>{$('canvas-chat-input').value=button.dataset.canvasExample;$('canvas-chat-input').focus();});
- mode();
+ $('canvas-stop').onclick=()=>{stopped=true;pending=null;$('canvas-chat-proposal').hidden=true;host.call('canvas_scope_stop').catch(()=>{});host.call('canvas_chat_pending',{pending:null}).catch(()=>{});};
+ $('canvas-recalculate').onclick=async()=>{if(!running&&lastText){await host.call('canvas_scope_done');pending=null;scopeRequest=null;await host.call('canvas_chat_pending',{pending:null});$('canvas-chat-input').value=lastText;execute();}};
+ $('canvas-model-settings').onclick=()=>{const native=window.api?.();if(native?.open_settings)native.open_settings('models');else line('assistant','Откройте настройки Dewiar → Модели → назначение «Изображения».');};
+ window.addEventListener('pagehide',()=>{if(host.doc)host.call('canvas_scope_closed').catch(()=>{});});
  return {
   setEnabled(value){enabled=value;controls();},
   changed(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>refresh().catch(()=>{}),1000);},
-  async mount(){log.replaceChildren();const data=await host.call('canvas_chat_state');for(const m of data.messages)line(m.role,m.text);if(!data.messages.length)line('assistant','Я помогу изменить этот холст. Выделите объект или укажите его номер. Простые команды выполняются локально; модель выбирается отдельно.');await refresh();},
-  async profiles(){const rows=await window.core.call('canvas_chat_profiles');for(const p of rows)$('canvas-chat-model').append(new Option(`${p.local?'Локальный адрес':'Внешняя'} · ${p.name} · ${p.model}`,p.id));},
+  async mount(){
+   clearInterval(scopeTimer);
+   const poll=async()=>{if(!host.doc)return;await host.call('canvas_scope_active');if(running||pending)return;const request=await host.call('canvas_scope_take');if(request){scopeRequest=request;$('canvas-chat-input').value=request.text;execute();}};
+   await host.call('canvas_scope_active');scopeTimer=setInterval(()=>poll().catch(()=>{}),1000);
+   log.replaceChildren();const data=await host.call('canvas_chat_state');for(const m of data.messages)line(m.role,m.text);if(data.pending){lastText=data.pending.text||'';stamp=data.pending.stamp;showProposal(data.pending.answer);}if(!data.messages.length)line('assistant','Я помогу изменить этот холст. Выделите объект или укажите его номер. Простые команды выполняются локально; модели Художника подключаются автоматически.');await refresh();},
+  async profiles(){},
  };
 }

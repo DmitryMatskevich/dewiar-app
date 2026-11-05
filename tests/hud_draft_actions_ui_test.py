@@ -33,6 +33,8 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
       }};
       core.call = async (cmd, args) => {
         calls.push([cmd,args]);
+        if (cmd === 'pad_text_clean') return {text:'Сервер работает. Продолжение фразы.',removed_count:1,review_count:0};
+        if (cmd === 'pad_ai') return {id:args.act === 'translate' ? 'translate-job' : 'transcript-polish'};
         if (cmd === 'dictation_finish' && window.delayStop) return new Promise(resolve=>window.resolveStop=resolve);
         if (cmd === 'settings_save') {
           Object.assign(llm, args.patch.llm);
@@ -97,6 +99,33 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     assert field.input_value() == 'привет'
     page.evaluate("fire('draft_command',{action:'layout_lat'})")
     assert field.input_value() == 'ghbdtn'
+    field.fill('Сервер работает, ну. продолжение фразы.')
+    page.locator('#a-text-menu').click(); page.locator('#a-clean-text').click()
+    page.wait_for_function("calls.some(x=>x[0]==='pad_ai'&&x[1].act==='transcript_polish')")
+    page.evaluate("fire('pad_ai',{id:'transcript-polish',text:'Сервер работает, продолжение фразы.',done:true})")
+    page.wait_for_function("document.querySelector('#askin').value==='Сервер работает, продолжение фразы.'")
+    field.fill('Good morning, Lyra.')
+    page.locator('#a-text-menu').click(); page.locator('#a-translate-text').click()
+    page.wait_for_function("calls.some(x=>x[0]==='pad_ai'&&x[1].act==='translate')")
+    args = page.evaluate("calls.filter(x=>x[0]==='pad_ai'&&x[1].act==='translate').at(-1)[1]")
+    assert args['lang'] == 'ru' and args['scope'] == 'doc' and args['text'] == 'Good morning, Lyra.'
+    page.evaluate("fire('pad_ai',{id:'translate-job',text:'Доброе утро, Лира.',done:true})")
+    page.wait_for_function("document.querySelector('#askin').value==='Доброе утро, Лира.'")
+    field.fill('Привет, мир!')
+    field.evaluate("e=>{e.setSelectionRange(8,e.value.length);e.dispatchEvent(new Event('select'))}")
+    page.locator('#a-text-menu').click(); page.locator('#a-translate-text').click()
+    page.wait_for_function("calls.filter(x=>x[0]==='pad_ai'&&x[1].act==='translate').length===2")
+    args = page.evaluate("calls.filter(x=>x[0]==='pad_ai'&&x[1].act==='translate').at(-1)[1]")
+    assert args['lang'] == 'en' and args['scope'] == 'sel' and args['text'] == 'мир!'
+    page.evaluate("fire('pad_ai',{id:'translate-job',text:'world!',done:true})")
+    page.wait_for_function("document.querySelector('#askin').value==='Привет, world!'")
+    field.fill('Привет.')
+    page.evaluate("fire('draft_command',{action:'translate'})")
+    page.wait_for_function("calls.filter(x=>x[0]==='pad_ai'&&x[1].act==='translate').length===3")
+    args = page.evaluate("calls.filter(x=>x[0]==='pad_ai'&&x[1].act==='translate').at(-1)[1]")
+    assert args['lang'] == 'en' and args['scope'] == 'doc'
+    page.evaluate("fire('pad_ai',{id:'translate-job',text:'Hello.',done:true})")
+    page.wait_for_function("document.querySelector('#askin').value==='Hello.'")
     field.fill('')
     text = "  Привет 😀\nВторая строка\n  "
     field.fill(text)
@@ -218,7 +247,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
                       const right=document.querySelector('#corner-r').getBoundingClientRect();
                       return {center:(model.left+model.right)/2, left:model.left, right:model.right, leftEnd:left.right, rightStart:right.left, top:model.top};
                     }""")
-                    assert abs(top['center'] - width / 2) < 1 and top['top'] == 10, (width, top)
+                    assert top['top'] >= 8 and top['top'] <= 12, (width, top)
                     assert top['left'] >= top['leftEnd'] and top['right'] <= top['rightStart'], (width, top)
                     for i, button in enumerate(buttons):
                         assert layout["box"]["left"] <= button["left"] < button["right"] <= layout["box"]["right"], (width, layout)

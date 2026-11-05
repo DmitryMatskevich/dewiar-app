@@ -193,6 +193,10 @@ class AnswerMixin:
         не голосом (Telegram/MAX, см. Turn.via); raw — без быстрых путей и передачи специалисту (дела по расписанию);
         shown — что показать вместо текста; report(ok, text) — чем кончился ход (дела по расписанию: повтор при сбое)."""
         text = text.strip()
+        if not via and not raw and not images:
+            from canvas_scope import submit
+            if submit(self, text):
+                return
         if not text and images:
             text = "Что на этой картинке?"
         if not text:
@@ -1462,15 +1466,8 @@ class AnswerMixin:
         try:
             if not prof and self.s.get('llm', 'auto_select'):
                 raise LLMError('Нет доступных моделей сейчас. Проверьте часы работы, приоритеты и лимиты в разделе «Модели».')
-            if not prof and (self.account.logged_in() or self.s.get("cloud", "key")):
-                try:                                   # модели нет, а вход dewiar.pro (или ключ) есть — подключаем модели Dewiar сами
-                    self._cloud_use()
-                    prof = self.s.active_llm(role)
-                except Exception as e:  # noqa: BLE001
-                    log.info("🧠 Модели Dewiar сами не подключились: %s", e)
             if not prof:
-                raise LLMError("я пока не подключён к языковой модели — откройте настройки, раздел «Модели»"
-                               + (": войдите в аккаунт dewiar.pro — модели Dewiar подключатся сами" if not self.account.logged_in() else ""))
+                raise LLMError("Не выбрана доступная языковая модель. Откройте настройки → «Модели» и выберите подключённую модель.")
             msgs = self._messages(text, images, prof)
             if visual_task and images and str(prof.get("kind", "")).endswith("_subscription"):
                 # The subscription's text adapter cannot consume image blocks. Keep the
@@ -1854,9 +1851,6 @@ class AnswerMixin:
             self.health_why(prof, e)
             self.health_problem(f"Модель ({(prof or {}).get('kind') or 'openai'}): {e}")
             msg = f"{e}." if self._cloud_said(prof, e) else f"Не получилось: {e}."   # облако объясняет само
-            from cloud import is_cloud, key_gone
-            if is_cloud(prof) and key_gone(e) and self._cloud_key_gone():
-                msg = "Ключ Dewiar удалён на сайте — теперь думаю по аккаунту dewiar.pro. Повторите, пожалуйста, вопрос."
             turn.error = msg
             self.emit("error", text=msg)
             # Keep the part already generated if a later continuation failed.

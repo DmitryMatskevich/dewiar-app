@@ -81,6 +81,26 @@ class ChatTests(unittest.TestCase):
    doc['elements'][0]['locked']=True;C.save(folder/'state.json',doc)
    with self.assertRaisesRegex(ValueError,'заблокирована'):self.call(text='Удали «Я спросил»')
 
+class ScopeTests(ChatTests):
+ def test_scope_modes_and_delivery(self):
+  import canvas_scope as S
+  a={'canvas_id':self.doc['id']}
+  S.command(self.engine,'canvas_scope_active',a)
+  S.command(self.engine,'canvas_scope_mode',{'mode':'follow'})
+  self.assertTrue(S.submit(self.engine,'Обведи #1'))
+  with self.assertRaises(ValueError):S.submit(self.engine,'ещё')
+  row=S.command(self.engine,'canvas_scope_take',a);self.assertEqual(row['text'],'Обведи #1')
+  self.assertIsNone(S.command(self.engine,'canvas_scope_take',a))
+  S.command(self.engine,'canvas_scope_done',a)
+  S.command(self.engine,'canvas_scope_mode',{'mode':'general'})
+  S.command(self.engine,'canvas_scope_active',a)
+  self.assertFalse(S.submit(self.engine,'общий вопрос'))
+ def test_opt_in_fallback(self):
+  result=json.dumps({'reply':'готово','operations':[]})
+  with patch('egress.local_only',return_value=False),patch('llm.stream_chat',side_effect=[RuntimeError('unavailable'),iter([result])]) as stream:
+   answer=self.call(text='помоги',profile_id='test-cloud',use_model=True,auto_fallback=True)
+   self.assertIn('test-local',answer['reply']);self.assertEqual(stream.call_count,2)
+
 if __name__=='__main__':
  try:unittest.main()
  finally:TEMP.cleanup()

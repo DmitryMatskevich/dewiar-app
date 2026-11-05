@@ -188,11 +188,15 @@ def command(engine,cmd,a):
         if cmd=='canvas_open':return doc
         if cmd=='canvas_file':return file_data(folder,doc['files'][a['file_id']])
         if cmd=='canvas_save':
+            run_id=a.get('run_id')
+            if run_id and run_id in doc.get('applied_runs',[]):return {'revision':doc['revision']}
             if a.get('base_revision')!=doc['revision']:raise ValueError('Холст изменён в другом окне. Перезагрузите после сохранения своей копии.')
             state=a.get('scene',{});elements=state.get('elements');app=state.get('appState');library=state.get('libraryItems',[])
             app=validate(elements,app,library,doc['files']);title=str(a.get('title',doc['title'])).strip()[:120] or 'Холст'
             if (doc['elements'],doc['appState'],doc['libraryItems'],doc['title'])!=(elements,app,library,title):
-                doc.update(elements=elements,appState=app,libraryItems=library,title=title,revision=doc['revision']+1,updated=time.time());save(folder/'state.json',doc)
+                doc.update(elements=elements,appState=app,libraryItems=library,title=title,revision=doc['revision']+1,updated=time.time())
+                if run_id:doc['applied_runs']=(doc.get('applied_runs',[])+[str(run_id)[:100]])[-100:]
+                save(folder/'state.json',doc)
             return {'revision':doc['revision']}
         if cmd=='canvas_tasks':return [{'id':row['id'],'title':row['title']} for row in engine.tasks.list()]
         if cmd=='canvas_document':

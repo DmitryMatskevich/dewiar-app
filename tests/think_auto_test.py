@@ -28,6 +28,14 @@ ok(wants_think("привет", "on") and not wants_think("Напиши стих"
 ok(all(wants_analysis(t) for t in ["Проанализируй договор и выдели риски", "Сравни эти два отчёта", "Вложения: отчёт.pdf\nЧто важно?"])
    and wants_analysis("x" * 900) and not wants_analysis("Привет, как дела?"),
    "аналитика: документы, сравнение и длинные запросы распознаются отдельно")
+search_request = "Find information about this exhibition for me. Найди мне информацию по данной выставке."
+ok(not wants_analysis(search_request), "«по данной выставке» — обычный запрос, а не совпадение с «данные»")
+from engine_answer import AnswerMixin  # noqa: E402
+class RoleStub:
+    s = type("Settings", (), {"get": staticmethod(lambda *args: None)})()
+    personas = {}
+ok(AnswerMixin._conversation_model_role(RoleStub(), search_request) == "communication",
+   "поиск по выставке идёт через обычного помощника и его web_search")
 
 # что уходит модели: с размышлениями — без enable_thinking:false и с большим лимитом
 seen = []
@@ -53,6 +61,9 @@ ok(seen[1].get("chat_template_kwargs") == {"enable_thinking": False}, "обыч�
 
 src = (ROOT / "core/engine_answer.py").read_text(encoding="utf-8")
 ok('wants_think(text)' in src and 'think="on"' in src and '"think_auto"' in src, "ядро: сложная просьба — профиль хода с think=on (выключается llm.think_auto)")
+turn_source = src[src.index("    def _run_turn("):]
+ok("self._cloud_use()" not in turn_source and "dewiar.pro" not in turn_source,
+   "обработка сообщения не подключает Dewiar Pro и не предлагает его вход")
 from settings import DEFAULTS  # noqa: E402
 ok(DEFAULTS["llm"]["think_auto"] is True and 'data-k="llm.think_auto"' in (ROOT / "ui/settings.html").read_text(encoding="utf-8"),
    "включено по умолчанию, переключатель в студии («Мозг»)")

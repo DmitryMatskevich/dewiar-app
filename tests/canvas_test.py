@@ -16,7 +16,7 @@ from bridge import Bridge
 from engine_commands import CommandsMixin
 import canvases as C
 settings=Settings(tmp/'config/settings.json');settings.update({'workspace':{'path':str(tmp/'workspace')}})
-settings.update({'llm':{'profiles':{'canvas-test-model':{'kind':'openai','name':'ТЕСТ модель','base_url':'https://example.invalid/v1','model':'fixture'}}}})
+settings.update({'llm':{'profiles':{'canvas-test-model':{'kind':'openai','name':'ТЕСТ модель','base_url':'https://example.invalid/v1','model':'fixture','roles':['images']}}}})
 ws=Workspace(settings);chat=ChatLog(tmp/'chat.jsonl');task=SimpleNamespace(id='canvas-task',dir=tmp/'task');task.dir.mkdir()
 with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
 bridge=Bridge('canvas-test',port=port)
@@ -30,7 +30,7 @@ def command(cmd,args):
         from macsys import copy_png_file
         folder,doc=C.read(engine,args['canvas_id']);path=C.exported(folder,doc);board=NSPasteboard.pasteboardWithUniqueName()
         copy_png_file(path,board);assert bytes(board.dataForType_('public.png'))==path.read_bytes();board.releaseGlobally();return True
-    if cmd=='canvas_chat_plan' and args.get('profile_id')=='canvas-test-model':
+    if cmd=='canvas_chat_plan' and args.get('auto_model') and args.get('text')=='Предложи оформление':
         # Explicit-model UI is verified without network or a billable request.
         reply=json.dumps({'reply':'Предлагаю зелёный фон','operations':[{'op':'background','color':'#00ff00'}]})
         with patch('llm.stream_chat',return_value=iter([reply])):return CommandsMixin.command(engine,cmd,args)
@@ -117,19 +117,18 @@ with sync_playwright() as playwright:
     chat_send('Измени цвет #1 на синий')
     assert page.evaluate("canvasEditor.api.getSceneElements()[0].strokeColor") == '#1971c2'
     chat_send('Сделай фон белым')
-    page.locator('#canvas-chat-model').select_option('canvas-test-model')
-    chat_send('Сделай фон зелёным')
+    chat_send('Предложи оформление')
     page.wait_for_function("!document.querySelector('#canvas-chat-proposal').hidden")
     assert page.evaluate('canvasEditor.api.getAppState().viewBackgroundColor')=='#ffffff'
     page.locator('#canvas-chat-apply').click()
     page.wait_for_function("canvasEditor.api.getAppState().viewBackgroundColor==='#00ff00'")
     page.wait_for_function("document.querySelector('#canvas-chat-proposal').hidden")
-    page.locator('#canvas-chat-model').select_option('')
     chat_send('Удали #1')
     assert page.evaluate('canvasEditor.api.getSceneElements().length')==0
     page.reload();page.wait_for_function('window.canvasEditor')
     page.wait_for_function("document.querySelector('#canvas-chat-log').textContent.includes('Удали #1')")
-    assert page.locator('#canvas-chat-model').input_value()==''
+    assert page.locator('#canvas-chat-model').count()==0
+    assert page.locator('#canvas-model-settings').is_hidden()
     page.set_viewport_size({'width':640,'height':800})
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
     page.screenshot(path=str(artifacts/('chat-'+kind+'.png')))
@@ -179,6 +178,19 @@ with sync_playwright() as playwright:
         assert Path(fixture_path).read_bytes()==original
         page.screenshot(path=str(artifacts/('ocr-chat-'+kind+'.png')))
         print('PASS: real Russian OCR fixture; two phrases/all; unrelated selection; mixed quotes delete; white PNG pixels/neighbor intact; undo/redo/reload; original unchanged',flush=True)
+    # Main assistant input reaches the editor without invoking the general answer.
+    scope_id=page.evaluate('canvasEditor.doc.id')
+    command('canvas_scope_active',{'canvas_id':scope_id})
+    command('canvas_scope_mode',{'mode':'follow'})
+    command('canvas_scope_submit',{'text':'Добавь текст «Из основного окна» в точке 20, 30'})
+    page.wait_for_function("canvasEditor.api.getSceneElements().some(e=>e.text==='Из основного окна')",timeout=15000)
+    page.wait_for_function("!document.querySelector('#canvas-chat-send').disabled")
+    assert not command('canvas_scope_state',{})['busy']
+    command('canvas_scope_mode',{'mode':'general'})
+    command('canvas_scope_active',{'canvas_id':scope_id})
+    assert command('canvas_scope_state',{})['canvas_id'] is None
+    command('canvas_scope_mode',{'mode':'follow'})
+    print('PASS: main assistant scope relay; same canvas history; explicit general mode survives heartbeat',flush=True)
     page.goto(f'http://127.0.0.1:{server.server_port}/canvas.html?id={identifier}&token=canvas-test&port={port}')
     try:
         page.wait_for_function('window.canvasEditor',timeout=30000)

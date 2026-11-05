@@ -1,4 +1,11 @@
-# Local Excalidraw module
+# Local canvas module
+
+The canvas is being migrated away from Excalidraw in small, compatible steps.
+The first step is complete: image elements, numbered labels, and simple
+rectangle/text elements created by Dewiar now come from
+`local-elements.js`, without calling Excalidraw's element converter. The
+existing scene shape is retained temporarily so old documents continue to
+open while the renderer is replaced.
 
 Build from this directory: `npm ci --ignore-scripts && npm run build`.
 Node is a build dependency only. Installed Dewiar uses the generated files in

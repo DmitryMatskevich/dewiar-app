@@ -7,6 +7,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 root = Path(SPECPATH).parent
+import runpy
+runpy.run_path(str(root / 'tools/check_hud_scripts.py'))['check_hud_scripts'](root)
 datas = [(str(root / name), name) for name in ("core", "ui", "data", "icons")]
 datas += [(str(root / name), "tools") for name in
           ("tools/subscription_ui_smoke.js", "tools/song_separation_probe.py")]

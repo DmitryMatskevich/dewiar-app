@@ -128,13 +128,13 @@
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
   /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
-  #mid { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; }
+  #mid { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; overflow: hidden; }
   #card.no-orb #mid { padding-top: 10px; }
   /* Ввод всегда находится над нижней панелью. До появления ответа свободное место — это область
      переписки; при открытом ответе карточка ответа занимает её целиком. */
   #mid::before { content: ""; flex: 0 0 0; min-height: 0; margin: -4px 0; }
   #mid::after { content: ""; display: none; }
-  #ask { margin-top: auto; }
+  #ask { margin-top: auto; flex: 0 0 auto; min-height: 0; position: relative; z-index: 1; }
   #cap { display: none; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; padding: 10px 13px; border-radius: 18px; background: var(--glass); font-size: calc(13.5px * var(--dw-text, 1)); line-height: 1.42; cursor: default;
          box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   #cap.show, #cap.running { display: flex; flex-direction: column; }
@@ -451,7 +451,7 @@
   .att button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 3px; }
   body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
 
-  #bar { flex: none; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; }
+  #bar { flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; margin-top: 8px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; position: relative; z-index: 2; }
   #card:hover #bar, #bar.pinned { opacity: 1; }
   .btn { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
   #bar .btn { flex: none; width: clamp(24px, calc(12.5vw - 7px), 28px); }
@@ -615,6 +615,15 @@
           background: rgba(14,14,18,.96); color: #ECEAF5; font: 500 12px/1.4 "Manrope", sans-serif; box-shadow: 0 10px 26px -10px rgba(0,0,0,.7);
           opacity: 0; transition: opacity .12s; }
   #htip.on { opacity: 1; }
+
+#assistant-topbar{position:absolute;top:8px;left:96px;right:96px;height:30px;display:flex;align-items:center;gap:6px;z-index:7}
+#assistant-topbar select{min-width:0;width:160px;max-width:52%;font:inherit;font-size:11px;color:var(--ink);border:0;border-radius:7px;background:transparent;padding:5px 2px;cursor:pointer}
+#assistant-topbar #ask-model{position:static;transform:none;flex:1;min-width:20px;max-width:none;width:auto;font-size:10px}
+#assistant-topbar #b-voice-inline{flex-shrink:0;width:26px;height:28px;padding:4px;border:0;background:transparent;color:var(--muted)}
+#canvas-scope-status{display:block;font-size:11px;color:var(--muted);margin:4px 0}#canvas-scope-status[hidden],#canvas-scope-log[hidden]{display:none}#canvas-scope-log{max-height:110px;overflow:auto;font-size:12px}#canvas-scope-log p{margin:4px 0}
+@media(min-width:300px) and (max-width:380px){#assistant-topbar select{max-width:42%}}
+@media(max-width:299px){#assistant-topbar{gap:4px}#assistant-topbar #ask-model{display:none}#assistant-topbar select{flex:1;max-width:none}}
+body.mini #assistant-topbar{display:none}
 </style>
 </head>
 <body>
@@ -664,6 +673,7 @@
           <button class="ab send" id="a-send" title="Отправить сообщение и вложения. Во время диктовки — завершить распознавание и отправить весь текст." aria-label="Отправить сообщение"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
           </div>
         </div>
+        <div id="a-text-menu-popup" role="menu" aria-label="Обработка текста" hidden><button type="button" role="menuitem" id="a-clean-text">Обработка текста <small>Убрать паразиты, склеить фразы, исправить опечатки</small></button><button type="button" role="menuitem" id="a-translate-text">Перевести <small>Русский ↔ английский</small></button><button type="button" role="menuitem" id="a-layout" disabled>Кириллица ↔ латиница</button></div>
         <span id="ask-feedback" role="status" aria-live="polite"></span>
       </div>
       <div id="att-menu" role="menu" aria-label="Добавить вложение"><h4>Добавить</h4><button id="att-files" type="button" title="Выбрать файлы для следующего сообщения. Проверьте вложения перед отправкой: их содержимое может получить выбранная модель.">Файлы</button><button id="att-folder" type="button" title="Выбрать папку для следующего сообщения. Проверьте её содержимое перед отправкой; рабочая папка Dewiar этим действием не меняется.">Папку</button></div>
@@ -673,7 +683,6 @@
       <div id="atts"></div>
       <span id="askn" aria-hidden="true"></span>
     </div>
-        <div id="a-text-menu-popup" role="menu" aria-label="Обработка текста" hidden><button type="button" role="menuitem" id="a-clean-text">Обработка текста <small>Убрать слова-паразиты и повторы</small></button><button type="button" role="menuitem" id="a-layout" disabled>Кириллица ↔ латиница</button></div>
   </div>
   <div id="team" role="dialog" aria-modal="true" aria-label="Выбор помощника">
     <div class="team-head"><b>Выберите помощника</b><button class="team-close" id="team-close" type="button" title="Закрыть выбор помощника (Esc)" aria-label="Закрыть">×</button></div>
@@ -706,7 +715,7 @@
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире. Название модели в центре верхней строки открывает выбор модели.</p>
     <h3>Голосовой ввод</h3><p>Нажмите микрофон и произнесите фразу. Нажатие квадрата останавливает запись и дожидается распознавания последних слов, оставляя текст в поле без отправки. Команда «Лира, стоп» останавливает запись. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Пока Лира думает или отвечает, в области ответа видна кнопка остановки: она прерывает текущий ответ и не очищает черновик. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
     <h3>Диктовка в другие приложения</h3><p>Включите микрофон, поставьте курсор в нужное поле и скажите «Лира, слушай» или «Лира, записывай». Продиктуйте текст и скажите «Лира, вставить», «Лира, добавить» или «Лира, текст». Текст заменит предыдущее содержимое буфера обмена; если подходящее поле активно, Лира также вставит текст в него, не отправляя сообщение. Если поле недоступно, текст останется в буфере для ручной вставки, а черновик — в диктовке. Лира продолжит слушать.</p><p>Когда окно Лиры открыто, черновик фоновой диктовки виден в отдельном поле и доступен для редактирования. Команда «Лира, текст» также копирует текст при диктовке через кнопку микрофона. «Лира, отмена» очищает фоновый черновик; «Лира, стоп» или «Лира, закончи диктовку» останавливает запись и сохраняет распознанный черновик. Одно имя показывает ассистента. Для автоматической вставки требуется разрешение «Универсальный доступ» в настройках macOS; защищённые поля не поддерживаются.</p>
-    <h3>Текст и снимок экрана</h3><p>Меню обработки текста появляется, когда в поле есть текст. «Обработка текста» убирает слова-паразиты и повторы; кириллица ↔ латиница меняет раскладку. Действие применяется к выделенному тексту, а без выделения — ко всему черновику. Скажите «Лира, обработать» или «Лира, обработка», чтобы убрать слова-паразиты и повторы. Для переключения текста скажите «Лира, кириллица» или «Лира, русский», либо «Лира, латиница» или «Лира, английский». Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» удаляет выделение, а если выделения нет — весь черновик. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
+    <h3>Текст и снимок экрана</h3><p>Меню обработки текста появляется, когда в поле есть текст. «Обработка текста» убирает слова-паразиты и повторы, склеивает очевидные продолжения фраз и исправляет явные опечатки по смыслу. Для контекстной правки используется подключённая модель; сомнительные слова и имена она должна сохранять. «Перевести» переводит выделенный фрагмент или весь черновик между русским и английским; направление определяется по алфавиту исходного текста. Скажите «Лира, перевод» или «Лира, перевести», чтобы запустить перевод. Кириллица ↔ латиница меняет раскладку. Действие применяется к выделенному тексту, а без выделения — ко всему черновику. Скажите «Лира, обработать» или «Лира, обработка», чтобы обработать текст. Для переключения текста скажите «Лира, кириллица» или «Лира, русский», либо «Лира, латиница» или «Лира, английский». Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» удаляет выделение, а если выделения нет — весь черновик. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
@@ -1388,7 +1397,7 @@ card.addEventListener("pointerdown", async (ev) => {
   // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
   // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
   // строки «ИИ-баланс…» и объявления — тоже кнопки (24.10: щелчок по #cloudlow уходил в перетаскивание и студия не открывалась)
-  if (ev.button !== 0 || ev.target.closest("button, input, textarea, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
+  if (ev.button !== 0 || ev.target.closest("button, input, textarea, select, option, a, [role=button], #assistant-topbar, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
@@ -1439,6 +1448,7 @@ async function enableMacVoice() {
   if (!voiceSwitchAvailable()) throw Error("Откройте приложение Dewiar для включения микрофона");
   let status = await window.pywebview.api.microphone_permission();
   if (status.state === 'not_determined' && !status.requested)status = await window.pywebview.api.request_microphone_access();
+  $("ask-feedback").textContent = "Ожидаю разрешение macOS на микрофон…";
   const deadline = Date.now() + 60000;
   while (status.pending && Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -1450,6 +1460,7 @@ async function enableMacVoice() {
   }
   await core.call("audio_enable");
   updateAudioMode("voice");
+  $("ask-feedback").textContent = "Голосовой режим включён";
 }
 let dictationSession = null, dictationStopPending = false, dictationFinishing = false;
 function setDictationLevel(value) {
@@ -1570,7 +1581,7 @@ function copyDraftByVoice(action) {
   }).catch(error => { showVoiceCommand({action, status:"error", message:error.message || String(error)}); });
 }
 function showVoiceCommand(e) {
-  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", process:"обработать текст", layout_cyr:"кириллица", layout_lat:"латиница", stop:"стоп", cancel:"отмена"};
+  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", process:"обработать текст", translate:"перевести", layout_cyr:"кириллица", layout_lat:"латиница", stop:"стоп", cancel:"отмена"};
   const label = e.action === "command" ? String(e.command || "команда") : (labels[e.action] || "команда");
   let message = "Команда «" + label + "» получена.";
   if (e.status === "received") message += " Выполняю…";
@@ -1582,6 +1593,10 @@ function showVoiceCommand(e) {
   else if (e.status === "done") {
     if (e.action === "insert") message += " Вставка отправлена в «" + (e.app || "активное приложение") + "». Проверьте поле.";
     else if (e.action === "copy") message += " Текст скопирован в буфер обмена.";
+    else if (e.action === "process") message += " Слова-паразиты и повторы убраны; фразы и явные опечатки проверены.";
+    else if (e.action === "translate") message += " Перевод готов.";
+    else if (e.action === "layout_cyr") message += " Текст переключён на кириллицу.";
+    else if (e.action === "layout_lat") message += " Текст переключён на латиницу.";
     else if (e.action === "stop") message += " Голосовой ввод остановлен.";
     else if (e.action === "clear" || e.action === "cancel") message += " Текст очищен.";
   }
@@ -1593,9 +1608,6 @@ function showVoiceCommand(e) {
 $("voice-command-dismiss").onclick = () => { $("voice-command-feedback").hidden = true; };
 $("voice-command-access").onclick = async () => {
   try {
-    else if (e.action === "process") message += " Слова-паразиты и повторы обработаны.";
-    else if (e.action === "layout_cyr") message += " Текст переключён на кириллицу.";
-    else if (e.action === "layout_lat") message += " Текст переключён на латиницу.";
     const a = api();
     if (a?.open_accessibility_settings) await a.open_accessibility_settings();
     else if (a?.open_settings) await a.open_settings("safety", "&mac_access_setup=1");
@@ -1611,6 +1623,7 @@ function pasteMessage(r, action) {
 core.on("draft_command", e => {
   if (e.action === "clear") clearDraftByVoice();
   else if (e.action === "process") cleanDraftText(true);
+  else if (e.action === "translate") translateDraftText(true);
   else if (e.action === "layout_cyr") applyDraftLayout("cyr", true);
   else if (e.action === "layout_lat") applyDraftLayout("lat", true);
   else copyDraftByVoice(e.action);
@@ -1683,6 +1696,8 @@ core.on("hello", () => core.call("background_dictation_state").then(renderBackgr
 async function startDictation() {
   if (dictating || dictationStopPending) return;
   if (audioMode === "text") await enableMacVoice();
+  const actual = await core.call("audio_state");
+  if (actual?.audio_mode === "text") await enableMacVoice();
   const result = await core.call("dictation_start");
   if (dictationStopPending || dictationFinishing) return;
   dictationSession = result?.session ?? dictationSession;
@@ -1734,8 +1749,10 @@ $("a-mic-pick").onclick = showMicMenu;
 document.addEventListener("mousedown", e => {
   if (!e.target.closest("#mic-menu, #a-mic-pick")) $("mic-menu").classList.remove("on");
   if (!e.target.closest("#att-menu, #a-att")) $("att-menu").classList.remove("on");
+  if (!e.target.closest("#a-text-menu-popup, #a-text-menu")) { $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false"); }
 });
-$("b-mic").onclick = guard($("b-mic"), () => audioMode === "text" ? enableMacVoice().catch(showErr) : core.call("mute", { on: !muted }).then(m => { muted = m; $("b-mic").classList.toggle("on", m); $("b-mic").title = m ? "Включить микрофон" : "Выключить микрофон"; }).catch(showErr), () => audioMode === 'text' ? 'Ожидаю разрешение macOS на микрофон или подключение голосового ввода…' : 'Переключаю микрофон…');
+window.addEventListener('blur',()=>{drag=null;card.classList.remove('dragging');});
+$("b-mic").onclick = guard($("b-mic"), async () => {const actual=await core.call("audio_state");if(actual?.audio_mode)updateAudioMode(actual.audio_mode);return audioMode === "text" ? enableMacVoice().catch(showErr) : core.call("mute", { on: !muted }).then(m => { muted = m; $("b-mic").classList.toggle("on", m); $("b-mic").title = m ? "Включить микрофон" : "Выключить микрофон"; }).catch(showErr);}, () => audioMode === 'text' ? 'Ожидаю разрешение macOS на микрофон или подключение голосового ввода…' : 'Переключаю микрофон…');
 $("b-set").onclick = () => { const a = api(); if (a) a.open_settings(); };
 /* Dewiar Облако: заряд на исходе — мягкая строка в виджете (нажать — студия, «Модели») */
 core.on("cloud", c => {
@@ -1747,7 +1764,6 @@ core.on("cloud", c => {
 });
 $("cloudlow").onclick = () => { const a = api(); if (a) a.open_settings("brain"); };
 /* объявления для всех (core: _ann_fetch, событие ann): строка «📣 заголовок»; нажали — студия покажет окно с фото и ссылкой */
-  if (!e.target.closest("#a-text-menu-popup, #a-text-menu")) { $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false"); }
 let annHidden = 0;
 function annSet(it) {
   const el = $("annb"); if (!it || it.id <= annHidden) { el.className = ""; return; }
@@ -2482,7 +2498,7 @@ function updateDraftActions() {
   clear.hidden = !t.value.length;
   clear.disabled = clear.hidden;
   const selected = t.selectionStart !== t.selectionEnd;
-  layout.disabled = !selected;
+  layout.disabled = !t.value.length;
   clear.title = selected ? "Стереть выделенный текст" : "Стереть весь текст ввода. Вложения и переписка сохранятся.";
   clear.setAttribute("aria-label", clear.title);
   copy.title = selected ? "Скопировать выделенный текст" : "Скопировать весь текст ввода";
@@ -2490,7 +2506,7 @@ function updateDraftActions() {
 }
 // Keep the textarea selection when an action is clicked, including in WebKit.
 const draftActionSelections = new WeakMap();
-for (const id of ["a-clear", "a-copy", "a-layout"]) {
+for (const id of ["a-clear", "a-copy", "a-layout", "a-translate-text"]) {
   $(id).addEventListener("mousedown", e => {
     if (e.button !== 0) return;
     const t = $("askin");
@@ -2508,6 +2524,139 @@ function draftActionRange(e, input) {
   return selection.start === selection.end ? null : [selection.start, selection.end];
 }
 $("askin").addEventListener("select", updateDraftActions);
+$("a-text-menu").addEventListener("mousedown", e => { if (e.button === 0) e.preventDefault(); });
+$("a-text-menu").onclick = () => {
+  const popup = $("a-text-menu-popup"); popup.hidden = !popup.hidden;
+  $("a-text-menu").setAttribute("aria-expanded", String(!popup.hidden));
+  updateDraftActions();
+};
+$("a-text-menu-popup").addEventListener("mousedown", e => {
+  if (e.button !== 0) return;
+  const action = e.target.closest("#a-layout, #a-translate-text");
+  if (action) {
+    const t = $("askin"); draftActionSelections.set(action, {start:t.selectionStart, end:t.selectionEnd, value:t.value});
+  }
+  e.preventDefault();
+});
+let draftTranslationJob = null;
+function finishDraftTranslation(event) {
+  const job = draftTranslationJob;
+  if (!job || !event || !event.done || (job.id && event.id !== job.id)) return;
+  if (!job.id) { job.pending = event; return; }
+  draftTranslationJob = null;
+  job.resolve({text:event.text || "", error:event.error || ""});
+}
+core.on("pad_ai", finishDraftTranslation);
+function requestDraftTranslation(text, doc, scope, lang) {
+  return new Promise(async resolve => {
+    const job = {id:"", pending:null, resolve}; draftTranslationJob = job;
+    try {
+      const started = await core.call("pad_ai", {act:"translate", scope, text, doc, lang});
+      if (draftTranslationJob !== job) return;
+      if (!started?.id) throw Error("модель не запустилась");
+      job.id = started.id;
+      if (job.pending?.id === job.id) finishDraftTranslation(job.pending);
+    } catch (err) {
+      if (draftTranslationJob === job) draftTranslationJob = null;
+      resolve({text:"", error:err.message || "модель недоступна"});
+    }
+  });
+}
+$("a-translate-text").onclick = e => translateDraftText(false, e);
+async function translateDraftText(fromVoice, event) {
+  const t = $("askin"), baseValue = t.value;
+  const range = fromVoice
+    ? (t.selectionStart !== t.selectionEnd ? [t.selectionStart,t.selectionEnd] : null)
+    : draftActionRange(event, t);
+  const source = range ? baseValue.slice(range[0], range[1]) : baseValue;
+  $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false");
+  const cyrillic = (source.match(/\p{Script=Cyrillic}/gu) || []).length;
+  const latin = (source.match(/\p{Script=Latin}/gu) || []).length;
+  if (!source.trim() || (!cyrillic && !latin)) {
+    const message = source.trim() ? "В тексте не найден русский или английский текст." : "Нет текста для перевода.";
+    $("ask-feedback").textContent = message;
+    if (fromVoice) showVoiceCommand({action:"translate",status:"error",message});
+    return;
+  }
+  const lang = cyrillic >= latin ? "en" : "ru";
+  const scope = range ? "sel" : "doc";
+  $("ask-feedback").textContent = lang === "en" ? "Перевожу с русского на английский…" : "Перевожу с английского на русский…";
+  try {
+    const result = await requestDraftTranslation(source, baseValue, scope, lang);
+    if (result.error) throw Error(result.error);
+    if (!result.text.trim()) throw Error("Модель вернула пустой перевод.");
+    if (t.value !== baseValue) throw Error("Черновик изменился во время перевода; исходный текст сохранён.");
+    if (range) t.setRangeText(result.text, range[0], range[1], "select"); else t.value = result.text;
+    lastDictationSelection = null; fitAsk(); t.focus({preventScroll:true}); updateDraftActions();
+    $("ask-feedback").textContent = lang === "en" ? "Перевод на английский готов." : "Перевод на русский готов.";
+    if (fromVoice) showVoiceCommand({action:"translate",status:"done"});
+  } catch (err) {
+    $("ask-feedback").textContent = err.message || "Не удалось перевести текст.";
+    if (fromVoice) showVoiceCommand({action:"translate",status:"error",message:err.message || "Не удалось перевести текст."});
+  }
+}
+let transcriptPolishJob = null;
+function finishTranscriptPolish(event) {
+  const job = transcriptPolishJob;
+  if (!job || !event || !event.done || (job.id && event.id !== job.id)) return;
+  if (!job.id) { job.pending = event; return; }
+  transcriptPolishJob = null;
+  job.resolve({text:event.text || "", error:event.error || ""});
+}
+core.on("pad_ai", finishTranscriptPolish);
+function requestTranscriptPolish(text, doc, scope) {
+  return new Promise(async resolve => {
+    const job = {id:"", pending:null, resolve}; transcriptPolishJob = job;
+    try {
+      const started = await core.call("pad_ai", {act:"transcript_polish", scope, text, doc});
+      if (transcriptPolishJob !== job) return;
+      if (!started?.id) throw Error("модель не запустилась");
+      job.id = started.id;
+      if (job.pending?.id === job.id) finishTranscriptPolish(job.pending);
+    } catch (err) {
+      if (transcriptPolishJob === job) transcriptPolishJob = null;
+      resolve({text:"", error:err.message || "модель недоступна"});
+    }
+  });
+}
+$("a-clean-text").onclick = () => cleanDraftText(false);
+async function cleanDraftText(fromVoice) {
+  const t = $("askin"), start = t.selectionStart, end = t.selectionEnd;
+  const selected = start !== end, source = selected ? t.value.slice(start, end) : t.value;
+  $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false");
+  if (!source.trim()) {
+    $("ask-feedback").textContent = "Нет текста для очистки";
+    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:"Нет текста для обработки."});
+    return;
+  }
+  try {
+    const result = await core.call("pad_text_clean", {text: source});
+    if (selected) t.setRangeText(result.text, start, end, "select"); else t.value = result.text;
+    const polishedRange = selected ? [start, start + result.text.length] : null;
+    const baseValue = t.value, polishScope = selected ? "sel" : "doc";
+    lastDictationSelection = null; fitAsk(); t.focus({preventScroll:true}); updateDraftActions();
+    $("ask-feedback").textContent = "Склеиваю фразы и проверяю явные опечатки…";
+    const polished = await requestTranscriptPolish(result.text, baseValue, polishScope);
+    let contextual = false;
+    if (!polished.error && polished.text && polished.text.length <= Math.max(120, result.text.length * 1.35)) {
+      if (t.value === baseValue) {
+        if (polishedRange) t.setRangeText(polished.text, polishedRange[0], polishedRange[1], "select"); else t.value = polished.text;
+        contextual = true; lastDictationSelection = null; fitAsk(); updateDraftActions();
+      } else {
+        $("ask-feedback").textContent = "Черновик изменился: оставлена базовая очистка без контекстной правки.";
+      }
+    }
+    if (t.value === baseValue || contextual) {
+      $("ask-feedback").textContent = contextual
+        ? `Очистка завершена${result.removed_count ? ` · удалено: ${result.removed_count}` : ""} · фразы и опечатки проверены`
+        : `Базовая очистка выполнена${result.removed_count ? ` · удалено: ${result.removed_count}` : ""}; контекстная правка недоступна`;
+    }
+    if (fromVoice) showVoiceCommand({action:"process",status:"done"});
+  } catch (err) {
+    $("ask-feedback").textContent = err.message || "Не удалось очистить текст";
+    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:err.message || "Не удалось обработать текст."});
+  }
+}
 $("a-layout").onclick = e => {
   applyDraftLayout(null, false, e);
 };
@@ -2522,51 +2671,23 @@ function applyDraftLayout(target, fromVoice, event) {
     return;
   }
   const latin = "qwertyuiopasdfghjklzxcvbnm", russian = "йцукенгшщзфывапролдячсмить";
-  const source = t.value.slice(...range);
+  const source = t.value.slice(...actualRange);
   const converted = Array.from(source, letter => {
     const lower = letter.toLowerCase();
-    let index = latin.indexOf(lower), mapped;
-    if (index >= 0) mapped = russian[index];
-    else { index = russian.indexOf(lower); if (index < 0) return letter; mapped = latin[index]; }
+    let index, mapped;
+    if (target === "lat") {
+      index = russian.indexOf(lower); if (index < 0) return letter; mapped = latin[index];
+    } else if (target === "cyr") {
+      index = latin.indexOf(lower); if (index < 0) return letter; mapped = russian[index];
+    } else {
+      index = latin.indexOf(lower);
+      if (index >= 0) mapped = russian[index];
+      else { index = russian.indexOf(lower); if (index < 0) return letter; mapped = latin[index]; }
+    }
     return letter !== lower ? mapped.toUpperCase() : mapped;
   }).join("");
-  t.setRangeText(converted, range[0], range[1], "select");
+  t.setRangeText(converted, actualRange[0], actualRange[1], "select");
   lastDictationSelection = null;
-$("a-text-menu").addEventListener("mousedown", e => { if (e.button === 0) e.preventDefault(); });
-$("a-text-menu").onclick = () => {
-  const popup = $("a-text-menu-popup"); popup.hidden = !popup.hidden;
-  $("a-text-menu").setAttribute("aria-expanded", String(!popup.hidden));
-  updateDraftActions();
-};
-$("a-text-menu-popup").addEventListener("mousedown", e => {
-  if (e.button !== 0) return;
-  if (e.target.closest("#a-layout")) {
-    const t = $("askin"); draftActionSelections.set($("a-layout"), {start:t.selectionStart, end:t.selectionEnd, value:t.value});
-  }
-  e.preventDefault();
-});
-$("a-clean-text").onclick = () => cleanDraftText(false);
-async function cleanDraftText(fromVoice) {
-  const t = $("askin"), start = t.selectionStart, end = t.selectionEnd;
-  const selected = start !== end, source = selected ? t.value.slice(start, end) : t.value;
-  $("a-text-menu-popup").hidden = true; $("a-text-menu").setAttribute("aria-expanded", "false");
-  if (!source.trim()) {
-    $("ask-feedback").textContent = "Нет текста для очистки";
-    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:"Нет текста для обработки."});
-    return;
-  }
-  try {
-    const result = await core.call("pad_text_clean", {text: source});
-    if (selected) t.setRangeText(result.text, start, end, "select"); else t.value = result.text;
-    lastDictationSelection = null; fitAsk(); t.focus({preventScroll:true}); updateDraftActions();
-    $("ask-feedback").textContent = result.removed_count || result.review_count
-      ? `Удалено: ${result.removed_count}; на проверку: ${result.review_count}` : "Слова-паразиты и повторы не найдены";
-    if (fromVoice) showVoiceCommand({action:"process",status:"done"});
-  } catch (err) {
-    $("ask-feedback").textContent = err.message || "Не удалось очистить текст";
-    if (fromVoice) showVoiceCommand({action:"process",status:"error",message:err.message || "Не удалось обработать текст."});
-  }
-}
   fitAsk(); t.focus({preventScroll: true});
   $("ask-feedback").textContent = target === "cyr" ? "Текст переключён на кириллицу" : target === "lat" ? "Текст переключён на латиницу" : "Раскладка текста изменена";
   if (fromVoice) showVoiceCommand({action:target === "cyr" ? "layout_cyr" : "layout_lat",status:"done"});
@@ -2739,5 +2860,6 @@ window.consumeTranscriptionAttachments = files => { atts = atts.filter(a => !fil
 document.addEventListener('media-task-started', e => { tasks[e.detail.id] = e.detail; renderTask(); });
 </script>
 <script src="assets/canvas-launch.js"></script>
+<script src="assets/canvas-attention.js"></script>
 </body>
 </html>

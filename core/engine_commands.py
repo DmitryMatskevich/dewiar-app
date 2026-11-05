@@ -1075,7 +1075,16 @@ class CommandsMixin:
             if self.on_quit:
                 threading.Timer(0.2, self.on_quit).start()
             return True
+        if cmd.startswith("canvas_scope_"):
+            from canvas_scope import command
+            return command(self, cmd, a)
         if cmd == "say":
+            from canvas_scope import submit
+            from canvas_scope import target
+            if target(self) and (a.get("images") or a.get("image") or a.get("files")):
+                raise ValueError("Добавьте картинку непосредственно на холст или переключитесь в общий разговор.")
+            if submit(self, a.get("text", "")):
+                return True
             # картинки (вставленные, снимок экрана) — как файлы: сохраняются во «Входящие» и видны в ленте «Чата»
             images = []
             files = list(a.get("files") or [])
@@ -1146,6 +1155,8 @@ class CommandsMixin:
         if cmd == "cameras":
             from eyes import list_cameras
             return list_cameras()
+        if cmd == "audio_state":
+            return {"audio_mode":"text" if getattr(self,"server",False) else "voice"}
         if cmd == "audio_enable":
             if sys.platform != "darwin":
                 raise ValueError("Переключение доступно в приложении macOS")

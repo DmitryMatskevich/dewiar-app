@@ -34,15 +34,15 @@ def index_result(raw, source):
         right=max(left,min(width,(x+w)*width));bottom=max(top,min(height,(1-y)*height))
         return [round(left,2),round(top,2),round(right-left,2),round(bottom-top,2)] if right>left and bottom>top else None
     lines=[]
-    for n,line in enumerate(raw.get('lines',[])[:5000]):
+    for n,line in enumerate(raw.get('lines',[])):
         box=pixels(line.get('box'))
         if not box:continue
         words=[]
-        for j,word in enumerate(line.get('words',[])[:1000]):
+        for j,word in enumerate(line.get('words',[])):
             wb=pixels(word.get('box'))
-            if wb:words.append({'id':f'l{n}w{j}','text':str(word['text'])[:2000],'box':wb,'confidence':word.get('confidence',0)})
-        lines.append({'id':f'l{n}','text':str(line['text'])[:10000],'box':box,'words':words,'confidence':line.get('confidence',0)})
-    return {'schema':1,'source_sha256':source['sha256'],'width':width,'height':height,'engine':raw.get('engine',''),
+            if wb:words.append({'id':f'l{n}w{j}','text':str(word['text']),'box':wb,'confidence':word.get('confidence',0)})
+        lines.append({'id':f'l{n}','text':str(line['text']),'box':box,'words':words,'confidence':line.get('confidence',0)})
+    return {'schema':2,'source_sha256':source['sha256'],'width':width,'height':height,'engine':raw.get('engine',''),
             'status':raw.get('status','done'),'error':raw.get('error',''),'lines':lines}
 
 
@@ -62,7 +62,7 @@ def get_index(src, folder, source):
         if path.exists():
             try:
                 cached=json.loads(path.read_text())
-                if cached.get('schema')==1 and cached.get('source_sha256')==source['sha256'] and cached.get('status')!='error':return cached
+                if cached.get('schema')==2 and cached.get('source_sha256')==source['sha256'] and cached.get('status')!='error':return cached
             except (ValueError,OSError):pass
         data=src.read_bytes()
         if hashlib.sha256(data).hexdigest()!=source['sha256']:raise ValueError('Оригинал изменён. Откройте снимок заново.')
@@ -99,7 +99,21 @@ def parse(text):
 
 def matches(index, target):
     wanted=norm(target);count=len(wanted.split());exact=[];fuzzy=[];seen=set()
-    for line in index['lines']:
+    lines=[{**l,'id':l.get('id',f'line{n}'),'box':l.get('box') or union([w['box'] for w in l['words']])} for n,l in enumerate(index['lines'])]
+    original_lines=list(lines)
+    # Vision can return neighbouring words of one visual row as separate observations.
+    # Join only real boxes on the same baseline, never invent word coordinates.
+    ordered=sorted(lines,key=lambda l:(l['box'][1],l['box'][0]))
+    for first in ordered:
+        group=[first];x,y,w,h=first['box'];right=x+w
+        for other in sorted((l for l in original_lines if l is not first and l['box'][0]>=right),key=lambda l:l['box'][0]):
+            ox,oy,ow,oh=other['box'];overlap=min(y+h,oy+oh)-max(y,oy)
+            if overlap>=min(h,oh)*.6 and ox-right<=max(h,oh)*2.5:
+                group.append(other);right=ox+ow
+        if len(group)>1:
+            joined=[word for l in group for word in (l['words'] or [l])]
+            lines.append({'id':first['id']+'joined','text':' '.join(l['text'] for l in group),'box':union([l['box'] for l in group]),'words':joined})
+    for line in lines:
         words=line['words']
         if not words:
             spans=[([line],line['text'])]

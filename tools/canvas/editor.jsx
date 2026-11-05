@@ -1,9 +1,10 @@
 import React from 'react';
 import {installCanvasChat} from './chat.js';
 import {createRoot} from 'react-dom/client';
-import {Excalidraw,MainMenu,convertToExcalidrawElements,exportToBlob,CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
+import {Excalidraw,MainMenu,exportToBlob,CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import {parseMermaidToExcalidraw} from '@excalidraw/mermaid-to-excalidraw';
+import {localImageElement,localEllipseLabel} from './local-elements.js';
 
 const $=id=>document.getElementById(id),core=window.core;
 const keys=['viewBackgroundColor','gridSize','gridStep','gridModeEnabled','currentItemStrokeColor','currentItemBackgroundColor','currentItemFillStyle','currentItemStrokeWidth','currentItemStrokeStyle','currentItemRoughness','currentItemOpacity','currentItemFontFamily','currentItemFontSize','currentItemTextAlign','currentItemStartArrowhead','currentItemEndArrowhead','currentItemRoundness'];
@@ -36,7 +37,7 @@ async function persistFiles(){
 async function flush(){
  clearTimeout(timer);if(!api||!loaded)return;
  if(pending){await pending;return flush();}
- pending=(async()=>{await persistFiles();const value=snapshot();if(value===saved)return;const data=JSON.parse(value);const r=await call('canvas_save',{base_revision:doc.revision,...data});doc.revision=r.revision;saved=value;status('Сохранено');})();
+ pending=(async()=>{await persistFiles();const value=snapshot();if(value===saved)return;const data=JSON.parse(value);const r=await call('canvas_save',{base_revision:doc.revision,run_id:doc.applyRunId,...data});doc.revision=r.revision;delete doc.applyRunId;saved=value;status('Сохранено');})();
  try{await pending;}finally{pending=null;}
  if(snapshot()!==saved)return flush();
 }
@@ -55,7 +56,7 @@ async function addImages(files){
   await ensureDocument();await flush();let offset=0;const point=center();
   for(const file of files){
    const item=await upload(file,'image',{name:file.name});const data=await call('canvas_file',{file_id:item.id});known.add(item.id);api.addFiles([data]);
-   const elements=convertToExcalidrawElements([{type:'image',fileId:item.id,x:point.x+offset,y:point.y+offset,width:item.width,height:item.height}]);
+   const elements=[localImageElement({fileId:item.id,x:point.x+offset,y:point.y+offset,width:item.width,height:item.height})];
    api.updateScene({elements:[...api.getSceneElementsIncludingDeleted(),...elements],captureUpdate:CaptureUpdateAction.IMMEDIATELY});offset+=50;
   }
   await flush();api.scrollToContent(api.getSceneElements(),{fitToContent:true});status('Изображения добавлены без уменьшения');
@@ -95,7 +96,7 @@ document.addEventListener('drop',e=>{const files=[...(e.dataTransfer?.files||[])
 $('instruction').onclick=()=>{api.updateScene({appState:{currentItemStrokeColor:'#e5484d',currentItemStrokeWidth:2,currentItemRoughness:0,currentItemBackgroundColor:'transparent',currentItemFontFamily:2},captureUpdate:CaptureUpdateAction.IMMEDIATELY});changed();status('Стиль «Инструкция»: красный, 2 px, ровные фигуры');};
 $('number').onclick=()=>{
  const n=Math.max(0,...api.getSceneElements().map(e=>e.customData?.dewiarNumber||0))+1,p=center(),group=crypto.randomUUID();
- const elements=convertToExcalidrawElements([{type:'ellipse',x:p.x,y:p.y,width:44,height:44,strokeColor:'#e5484d',backgroundColor:'#ffffff',fillStyle:'solid',strokeWidth:2,roughness:0,label:{text:String(n),fontFamily:2,fontSize:24,strokeColor:'#e5484d'}}]);
+ const elements=[localEllipseLabel({text:n,x:p.x,y:p.y,customData:{dewiarNumber:n}})];
  elements.forEach(e=>{e.groupIds=[group];e.customData={dewiarNumber:n};});api.updateScene({elements:[...api.getSceneElementsIncludingDeleted(),...elements],captureUpdate:CaptureUpdateAction.IMMEDIATELY});changed();
 };
 function blocks(){const all=api.getSceneElementsIncludingDeleted();return all.filter(e=>e.customData?.mermaidSource&&all.some(other=>!other.isDeleted&&other.customData?.mermaidBlock===e.customData.mermaidBlock));}

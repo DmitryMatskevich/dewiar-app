@@ -1,4 +1,4 @@
-"""The Models screen exposes independent communication/planning/coding/analytics queues."""
+"""The Models screen exposes independent communication/planning/coding/analytics/image queues."""
 import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -39,7 +39,7 @@ def main():
           }}, ui:{}, privacy:{}, tools:{}}; renderProfiles(); }
         """)
         assert not errors, errors
-        assert page.locator("[data-model-role]").count() == 4
+        assert page.locator("[data-model-role]").count() == 5
         assert page.locator("[data-model-role='communication']").get_attribute("aria-selected") == "true"
         assert page.locator("#profiles .prof").count() == 2
         assert "Чат" in page.locator("#profiles").inner_text()
@@ -79,4 +79,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    print("OK: four model role tabs filter profiles and assign existing models")
+    print("OK: five model role tabs filter profiles and assign existing models")

@@ -143,7 +143,9 @@ class Background(unittest.TestCase):
         AudioMixin.handle_text(e, 'Лира, скопировать', True, False)
         AudioMixin.handle_text(e, 'скопировать', True, False, forced='lira')
         AudioMixin.handle_text(e, 'Лира, очисти', True, False)
-        self.assertEqual(e.events, [('draft_command', {'action':'insert'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'clear'})])
+        AudioMixin.handle_text(e, 'Лира, перевод', True, False)
+        AudioMixin.handle_text(e, 'Лира, перевести', True, False)
+        self.assertEqual(e.events, [('draft_command', {'action':'insert'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'copy'}), ('draft_command', {'action':'clear'}), ('draft_command', {'action':'translate'}), ('draft_command', {'action':'translate'})])
     def test_insert_continues_listening_and_keeps_text_on_error(self):
         e = Engine()
         e._dictation_result('Добрый день.', 'test', 3)
