@@ -316,7 +316,7 @@ window.SongSheet = (() => {
   }
   function chordFingering(symbol,evidence) { return exactVoicing(evidence) || chordFingerings(symbol,1)[0]||''; }
   function chordTooltip(symbol,evidence) {
-    const exact=exactVoicing(evidence), shape=exact || chordFingering(symbol), probability=voicingProbability(evidence);
+    const exact=exactVoicing(evidence), shape=exact || chordFingering(symbol), probability=exact?voicingProbability(evidence):null;
     if(!shape) return `${symbol}: позиция на грифе не определена`;
     return `${symbol} · 1→6: ${shape}${exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
   }
