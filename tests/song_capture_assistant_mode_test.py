@@ -68,6 +68,14 @@ class AssistantCaptureModeTest(unittest.TestCase):
         CommandsMixin._command(engine, "song_capture", {"song_id": "s2", "action": "stop"})
         self.assertTrue(engine.muted)
 
+    def test_system_audio_capture_also_starts_full_analysis_after_stop(self):
+        engine = self.engine()
+        started = CommandsMixin._command(engine, "song_capture", {"song_id": "s3", "action": "start", "source": "system"})
+        self.assertTrue(started["running"])
+        stopped = CommandsMixin._command(engine, "song_capture", {"song_id": "s3", "action": "stop"})
+        self.assertEqual(stopped["status"], "running")
+        self.assertEqual(engine.song_analyzer.calls, [("s3", True)])
+
 
 if __name__ == "__main__":
     unittest.main()

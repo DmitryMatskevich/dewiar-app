@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import json
+import math
 import os
 import re
 import tempfile
@@ -242,7 +243,8 @@ class SongStore:
                                              'structure': bool(selected), 'chords': has_chords})
             return self.patch(song_id, changes)
 
-    def edit_phrase(self, song_id, phrase_id, text, note, reviewed, base_revision, action="edit"):
+    def edit_phrase(self, song_id, phrase_id, text, note, reviewed, base_revision, action="edit", word_start=None,
+                    word_start_ms=None, word_end_ms=None):
         """Правка/undo/redo одной фразы с проверкой ревизии, без запуска ASR."""
         if base_revision is None:
             raise ValueError("Для сохранения нужна ревизия карточки")
@@ -262,12 +264,62 @@ class SongStore:
             history = histories.get(phrase_id, {"versions": [copy.deepcopy(phrase)], "cursor": 0})
             if action == "edit":
                 text = str(text or "").strip()
-                if not text or len(text) > 4000:
-                    raise ValueError("Введите текст фразы (до 4000 символов) или [неразборчиво]")
-                edited = {**phrase, "text": text, "note": note,
-                          "review_state": "verified" if reviewed else "needs_review"}
-                if text != phrase.get("text"):
-                    edited.update(words=[], agreement=[], timing_quality="phrase", alignment_stale=True)
+                if word_start is not None:
+                    if not isinstance(word_start, int) or isinstance(word_start, bool):
+                        raise ValueError("Не удалось определить слово для правки")
+                    words = copy.deepcopy(phrase.get("words") or [])
+                    target = next((w for w in words if w.get("char_start") == word_start), None)
+                    if target is None:
+                        token = next((m for m in re.finditer(r"\S+", str(phrase.get("text") or ""))
+                                      if m.start() == word_start), None)
+                        if token is None:
+                            raise ValueError("Выбранное слово не найдено во фразе — обновите лист песни")
+                        start_ms, end_ms = word_start_ms, word_end_ms
+                        if (not isinstance(start_ms, (int, float)) or isinstance(start_ms, bool) or
+                                not isinstance(end_ms, (int, float)) or isinstance(end_ms, bool) or
+                                not math.isfinite(start_ms) or not math.isfinite(end_ms) or
+                                start_ms < phrase.get("start_ms", 0) or end_ms > phrase.get("end_ms", 0) or
+                                end_ms <= start_ms):
+                            raise ValueError("Не удалось сохранить время выбранного слова — выберите его при воспроизведении")
+                        target = {"text": token.group(), "char_start": token.start(), "char_end": token.end(),
+                                  "start_ms": round(start_ms), "end_ms": round(end_ms),
+                                  "method": "manual_word_edit_estimated"}
+                        words.append(target)
+                    if not text or len(text) > 120 or any(char.isspace() for char in text):
+                        raise ValueError("Введите одно слово без пробелов (до 120 символов)")
+                    old_start, old_end = target["char_start"], target["char_end"]
+                    delta = len(text) - (old_end - old_start)
+                    phrase_text = phrase["text"][:old_start] + text + phrase["text"][old_end:]
+                    for word in words:
+                        if word is target:
+                            word.update(text=text, char_end=old_start + len(text),
+                                        method="manual_word_edit_estimated" if word.get("method") == "manual_word_edit_estimated" else "manual_word_edit",
+                                        verified=True)
+                        elif word.get("char_start", -1) >= old_end:
+                            word["char_start"] += delta
+                            word["char_end"] += delta
+                    agreement = copy.deepcopy(phrase.get("agreement") or [])
+                    for vote in agreement:
+                        if vote.get("char_start") == old_start:
+                            vote.update(text=text, char_end=old_start + len(text), needs_review=False)
+                        elif vote.get("char_start", -1) >= old_end:
+                            vote["char_start"] += delta
+                            vote["char_end"] += delta
+                    edited = {**phrase, "text": phrase_text, "words": words, "agreement": agreement,
+                              "note": note, "review_state": "verified" if reviewed else "needs_review"}
+                    for chord in row.get("chords", []):
+                        anchor = chord.get("anchor") or {}
+                        at = anchor.get("grapheme_index")
+                        if anchor.get("phrase_id") == phrase_id and isinstance(at, int) and at >= old_start:
+                            chord["previous_anchor"] = chord.pop("anchor")
+                            chord["verified"] = False
+                else:
+                    if not text or len(text) > 4000:
+                        raise ValueError("Введите текст фразы (до 4000 символов) или [неразборчиво]")
+                    edited = {**phrase, "text": text, "note": note,
+                              "review_state": "verified" if reviewed else "needs_review"}
+                    if text != phrase.get("text"):
+                        edited.update(words=[], agreement=[], timing_quality="phrase", alignment_stale=True)
                 history["versions"] = history["versions"][:history["cursor"] + 1] + [edited]
                 history["cursor"] += 1
             else:
@@ -288,7 +340,7 @@ class SongStore:
                         chord['verified'] = False
             return self.patch(song_id, {"phrases": phrases, "phrase_history": histories,
                 "status": "review" if row.get('status') == 'ready' else row.get('status','review'),
-                "words": [], "chords": chords, "guitar_sheet": build_guitar_sheet(phrases,chords), "review_state": "lyrics_verified" if verified else "needs_review",
+                "words": [w for p in phrases for w in p.get('words',[])], "chords": chords, "guitar_sheet": build_guitar_sheet(phrases,chords), "review_state": "lyrics_verified" if verified else "needs_review",
                 "stage_label": "Текст проверен; аккорды ещё не проверены" if verified else "Проверьте текст по записи"}, base_revision)
 
     def delete(self, song_id: str) -> bool:

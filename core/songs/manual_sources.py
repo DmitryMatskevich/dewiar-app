@@ -4,6 +4,22 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 
+def youtube_video_id(url):
+    try:
+        parsed = urlsplit(str(url or '').strip())
+        host = (parsed.hostname or '').lower().rstrip('.')
+        video_id = ''
+        if host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'):
+            video_id = (parse_qs(parsed.query).get('v') or [''])[0] if parsed.path == '/watch' else ''
+            if parsed.path.startswith(('/shorts/', '/live/', '/embed/')):
+                video_id = parsed.path.split('/')[2]
+        elif host in ('youtu.be', 'www.youtu.be'):
+            video_id = parsed.path.strip('/').split('/')[0]
+        return video_id if re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id) else ''
+    except (ValueError, IndexError):
+        return ''
+
+
 def add_manual_source(store, song_id, url='', lyrics='', base_revision=None):
     url = str(url or '').strip()
     lyrics = str(lyrics or '').strip()
@@ -18,14 +34,7 @@ def add_manual_source(store, song_id, url='', lyrics='', base_revision=None):
             host = (parsed.hostname or '').lower().rstrip('.')
             if parsed.scheme not in ('http', 'https') or not host or parsed.username or parsed.password or any(c.isspace() for c in url):
                 raise ValueError()
-            if host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com'):
-                video_id = (parse_qs(parsed.query).get('v') or [''])[0] if parsed.path == '/watch' else ''
-                if parsed.path.startswith(('/shorts/', '/live/', '/embed/')):
-                    video_id = parsed.path.split('/')[2]
-            elif host in ('youtu.be', 'www.youtu.be'):
-                video_id = parsed.path.strip('/').split('/')[0]
-            if video_id and not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
-                raise ValueError()
+            video_id = youtube_video_id(url)
         except (ValueError, IndexError):
             raise ValueError('Введите корректную ссылку http или https') from None
     if base_revision is None:

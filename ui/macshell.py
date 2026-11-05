@@ -823,8 +823,11 @@ def make_api(app):
             return True
 
         def open_url(self, url):
-            from urllib.parse import urlparse
-            if urlparse(str(url)).scheme not in ("http", "https", "mailto", "obsidian", "tg"):
+            from urllib.parse import parse_qs, urlparse
+            parsed = urlparse(str(url))
+            if parsed.scheme == "yandexmusic" and (parsed.netloc.lower() != "search" or parsed.path not in ("", "/") or not parse_qs(parsed.query).get("text")):
+                raise ValueError("недопустимая ссылка Яндекс Музыки")
+            if parsed.scheme not in ("http", "https", "mailto", "obsidian", "tg", "yandexmusic"):
                 raise ValueError("неподдерживаемая схема адреса")
             open_target(url)
             return True

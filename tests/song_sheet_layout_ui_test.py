@@ -75,12 +75,12 @@ def main():
                           const next=visible[visible.indexOf(e)+1];
                           return next && (next.classList.contains('song-paper-lyrics') || next.classList.contains('song-paper-instrumental')) && e.parentElement.classList.contains('song-paper-line') && e.parentElement===next.parentElement && Math.abs(next.getBoundingClientRect().top-e.getBoundingClientRect().bottom)<1;
                         }),
-                        instrumental_labels:es.filter(e=>e.classList.contains('song-paper-instrumental')).length===row.guitar_sheet.filter(l=>!l.text && [...(l.chords||[]),...(l.unplaced_chords||[])].some(c=>c.name && c.name!=='N')).length,
+                        instrumental_labels:es.filter(e=>e.classList.contains('song-paper-instrumental')).length===SongSheet.sheetRows(row).filter(r=>r.kind==='instrumental').length,
                         one_visual_row:chords.every(e=>e.getBoundingClientRect().height<=parseFloat(getComputedStyle(e).lineHeight)+1),
                         fits:chords.every(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().right<=e.getBoundingClientRect().right+1}),
                         overflow:chords.flatMap(e=>{const r=document.createRange();r.selectNodeContents(e);const a=r.getBoundingClientRect(),b=e.getBoundingClientRect();return a.right>b.right+1?[{text:e.textContent,width:a.width,available:b.width}]:[]}),
                         all_words:words(lyrics.map(e=>e.textContent).join(' '))===words(row.guitar_sheet.map(l=>l.text).join(' ')),
-                        copy_matches:SongSheet.plainText(row)===es.map(e=>e.classList.contains('song-paper-space')?'':e.textContent).join('\\n').replace(/^\\n+|\\n+$/g,''),
+                        copy_matches:SongSheet.plainText(row).startsWith(es.map(e=>e.classList.contains('song-paper-space')?'':e.textContent).join('\\n').replace(/^\\n+|\\n+$/g,'')),
                         chord_rows:chords.length
                       };
                     }''', row)

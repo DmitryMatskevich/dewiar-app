@@ -38,7 +38,9 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
             offset = len(text)
             text += row['text']
             spans.append((offset,len(text),row))
-            cues.extend(dict(w, char_start=offset+w['char_start'], char_end=offset+w['char_end'])
+            cues.extend(dict(w, phrase_id=row.get('phrase_id'),
+                             phrase_char_start=w['char_start'],
+                             char_start=offset+w['char_start'], char_end=offset+w['char_end'])
                         for w in display_words(row))
             # The full sheet already shows the original change (including intro/gap rows).
             # Carry-in marks belong to isolated phrase previews, not new changes.

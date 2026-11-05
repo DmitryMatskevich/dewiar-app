@@ -68,6 +68,20 @@ with sync_playwright() as p:
         ok((g["fits"] or g["bot_h"] == 0) and g["cap_b"] <= g["yn_t"] and g["yn_b"] <= g["task_t"] and g["task_b"] <= g["bar_t"] + 1,
            f"{h}: «Да/Нет» с задачей — вопрос виден, ничего не наезжает: {g}")
         pg.close()
+    pg = b.new_page(viewport={"width": 722, "height": 202}); pg.on("pageerror", lambda e: errs.append(str(e)))
+    pg.goto((tmp / "hud.html").as_uri()); pg.wait_for_timeout(500)
+    pg.evaluate("""() => { document.querySelector('#card').classList.add('no-orb');
+      document.querySelector('#cap').classList.add('running');
+      document.querySelector('#bot').textContent = 'Первая строка ответа остаётся на своём месте.';
+      note({note:'Микрофон молчит — проверьте, что он включён и не выключен звук записи, или выберите другой в студии → «Звук и поведение» → «Микрофон».'}); }""")
+    pg.wait_for_timeout(250)
+    g = pg.evaluate("""() => { const r=s=>document.querySelector(s).getBoundingClientRect();
+      return {visible:getComputedStyle(document.querySelector('#note')).display!=='none',
+        noteTop:r('#note').top,noteBottom:r('#note').bottom,noteHeight:r('#note').height,
+        capBottom:r('#cap').bottom,firstLine:document.querySelector('#bot').textContent}; }""")
+    ok(g['visible'] and g['noteHeight'] > 0 and g['noteTop'] >= g['capBottom'],
+       f"уведомление о микрофоне занимает отдельную строку и не перекрывает первую строку ответа: {g}")
+    pg.close()
     b.close()
 ok(not errs, f"без ошибок на странице: {errs[:3]}")
 print("\nИТОГ:", "всё прошло" if not fails else f"провалов {len(fails)}")

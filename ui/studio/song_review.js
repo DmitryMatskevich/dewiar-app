@@ -65,7 +65,7 @@ window.SongReview = (() => {
   function protectedView(songId) {
     const active = document.activeElement;
     return [...drafts.keys()].some(k => k.startsWith(songId + ':')) ||
-      !!(active?.matches('input,textarea,select') && active.closest('.song-phrase-editor, .song-properties')) ||
+      !!(active?.matches('input,textarea,select') && active.closest('.song-phrase-editor, .song-properties, .song-live-editor')) ||
       !!document.querySelector('#song-review-audio')?.matches(':not([data-idle]),[data-session],[data-loading],[data-sheet-hold]');
   }
   function stop() {
@@ -111,7 +111,7 @@ window.SongReview = (() => {
       player.dataset.sheetHold = '1';
       if (player.src) player.currentTime = 0;
       delete player.dataset.loading; delete player.dataset.session;
-      player.dataset.idle = '1'; clearHighlights(); message(''); sync();
+      player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync();
     };
     player.dataset.idle = '1';
     function followWords(scroll) {
@@ -121,7 +121,7 @@ window.SongReview = (() => {
     player.addEventListener('seeked', () => { followWords(followSheet && !player.paused); sync(); });
     player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(followSheet); sync(); };
     player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
-    player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); message(''); sync(); });
+    player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync(); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
     document.getElementById('song-review-loop').onchange = e => { player.loop = e.target.checked; };
     async function playFull(restart=false, autoplay=true, seekTo=null) {
@@ -200,6 +200,121 @@ window.SongReview = (() => {
     }
     if(previousButton) previousButton.onclick=()=>seekLine(-1);
     if(nextButton) nextButton.onclick=()=>seekLine(1);
+    const liveEditor=document.getElementById('song-live-editor');
+    const liveMode=document.getElementById('song-live-edit-mode');
+    const liveText=document.getElementById('song-live-edit-text');
+    const livePreview=document.getElementById('song-live-edit-preview');
+    const liveChords=document.getElementById('song-live-chords');
+    const liveStatus=document.getElementById('song-live-edit-status');
+    let liveTarget=null, livePhraseText='', liveChordDraft=[];
+    function targetPhrase() {
+      const current=getCurrent();
+      return liveTarget && current?.phrases?.find(p=>p.phrase_id===liveTarget.phraseId);
+    }
+    function phraseChords(phrase, chords=getCurrent()?.chords||[]) {
+      const current=getCurrent(), index=current?.phrases?.findIndex(item=>item.phrase_id===phrase.phrase_id)??-1;
+      const gapStart=index>0?Number(current.phrases[index-1].end_ms):0;
+      return chords.filter(c=>c.name!=='N' && (c.anchor?.phrase_id===phrase.phrase_id ||
+        (Number(c.start_ms)>=gapStart && Number(c.start_ms)<Number(phrase.end_ms))));
+    }
+    function updateLivePreview() {
+      if(!livePreview||!liveTarget)return;
+      if(liveMode.value!=='word') { livePreview.textContent=(liveMode.value==='phrase'?liveText.value:livePhraseText).trim()||'…';return; }
+      const start=liveTarget.charStart,end=liveTarget.charEnd;
+      livePreview.textContent=livePhraseText.slice(0,start)+liveText.value+livePhraseText.slice(end);
+    }
+    function renderLiveChords() {
+      liveChords.innerHTML=liveChordDraft.map((chord,index)=>`<div class="song-live-chord" data-live-chord="${index}">
+        <label class="f">Аккорд<input data-live-chord-name value="${esc(chord.name||'')}" maxlength="24" placeholder="Am, D7"></label>
+        <label class="f">Секунда<input data-live-chord-time type="number" min="0" step="0.01" value="${(Number(chord.start_ms)||0)/1000}"></label>
+        <button type="button" class="btn small" data-live-chord-remove="${index}" aria-label="Убрать аккорд ${index+1}" title="Убрать аккорд">×</button>
+      </div>`).join('') || '<p class="hint">В этой фразе пока нет аккордов.</p>';
+      liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
+        liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
+      });
+    }
+    function openPhraseEditor(phraseId,mode='phrase') {
+      const phrase=getCurrent()?.phrases?.find(item=>item.phrase_id===phraseId);
+      if(!phrase) return;
+      player.pause();
+      liveTarget={phraseId:phrase.phrase_id,text:phrase.text,charStart:0,charEnd:phrase.text.length,startMs:Number(phrase.start_ms)||0,endMs:Number(phrase.end_ms)||0};
+      liveMode.value=mode;
+      livePhraseText=phrase.text;
+      liveText.value=phrase.text;
+      document.getElementById('song-live-edit-target').textContent=`${time(phrase.start_ms)}–${time(phrase.end_ms)} · ${mode==='chords'?'Аккорды фразы':'Текст фразы'}`;
+      liveEditor.classList.toggle('song-live-editor--chords',mode==='chords');
+      document.querySelector('#song-live-editor .song-live-editor-head b').textContent=mode==='chords'?'Правка аккордов фразы':'Правка фразы';
+      document.getElementById('song-live-edit-save').textContent=mode==='chords'?'Сохранить аккорды':'Сохранить текст и аккорды';
+      document.getElementById('song-live-reviewed').checked=phrase.review_state==='verified';
+      liveChordDraft=phraseChords(phrase).map(c=>structuredClone(c));
+      renderLiveChords();updateLivePreview();liveStatus.textContent='Песня приостановлена. Правки сохраняются в карточке песни.';
+      liveEditor.hidden=false;
+      liveEditor.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+      if(mode==='phrase') liveText.focus();
+      else liveChords.querySelector('[data-live-chord-name]')?.focus();
+    }
+    window.songPaperEditContext={songId:row.song_id,open:openPhraseEditor};
+    if(!window.songPaperEditListener) {
+      document.addEventListener('click',event=>{
+        const button=event.target.closest?.('[data-song-edit-phrase][data-song-edit-kind]');
+        const context=window.songPaperEditContext;
+        if(!button||button.closest('.song-paper')?.dataset.songId!==context?.songId) return;
+        context.open(button.dataset.songEditPhrase,button.dataset.songEditKind==='chords'?'chords':'phrase');
+      });
+      window.songPaperEditListener=true;
+    }
+    liveText?.addEventListener('input',updateLivePreview);
+    document.getElementById('song-live-chord-add')?.addEventListener('click',()=>{
+      const phrase=targetPhrase();if(!phrase)return;
+      liveChordDraft.push({name:'',start_ms:liveTarget?.startMs ?? phrase.start_ms,
+        anchor:liveTarget?{kind:'manual',phrase_id:phrase.phrase_id,grapheme_index:liveTarget.charStart}:null,
+        method:'manual',verified:true});renderLiveChords();
+    });
+    document.getElementById('song-live-edit-close')?.addEventListener('click',()=>{liveEditor.hidden=true;});
+    document.getElementById('song-live-edit-save')?.addEventListener('click',async()=>{
+      const button=document.getElementById('song-live-edit-save');button.disabled=true;liveStatus.textContent='Сохраняем…';
+      try {
+        let current=getCurrent(), phrase=targetPhrase();
+        if(!phrase||!liveTarget)throw Error('Фраза уже изменилась — обновите карточку и повторите правку');
+        const mode=liveMode.value, editText=liveText.value.trim();
+        const originalText=mode==='word'?liveTarget.text:phrase.text;
+        const reviewed=document.getElementById('song-live-reviewed').checked;
+        if(mode!=='chords' && (editText!==originalText || reviewed!==(phrase.review_state==='verified'))) {
+          current=await core.call('song_edit_phrase',{song_id:row.song_id,phrase_id:phrase.phrase_id,
+            base_revision:current.revision,text:editText,note:phrase.note||'',reviewed,
+            ...(mode==='word'?{word_start:liveTarget.charStart,word_start_ms:liveTarget.startMs,word_end_ms:liveTarget.endMs}:{})});
+          accept(current);phrase=current.phrases.find(p=>p.phrase_id===liveTarget.phraseId);
+          if(mode==='word') {
+            const updated=phrase?.words?.find(w=>w.char_start===liveTarget.charStart);
+            if(updated)liveTarget={...liveTarget,text:updated.text,charEnd:updated.char_end};
+          }
+          if(phrase)livePhraseText=phrase.text;
+          updateLivePreview();
+        }
+        const oldPhraseEvents=phraseChords(phrase,current.chords||[]);
+        const newPhraseEvents=liveChordDraft.map((draft,index)=>{
+          const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
+          const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim();
+          const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
+          if(!name)throw Error(`Введите название аккорда ${index+1}`);
+          if(!Number.isFinite(seconds)||seconds<0)throw Error(`Проверьте время аккорда ${index+1}`);
+          return {...draft,name,start_ms:Math.round(seconds*1000),verified:true,method:draft.method||'manual'};
+        });
+        const signature=events=>JSON.stringify(events.map(({name,start_ms,anchor})=>({name,start_ms,anchor})));
+        if(signature(oldPhraseEvents)!==signature(newPhraseEvents)) {
+          const keep=(current.chords||[]).filter(c=>c.name==='N'||!oldPhraseEvents.includes(c));
+          current=await core.call('song_edit_chords',{song_id:row.song_id,base_revision:current.revision,
+            chords:[...keep,...newPhraseEvents].sort((a,b)=>a.start_ms-b.start_ms)});
+          accept(current);
+        }
+        liveStatus.textContent=mode==='chords'
+          ? 'Аккорды фразы сохранены. Воспроизведение осталось на паузе.'
+          : mode==='word'
+            ? 'Слово и времена слов сохранены; аккорды фразы обновлены. Воспроизведение осталось на паузе.'
+            : 'Текст и аккорды сохранены. Для изменённой фразы времена слов нужно проверить заново. Воспроизведение осталось на паузе.';
+      } catch(error) { liveStatus.textContent=`${error.message||'Не удалось сохранить правку'}. Исправления оставлены в редакторе.`; }
+      finally { button.disabled=false; }
+    });
     sync();
     document.querySelectorAll('.song-phrase[data-phrase-id]').forEach(el => {
       const pid = el.dataset.phraseId, k = key(row.song_id, pid);

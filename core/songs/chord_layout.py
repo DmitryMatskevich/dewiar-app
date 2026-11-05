@@ -97,7 +97,7 @@ def layout_chords(phrases, events):
     for row in ordered:
         if (row.get('timing_quality') == 'gap' and grouped_rows and
                 grouped_rows[-1].get('timing_quality') == 'gap' and
-                row['start_ms']-grouped_rows[-1]['start_ms'] < 12_000):
+                row['start_ms']-grouped_rows[-1].get('end_ms', grouped_rows[-1]['start_ms']) <= 2_500):
             grouped_rows[-1]['unplaced_chords'].extend(row['unplaced_chords'])
             grouped_rows[-1]['end_ms'] = row['end_ms']
         else:

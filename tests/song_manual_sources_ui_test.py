@@ -11,7 +11,8 @@ sys.path.insert(0, str(ROOT / 'tools'))
 from songs_ui_preview import page as preview_page
 
 row = {'song_id':'fixture', 'revision':1, 'title':'ТЕСТ — песня', 'artist':'', 'status':'needs_input',
-       'stage':'sources', 'capabilities':{'audio':False}, 'audio':{}, 'phrases':[], 'chords':[], 'source_candidates':[]}
+       'stage':'sources', 'capabilities':{'audio':False}, 'audio':{}, 'phrases':[], 'chords':[],
+       'source_candidates':[{'candidate_id':'yandex-search:test','kind':'reference','title':'Поиск в Яндекс Музыке','url':'yandexmusic://search?text=test'}]}
 with tempfile.TemporaryDirectory() as temp, sync_playwright() as pw:
     ui = Path(temp) / 'ui'; shutil.copytree(ROOT / 'ui', ui)
     html = preview_page('fixture').decode().replace('="/studio/', '="studio/')
@@ -22,10 +23,15 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='song_get')return structuredClone(row);
  if(cmd==='song_source_add'){
    if(!a.url&&!a.lyrics)throw Error('Укажите ссылку или текст');
-   row.revision++;row.source_candidates=[{candidate_id:'reference:fixture:audio',kind:'youtube',title:'Запись по ссылке пользователя',url:a.url}];
+   row.revision++;row.source_candidates.push({candidate_id:'reference:fixture:audio',kind:'youtube',title:'Запись по ссылке пользователя',url:a.url});
    return structuredClone(row);
  }
- if(cmd==='song_download_source')return {...structuredClone(row),status:'running'};
+ if(cmd==='song_source_select'){
+   row.selected_source_id=a.candidate_id;
+   for(const candidate of row.source_candidates)candidate.selected=candidate.candidate_id===a.candidate_id;
+   return structuredClone(row);
+ }
+ if(cmd==='song_process_source'){row.status='running';return structuredClone(row);}
  return {};}};
 '''.replace('ROW', json.dumps(row, ensure_ascii=False))
     (ui/'test.html').write_text(html[:start] + mock + html[end:], encoding='utf-8')
@@ -41,10 +47,17 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     page.locator('#song-manual-lyrics').fill('Тестовый текст для сверки')
     page.locator('#song-add-manual-source').click()
     page.wait_for_function("calls.some(c=>c[0]==='song_source_add'&&c[1].url.includes('youtu.be'))")
-    assert 'Источник добавлен' in page.locator('#song-manual-source-result').inner_text()
+    assert 'Источник сохранён' in page.locator('#song-manual-source-result').inner_text(), repr(page.locator('#song-manual-source-result').inner_text())
     assert page.locator('[data-song-source]').is_visible()
-    page.locator('[data-song-source]').click()
-    page.wait_for_function("calls.some(c=>c[0]==='song_download_source'&&c[1].candidate_id==='reference:fixture:audio')")
+    assert page.locator('[data-song-yandex-capture]').is_visible()
+    source_card=page.locator('.song-source').filter(has_text='Запись по ссылке пользователя')
+    assert source_card.locator('[data-song-source-select]').is_visible()
+    assert page.locator('.song-source-stage [data-song-source]').is_visible()
+    source_card.locator('[data-song-source-select]').click()
+    page.wait_for_function("calls.some(c=>c[0]==='song_source_select'&&c[1].candidate_id==='reference:fixture:audio')")
+    assert 'Запись выбрана' in source_card.inner_text()
+    page.locator('.song-source-stage [data-song-source]').click()
+    page.wait_for_function("calls.some(c=>c[0]==='song_process_source'&&c[1].candidate_id==='reference:fixture:audio')")
     assert not errors, errors
     browser.close()
 print('OK: manual source entry, validation and starting selected recording')

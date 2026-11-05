@@ -177,9 +177,14 @@
   #yn.on { display: flex; }
   #yn button { flex: 1; padding: 7px 0; border-radius: 12px; border: 0; background: rgba(255,255,255,.1); color: var(--ink); font: inherit; cursor: pointer; }
   #yn button.yes { background: var(--brand); color: #fff; font-weight: 600; }
-  #note { text-align: center; font-size: 12.5px; line-height: 1.4; color: var(--muted); padding: 0 6px; cursor: default; }
+  /* Статус — отдельная строка в flex-колонке. Без flex-basis и ограничения высоты
+     длинная подсказка сжималась до нулевого блока, а текст продолжал рисоваться поверх ответа. */
+  #note { flex: 0 1 auto; width: 100%; min-width: 0; min-height: 1.4em; max-height: min(4.2em, 28vh); overflow: auto; overflow-wrap: anywhere;
+          text-align: left; font-size: 12.5px; line-height: 1.4; color: var(--muted); padding: 0 8px; cursor: default;
+          scrollbar-width: thin; overscroll-behavior: contain; }
   #note:empty, #cap.show ~ #note { display: none; }
   #note { white-space: pre-line; }
+  #note:not(:empty) { padding-block: 3px; border-radius: 10px; background: var(--glass); }
   /* первая загрузка: что готовится (status.loading) — полоска под строкой; доля неизвестна — бегущий отрезок */
   #ldbar { display: none; width: 56%; height: 3px; margin: 7px auto 0; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
   #ldbar.on { display: block; } #cap.show ~ #ldbar { display: none; }

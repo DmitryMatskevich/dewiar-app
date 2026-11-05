@@ -1,5 +1,6 @@
 """Checks derived from defects found in the nine real pilot recordings."""
 import copy
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -35,6 +36,19 @@ class EvidenceTests(unittest.TestCase):
         self.assertTrue(all(len(l['text'])<=42 for l in lines))
         words=[l['text'][w['char_start']:w['char_end']] for l in lines for w in l['display_words']]
         self.assertEqual(words,p['text'].split())
+        cues=[w for line in lines for w in line['display_words']]
+        self.assertTrue(all(w['phrase_id']=='p' for w in cues))
+        self.assertEqual([w['phrase_char_start'] for w in cues],
+                         [m.start() for m in re.finditer(r'\S+',p['text'])])
+
+    def test_public_sheet_keeps_source_phrase_id_for_inline_editing_wrapped_lines(self):
+        phrase={'phrase_id':'p','text':'Тихим вечером мы возвращались домой Сердце радовалось встрече.',
+                'start_ms':0,'end_ms':12000}
+        row=public_song({'song_id':'inline-edit','revision':1,'title':'Тест','phrases':[phrase],
+                         'sections':[],'chords':[],'audio':{'duration_ms':12000}})
+        lines=[line for line in row['guitar_sheet'] if line.get('text')]
+        self.assertGreater(len(lines),1)
+        self.assertTrue(all(line['source_phrase_ids']==['p'] for line in lines))
 
     def test_missing_opening_uses_two_independent_models(self):
         from songs.consensus import choose_spine, phrases_from_words

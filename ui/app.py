@@ -1249,7 +1249,11 @@ class Api:
         """Ссылка наружу: сайт, Telegram (tg://), Obsidian (obsidian://) — системой. Только эти схемы: страница не
         должна суметь открыть через систему файл или запустить программу (file:, ms-…: и подобные)."""
         url = str(url or "")
-        if not url.split(":", 1)[0].lower() in ("http", "https", "obsidian", "tg"):
+        parsed = urllib.parse.urlsplit(url)
+        scheme = parsed.scheme.lower()
+        if scheme == "yandexmusic" and (parsed.netloc.lower() != "search" or parsed.path not in ("", "/") or not urllib.parse.parse_qs(parsed.query).get("text")):
+            return False
+        if scheme not in ("http", "https", "obsidian", "tg", "yandexmusic"):
             return False
         if WIN:
             os.startfile(url)  # noqa: S606

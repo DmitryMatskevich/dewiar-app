@@ -321,15 +321,13 @@ class SongSources:
                 raise ValueError('Дождитесь завершения текущего этапа')
             candidates = row.get('source_candidates', [])
             candidate = next((c for c in candidates if c.get('candidate_id') == candidate_id), None)
-            check = (candidate or {}).get('source_check') or {}
-            if not candidate or candidate.get('kind') not in {'reference','lyrics','chords'}:
-                raise ValueError('Выберите проверенную страницу с текстом или аккордами')
-            if check.get('status') != 'available':
-                raise ValueError('Сначала проверьте, что страница открывается и содержит читаемый текст')
+            if not candidate or candidate.get('kind') not in {'reference','lyrics','chords','youtube'}:
+                raise ValueError('Выберите конкретную запись или страницу с текстом/аккордами')
             for item in candidates:
                 item['selected'] = item is candidate
-            label = ('Страница выбрана для сверки; ещё проверьте совпадение версии с записью' if row.get('audio',{}).get('path')
-                     else 'Источник выбран; теперь выберите и обработайте запись исполнения')
+            has_recording = bool(row.get('audio',{}).get('path') or row.get('phrases'))
+            label = ('Источник выбран для сверки с текущей записью; пакетный разбор этой версии доступен в отдельной карточке' if has_recording
+                     else 'Запись выбрана; нажмите «Обработать пакетно», чтобы начать разбор') if candidate.get('kind') == 'youtube' else 'Источник выбран для сверки; проверьте совпадение текста и версии с записью'
             updated = self.store.patch(song_id, {'source_candidates':candidates,
                 'selected_source_id':candidate_id,'stage_label':label})
         self.emit('song_analysis', song_id=song_id, running=False, song=updated)
