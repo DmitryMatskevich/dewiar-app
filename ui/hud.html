@@ -2160,11 +2160,11 @@ core.on('hello',d=>setCalendarBadgeSettings((((d||{}).settings||{}).ui||{})));
 for(const event of ['reminders','calendars','money_saved','note_saved','tasks']) core.on(event,()=>refreshCalendarBadge());
 setInterval(()=>{if(!document.hidden) refreshCalendarBadge();},60000);
 window.addEventListener('focus',()=>refreshCalendarBadge());
-let mailBadgeCounts = { important_unread: 0 };
-function setMailBadgeMode() { setMailBadgeCounts(mailBadgeCounts); }
+let mailBadgeCounts = { badge: 0, filters: {} };
+function setMailBadgeMode() { refreshMailCounts(); }
 function setMailBadgeCounts(counts) {
   mailBadgeCounts = { ...mailBadgeCounts, ...(counts || {}) };
-  const n = Math.max(0, Number(mailBadgeCounts.important_unread) || 0), button = $("b-mail"), badge = $("b-mail-count");
+  const n = Math.max(0, Number(mailBadgeCounts.badge) || 0), button = $("b-mail"), badge = $("b-mail-count");
   const attention = Math.max(0, Number(mailBadgeCounts.attention) || 0);
   button.classList.toggle("has-mail-count", n > 0 || attention > 0); badge.hidden = n === 0 && !attention;
   badge.textContent = attention ? "!" : n > 99 ? "99+" : String(n);
@@ -2172,11 +2172,15 @@ function setMailBadgeCounts(counts) {
     const label = attention === 1 ? "Почта: один ящик ждёт пароль. Открыть и ввести" : "Почта: ящиков ждут пароль — " + attention + ". Открыть и ввести";
     button.title = label; button.setAttribute("aria-label", label); return;
   }
-  const label = n ? "Важных непрочитанных писем: " + n + ". Открыть список" : "Открыть почту: важных непрочитанных писем нет";
+  const selected = mailBadgeCounts.filters || {};
+  const criteria = [["important", "важные"], ["unread", "непрочитанные"], ["unanswered", "без ответа"]]
+    .filter(([key]) => selected[key]).map(([, title]) => title);
+  const description = criteria.length ? criteria.join(", ") : "условия не выбраны";
+  const label = n ? "Писем " + description + ": " + n + ". Открыть список" : "Открыть почту: нет писем (" + description + ")";
   button.title = label; button.setAttribute("aria-label", label);
 }
 async function refreshMailCounts() { try { setMailBadgeCounts(await core.call("mail_badge_counts")); } catch (_) {} }
-$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : "&important=1&unread=1"); };
+$("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : "&badge=1"); };
 core.on("mail_counts", counts => setMailBadgeCounts(counts));
 core.on("hello", d => { setMailBadgeMode((((d || {}).settings || {}).ui || {}).mail_badge_mode); setTimeout(refreshMailCounts, 700); });
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */

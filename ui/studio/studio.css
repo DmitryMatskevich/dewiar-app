@@ -2151,8 +2151,11 @@ html.framed .py-drawer { top: 38px; }
 .ml-mail-app { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
 .ml-sidebar { min-width:0; padding:10px; border:1px solid var(--line); border-radius:14px; background:color-mix(in srgb,var(--field) 62%,transparent); }
 .ml-nav-group { display:grid; gap:3px; padding-bottom:12px; border-bottom:1px solid var(--line); }
-.ml-badge-preference { display:grid; gap:5px; padding:12px 2px; color:var(--muted); font-size:12px; }
-.ml-badge-preference select { width:100%; min-width:0; }
+.ml-badge-filters { display:grid; gap:8px; margin:12px 0; padding:10px 9px; border:1px solid var(--line); border-radius:12px; color:var(--muted); font-size:12px; }
+.ml-badge-filters legend { padding:0 4px; color:var(--ink); font-weight:650; }
+.ml-badge-filters label { display:flex; align-items:center; gap:8px; cursor:pointer; }
+.ml-badge-filters input { accent-color:var(--accent); }
+.ml-badge-filters p { margin:0; font-size:11px; line-height:1.4; }
 .ml-view-item { min-height:42px; display:flex; align-items:center; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
 .ml-view-item:hover,.ml-view-item:focus-visible,.ml-view-item.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
 .ml-view-item.selected { font-weight:700; }

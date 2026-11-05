@@ -1,6 +1,7 @@
 /* Почтовый центр: IMAP accounts, cached triage, editable rules and version-confirmed replies. */
 let mlAccounts = [], mlSelected = "", mlCurrentMessage = null, mlDraft = null, mlRulesData = {};
 let mlView = "all", mlAccountFilter = "", mlSelectedMessageId = "";
+let mlBadgeFilters = { important: true, unread: false, unanswered: true };
 let mlAttentionShown = false;
 document.querySelector('nav button[data-p="mail"]').addEventListener("click", () => {
   if (core.connected) mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
@@ -80,7 +81,7 @@ function mlRemoveImportanceRule(id) {
 function mlSetView(view) {
   mlClearMessage();
   mlView = view; mlAccountFilter = "";
-  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", important_unread: "Важные непрочитанные", unanswered: "Без ответа" };
+  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", important_unread: "Важные непрочитанные", unanswered: "Без ответа", badge_custom: "На значке" };
   document.querySelectorAll("[data-ml-view]").forEach(b => {
     const selected = b.dataset.mlView === view;
     b.classList.toggle("selected", selected); b.setAttribute("aria-pressed", String(selected));
@@ -131,22 +132,48 @@ async function mlLoad() {
   if (waiting) mlAskPassword(waiting);
   const r = await core.call("mail_rules_get"); mlRulesData = r.rules; $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
   mlRenderImportanceRules(r.rules.importance_rules || []);
+  mlBadgeFilters = { important: true, unread: false, unanswered: true,
+    ...((typeof S !== "undefined" && S && S.ui && S.ui.mail_badge_filters) || {}) };
+  document.querySelectorAll("[data-mail-badge-filter]").forEach(input => {
+    input.checked = !!mlBadgeFilters[input.dataset.mailBadgeFilter];
+    input.onchange = mlSaveBadgeFilters;
+  });
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
   const params = new URLSearchParams(location.search);
-  if (params.has("important") && params.has("unread")) mlSetView("important_unread");
+  if (params.has("badge")) mlSetView("badge_custom");
+  else if (params.has("important") && params.has("unread")) mlSetView("important_unread");
   else if (params.has("important")) mlSetView("important"); else if (params.has("unread")) mlSetView("unread");
+}
+async function mlSaveBadgeFilters() {
+  const next = Object.fromEntries([...document.querySelectorAll("[data-mail-badge-filter]")]
+    .map(input => [input.dataset.mailBadgeFilter, input.checked]));
+  const previous = mlBadgeFilters;
+  mlBadgeFilters = next;
+  try {
+    S = await core.call("settings_save", { patch: { ui: { mail_badge_filters: next } } });
+    toast("Условия значка сохранены.");
+    if (mlView === "badge_custom") mlList();
+  } catch (e) {
+    mlBadgeFilters = previous;
+    document.querySelectorAll("[data-mail-badge-filter]").forEach(input => { input.checked = !!previous[input.dataset.mailBadgeFilter]; });
+    toast(e.message);
+  }
 }
 async function mlList() {
   try {
-    const important = mlView === "important" || mlView === "important_unread" || mlView === "unanswered";
-    const unanswered = mlView === "unanswered";
-    const items = await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
-      account_id: mlAccountFilter, important, unanswered, unread: mlView === "unread" || mlView === "important_unread" });
+    const important = mlView === "important" || mlView === "important_unread" || mlView === "unanswered" || (mlView === "badge_custom" && mlBadgeFilters.important);
+    const unanswered = mlView === "unanswered" || (mlView === "badge_custom" && mlBadgeFilters.unanswered);
+    const noBadgeFilters = mlView === "badge_custom" && !Object.values(mlBadgeFilters).some(Boolean);
+    const items = noBadgeFilters ? [] : await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
+      account_id: mlAccountFilter, important, unanswered, incoming_only: mlView === "badge_custom",
+      unread: mlView === "unread" || mlView === "important_unread" || (mlView === "badge_custom" && mlBadgeFilters.unread) });
     const box = $("#ml-list"); box.replaceChildren();
     if (!items.length) {
       const empty = document.createElement("div"); empty.className = "ml-empty";
       const configured = mlAccounts.some(a => a.enabled);
-      empty.innerHTML = `<b>${configured ? "Писем пока нет" : "Подключите почтовый ящик"}</b><span>${configured ? "Измените поиск или выберите другое представление." : "Откройте «Подключение и управление ящиками», чтобы начать получать письма."}</span>`;
+      empty.innerHTML = noBadgeFilters
+        ? "<b>Условия не выбраны</b><span>Отметьте, какие письма показывать на значке.</span>"
+        : `<b>${configured ? "Писем пока нет" : "Подключите почтовый ящик"}</b><span>${configured ? "Измените поиск или выберите другое представление." : "Откройте «Подключение и управление ящиками», чтобы начать получать письма."}</span>`;
       box.appendChild(empty); return;
     }
     items.forEach(m => {

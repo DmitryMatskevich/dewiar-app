@@ -680,12 +680,25 @@ class MailService:
                 "FROM messages WHERE folder='INBOX' AND importance='important' AND from_self=0").fetchone()
         return int(row[0] or 0)
 
-    def important_unread_count(self):
-        """Count unread important inbox messages, deduplicating copies in several accounts."""
+    def badge_count(self, filters=None):
+        """Count incoming messages matching all selected badge filters."""
+        if filters is None:
+            provider = getattr(self, "badge_filters_provider", None)
+            filters = provider() if callable(provider) else {}
+        filters = filters if isinstance(filters, dict) else {}
+        clauses = ["folder='INBOX'", "from_self=0"]
+        if filters.get("important"):
+            clauses.append("importance='important'")
+        if filters.get("unread"):
+            clauses.append("unread=1")
+        if filters.get("unanswered"):
+            clauses.append("answered=0")
+        if not any(filters.get(key) for key in ("important", "unread", "unanswered")):
+            return 0
         with self._db() as db:
             row = db.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), "
                 "account_id || ':' || uidvalidity || ':' || uid)) "
-                "FROM messages WHERE folder='INBOX' AND unread=1 AND importance='important' AND from_self=0").fetchone()
+                "FROM messages WHERE " + " AND ".join(clauses)).fetchone()
         return int(row[0] or 0)
 
     def attention_count(self):
@@ -694,8 +707,12 @@ class MailService:
         return sum(1 for aid in enabled if getattr(self._accounts.get(aid), "_secret_state", "") in ATTENTION_STATES)
 
     def badge_counts(self):
+        provider = getattr(self, "badge_filters_provider", None)
+        filters = provider() if callable(provider) else {}
+        filters = filters if isinstance(filters, dict) else {}
         return {"unread": self.unread_count(), "important": self.important_count(),
-                "important_unread": self.important_unread_count(), "attention": self.attention_count()}
+                "badge": self.badge_count(filters), "filters": filters,
+                "attention": self.attention_count()}
 
     def check(self, force=False):
         if force:
@@ -721,11 +738,13 @@ class MailService:
                 "unavailable": [{"id": a["id"], "address": a["address"], "error": a["last_error"] or "Ящик не подключён"}
                                 for a in accounts if not a["enabled"] or a["last_error"]]}
 
-    def list_mail(self, limit=30, unread=False, query="", important=False, account_id="", unanswered=False):
+    def list_mail(self, limit=30, unread=False, query="", important=False, account_id="", unanswered=False, incoming_only=False):
         clauses, args = ["folder='INBOX'"], []
+        if incoming_only:
+            clauses.append("from_self=0")
         if unread:
             clauses.append("unread=1")
-        if important or unanswered:
+        if important:
             clauses.append("importance='important'")
         if unanswered:
             clauses.append("answered=0 AND from_self=0")

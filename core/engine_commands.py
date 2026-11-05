@@ -736,7 +736,8 @@ class CommandsMixin:
                 if cmd == "mail_list":
                     return self.mail.list_mail(limit=a.get("limit", 50), unread=bool(a.get("unread")),
                                                query=a.get("query", ""), important=bool(a.get("important")),
-                                               account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")))
+                                               account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")),
+                                               incoming_only=bool(a.get("incoming_only")))
                 if cmd == "mail_unread_count":
                     return self.mail.unread_count()
                 if cmd == "mail_badge_counts":

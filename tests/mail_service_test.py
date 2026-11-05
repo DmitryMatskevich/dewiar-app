@@ -201,7 +201,14 @@ class MailServiceTests(unittest.TestCase):
             self.service._store_message(db, first, {**unread, "uid": "44", "message_id": "<read>", "unread": False}, "77", "INBOX")
         self.assertEqual(self.service.unread_count(), 2)
         self.assertEqual(self.service.important_count(), 3)
-        self.assertEqual(self.service.badge_counts(), {"unread": 2, "important": 3, "attention": 0})
+        self.service.badge_filters_provider = lambda: {"important": True, "unread": False, "unanswered": True}
+        self.assertEqual(self.service.badge_count(), 3)
+        self.service.badge_filters_provider = lambda: {"important": True, "unread": True, "unanswered": False}
+        self.assertEqual(self.service.badge_count(), 2)
+        counts = self.service.badge_counts()
+        self.assertEqual(counts["badge"], 2)
+        self.assertEqual(counts["filters"], {"important": True, "unread": True, "unanswered": False})
+        self.assertEqual(counts["attention"], 0)
 
     def test_reply_all_addresses_signature_revision_confirmation_and_one_shot(self):
         self.service.rules["signature_by_account"]["dcnt"] = "С уважением, Дмитрий"

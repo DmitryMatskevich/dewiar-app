@@ -523,6 +523,13 @@
             <button type="button" class="ml-view-item" data-ml-view="important" aria-pressed="false"><span>Важные</span></button>
             <button type="button" class="ml-view-item" data-ml-view="unanswered" aria-pressed="false"><span>Без ответа</span></button>
           </div>
+          <fieldset class="ml-badge-filters" aria-describedby="ml-badge-help">
+            <legend>Показывать на значке</legend>
+            <label><input type="checkbox" data-mail-badge-filter="important"><span>Важные</span></label>
+            <label><input type="checkbox" data-mail-badge-filter="unread"><span>Непрочитанные</span></label>
+            <label><input type="checkbox" data-mail-badge-filter="unanswered"><span>Без ответа</span></label>
+            <p id="ml-badge-help">Учитываются письма, которые соответствуют всем отмеченным условиям.</p>
+          </fieldset>
           <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
           <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>
           <p class="ml-sidebar-note">Заголовки обновляются каждые пять минут. Пароли хранятся в Связке ключей macOS.</p>

@@ -16,12 +16,12 @@ with sync_playwright() as pw:
     page.add_script_tag(content='''
       window.$=(selector,root=document)=>root.querySelector(selector);
       window.saved=[];
-      window.savedBadgeMode='unread';
+      window.savedBadgeFilters=null;
       window.core={connected:true,on(){return this},async call(cmd,args={}){
         if(cmd==='mail_accounts')return [];
         if(cmd==='mail_rules_get')return {rules:{schema_version:2,accounts:[],important_contacts:[],important_recipient_groups:[],importance_rules:[],website_forms:[],reply_preferences:{confirmed_self_addresses:[]}}};
         if(cmd==='mail_rules_save'){saved.push(args.rules);return {rules:args.rules};}
-        if(cmd==='settings_save'){savedBadgeMode=args.patch.ui.mail_badge_mode;return {ui:{mail_badge_mode:savedBadgeMode}};}
+        if(cmd==='settings_save'){savedBadgeFilters=args.patch.ui.mail_badge_filters;return {ui:{mail_badge_filters:savedBadgeFilters}};}
         if(cmd==='mail_list')return [];
         return {};
       }};
@@ -30,8 +30,8 @@ with sync_playwright() as pw:
     page.add_script_tag(content=(ROOT / "ui/studio/mail.js").read_text())
     page.locator('nav button[data-p="mail"]').click()
     page.wait_for_function("typeof mlRulesData==='object' && document.getElementById('ml-rules').value.length>0")
-    page.locator("#ml-badge-mode").select_option("important")
-    page.wait_for_function("savedBadgeMode==='important'")
+    page.locator('[data-mail-badge-filter="unread"]').check()
+    page.wait_for_function("savedBadgeFilters.unread===true && savedBadgeFilters.important===true")
     page.locator("#p-mail details.ml-settings").nth(1).locator("summary").click()
     page.locator("#ml-ir-sender").fill("client@example.org")
     page.locator("#ml-ir-subject").fill("Оплата")

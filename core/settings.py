@@ -218,7 +218,8 @@ DEFAULTS = {
                "mem_warn": True},  # предупреждать, когда памяти не хватает (открыто много других программ) — engine_brain._memory_watch
     "ui": {"hud_x": None, "hud_y": None, "subtitles": True, "force_x11": True,
            "calendar_badge_types": ["birthday", "event"], "calendar_badge_days": 1,
-           "mail_badge_mode": "unread",  # mail icon counter: unread or important inbox messages
+           "mail_badge_mode": "unread",  # legacy preference, retained for migration compatibility
+           "mail_badge_filters": {"important": True, "unread": False, "unanswered": True},
            "hud_w": None, "hud_h": None,    # свой размер карточки виджета (растянули за угол), px при масштабе 100 %
            "hud_show_orb": True,              # показывать большой круглый образ агента в окне
            "hud_orb_height": None,            # высота окна с образом для возврата после скрытия
