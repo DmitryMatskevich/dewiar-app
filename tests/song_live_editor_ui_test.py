@@ -135,8 +135,8 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert chord_preview.is_visible()
     assert 'Am' in chord_preview.inner_text() and 'E7' in chord_preview.inner_text()
     assert '\n' not in chord_preview.inner_text()
-    assert 'струны 1→6' in chord_preview.locator('.song-chord-tip').first.get_attribute('title')
-    assert 'струны 1→6' in page.locator('[data-live-chord-name]').first.get_attribute('title')
+    assert '1→6:' in chord_preview.locator('.song-chord-tip').first.get_attribute('title')
+    assert '1→6:' in page.locator('[data-live-chord-name]').first.get_attribute('title')
     assert page.locator('[data-live-chord-name]').first.get_attribute('maxlength') == '6'
     assert page.locator('[data-live-chord-time]').first.get_attribute('step') == '0.001'
     assert page.locator('[data-live-chord-time]').first.get_attribute('min') == '0.000'

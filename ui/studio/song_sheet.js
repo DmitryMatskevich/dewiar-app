@@ -113,7 +113,9 @@ window.SongSheet = (() => {
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
-      if(text) lines.push({kind:'chords',text,phrase_id:phraseId,chord_marks:chords.map(c=>({name:c.name,at:c.at}))});
+      if(text) lines.push({kind:'chords',text,phrase_id:phraseId,chord_marks:chords.map(c=>({name:c.name,at:c.at,
+        voicing_fingering:c.voicing_fingering||c.fingering||c.voicing?.fingering,
+        voicing_probability:c.voicing_probability??c.fingering_probability??c.voicing?.probability}))});
       if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
         display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true; }
       else if(text) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
@@ -229,13 +231,15 @@ window.SongSheet = (() => {
     const body=sheetRows(row).map(r=>r.text).join('\n').replace(/^\n+|\n+$/g, '');
     const names=[...new Set(sheetRows(row).filter(r=>r.kind==='chords')
       .flatMap(r=>r.text.trim().split(/\s+/)).filter(Boolean))];
+    const evidenceFor=name=>[...(row.chords||[]),...(row.guitar_sheet||[]).flatMap(line=>line.chords||[])]
+      .find(chord=>chord.name===name);
     const fingerings=names.map(name=>{
-      const shape=chordFingering(name);
-      return `${name} — ${shape || 'аппликатура не найдена'}`;
+      const evidence=evidenceFor(name), exact=exactVoicing(evidence), shape=exact || chordFingering(name);
+      return `${name} — ${shape || 'позиция не определена'}${shape && !exact?' (оценка)':''}`;
     });
     const sources=sourceLinks(row).map(source=>`${source.title} — ${source.url}`);
     const extras=[];
-    if(fingerings.length) extras.push(`Аппликатуры (струны 1→6; число — лад, 0 — открытая струна, x — не играть):\n${fingerings.join('\n')}`);
+    if(fingerings.length) extras.push(`Аппликатуры (струны 1→6):\n${fingerings.join('\n')}`);
     if(sources.length) extras.push(`Источники:\n${sources.join('\n')}`);
     return [body,...extras].filter(Boolean).join('\n\n');
   }
@@ -299,11 +303,22 @@ window.SongSheet = (() => {
     const result=[...found.values()].sort((a,b)=>a.score-b.score||a.shape.localeCompare(b.shape)).slice(0,Math.max(3,limit)).map(item=>item.shape);
     fingeringCache.set(cacheKey,result);return result.slice(0,limit);
   }
-  function chordFingering(symbol) { return chordFingerings(symbol,1)[0]||''; }
-  function chordTooltip(symbol) {
-    const shapes=chordFingerings(symbol,3);
-    if(!shapes.length) return `${symbol}: аппликатура не найдена`;
-    return `${symbol} · струны 1→6 (лад; 0 — открытая, x — не играть): ${shapes[0]}${shapes.length>1?` · другие варианты: ${shapes.slice(1).join(' / ')}`:''}`;
+  function exactVoicing(evidence) {
+    const value=evidence?.voicing_fingering || evidence?.fingering || evidence?.voicing?.fingering;
+    if(Array.isArray(value)) return value.length===6 && value.every(item=>/^(?:x|[0-9]|1[0-9]|2[0-4])$/.test(String(item))) ? value.join('-') : '';
+    const shape=String(value||'').trim();
+    return /^(?:x|[0-9]|1[0-9]|2[0-4])(?:-(?:x|[0-9]|1[0-9]|2[0-4])){5}$/.test(shape) ? shape : '';
+  }
+  function voicingProbability(evidence) {
+    const raw=evidence?.voicing_probability ?? evidence?.fingering_probability ?? evidence?.voicing?.probability;
+    const value=Number(raw);
+    return Number.isFinite(value) && value>=0 && value<=1 ? Math.round(value*100) : null;
+  }
+  function chordFingering(symbol,evidence) { return exactVoicing(evidence) || chordFingerings(symbol,1)[0]||''; }
+  function chordTooltip(symbol,evidence) {
+    const exact=exactVoicing(evidence), shape=exact || chordFingering(symbol), probability=voicingProbability(evidence);
+    if(!shape) return `${symbol}: позиция на грифе не определена`;
+    return `${symbol} · 1→6: ${shape}${exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
   }
   function chordLineHTML(line) {
     if(!line.chord_marks?.length) return esc(line.text);
@@ -311,7 +326,7 @@ window.SongSheet = (() => {
     for(const chord of line.chord_marks) {
       const at=Math.max(cursor,Math.min(line.text.length,Number(chord.at)||0));
       html+=esc(line.text.slice(cursor,at));
-      html+=`<span class="song-chord-tip" title="${esc(chordTooltip(chord.name))}" aria-label="${esc(chordTooltip(chord.name))}">${esc(chord.name)}</span>`;
+      html+=`<span class="song-chord-tip" title="${esc(chordTooltip(chord.name,chord))}" aria-label="${esc(chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
       cursor=at+chord.name.length;
     }
     return html+esc(line.text.slice(cursor));

@@ -5,7 +5,10 @@ assert.equal(s.chordFingering('Em'),'0-0-0-2-2-0');
 assert.equal(s.chordFingering('Am'),'0-1-2-2-0-x');
 assert.equal(s.chordFingering('C/G'),'0-1-0-2-3-3');
 assert.equal(s.chordFingerings('Am').length,3);
-assert.match(s.chordTooltip('Am'),/струны 1→6.*0-1-2-2-0-x.*другие варианты/);
+assert.match(s.chordTooltip('Am'),/1→6: 0-1-2-2-0-x/);
+assert.ok(!s.chordTooltip('Am').includes('другие варианты'));
+assert.equal(s.chordFingering('Am',{voicing_fingering:'5-5-7-7-6-5'}),'5-5-7-7-6-5');
+assert.match(s.chordTooltip('Am',{voicing_fingering:'5-5-7-7-6-5',voicing_probability:0.82}),/5-5-7-7-6-5.*вероятность 82%/);
 // The preview and clipboard must use the same current semitone offset.
 const fixture={song_id:'copy-check',title:'Must not copy',artist:'Artist',phrases:[{phrase_id:'p'}],sections:[{label:'Verse',phrase_indexes:[0]}],guitar_sheet:[{phrase_id:'p',text:'One two',cells:[{char_index:0,chords:['B7/D#']},{char_index:9,chords:['F#m']}]},{text:'',unplaced_chords:[{name:'Bb',start_ms:1234},{name:'N',start_ms:1500}]}]};
 const elements=new Map();global.document={getElementById:id=>{if(!elements.has(id))elements.set(id,{value:'',textContent:'',setAttribute(name,value){this[name]=value}});return elements.get(id)}};

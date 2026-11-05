@@ -179,6 +179,17 @@ class SongPipelineTest(unittest.TestCase):
         self.assertEqual(rows[0]['timing_quality'], 'gap')
         self.assertEqual(rows[0]['unplaced_chords'][0]['name'], 'Em')
 
+    def test_exact_voicing_is_preserved_but_name_only_has_no_fake_position(self):
+        rows = build_guitar_sheet([{'text': 'Строка', 'start_ms': 0, 'end_ms': 4000}], [
+            {'name': 'Am', 'start_ms': 0, 'voicing_fingering': '5-5-7-7-6-5',
+             'voicing_probability': .82, 'voicing_source': 'source-tab'},
+            {'name': 'E', 'start_ms': 2000, 'voicing_fingering': 'bad'}])
+        exact = rows[0]['chords'][0]
+        self.assertEqual(exact['voicing_fingering'], '5-5-7-7-6-5')
+        self.assertEqual(exact['voicing_probability'], .82)
+        self.assertEqual(exact['voicing_source'], 'source-tab')
+        self.assertNotIn('voicing_fingering', rows[0]['chords'][1])
+
 
 if __name__ == '__main__':
     unittest.main()

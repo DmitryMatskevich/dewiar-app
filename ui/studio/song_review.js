@@ -237,10 +237,10 @@ window.SongReview = (() => {
         const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
         const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
         const fingering=rowElement?.querySelector('[data-live-chord-fingering]');
-        const shapes=window.SongSheet?.chordFingerings(name,3)||[];
+        const shape=window.SongSheet?.chordFingering(name,chord)||'';
         if(fingering) {
-          fingering.textContent=shapes[0]?`1→6 ${shapes[0]}`:'—';
-          fingering.title=window.SongSheet?.chordTooltip(name)||'Аппликатура не найдена';
+          fingering.textContent=shape?`1→6 ${shape}`:'—';
+          fingering.title=window.SongSheet?.chordTooltip(name,chord)||'Позиция на грифе не определена';
         }
         const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
         const startMs=Number.isFinite(seconds)&&seconds>=0?Math.round(seconds*1000):Number(chord.start_ms)||0;
@@ -263,7 +263,7 @@ window.SongReview = (() => {
       let chordLine='',cursor=0;
       for(const chord of placed) {
         const at=Math.max(cursor,chord.at);
-        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(window.SongSheet.chordTooltip(chord.name))}">${esc(chord.name)}</span>`;
+        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(window.SongSheet.chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
         cursor=at+chord.name.length;
       }
       livePreviewChords.innerHTML=chordLine;
@@ -284,9 +284,10 @@ window.SongReview = (() => {
       liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
         liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
       });
-      liveChords.querySelectorAll('[data-live-chord-name]').forEach(input=>{
-        input.title=window.SongSheet?.chordTooltip(input.value)||'Название аккорда';
-        input.addEventListener('input',()=>{input.title=window.SongSheet?.chordTooltip(input.value)||'Название аккорда';updateLivePreview();});
+      liveChords.querySelectorAll('[data-live-chord-name]').forEach((input,index)=>{
+        const chord=liveChordDraft[index]||{};
+        input.title=window.SongSheet?.chordTooltip(input.value,chord)||'Название аккорда';
+        input.addEventListener('input',()=>{input.title=window.SongSheet?.chordTooltip(input.value,chord)||'Название аккорда';updateLivePreview();});
       });
       liveChords.querySelectorAll('[data-live-chord-time]').forEach(input=>input.addEventListener('input',updateLivePreview));
       updateLivePreview();

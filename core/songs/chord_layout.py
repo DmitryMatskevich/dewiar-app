@@ -10,6 +10,31 @@ def clean_chord(value):
     return value[0].upper() + value[1:]
 
 
+def _voicing_fields(event):
+    """Keep an exact guitar position only when an upstream source supplied it.
+
+    Chordino/CQT names do not contain string/fret information, so this data
+    must never be manufactured from the chord name.  A source-aware voicing
+    may use ``0`` for an open string, ``x`` for an unplayed string and a fret
+    number for strings 1→6.
+    """
+    value=event.get('voicing_fingering', event.get('fingering'))
+    if isinstance(value, (list, tuple)):
+        value='-'.join(str(item).strip() for item in value)
+    value=str(value or '').strip()
+    if not re.fullmatch(r'(?:x|[0-9]|1[0-9]|2[0-4])(?:-(?:x|[0-9]|1[0-9]|2[0-4])){5}', value):
+        return {}
+    probability=event.get('voicing_probability', event.get('fingering_probability'))
+    try:
+        probability=float(probability)
+    except (TypeError, ValueError):
+        probability=None
+    fields={'voicing_fingering':value, 'voicing_source':str(event.get('voicing_source') or 'source').strip()[:80]}
+    if probability is not None and 0 <= probability <= 1:
+        fields['voicing_probability']=round(probability, 4)
+    return fields
+
+
 def _anchor(event, phrase):
     anchor = event.get('anchor') or {}
     if anchor.get('phrase_id') == phrase.get('phrase_id') and anchor.get('kind') in {'manual', 'char_ctc'}:
@@ -57,7 +82,10 @@ def layout_chords(phrases, events):
         start = int(event.get('start_ms', 0))
         if start < 0:
             raise ValueError('Время аккорда не может быть отрицательным')
-        valid.append({**event, 'name': name, 'start_ms': start})
+        voicing=_voicing_fields(event)
+        base={key:value for key,value in event.items()
+              if key not in {'voicing_fingering','fingering','voicing_probability','fingering_probability','voicing_source'}}
+        valid.append({**base, **voicing, 'name': name, 'start_ms': start})
     valid.sort(key=lambda e: e['start_ms'])
     out, used = [], set()
     for phrase in phrases or []:
