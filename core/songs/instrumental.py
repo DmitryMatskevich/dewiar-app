@@ -89,6 +89,35 @@ class InstrumentalManager:
             thread = self._threads.get(song_id)
             return bool(thread and thread.is_alive())
 
+    def prepare_pending(self):
+        """Queue every owned recording which has no usable instrumental yet.
+
+        This is deliberately independent of lyric review: a karaoke worker can
+        run while text, sections, or chords still need checking.  The method is
+        safe to call at startup and after a new recording is attached.
+        """
+        result = {"started": [], "ready": [], "already_running": [], "missing_audio": [], "errors": []}
+        for row in self.store.list(limit=500):
+            song_id = str(row.get("song_id") or "")
+            audio = row.get("audio") or {}
+            source = (self.root / str(audio.get("path") or "")).resolve()
+            if self.root not in source.parents or not source.is_file():
+                result["missing_audio"].append(song_id)
+                continue
+            summary = self.summary(song_id)
+            if summary.get("state") == "ready" and summary.get("artifact"):
+                result["ready"].append(song_id)
+                continue
+            if self.running(song_id):
+                result["already_running"].append(song_id)
+                continue
+            try:
+                started = self.start(song_id)
+                result["ready" if started.get("reused") else "started"].append(song_id)
+            except Exception as exc:  # one card must not block the rest
+                result["errors"].append({"song_id": song_id, "error": str(exc)[:240]})
+        return result
+
     def recover(self):
         for manifest_path in self.root.glob("*/karaoke/manifest.json"):
             try:

@@ -174,6 +174,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         # Older builds used the single `_heavy_lock`; keeping one semaphore
         # here preserves the resource budget while allowing two songs at once.
         self.song_instrumental._heavy_slots = self.song_analyzer._heavy_slots
+        # Karaoke is a background stage, not a review gate.  Recover interrupted
+        # jobs and queue recordings which never received an instrumental file.
+        threading.Thread(target=self.song_instrumental.prepare_pending,
+                         name="song-instrumental-resume", daemon=True).start()
         from songs.sources import SongSources
         self.song_sources = SongSources(self.song_store, self.emit, self.song_analyzer)
         from songs.processing import SongProcessing
@@ -687,7 +691,30 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
 
     # ---------- события наружу ----------
 
+    def _queue_song_instrumental(self, song):
+        if not getattr(self, "song_instrumental", None) or not isinstance(song, dict):
+            return
+        song_id = str(song.get("song_id") or "")
+        audio = song.get("audio") or {}
+        if not song_id or not audio.get("path"):
+            return
+
+        def run():
+            try:
+                summary = self.song_instrumental.summary(song_id)
+                if summary.get("state") in {"ready", "queued", "preparing", "separating", "checking"}:
+                    return
+                self.song_instrumental.start(song_id)
+            except (ValueError, OSError, RuntimeError):
+                # The next startup or explicit retry can recover a failed job;
+                # never let a karaoke failure interrupt lyric processing.
+                return
+
+        threading.Thread(target=run, name="song-instrumental-auto", daemon=True).start()
+
     def emit(self, type_, **kw):
+        if type_ in {"song_capture", "song_analysis"} and not kw.get("running") and kw.get("song"):
+            self._queue_song_instrumental(kw["song"])
         if type_.startswith('song_') and 'song' in kw:
             from songs.public import public_song
             kw['song'] = public_song(kw['song'], summary=True)

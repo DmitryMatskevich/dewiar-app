@@ -6,7 +6,7 @@
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const processingSongs = new Set();
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
-  const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["review", "Проверяем"], ["karaoke", "Минусовка"]];
+  const stages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознаём слова"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["karaoke", "Минусовка"], ["review", "Проверяем"]];
   const esc = (v) => escH(v == null ? "" : v);
   const call = (name, args) => core.call(name, args || {});
   const $s = (id) => document.getElementById(id);
@@ -31,7 +31,7 @@
   function instrumentalPanel(row, state) {
     const busy = ["queued", "preparing", "separating", "checking"].includes(state);
     const hasAudio = !!(row.capabilities?.audio || row.audio?.path);
-    const message = state === "ready" ? "Минусовка создана." : state === "failed" ? `Не удалось создать минусовку: ${row.karaoke?.error || "ошибка подготовки"}` : busy ? "Идёт подготовка минусовки…" : hasAudio ? "Создайте версию песни без вокала." : "Добавьте аудиозапись, чтобы создать минусовку.";
+    const message = state === "ready" ? "Минусовка создана." : state === "failed" ? `Не удалось создать минусовку: ${row.karaoke?.error || "ошибка подготовки"}` : busy ? "Идёт подготовка минусовки независимо от проверки текста…" : hasAudio ? "Минусовка будет подготовлена автоматически в пакетной обработке." : "Добавьте аудиозапись, чтобы создать минусовку.";
     const action = hasAudio
       ? `<button type="button" class="btn primary" id="song-instrumental" ${busy ? "disabled" : ""}>${busy ? "Готовится…" : state === "ready" ? "Пересоздать минусовку" : state === "failed" || state === "interrupted" ? "Повторить" : "Создать минусовку"}</button>${busy ? '<button type="button" class="btn" id="song-instrumental-cancel">Отменить</button>' : ""}`
       : `<button type="button" class="btn" id="song-instrumental-add-audio">Добавить аудиозапись</button>`;
@@ -40,8 +40,13 @@
   }
   function stageIndex(row) {
     const instrumental = row.karaoke?.state;
-    if (instrumental === "ready") return stages.length;
-    if (["queued", "preparing", "separating", "checking"].includes(instrumental)) return stages.length - 1;
+    const karaokeIndex = stages.findIndex((x) => x[0] === "karaoke");
+    const reviewIndex = stages.findIndex((x) => x[0] === "review");
+    // Минусовка запускается независимо, но в карточке показывается как
+    // текущий этап только после завершения распознавания и аккордов.
+    if (["review", "ready"].includes(row.stage) || row.status === "review") {
+      return instrumental === "ready" ? reviewIndex : karaokeIndex;
+    }
     const i = stages.findIndex((x) => x[0] === row.stage);
     return i < 0 ? 0 : i;
   }
@@ -53,6 +58,9 @@
     if (['lyrics', 'structure', 'chords'].includes(key) && row.audio?.path && (row.analysis_runs?.length || row.capabilities?.lyrics)) {
       const labels = {lyrics: 'распознавание слов', structure: 'разметку куплетов и припевов', chords: 'проверку аккордов'};
       return `<button type="button" class="btn small song-step-retry" data-song-rerun-step="${key}" data-song-id="${esc(row.song_id)}" title="Перезапустить ${labels[key]}; результаты остальных этапов и пользовательские правки сохранятся">Повторить этап</button>`;
+    }
+    if (key === 'karaoke' && row.audio?.path && !['queued', 'preparing', 'separating', 'checking'].includes(row.karaoke?.state)) {
+      return `<button type="button" class="btn small song-step-retry" data-song-rerun-karaoke="${esc(row.song_id)}" title="Запустить или повторить подготовку минусовки независимо от проверки текста">Повторить этап</button>`;
     }
     return '';
   }
@@ -178,6 +186,17 @@
         await load();
       } catch (error) {
         toast(error.message || 'Не удалось перезапустить этап', 5000, 'bad');
+        button.disabled = false;
+      }
+    }));
+    detail.querySelectorAll('[data-song-rerun-karaoke]').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await call('song_instrumental_prepare', {song_id: row.song_id, force: true});
+        renderDetail(await call('song_get', {song_id: row.song_id}));
+        await load();
+      } catch (error) {
+        toast(error.message || 'Не удалось перезапустить минусовку', 5000, 'bad');
         button.disabled = false;
       }
     }));
