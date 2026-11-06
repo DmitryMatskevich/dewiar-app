@@ -34,6 +34,11 @@ window.SongSheet = (() => {
     const duration=Math.max(1,(line.end_ms || 0)-(line.start_ms || 0));
     return [...positioned,...line.unplaced_chords.map(c=>({...c,char_index:Math.max(0,Math.min(line.text.length-1,Math.floor((c.start_ms-(line.start_ms || 0))/duration*line.text.length)))}))];
   }
+  function vocalBounds(line) {
+    const words=(line.display_words||line.words||[]).filter(word=>Number.isFinite(Number(word.start_ms))&&Number.isFinite(Number(word.end_ms))&&Number(word.end_ms)>Number(word.start_ms));
+    if(!words.length) return {start:Number(line.start_ms)||0,end:Number(line.end_ms)||Number(line.start_ms)||0};
+    return {start:Math.min(...words.map(word=>Number(word.start_ms))),end:Math.max(...words.map(word=>Number(word.end_ms)))};
+  }
   function compactChords(line, steps, width=42) {
     let candidates=chordCandidates(line);
     if (!line.text && line.unplaced_chords?.length) {
@@ -89,8 +94,8 @@ window.SongSheet = (() => {
       const next=source.slice(i).find(line=>line.text);
       const eventStart=Math.min(...events.map(event=>Number(event.start_ms)||0));
       const eventEnd=Math.max(...events.map(event=>Number(event.end_ms)||Number(event.start_ms)||0));
-      let start=previous ? Number(previous.end_ms) : 0;
-      let end=next ? Number(next.start_ms) : duration;
+      let start=previous ? vocalBounds(previous).end : 0;
+      let end=next ? vocalBounds(next).start : duration;
       if(!Number.isFinite(start)) start=eventStart;
       if(!Number.isFinite(end)||end<=start) { start=eventStart; end=Math.max(eventEnd,eventStart+1000); }
       const phraseId=next?.source_phrase_ids?.[0]||next?.phrase_id;

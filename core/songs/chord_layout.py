@@ -35,6 +35,20 @@ def _voicing_fields(event):
     return fields
 
 
+def _vocal_bounds(phrase):
+    """Use timed words to exclude instrumental lead-ins and tails."""
+    start = int(phrase.get('start_ms') or 0)
+    end = int(phrase.get('end_ms') or start)
+    words = [word for word in phrase.get('words') or []
+             if isinstance(word.get('start_ms'), (int, float))
+             and isinstance(word.get('end_ms'), (int, float))
+             and word.get('end_ms') > word.get('start_ms')]
+    if words:
+        start = min(int(word['start_ms']) for word in words)
+        end = max(int(word['end_ms']) for word in words)
+    return start, max(start, end)
+
+
 def _anchor(event, phrase):
     anchor = event.get('anchor') or {}
     if anchor.get('phrase_id') == phrase.get('phrase_id') and anchor.get('kind') in {'manual', 'char_ctc'}:
@@ -93,18 +107,29 @@ def layout_chords(phrases, events):
         if not text:
             continue
         ps, pe = int(phrase.get('start_ms') or 0), int(phrase.get('end_ms') or 0)
+        vocal_ps, vocal_pe = _vocal_bounds(phrase)
         marks, unplaced = [], []
         # A lyric line also needs the chord already sounding at its start.
         # This is a continuation, not an invented new change. N stops carry-in.
-        previous = [e for e in events or [] if int(e.get('start_ms',0)) < ps]
+        previous = [e for e in events or []
+                    if int(e.get('start_ms', 0)) < vocal_ps
+                    and (e.get('end_ms') is None or int(e.get('end_ms') or 0) > vocal_ps)]
         active = max(previous, key=lambda e: int(e.get('start_ms',0)), default=None)
-        if active and clean_chord(active.get('name')) and (active.get('end_ms') is None or active['end_ms'] > ps):
+        if active and clean_chord(active.get('name')) and (active.get('end_ms') is None or active['end_ms'] > vocal_ps):
             marks.append({**active, 'char_index':0, 'anchor_quality':'continuation', 'continued':True})
         for i, event in enumerate(valid):
-            if not ps <= event['start_ms'] < pe:
+            event_end = int(event.get('end_ms') or event['start_ms'])
+            if vocal_ps <= event['start_ms'] < vocal_pe:
+                used.add(i)
+            elif event['start_ms'] < vocal_ps and event_end > vocal_ps:
+                # A chord crossing the first word is already shown as a
+                # carry-in chord; do not duplicate it in the instrumental row.
+                used.add(i)
                 continue
-            used.add(i)
-            at, quality = _anchor(event, {**phrase, 'text': text})
+            else:
+                continue
+            at, quality = _anchor(event, {**phrase, 'start_ms': vocal_ps,
+                                          'end_ms': vocal_pe, 'text': text})
             mark = {**event, 'char_index': at, 'anchor_quality': quality}
             (marks if at is not None else unplaced).append(mark)
         grouped = {}

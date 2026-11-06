@@ -179,6 +179,19 @@ class SongPipelineTest(unittest.TestCase):
         self.assertEqual(rows[0]['timing_quality'], 'gap')
         self.assertEqual(rows[0]['unplaced_chords'][0]['name'], 'Em')
 
+    def test_word_bounds_keep_intro_chords_out_of_first_lyric(self):
+        phrase = {'text': 'Первая строка', 'start_ms': 0, 'end_ms': 5000,
+                  'words': [{'text': 'Первая', 'start_ms': 3000, 'end_ms': 3600},
+                            {'text': 'строка', 'start_ms': 3600, 'end_ms': 4200}]}
+        rows = build_guitar_sheet([phrase], [
+            {'name': 'Em', 'start_ms': 500, 'end_ms': 2500},
+            {'name': 'Am', 'start_ms': 3200, 'end_ms': 4200},
+        ])
+        gap = next(row for row in rows if row['timing_quality'] == 'gap')
+        lyric = next(row for row in rows if row.get('text'))
+        self.assertEqual(gap['unplaced_chords'][0]['name'], 'Em')
+        self.assertEqual(lyric['chords'][0]['name'], 'Am')
+
     def test_exact_voicing_is_preserved_but_name_only_has_no_fake_position(self):
         rows = build_guitar_sheet([{'text': 'Строка', 'start_ms': 0, 'end_ms': 4000}], [
             {'name': 'Am', 'start_ms': 0, 'voicing_fingering': '5-5-7-7-6-5',

@@ -111,6 +111,20 @@ const intro=s.sheetHTML({song_id:'intro',title:'Intro',phrases:[],guitar_sheet:[
 assert.match(intro,/data-cue-step="3">Всту<\/span><span class="song-paper-cue-part" data-cue-step="2">пле<\/span><span class="song-paper-cue-part" data-cue-step="1">ние<\/span>/);
 assert.ok(!intro.includes('До вокала'));
 console.log('Intro countdown highlights title parts in 3-2-1 order without a vocal-wait message: OK');
+const delayedIntro={guitar_sheet:[
+ {text:'',unplaced_chords:[{name:'Em',start_ms:500,end_ms:2500}]},
+ {phrase_id:'next',text:'First lyric.',start_ms:0,end_ms:5000,
+  display_words:[{char_start:0,char_end:5,start_ms:3000,end_ms:3600}],
+  chords:[{name:'Am',char_index:0,start_ms:3000,end_ms:5000}]}
+]};
+const delayedRows=s.sheetRows(delayedIntro).filter(row=>row.kind!=='space');
+assert.equal(delayedRows[0].kind,'chords');
+assert.equal(delayedRows[1].kind,'instrumental');
+assert.equal(delayedRows[1].start_ms,0);
+assert.equal(delayedRows[1].end_ms,3000);
+assert.equal(delayedRows[2].kind,'chords');
+assert.equal(delayedRows[3].kind,'lyrics');
+console.log('Intro boundary follows first timed word instead of segment zero: OK');
 
 assert.equal(s.lineTarget([1000,5000,11000],0,1),1000);
 assert.equal(s.lineTarget([1000,5000,11000],3000,-1),null);
