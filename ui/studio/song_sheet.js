@@ -401,8 +401,9 @@ window.SongSheet = (() => {
     popover.innerHTML=`<div class="song-chord-popover-head"><b>${esc(state.symbol)}</b><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin title="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}" aria-label="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Закрыть подсказку" aria-label="Закрыть подсказку">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}`;
     popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:''); renderChordPopover(); positionChordPopover(popover,state.trigger); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
-    popover.querySelector('[data-chord-prev]').onclick=()=>{ state.index=(state.index+state.variants.length-1)%state.variants.length; renderChordPopover(); positionChordPopover(popover,state.trigger); };
-    popover.querySelector('[data-chord-next]').onclick=()=>{ state.index=(state.index+1)%state.variants.length; renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    const moveVariant=delta=>{ state.index=(state.index+delta+state.variants.length)%state.variants.length; if(state.pinned) setPinnedVoicing(state.symbol,state.songId,state.variants[state.index]); renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    popover.querySelector('[data-chord-prev]').onclick=()=>moveVariant(-1);
+    popover.querySelector('[data-chord-next]').onclick=()=>moveVariant(1);
     positionChordPopover(popover,state.trigger);
   }
   function scheduleChordPopoverHide() { clearTimeout(chordPopoverHideTimer); chordPopoverHideTimer=setTimeout(()=>hideChordPopover(),180); }
