@@ -358,17 +358,34 @@ window.SongSheet = (() => {
     chordFingerings(symbol,8).forEach(add);
     return result;
   }
+  function inferChordName(shape) {
+    const values=String(shape||'').split('-'), sounded=[];
+    values.forEach((value,index)=>{ if(value==='x'||value==='') return; const fret=Number(value); if(!Number.isInteger(fret)||fret<0) return; sounded.push((STRING_PC[index]+fret)%12); });
+    if(!sounded.length) return '?';
+    const set=new Set(sounded), bass=sounded.at(-1), noteNames=['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'];
+    const suffixes=Object.entries(CHORD_INTERVALS).filter(([suffix])=>suffix==='m7b5'||suffix==='maj7'||suffix==='m7'||suffix==='7'||suffix==='m'||suffix==='');
+    let best=null;
+    for(const root of new Set(sounded)) for(const [suffix,intervals] of suffixes) {
+      const expected=new Set(intervals.map(interval=>(root+interval)%12));
+      const exact=expected.size===set.size&&[...expected].every(note=>set.has(note));
+      const coverage=[...set].filter(note=>expected.has(note)).length/Math.max(set.size,expected.size);
+      const score=(exact?100:0)+coverage*20+(root===bass?5:0)-(expected.size-set.size)*2;
+      if(!best||score>best.score) best={score,name:noteNames[root]+suffix};
+    }
+    return best?.name || noteNames[bass]+'?';
+  }
   function chordDiagramHTML(symbol,shape,index,total) {
     const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'];
     const fretted=values.map(Number).filter(Number.isFinite).filter(value=>value>0);
-    const base=fretted.length ? Math.max(1,Math.min(...fretted)) : 1;
+    const minFret=fretted.length ? Math.min(...fretted) : 1;
+    const base=minFret<=4 ? 1 : minFret;
     const fretLabels=Array.from({length:4},(_,column)=>base+column);
     const rows=labels.map((label,row)=>{
       const value=values[row]??'x', fret=Number(value);
-      const cells=fretLabels.map(number=>`<span class="song-chord-fret ${fret===number?'filled':''}" aria-hidden="true"></span>`).join('');
-      return `<div class="song-chord-row"><span class="song-chord-string">${label}</span><span class="song-chord-grid">${cells}</span><b class="song-chord-value">${esc(value)}</b></div>`;
+      const cells=fretLabels.map(number=>`<button type="button" class="song-chord-fret ${fret===number?'filled':''}" data-chord-fret="${number}" data-chord-string="${row}" aria-label="${label}, лад ${number}"></button>`).join('');
+      return `<div class="song-chord-row"><span class="song-chord-string">${label}</span><span class="song-chord-grid">${cells}</span><button type="button" class="song-chord-value" data-chord-string-toggle="${row}" aria-label="${label}, ${value==='x'?'включить открытую струну':'переключить открытую или заглушенную струну'}">${esc(value)}</button></div>`;
     }).join('');
-    return `<div class="song-chord-fret-head"><span></span>${fretLabels.map(number=>`<b>${number}</b>`).join('')}<span></span></div><div class="song-chord-diagram">${rows}</div><div class="song-chord-position">${base} лад · струны 1→6</div><div class="song-chord-variants"><button type="button" class="song-chord-nav" data-chord-prev aria-label="Предыдущая аппликатура">‹</button><span>${index+1}/${total}</span><button type="button" class="song-chord-nav" data-chord-next aria-label="Следующая аппликатура">›</button></div>`;
+    return `<div class="song-chord-fret-head"><span></span>${fretLabels.map(number=>`<b>${number}</b>`).join('')}<span></span></div><div class="song-chord-diagram">${rows}</div><div class="song-chord-variants"><button type="button" class="song-chord-nav" data-chord-prev aria-label="Предыдущая аппликатура">‹</button><span>${index+1}/${total}</span><button type="button" class="song-chord-nav" data-chord-next aria-label="Следующая аппликатура">›</button></div>`;
   }
   let chordPopoverBound=false, chordPopoverState=null, chordPopoverHideTimer=0;
   function chordPopoverElement() {
@@ -398,9 +415,22 @@ window.SongSheet = (() => {
     const state=chordPopoverState, popover=chordPopoverElement();
     if(!state||!state.variants.length) { popover.hidden=true; return; }
     const shape=state.variants[state.index];
-    popover.innerHTML=`<div class="song-chord-popover-head"><b>${esc(state.symbol)}</b><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin title="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}" aria-label="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Закрыть подсказку" aria-label="Закрыть подсказку">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}`;
+    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><b>${esc(state.symbol)}</b><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin title="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}" aria-label="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Закрыть подсказку" aria-label="Закрыть подсказку">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}`;
     popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:''); renderChordPopover(); positionChordPopover(popover,state.trigger); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
+    popover.querySelectorAll('[data-chord-transpose]').forEach(button=>button.onclick=()=>{
+      state.symbol=transpose(state.symbol,Number(button.dataset.chordTranspose)||0);
+      state.variants=chordVariants(state.symbol,{song_id:state.songId});
+      state.index=0; state.pinned=false; setPinnedVoicing(state.symbol,state.songId,''); renderChordPopover(); positionChordPopover(popover,state.trigger);
+    });
+    popover.querySelectorAll('[data-chord-fret]').forEach(button=>button.onclick=()=>{
+      const values=shape.split('-'), string=Number(button.dataset.chordString), fret=Number(button.dataset.chordFret);
+      values[string]=values[string]===String(fret)?'0':String(fret); state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
+    });
+    popover.querySelectorAll('[data-chord-string-toggle]').forEach(button=>button.onclick=()=>{
+      const values=shape.split('-'), string=Number(button.dataset.chordStringToggle), current=values[string];
+      values[string]=current==='x'?'0':current==='0'?'x':'0'; state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
+    });
     const moveVariant=delta=>{ state.index=(state.index+delta+state.variants.length)%state.variants.length; if(state.pinned) setPinnedVoicing(state.symbol,state.songId,state.variants[state.index]); renderChordPopover(); positionChordPopover(popover,state.trigger); };
     popover.querySelector('[data-chord-prev]').onclick=()=>moveVariant(-1);
     popover.querySelector('[data-chord-next]').onclick=()=>moveVariant(1);
@@ -512,6 +542,8 @@ window.SongSheet = (() => {
       trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/>',
       down:'<path d="M12 4v16m-6-6 6 6 6-6"/>',
       up:'<path d="M12 20V4m-6 6 6-6 6 6"/>',
+      left:'<path d="m15 18-6-6 6-6"/>',
+      right:'<path d="m9 18 6-6-6-6"/>',
       previous:'<path d="M5 5v14m14-14L7 12l12 7Z"/>',
       next:'<path d="M19 5v14M5 5l12 7-12 7Z"/>',
       copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
@@ -672,5 +704,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,icon,compactChords,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,inferChordName,icon,compactChords,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
 })();
