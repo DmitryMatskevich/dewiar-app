@@ -135,17 +135,18 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-close').count() == 0
     live_play = page.locator('#song-live-edit-play')
     assert live_play.count() == 1
-    assert live_play.get_attribute('aria-label') == 'Проиграть текущую фразу'
+    assert 'не выходя из редактора' in live_play.get_attribute('aria-label')
     live_play.click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_phrase_audio')")
-    page.wait_for_function("!document.querySelector('#song-review-audio').paused")
-    page.locator('#song-review-audio').evaluate("(a)=>{a.currentTime=1.5;a.dispatchEvent(new Event('timeupdate'))}")
+    page.wait_for_function("!document.querySelector('#song-live-edit-audio').paused")
+    assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
+    page.locator('#song-live-edit-audio').evaluate("(a)=>{a.currentTime=1.5;a.dispatchEvent(new Event('timeupdate'))}")
     assert page.locator('.song-phrase[data-phrase-id="phrase-1"] .song-word.current-word').text_content() == 'молчу'
     assert page.locator('.song-paper-word.current-word').inner_text() == 'молчу'
-    assert live_play.get_attribute('aria-label') == 'Приостановить проигрывание текущей фразы'
+    assert 'Приостановить' in live_play.get_attribute('aria-label')
     live_play.click()
-    page.wait_for_function("document.querySelector('#song-review-audio').paused")
-    page.wait_for_function("document.querySelector('#song-live-edit-play')?.getAttribute('aria-label')==='Проиграть текущую фразу'")
+    page.wait_for_function("document.querySelector('#song-live-edit-audio').paused")
+    page.wait_for_function("document.querySelector('#song-live-edit-play')?.getAttribute('aria-label').includes('не выходя из редактора')")
     assert page.locator('#song-live-edit-target').inner_text().startswith('0.000–8.000 с')
     chord_preview=page.locator('#song-live-edit-preview-chords')
     assert chord_preview.is_visible()

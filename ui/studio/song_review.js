@@ -67,7 +67,8 @@ window.SongReview = (() => {
     const active = document.activeElement;
     return [...drafts.keys()].some(k => k.startsWith(songId + ':')) ||
       !!(active?.matches('input,textarea,select') && active.closest('.song-phrase-editor, .song-properties, .song-live-editor')) ||
-      !!document.querySelector('#song-review-audio')?.matches(':not([data-idle]),[data-session],[data-loading],[data-sheet-hold]');
+      !!document.querySelector('#song-review-audio')?.matches(':not([data-idle]),[data-session],[data-loading],[data-sheet-hold]') ||
+      !!document.querySelector('#song-live-edit-audio')?.matches('[data-phrase-id],[data-loading]');
   }
   function stop() {
     audioRequest++;
@@ -84,7 +85,7 @@ window.SongReview = (() => {
     const status = document.getElementById('song-play-status');
     const sheetStatus = document.getElementById('song-sheet-play-status');
     let fullData = new Map(), followSheet = true, variant = 'original';
-    let livePlay = null, livePhraseId = '';
+    let livePlay = null, livePhraseId = '', liveAudio = null;
     const message = text => { status.textContent = text; if (sheetStatus) sheetStatus.textContent = text; };
     function sync() {
       if (!player.isConnected) return;
@@ -97,11 +98,12 @@ window.SongReview = (() => {
         play.disabled = loading || !row.capabilities?.audio;
       }
       if (livePlay) {
-        const livePlaying = !!livePhraseId && player.dataset.livePhraseId === livePhraseId && playing;
-        const liveTitle = livePlaying ? 'Приостановить проигрывание текущей фразы' : 'Проиграть текущую фразу';
+        const livePlaying = !!livePhraseId && liveAudio && !liveAudio.paused && !liveAudio.ended;
+        const liveLoading = !!liveAudio?.dataset.loading;
+        const liveTitle = livePlaying ? 'Приостановить проигрывание текущей фразы' : 'Проиграть текущую фразу, не выходя из редактора';
         livePlay.innerHTML = SongSheet.icon(livePlaying ? 'pause' : 'play');
         livePlay.title = liveTitle; livePlay.setAttribute('aria-label', liveTitle);
-        livePlay.disabled = loading && player.dataset.livePhraseId !== livePhraseId;
+        livePlay.disabled = liveLoading || !row.capabilities?.audio;
       }
       if (stopButton) stopButton.disabled = !(loading || player.dataset.session || playing || player.currentTime > 0);
       for (const [button,direction] of [[previousButton,-1],[nextButton,1]]) {
@@ -120,6 +122,12 @@ window.SongReview = (() => {
       player.dataset.sheetHold = '1';
       if (player.src) player.currentTime = 0;
       delete player.dataset.loading; delete player.dataset.session; delete player.dataset.livePhraseId;
+      if (liveAudio) {
+        liveAudio.pause();
+        liveAudio.currentTime = 0;
+        delete liveAudio.dataset.loading;
+        delete liveAudio.dataset.phraseId;
+      }
       livePhraseId = '';
       player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync();
     };
@@ -213,6 +221,7 @@ window.SongReview = (() => {
     if(nextButton) nextButton.onclick=()=>seekLine(1);
     const liveEditor=document.getElementById('song-live-editor');
     livePlay=document.getElementById('song-live-edit-play');
+    liveAudio=document.getElementById('song-live-edit-audio');
     const liveMode=document.getElementById('song-live-edit-mode');
     const liveText=document.getElementById('song-live-edit-text');
     const livePreview=document.getElementById('song-live-edit-preview');
@@ -232,38 +241,44 @@ window.SongReview = (() => {
         el.querySelectorAll('[data-word-start]').forEach(word=>word.classList.toggle('current-word',
           active && position>=Number(word.dataset.wordStart) && position<Number(word.dataset.wordEnd)));
       });
-      SongSheet.updatePlayback(row.song_id,position,true);
+      // Phrase playback is local to the editor: update highlights without
+      // moving the full-song sheet or switching the main player to the song.
+      SongSheet.updatePlayback(row.song_id,position,false);
     }
     async function playLivePhrase() {
-      if (!liveTarget) return;
-      if (livePhraseId && player.dataset.livePhraseId===livePhraseId && !player.paused && !player.ended) {
-        player.pause();
+      if (!liveTarget || !liveAudio) return;
+      if (livePhraseId && liveAudio.dataset.phraseId===livePhraseId && !liveAudio.paused && !liveAudio.ended) {
+        liveAudio.pause();
         return;
       }
       const request=++audioRequest, phraseId=liveTarget.phraseIds?.[0]||liveTarget.phraseId;
-      player.pause(); player.dataset.loading='1'; sync();
+      player.pause();
+      liveAudio.pause();
+      liveAudio.dataset.loading='1';
+      sync();
       if (liveStatus) liveStatus.textContent='Готовим фразу…';
       try {
         const clip=await core.call('song_phrase_audio',{song_id:row.song_id,phrase_id:phraseId});
-        if(request!==audioRequest || !player.isConnected) return;
-        player.src=clip.data; player.currentTime=0;
-        player.dataset.clipStart=clip.start_ms; player.dataset.phraseId=phraseId; player.dataset.livePhraseId=liveTarget.phraseId;
+        if(request!==audioRequest || !liveAudio.isConnected) return;
+        liveAudio.src=clip.data; liveAudio.currentTime=0;
+        liveAudio.dataset.clipStart=clip.start_ms; liveAudio.dataset.phraseId=liveTarget.phraseId;
         livePhraseId=liveTarget.phraseId;
-        player.ontimeupdate=()=>{
-          const position=Number(clip.start_ms)+player.currentTime*1000;
+        liveAudio.ontimeupdate=()=>{
+          const position=Number(clip.start_ms)+liveAudio.currentTime*1000;
           updateLivePhraseWords(position); sync();
         };
-        player.onended=()=>{
-          clearLiveHighlights(); delete player.dataset.livePhraseId; livePhraseId=''; player.dataset.idle='1';
+        liveAudio.onended=()=>{
+          clearLiveHighlights(); delete liveAudio.dataset.phraseId; livePhraseId='';
           if (liveStatus) liveStatus.textContent='Фраза закончилась. Можно запустить её снова.';
           sync();
         };
-        await player.play();
+        liveAudio.onpause=()=>sync();
+        await liveAudio.play();
         if (liveStatus) liveStatus.textContent='Фраза воспроизводится…';
       } catch(error) {
         if(request===audioRequest && liveStatus) liveStatus.textContent=error.message||'Не удалось воспроизвести фразу';
       } finally {
-        if(request===audioRequest && player.isConnected) { delete player.dataset.loading; sync(); }
+        if(request===audioRequest && liveAudio.isConnected) { delete liveAudio.dataset.loading; sync(); }
       }
     }
     function targetPhrase() {
@@ -358,6 +373,7 @@ window.SongReview = (() => {
       const phrase=current?.phrases?.find(item=>item.phrase_id===sourcePhraseIds[0]);
       if(!phrase) return;
       player.pause();
+      liveAudio?.pause();
       const sourcePhrases=sourcePhraseIds.map(id=>current.phrases.find(item=>item.phrase_id===id)).filter(Boolean);
       liveTarget={phraseId:phrase.phrase_id,phraseIds:sourcePhraseIds,displayLineId:displayLine?.phrase_id||'',
         text:displayLine?.text||phrase.text,charStart:0,charEnd:(displayLine?.text||phrase.text).length,
@@ -378,13 +394,13 @@ window.SongReview = (() => {
       liveEditor.hidden=false;
       livePhraseId=liveTarget.phraseId;
       delete player.dataset.livePhraseId;
-      if (livePlay) { livePlay.innerHTML=SongSheet.icon('play'); livePlay.title='Проиграть текущую фразу'; livePlay.setAttribute('aria-label','Проиграть текущую фразу'); livePlay.disabled=!row.capabilities?.audio; }
+      if (livePlay) { livePlay.innerHTML=SongSheet.icon('play'); livePlay.title='Проиграть текущую фразу, не выходя из редактора'; livePlay.setAttribute('aria-label','Проиграть текущую фразу, не выходя из редактора'); livePlay.disabled=!row.capabilities?.audio; }
       liveEditor.scrollIntoView({block:'nearest',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
       if(mode==='phrase') liveText.focus();
       else liveChords.querySelector('[data-live-chord-name]')?.focus();
     }
     window.songPaperEditContext={songId:row.song_id,open:openPhraseEditor};
-    if(!window.songPaperEditListener) {
+    if(!window.songPaperEditListener && document.addEventListener) {
       document.addEventListener('click',event=>{
         const button=event.target.closest?.('[data-song-edit-phrase][data-song-edit-kind]');
         const context=window.songPaperEditContext;
@@ -400,10 +416,10 @@ window.SongReview = (() => {
         anchor:liveTarget?{kind:'manual',phrase_id:phrase.phrase_id,grapheme_index:liveTarget.charStart}:null,
         method:'manual',verified:true});renderLiveChords();
     });
-    livePlay?.addEventListener('click',playLivePhrase);
+    livePlay?.addEventListener('click',event=>{ event.preventDefault(); event.stopPropagation(); playLivePhrase(); });
     document.getElementById('song-live-edit-save')?.addEventListener('click',async()=>{
       const button=document.getElementById('song-live-edit-save');button.disabled=true;liveStatus.textContent='Сохраняем…';
-      if (livePhraseId && player.dataset.livePhraseId===livePhraseId) player.pause();
+      if (livePhraseId && liveAudio?.dataset.phraseId===livePhraseId) liveAudio.pause();
       try {
         let current=getCurrent(), phrase=targetPhrase();
         if(!phrase||!liveTarget)throw Error('Фраза уже изменилась — обновите карточку и повторите правку');

@@ -106,6 +106,7 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-player-actions select { min-width:130px; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--surface); color:var(--ink); }
 .song-live-editor { display:block; margin-top:12px; padding:14px; border:1px solid var(--accent); border-radius:12px; background:var(--surface); }
 .song-live-editor[hidden] { display:none; }
+#song-live-edit-audio { display:none; }
 .song-live-editor--chords #song-live-text-field, .song-live-editor--chords #song-live-reviewed-field { display:none; }
 .song-live-editor-head, .song-live-chord-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .song-live-editor-head { flex-wrap:wrap; }
