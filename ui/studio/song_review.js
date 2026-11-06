@@ -309,10 +309,11 @@ window.SongReview = (() => {
         const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
         const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
         const fingering=rowElement?.querySelector('[data-live-chord-fingering]');
-        const shape=window.SongSheet?.chordFingering(name,chord)||'';
+        const evidence={...chord,song_id:row.song_id};
+        const shape=window.SongSheet?.chordFingering(name,evidence)||'';
         if(fingering) {
           fingering.textContent=shape?`1→6 ${shape}`:'—';
-          fingering.title=window.SongSheet?.chordTooltip(name,chord)||'Позиция на грифе не определена';
+          fingering.title=window.SongSheet?.chordTooltip(name,evidence)||'Позиция на грифе не определена';
         }
         const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
         const startMs=Number.isFinite(seconds)&&seconds>=0?Math.round(seconds*1000):Number(chord.start_ms)||0;
@@ -335,7 +336,9 @@ window.SongReview = (() => {
       let chordLine='',cursor=0;
       for(const chord of placed) {
         const at=Math.max(cursor,chord.at);
-        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(window.SongSheet.chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
+        const evidence={...chord,song_id:row.song_id};
+        const tooltip=window.SongSheet.chordTooltip(chord.name,evidence);
+        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(tooltip)}" aria-label="${esc(tooltip)}" aria-expanded="false" data-chord-name="${esc(chord.name)}" data-song-id="${esc(row.song_id||'')}">${esc(chord.name)}</span>`;
         cursor=at+chord.name.length;
       }
       livePreviewChords.innerHTML=chordLine;

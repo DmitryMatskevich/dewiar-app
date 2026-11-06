@@ -113,7 +113,8 @@ window.SongSheet = (() => {
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
-      if(text) lines.push({kind:'chords',text,phrase_id:phraseId,chord_marks:chords.map(c=>({name:c.name,at:c.at,
+      if(text) lines.push({kind:'chords',text,phrase_id:phraseId,song_id:row.song_id,chord_marks:chords.map(c=>({name:c.name,at:c.at,
+        song_id:row.song_id,
         start_ms:c.start_ms,end_ms:c.end_ms,
         voicing_fingering:c.voicing_fingering||c.fingering||c.voicing?.fingering,
         voicing_probability:c.voicing_probability??c.fingering_probability??c.voicing?.probability}))});
@@ -145,7 +146,7 @@ window.SongSheet = (() => {
       if(Number(word.dataset.start)<=ms && ms<Number(word.dataset.end) && (!selected || Number(word.dataset.start)>=Number(selected.dataset.start))) selected=word;
     }
     const old=paper.querySelector('.song-paper-word.current-word');
-    const oldChord=paper.querySelector('.song-paper-chord.current-chord');
+    const oldChord=paper.querySelector('.song-chord-tip.current-chord');
     const instrumentals=[...paper.querySelectorAll('.song-paper-instrumental[data-start-ms][data-end-ms]')];
     let activeInstrumental=null;
     for(const marker of instrumentals) {
@@ -159,7 +160,7 @@ window.SongSheet = (() => {
         parts.find(part=>Number(part.dataset.cueStep)===cue.count)?.classList.add('countdown-lit');
       }
     }
-    const chordSpans=[...paper.querySelectorAll('.song-paper-chord[data-start-ms]')];
+    const chordSpans=[...paper.querySelectorAll('.song-chord-tip[data-start-ms]')];
     let activeChord=null;
     for(const chord of chordSpans) {
       const start=Number(chord.dataset.startMs);
@@ -249,8 +250,8 @@ window.SongSheet = (() => {
     const evidenceFor=name=>[...(row.chords||[]),...(row.guitar_sheet||[]).flatMap(line=>line.chords||[])]
       .find(chord=>chord.name===name);
     const fingerings=names.map(name=>{
-      const evidence=evidenceFor(name), exact=exactVoicing(evidence), shape=exact || chordFingering(name);
-      return `${name} — ${shape || 'позиция не определена'}${shape && !exact?' (оценка)':''}`;
+      const evidence={...(evidenceFor(name)||{}),song_id:row.song_id}, exact=exactVoicing(evidence), pinned=pinnedVoicing(name,row.song_id), shape=chordFingering(name,evidence);
+      return `${name} — ${shape || 'позиция не определена'}${pinned?' (закреплено)':shape && !exact?' (оценка)':''}`;
     });
     const sources=sourceLinks(row).map(source=>`${source.title} — ${source.url}`);
     const extras=[];
@@ -270,6 +271,19 @@ window.SongSheet = (() => {
     '13':[0,2,4,7,9,10],m13:[0,2,3,7,9,10],maj13:[0,2,4,7,9,11]
   };
   const fingeringCache=new Map();
+  const PINNED_VOICING_PREFIX='dewiar:song-chord-voicing:';
+  function pinnedVoicing(symbol,songId='') {
+    try {
+      const value=localStorage.getItem(PINNED_VOICING_PREFIX+`${songId||'global'}:${symbol}`);
+      return exactVoicing({voicing_fingering:value}) || '';
+    } catch (_) { return ''; }
+  }
+  function setPinnedVoicing(symbol,songId,shape) {
+    try {
+      const key=PINNED_VOICING_PREFIX+`${songId||'global'}:${symbol}`;
+      if(shape) localStorage.setItem(key,shape); else localStorage.removeItem(key);
+    } catch (_) {}
+  }
   function chordFingerings(symbol,limit=3) {
     const cacheKey=String(symbol);
     if(fingeringCache.has(cacheKey)) return fingeringCache.get(cacheKey).slice(0,limit);
@@ -329,11 +343,86 @@ window.SongSheet = (() => {
     const value=Number(raw);
     return Number.isFinite(value) && value>=0 && value<=1 ? Math.round(value*100) : null;
   }
-  function chordFingering(symbol,evidence) { return exactVoicing(evidence) || chordFingerings(symbol,1)[0]||''; }
+  function chordFingering(symbol,evidence) {
+    const pinned=pinnedVoicing(symbol,evidence?.song_id);
+    return pinned || exactVoicing(evidence) || chordFingerings(symbol,1)[0]||'';
+  }
   function chordTooltip(symbol,evidence) {
-    const exact=exactVoicing(evidence), shape=exact || chordFingering(symbol), probability=exact?voicingProbability(evidence):null;
+    const pinned=pinnedVoicing(symbol,evidence?.song_id), exact=exactVoicing(evidence), shape=pinned || exact || chordFingering(symbol), probability=exact?voicingProbability(evidence):null;
     if(!shape) return `${symbol}: позиция на грифе не определена`;
-    return `${symbol} · 1→6: ${shape}${exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
+    return `${symbol} · 1→6: ${shape}${pinned?' · закреплено':exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
+  }
+  function chordVariants(symbol,evidence) {
+    const result=[], add=shape=>{ const normalized=exactVoicing({voicing_fingering:shape}); if(normalized&&!result.includes(normalized)) result.push(normalized); };
+    add(pinnedVoicing(symbol,evidence?.song_id)); add(exactVoicing(evidence));
+    chordFingerings(symbol,8).forEach(add);
+    return result;
+  }
+  function chordDiagramHTML(symbol,shape,index,total) {
+    const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'];
+    const fretted=values.map(Number).filter(Number.isFinite).filter(value=>value>0);
+    const base=fretted.length ? Math.max(1,Math.min(...fretted)) : 1;
+    const fretLabels=Array.from({length:4},(_,column)=>base+column);
+    const rows=labels.map((label,row)=>{
+      const value=values[row]??'x', fret=Number(value);
+      const cells=fretLabels.map(number=>`<span class="song-chord-fret ${fret===number?'filled':''}" aria-hidden="true"></span>`).join('');
+      return `<div class="song-chord-row"><span class="song-chord-string">${label}</span><span class="song-chord-grid">${cells}</span><b class="song-chord-value">${esc(value)}</b></div>`;
+    }).join('');
+    return `<div class="song-chord-fret-head"><span></span>${fretLabels.map(number=>`<b>${number}</b>`).join('')}<span></span></div><div class="song-chord-diagram">${rows}</div><div class="song-chord-position">${base} лад · струны 1→6</div><div class="song-chord-variants"><button type="button" class="song-chord-nav" data-chord-prev aria-label="Предыдущая аппликатура">‹</button><span>${index+1}/${total}</span><button type="button" class="song-chord-nav" data-chord-next aria-label="Следующая аппликатура">›</button></div>`;
+  }
+  let chordPopoverBound=false, chordPopoverState=null, chordPopoverHideTimer=0;
+  function chordPopoverElement() {
+    let popover=document.querySelector('.song-chord-popover');
+    if(popover) return popover;
+    popover=document.createElement('div'); popover.className='song-chord-popover'; popover.hidden=true;
+    document.body.appendChild(popover);
+    popover.addEventListener('pointerenter',()=>clearTimeout(chordPopoverHideTimer));
+    popover.addEventListener('pointerleave',()=>{ if(!chordPopoverState?.pinned) scheduleChordPopoverHide(); });
+    return popover;
+  }
+  function positionChordPopover(popover,trigger) {
+    if(!trigger?.getBoundingClientRect) return;
+    const rect=trigger.getBoundingClientRect(); popover.style.visibility='hidden'; popover.hidden=false;
+    const box=popover.getBoundingClientRect(), gap=8;
+    const left=Math.max(8,Math.min(window.innerWidth-box.width-8,rect.left));
+    const top=rect.bottom+gap+box.height<=window.innerHeight ? rect.bottom+gap : Math.max(8,rect.top-gap-box.height);
+    popover.style.left=`${left}px`; popover.style.top=`${top}px`; popover.style.visibility='visible';
+  }
+  function hideChordPopover() {
+    clearTimeout(chordPopoverHideTimer); const popover=document.querySelector('.song-chord-popover');
+    if(popover) popover.hidden=true;
+    if(chordPopoverState?.trigger) chordPopoverState.trigger.setAttribute('aria-expanded','false');
+    chordPopoverState=null;
+  }
+  function renderChordPopover() {
+    const state=chordPopoverState, popover=chordPopoverElement();
+    if(!state||!state.variants.length) { popover.hidden=true; return; }
+    const shape=state.variants[state.index];
+    popover.innerHTML=`<div class="song-chord-popover-head"><b>${esc(state.symbol)}</b><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin title="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}" aria-label="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Закрыть подсказку" aria-label="Закрыть подсказку">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}`;
+    popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:''); renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
+    popover.querySelector('[data-chord-prev]').onclick=()=>{ state.index=(state.index+state.variants.length-1)%state.variants.length; renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    popover.querySelector('[data-chord-next]').onclick=()=>{ state.index=(state.index+1)%state.variants.length; renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    positionChordPopover(popover,state.trigger);
+  }
+  function scheduleChordPopoverHide() { clearTimeout(chordPopoverHideTimer); chordPopoverHideTimer=setTimeout(()=>hideChordPopover(),180); }
+  function showChordPopover(trigger) {
+    if(!trigger) return;
+    clearTimeout(chordPopoverHideTimer);
+    const symbol=(trigger.dataset.chordName||trigger.textContent||'').trim(); if(!symbol) return;
+    const evidence={song_id:trigger.dataset.songId||'',voicing_fingering:trigger.dataset.chordFingering||'',voicing_probability:trigger.dataset.chordProbability};
+    const variants=chordVariants(symbol,evidence); if(!variants.length) return;
+    const pinnedShape=pinnedVoicing(symbol,evidence.song_id); let index=Math.max(0,variants.indexOf(pinnedShape));
+    chordPopoverState={trigger,symbol,songId:evidence.song_id,variants,index,pinned:!!pinnedShape};
+    trigger.setAttribute('aria-expanded','true'); renderChordPopover();
+  }
+  function bindChordPopovers() {
+    if(chordPopoverBound || typeof document==='undefined' || !document.addEventListener || !document.body) return;
+    chordPopoverBound=true;
+    document.addEventListener('pointerover',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) showChordPopover(trigger); });
+    document.addEventListener('pointerout',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger&&!trigger.contains(event.relatedTarget)) scheduleChordPopoverHide(); });
+    document.addEventListener('click',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) { showChordPopover(trigger); return; } if(chordPopoverState&&!event.target.closest?.('.song-chord-popover')) hideChordPopover(); });
+    document.addEventListener('keydown',event=>{ if(event.key==='Escape') hideChordPopover(); });
   }
   function chordLineHTML(line) {
     if(!line.chord_marks?.length) return esc(line.text);
@@ -345,7 +434,11 @@ window.SongSheet = (() => {
       const start=Number(chord.start_ms), end=Number(chord.end_ms);
       const nextStart=Number(line.chord_marks[index+1]?.start_ms);
       const timing=Number.isFinite(start) ? ` data-start-ms="${start}"${Number.isFinite(end)?` data-end-ms="${end}"`:''}${Number.isFinite(nextStart)?` data-next-start-ms="${nextStart}"`:''}` : '';
-      html+=`<span class="song-paper-chord song-chord-tip"${timing} title="${esc(chordTooltip(chord.name,chord))}" aria-label="${esc(chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
+      const chordEvidence={...chord,song_id:chord.song_id||line.song_id};
+      const shape=exactVoicing(chordEvidence);
+      const attrs=` data-chord-name="${esc(chord.name)}" data-song-id="${esc(chordEvidence.song_id||'')}"${shape?` data-chord-fingering="${esc(shape)}"`:''}${Number.isFinite(Number(chord.voicing_probability))?` data-chord-probability="${chord.voicing_probability}"`:''}`;
+      const tooltip=chordTooltip(chord.name,chordEvidence);
+      html+=`<span class="song-chord-tip" title="${esc(tooltip)}" aria-label="${esc(tooltip)}" aria-expanded="false"${attrs}${timing}>${esc(chord.name)}</span>`;
       cursor=at+chord.name.length;
     }
     return html+esc(line.text.slice(cursor));
@@ -426,6 +519,7 @@ window.SongSheet = (() => {
       karaoke:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5"/>',
       pause:'<path d="M8 4v16M16 4v16"/>',
       stop:'<rect x="5" y="5" width="14" height="14" rx="1"/>',
+      pin:'<path d="m14 4 6 6-3 3-2-2-4 4v4l-2 2-1-5-5-1 2-2h4l4-4-2-2Z"/>',
       mic:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/>',
       system:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M7 10h2l2-3 3 7 2-4h1"/>',
       upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/>'
@@ -467,6 +561,7 @@ window.SongSheet = (() => {
   }
   function bindToolbar(row, getCurrent, render) {
     if (!document.getElementById('song-key-up')) return;
+    bindChordPopovers();
     bindResponsive(row,render);
     function change(delta) {
       shifts.set(row.song_id,offset(row)+delta); render();
