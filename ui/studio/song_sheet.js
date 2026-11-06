@@ -394,7 +394,6 @@ window.SongSheet = (() => {
     popover=document.createElement('div'); popover.className='song-chord-popover'; popover.hidden=true;
     document.body.appendChild(popover);
     popover.addEventListener('pointerenter',()=>clearTimeout(chordPopoverHideTimer));
-    popover.addEventListener('pointerleave',()=>{ if(!chordPopoverState?.pinned) scheduleChordPopoverHide(); });
     return popover;
   }
   function positionChordPopover(popover,trigger) {
@@ -451,7 +450,6 @@ window.SongSheet = (() => {
     if(chordPopoverBound || typeof document==='undefined' || !document.addEventListener || !document.body) return;
     chordPopoverBound=true;
     document.addEventListener('pointerover',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) showChordPopover(trigger); });
-    document.addEventListener('pointerout',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger&&!trigger.contains(event.relatedTarget)) scheduleChordPopoverHide(); });
     document.addEventListener('click',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) { showChordPopover(trigger); return; } if(chordPopoverState&&!event.target.closest?.('.song-chord-popover')) hideChordPopover(); });
     document.addEventListener('keydown',event=>{ if(event.key==='Escape') hideChordPopover(); });
   }
