@@ -2,7 +2,8 @@
 
 Song records are user data.  Writes use a temporary file and replace so a
 crash cannot leave a half-written song card.  Audio ownership is represented
-explicitly; deleting a card never deletes a file the user supplied.
+explicitly; deleting a card removes its song folder and generated artifacts,
+but never follows or deletes an external user path.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import json
 import math
 import os
 import re
+import shutil
 import tempfile
 import threading
 import uuid
@@ -485,13 +487,20 @@ class SongStore:
                 base_revision)
 
     def delete(self, song_id: str) -> bool:
-        """Remove only the owned card metadata; audio cleanup is a separate explicit step."""
+        """Remove a card and every file stored under its owned song folder.
+
+        Imported/recorded audio and generated karaoke/analysis artifacts are
+        stored below ``root/<song_id>``.  An external file referenced by a card
+        is never touched.
+        """
         with self._lock:
             if not self._read(song_id):
                 return False
-            path = self.root / song_id
-            # Keep owned audio for the explicit storage-cleanup action; removing
-            # a card must not silently destroy a potentially long recording.
-            (path / "song.json").unlink(missing_ok=True)
+            root = self.root.resolve()
+            path = (self.root / song_id).resolve()
+            if path.parent != root or path == root:
+                raise ValueError("Недопустимая папка песни")
+            shutil.rmtree(path)
+            self._card_cache.pop(song_id, None)
             self._write_json(self.index_path, [x for x in self._read_index() if x != song_id])
             return True

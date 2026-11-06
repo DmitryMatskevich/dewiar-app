@@ -40,3 +40,16 @@ def test_song_store_processing_filters_include_active_and_stopped_jobs(tmp_path)
 
     assert {row["title"] for row in store.list(status="batch")} == {"Активная", "Ожидает выбора", "Остановилась"}
     assert {row["title"] for row in store.list(status="stopped")} == {"Остановилась"}
+
+
+def test_song_store_delete_removes_owned_song_folder(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    song = store.create("Удаляемая", "Исполнитель")
+    folder = store.root / song["song_id"]
+    (folder / "audio").mkdir()
+    (folder / "audio" / "recording.wav").write_bytes(b"audio")
+    (folder / "karaoke").mkdir()
+    (folder / "karaoke" / "manifest.json").write_text("{}", encoding="utf-8")
+    assert store.delete(song["song_id"])
+    assert not folder.exists()
+    assert store.list() == []

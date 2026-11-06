@@ -107,7 +107,7 @@
     list.querySelectorAll("[data-song-delete]").forEach((el) => el.addEventListener("click", async (event) => {
       event.stopPropagation();
       const row = state.rows.find((x) => x.song_id === el.dataset.songDelete);
-      if (!row || !confirm(`Удалить карточку «${row.title}»? Собственный аудиофайл удалится только отдельной очисткой.`)) return;
+      if (!row || !confirm(`Удалить песню «${row.title}» вместе с аудиозаписью, минусовкой и результатами обработки?`)) return;
       try { await call("song_delete", { song_id: row.song_id }); await load(); if (state.current && state.current.song_id === row.song_id) closeDetail(); }
       catch (error) { toast(error.message || "Не удалось удалить песню", 4000, "bad"); }
     }));

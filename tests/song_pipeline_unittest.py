@@ -77,9 +77,10 @@ class SongPipelineTest(unittest.TestCase):
         self.store.index_path.write_text('broken')
         self.assertEqual(self.store.list()[0]['song_id'], self.sid)
 
-    def test_deleted_card_does_not_delete_audio_or_reappear(self):
+    def test_deleted_card_removes_owned_audio_and_does_not_reappear(self):
         self.store.delete(self.sid)
-        self.assertTrue(self.audio.exists())
+        self.assertFalse(self.audio.exists())
+        self.assertFalse((self.store.root / self.sid).exists())
         self.store.index_path.unlink()
         self.assertEqual(self.store.list(), [])
 
