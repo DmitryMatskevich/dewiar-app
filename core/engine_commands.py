@@ -1934,7 +1934,8 @@ class CommandsMixin:
         if cmd == "song_transcribe":
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь загрузки записи')
-            return self.song_analyzer.start(str(a.get("song_id") or ""), full=a.get('full') is True)
+            return self.song_analyzer.start(str(a.get("song_id") or ""), full=a.get('full') is True,
+                                            models=a.get('models'))
         if cmd == "song_rerun_step":
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь завершения работы с источником')

@@ -24,6 +24,11 @@ class SongAnalyzer:
         "structure": "structure",
         "chords": "chords",
     }
+    MODEL_LABELS = {
+        "gigaam": "GigaAM (как в голосовом вводе)",
+        "whisper": "Whisper large-v2",
+        "qwen": "Qwen3-ASR",
+    }
 
     def __init__(self, root: Path, store, host, emit):
         self.root = Path(root).resolve()
@@ -327,7 +332,28 @@ class SongAnalyzer:
                 self._running.discard(song_id)
                 self._cancels.pop(song_id, None)
 
-    def start(self, song_id: str, full=False):
+    @classmethod
+    def normalize_models(cls, models):
+        """Return a stable, safe model selection for a song run.
+
+        The singing pipeline always keeps the consensus/alignment stages; the
+        selected recognizers only control which independent hypotheses are
+        produced.  An omitted selection preserves the historical ensemble.
+        """
+        if models is None:
+            return tuple(cls.MODEL_LABELS)
+        if not isinstance(models, (list, tuple, set)):
+            raise ValueError("Список распознавателей должен быть массивом")
+        result=[]
+        for model in models:
+            key=str(model or "").strip().lower()
+            if key in cls.MODEL_LABELS and key not in result:
+                result.append(key)
+        if not result:
+            raise ValueError("Выберите хотя бы один распознаватель")
+        return tuple(result)
+
+    def start(self, song_id: str, full=False, models=None):
         row = self.store.get(song_id)
         if not row:
             raise ValueError("Песня не найдена")
@@ -338,6 +364,7 @@ class SongAnalyzer:
         path = (self.root / rel).resolve() if rel else None
         if not path or self.root not in path.parents or not path.is_file():
             raise ValueError("Сначала сохраните полную запись песни")
+        selected_models = self.normalize_models(models) if full else ("gigaam",)
         with self._lock:
             if song_id in self._running:
                 raise ValueError("Распознавание уже идёт")
@@ -345,10 +372,12 @@ class SongAnalyzer:
             self._cancels[song_id] = threading.Event()
             run_id = str(uuid.uuid4())
             try:
+                labels = ", ".join(self.MODEL_LABELS[key] for key in selected_models)
                 updated = self.store.patch(song_id, {"status": "running", "analysis_state": "transcribing", "stage": "lyrics",
-                                                     "active_run_id": run_id, "stage_label": "Распознаём слова"})
+                                                     "active_run_id": run_id, "analysis_models": list(selected_models),
+                                                     "stage_label": f"Распознаём слова: {labels}"})
                 self.emit("song_analysis", song_id=song_id, running=True, song=updated)
-                args = (song_id, path, run_id, True) if full else (song_id, path, run_id)
+                args = (song_id, path, run_id, True, selected_models) if full else (song_id, path, run_id, False, selected_models)
                 threading.Thread(target=self._run, args=args, name=f"song-lyrics-{song_id[:8]}", daemon=True).start()
             except Exception:
                 self._running.discard(song_id)
@@ -361,7 +390,7 @@ class SongAnalyzer:
     # together while still protecting the machine from an unbounded model fanout.
     _heavy_slots = threading.BoundedSemaphore(max(2, min(8, int(os.environ.get('DEWIAR_SONG_ANALYSIS_PARALLEL', '2')))))
 
-    def _run(self, song_id: str, path: Path, run_id: str, full=False):
+    def _run(self, song_id: str, path: Path, run_id: str, full=False, models=("gigaam",)):
         try:
             cancel = self._cancels.get(song_id)
             if cancel is not None and cancel.is_set():
@@ -369,8 +398,9 @@ class SongAnalyzer:
             selected_stt = None
             basic_error = None
             try:
+                use_gigaam = "gigaam" in models
                 current_fn = getattr(self.host, "current_stt", None)
-                if callable(current_fn):
+                if use_gigaam and callable(current_fn):
                     selected_stt = current_fn()
                     if selected_stt is None or not getattr(selected_stt, "ready", True):
                         # `--text-only` deliberately skips microphone startup, so
@@ -390,25 +420,29 @@ class SongAnalyzer:
                                 raise RuntimeError(selected_stt.error or "Локальная модель не загружена; скачивание отключено")
                         else:
                             raise RuntimeError("локальный распознаватель ещё готовится — повторите после его загрузки")
-                # Не переключать провайдера распознавания за спиной пользователя.
-                kwargs = {"allow_fallback": False, "cancel": self._cancels.get(song_id)}
-                if selected_stt is not None:
-                    kwargs["stt"] = selected_stt
-                if cancel is not None and cancel.is_set():
-                    return
-                segments = self.host.transcribe_file(path, **kwargs)
                 phrases = []
-                for start, end, text in segments or []:
-                    text = str(text or "").strip()
-                    if not text:
-                        continue
-                    if not all(math.isfinite(float(x)) for x in (start, end)) or float(end) <= float(start) or float(start) < 0:
-                        raise ValueError("Распознаватель вернул некорректные времена фраз")
-                    start_ms, end_ms = int(float(start) * 1000), int(float(end) * 1000)
-                    phrases.append({"phrase_id": f"{run_id}-{len(phrases)}", "start_ms": start_ms, "end_ms": end_ms,
-                                    "text": text, "kind": "unknown", "timing_quality": "phrase", "words": [],
-                                    "review_state": "needs_review", "note": ""})
-                model = getattr(selected_stt, "model_name", None) or type(selected_stt).__name__
+                if use_gigaam:
+                    # Не переключать провайдера распознавания за спиной
+                    # пользователя.  This baseline is optional: a Whisper or
+                    # Qwen-only run must not silently invoke the voice-input
+                    # recognizer as a fourth model.
+                    kwargs = {"allow_fallback": False, "cancel": self._cancels.get(song_id), "stt": selected_stt}
+                    if cancel is not None and cancel.is_set():
+                        return
+                    segments = self.host.transcribe_file(path, **kwargs)
+                    for start, end, text in segments or []:
+                        text = str(text or "").strip()
+                        if not text:
+                            continue
+                        if not all(math.isfinite(float(x)) for x in (start, end)) or float(end) <= float(start) or float(start) < 0:
+                            raise ValueError("Распознаватель вернул некорректные времена фраз")
+                        start_ms, end_ms = int(float(start) * 1000), int(float(end) * 1000)
+                        phrases.append({"phrase_id": f"{run_id}-{len(phrases)}", "start_ms": start_ms, "end_ms": end_ms,
+                                        "text": text, "kind": "unknown", "timing_quality": "phrase", "words": [],
+                                        "review_state": "needs_review", "note": ""})
+                    model = getattr(selected_stt, "model_name", None) or type(selected_stt).__name__
+                else:
+                    model = "not-selected"
             except Exception as exc:
                 if not full:
                     raise
@@ -424,7 +458,7 @@ class SongAnalyzer:
                             return
                         fresh = self.store.patch(song_id, {'stage_label': label})
                     self.emit('song_analysis', song_id=song_id, running=True, song=fresh)
-                progress('Базовый текст недоступен; запускаем остальные модели' if basic_error else 'Базовый текст сохранён; ждём модуль полного разбора')
+                progress('Базовый текст недоступен; запускаем выбранные модели' if basic_error else 'Базовый текст сохранён; запускаем выбранные модели')
                 folder = path.parent.parent / 'analysis' / run_id
                 folder.mkdir(parents=True, exist_ok=True)
                 import json
@@ -435,7 +469,13 @@ class SongAnalyzer:
                 try:
                     if cancel.is_set():
                         return
-                    result = analyze(path, folder/'result.json', run_id, cancel, progress)
+                    steps = [key for key in ('whisper', 'qwen') if key in models]
+                    # Consensus can use the selected GigaAM baseline, a single
+                    # heavy recognizer, or both.  Keeping it in every full run
+                    # makes the result comparable and leaves raw hypotheses.
+                    steps += ['consensus', 'align', 'chords']
+                    result = analyze(path, folder/'result.json', run_id, cancel, progress,
+                                     steps=','.join(steps))
                 except InterruptedError:
                     return
                 except Exception as exc:

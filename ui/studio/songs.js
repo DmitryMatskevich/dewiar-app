@@ -2,7 +2,7 @@
    Правки сохраняются с контролем ревизий; рабочие настройки не изменяются. */
 (function () {
   "use strict";
-  const state = { rows: [], query: "", status: "", current: null };
+  const state = { rows: [], query: "", status: "", current: null, transcribeSongId: "" };
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const processingSongs = new Set();
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
@@ -310,8 +310,12 @@
       catch (error) { toast(error.message || "Не удалось завершить запись", 5000, "bad"); }
     });
     $s("song-start-transcribe")?.addEventListener("click", async () => {
-      try { await call("song_transcribe", { song_id: row.song_id }); await load(); toast("Распознавание началось. Полный текст останется доступен для сверки."); }
-      catch (error) { toast(error.message || "Не удалось запустить распознавание", 5000, "bad"); }
+      const dialog=$s('song-transcribe-dialog');
+      if (!dialog) return;
+      state.transcribeSongId=row.song_id;
+      dialog.querySelectorAll('[data-song-model]').forEach(input=>{input.checked=true;});
+      dialog.hidden=false;
+      dialog.querySelector('[data-song-model]')?.focus();
     });
     $s("song-attach-audio")?.addEventListener("click", () => $s("song-audio-input")?.click());
     $s("song-audio-input")?.addEventListener("change", async (event) => {
@@ -466,6 +470,29 @@
       finally { button.disabled = false; }
     });
     $s("song-create-cancel")?.addEventListener("click", closeCreateDialog);
+    $s('song-transcribe-cancel')?.addEventListener('click',()=>{
+      const dialog=$s('song-transcribe-dialog'); if(dialog) dialog.hidden=true;
+      state.transcribeSongId='';
+    });
+    $s('song-transcribe-submit')?.addEventListener('click',async event=>{
+      const dialog=$s('song-transcribe-dialog'), songId=state.transcribeSongId;
+      if(!dialog||!songId)return;
+      const models=[...dialog.querySelectorAll('[data-song-model]:checked')].map(input=>input.dataset.songModel);
+      const status=dialog.querySelector('[data-song-transcribe-status]'), button=event.currentTarget;
+      if(!models.length){if(status)status.textContent='Выберите хотя бы один распознаватель';return;}
+      button.disabled=true;
+      if(status)status.textContent='Запускаем выбранные модели…';
+      try {
+        const saved=await call('song_transcribe',{song_id:songId,full:true,models});
+        dialog.hidden=true;state.transcribeSongId='';
+        if(state.current?.song_id===songId)renderDetail(saved);
+        await load();
+        toast(`Распознавание запущено: ${models.join(', ')}. Сырые варианты сохранятся для сравнения.`,6000);
+      } catch(error) {
+        if(status)status.textContent=error.message||'Не удалось запустить распознавание';
+        else toast(error.message||'Не удалось запустить распознавание',5000,'bad');
+      } finally { button.disabled=false; }
+    });
     $s("song-create-submit")?.addEventListener("click", async () => {
       const input = $s("song-create-input"), value = input?.value.trim();
       if (!value) { input?.focus(); return; }

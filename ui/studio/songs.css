@@ -62,6 +62,12 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-create-card { width:min(520px,100%); background:var(--panel,#fff); border:1px solid var(--line); border-radius:18px; padding:22px; box-shadow:0 18px 60px rgba(0,0,0,.2); }
 .song-create-card h2 { margin:0 0 8px; }
 .song-create-card .actions { justify-content:flex-end; margin-top:18px; }
+.song-transcribe-card { width:min(680px,100%); }
+.song-model-options { display:grid; gap:8px; margin:14px 0; }
+.song-model-option { display:flex; gap:10px; align-items:flex-start; padding:11px 12px; border:1px solid var(--line); border-radius:12px; background:var(--field); cursor:pointer; }
+.song-model-option input { flex:none; margin-top:4px; accent-color:var(--accent); }
+.song-model-option span { display:grid; gap:2px; }
+.song-model-option small { color:var(--muted); line-height:1.4; }
 .songs-empty[hidden] { display:none; }
 @media (max-width:760px) {
   .song-card { grid-template-columns:1fr; }

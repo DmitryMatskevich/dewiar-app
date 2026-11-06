@@ -122,6 +122,7 @@ window.SongReview = (() => {
       player.dataset.sheetHold = '1';
       if (player.src) player.currentTime = 0;
       delete player.dataset.loading; delete player.dataset.session; delete player.dataset.livePhraseId;
+      delete player.dataset.clipStart; delete player.dataset.phraseId;
       if (liveAudio) {
         liveAudio.pause();
         liveAudio.currentTime = 0;
@@ -139,7 +140,7 @@ window.SongReview = (() => {
     player.addEventListener('seeked', () => { followWords(followSheet && !player.paused); sync(); });
     player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(followSheet); sync(); };
     player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
-    player.addEventListener('ended', () => { delete player.dataset.session; player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync(); });
+    player.addEventListener('ended', () => { delete player.dataset.session; delete player.dataset.phraseId; delete player.dataset.clipStart; player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync(); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
     document.getElementById('song-review-loop').onchange = e => { player.loop = e.target.checked; };
     async function playFull(restart=false, autoplay=true, seekTo=null) {
@@ -193,11 +194,12 @@ window.SongReview = (() => {
     selectPlaybackVariant = value => {
       if (!setPlaybackVariant(value)) return Promise.resolve();
       followSheet=true;
-      return playFull(false,true,player.dataset.session ? player.currentTime : null);
+      const position=player.dataset.session && !player.dataset.phraseId ? player.currentTime : null;
+      return playFull(false,true,position);
     };
     if (variantSelect) variantSelect.onchange = async () => {
       const wasPlaying = !player.paused && !player.ended;
-      const position = player.currentTime;
+      const position = player.dataset.session && !player.dataset.phraseId ? player.currentTime : null;
       const next = variantSelect.value;
       if (next === 'instrumental' && row.karaoke?.state !== 'ready') { variantSelect.value = variant; return; }
       variant = next;
@@ -542,11 +544,34 @@ window.SongReview = (() => {
         const request = ++audioRequest, button = e.target;
         const playStatus = document.getElementById('song-play-status');
         player.pause(); player.dataset.loading = '1'; sync();
+        // Phrase playback has its own local timeline.  Clear the full-song
+        // session before loading it so line navigation cannot interpret the
+        // clip position as a position in the complete recording.
+        delete player.dataset.session;
+        delete player.dataset.clipStart;
+        delete player.dataset.phraseId;
         button.disabled = true; playStatus.textContent = 'Готовим фрагмент…';
         try {
           const clip = await core.call('song_phrase_audio', {song_id: row.song_id, phrase_id: pid});
           if (request !== audioRequest || !player.isConnected) return;
           player.src = clip.data;
+          // A phrase is a new media timeline.  Safari may retain the old
+          // currentTime after changing src; without an explicit reset the
+          // clip starts in the middle (or immediately ends) after a full-song
+          // or another phrase playback.
+          player.currentTime = 0;
+          if (typeof player.load === 'function') {
+            await new Promise((resolve, reject) => {
+              const done=()=>{cleanup();resolve();};
+              const fail=()=>{cleanup();reject(new Error('Не удалось загрузить фрагмент'));};
+              const cleanup=()=>{player.removeEventListener?.('loadedmetadata',done);player.removeEventListener?.('error',fail);};
+              player.addEventListener?.('loadedmetadata',done,{once:true});
+              player.addEventListener?.('error',fail,{once:true});
+              player.load();
+            });
+          }
+          if (request !== audioRequest || !player.isConnected) return;
+          player.currentTime = 0;
           player.dataset.clipStart = clip.start_ms;
           player.dataset.phraseId = pid;
           player.ontimeupdate = () => {
@@ -556,7 +581,14 @@ window.SongReview = (() => {
           };
           document.querySelectorAll('.song-phrase.playing').forEach(x => x.classList.remove('playing'));
           el.classList.add('playing');
-          player.onended = () => { el.classList.remove('playing'); player.dataset.idle = '1'; };
+          player.onended = () => {
+            el.classList.remove('playing');
+            delete player.dataset.session;
+            delete player.dataset.phraseId;
+            delete player.dataset.clipStart;
+            player.dataset.idle = '1';
+            sync();
+          };
           await player.play();
           playStatus.textContent = 'Фраза с небольшим контекстом';
         } catch (error) { playStatus.textContent = error.message || 'Не удалось воспроизвести'; }

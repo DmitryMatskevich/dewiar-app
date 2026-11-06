@@ -507,6 +507,20 @@
         <div class="actions"><button class="btn" id="song-create-cancel">Отмена</button><button class="btn primary" id="song-create-submit">Добавить</button></div>
       </div>
     </div>
+    <div id="song-transcribe-dialog" class="song-create-dialog" role="dialog" aria-modal="true" aria-labelledby="song-transcribe-title" hidden>
+      <div class="song-create-card song-transcribe-card">
+        <h2 id="song-transcribe-title">Распознать текст песни</h2>
+        <p class="hint">Можно запустить один распознаватель или сравнить несколько. Для пения итог выбирается по их совпадению; исходные варианты останутся в карточке песни.</p>
+        <div class="song-model-options">
+          <label class="song-model-option"><input type="checkbox" data-song-model="whisper" checked><span><b>Whisper large-v2</b><small>Надёжный базовый вариант для русской песни и временных сегментов.</small></span></label>
+          <label class="song-model-option"><input type="checkbox" data-song-model="qwen" checked><span><b>Qwen3-ASR</b><small>Независимая проверка; на распевах может иначе разделить слова.</small></span></label>
+          <label class="song-model-option"><input type="checkbox" data-song-model="gigaam" checked><span><b>GigaAM — как в голосовом вводе</b><small>Та же локальная модель ввода текста; на долгих гласных возможны обрывы, поэтому лучше сравнивать её с Whisper.</small></span></label>
+        </div>
+        <p class="hint">Во время песни модели получают полную запись. Отделённый голос используется только для проверки границ вокала и не заменяет исходный звук.</p>
+        <div class="actions"><button class="btn" data-song-transcribe-cancel>Отмена</button><button class="btn primary" data-song-transcribe-submit>Запустить выбранные</button></div>
+        <p class="song-save-status" data-song-transcribe-status role="status"></p>
+      </div>
+    </div>
   </div></section>
 
 
