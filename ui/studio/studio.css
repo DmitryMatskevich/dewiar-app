@@ -2175,6 +2175,7 @@ html.framed .py-drawer { top: 38px; }
 .ml-toolbar h2 { margin:0; font-size:20px; }
 .ml-toolbar-actions { display:flex; justify-content:flex-end; align-items:center; gap:8px; min-width:0; }
 .ml-toolbar-actions #ml-query { width:min(280px,32vw); min-width:150px; min-height:42px; }
+.ml-toolbar-actions #ml-unlock { max-width:230px; white-space:normal; }
 .ml-sync-state { min-height:0; margin:0 0 6px; }
 .ml-sync-state:empty { display:none; }
 .ml-split { display:grid; grid-template-columns:minmax(250px,.82fr) minmax(330px,1.18fr); gap:12px; align-items:start; }
@@ -2242,8 +2243,10 @@ html.framed .py-drawer { top: 38px; }
 @media(max-width:520px) {
   .ml-toolbar { align-items:stretch; flex-direction:column; }
   .ml-toolbar-actions { justify-content:stretch; }
+  .ml-toolbar-actions { flex-wrap:wrap; }
   .ml-toolbar-actions #ml-query { flex:1; width:auto; }
   .ml-toolbar-actions .btn { white-space:nowrap; }
+  .ml-toolbar-actions #ml-unlock { flex:1 1 100%; max-width:none; white-space:normal; }
   .ml-accounts { grid-template-columns:minmax(0,1fr); }
 }
 

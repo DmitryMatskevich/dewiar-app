@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     # «Разрешить доступ» — одна команда ядру, затем синхронизация.
     page.click('#ml-unlock')
     page.wait_for_function("calls.some(c=>c[0]==='mail_sync')")
-    assert page.locator('#ml-unlock').is_hidden()
+    assert page.locator('#ml-unlock').is_visible()
     assert not errors, errors
     browser.close()
 print('OK: mailbox without a working password asks inside Dewiar, rejected password is not saved, unlock is one action')

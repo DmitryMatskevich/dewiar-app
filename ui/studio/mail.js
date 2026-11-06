@@ -105,13 +105,13 @@ function mlClearMessage() {
 }
 async function mlSelect(id) {
   mlSelected = id; const a = mlAccounts.find(x => x.id === id); if (!a) return;
+  const unlock = $("#ml-unlock"); if (unlock) unlock.title = `Разрешить Dewiar читать сохранённый пароль ящика ${a.address} из Связки ключей`;
   $("#ml-selected-address").textContent = a.address;
   $("#ml-name").value = a.name || ""; $("#ml-login").value = a.login || "";
   $("#ml-smtp").value = a.smtp_host || ""; $("#ml-sport").value = a.smtp_port || "";
   $("#ml-sec").value = a.smtp_security || "ssl"; $("#ml-imap").value = a.imap_host || ""; $("#ml-iport").value = a.imap_port || "";
   $("#ml-pass").value = ""; $("#ml-pass").placeholder = a.needs_password ? "введите пароль приложения заново" :
     a.has_password ? "пароль сохранён; введите новый только для замены" : "пароль приложения";
-  const unlock = $("#ml-unlock"); if (unlock) unlock.hidden = a.credential_state !== "needs_access";
   $("#ml-on").style.display = a.configured ? "" : "none";
   $("#ml-state").textContent = a.enabled ? "Подключён: " + a.address : a.configured ? "Настройки сохранены" : "";
   mlRenderAccounts();
@@ -125,6 +125,7 @@ async function mlSelect(id) {
 async function mlLoad() {
   mlAccounts = await core.call("mail_accounts");
   if (!mlSelected || !mlAccounts.some(a => a.id === mlSelected)) mlSelected = (mlAccounts.find(a => a.enabled) || mlAccounts[0] || {}).id || "";
+  const unlock = $("#ml-unlock"); if (unlock) unlock.disabled = !mlSelected;
   // Открыли по значку «!» — сразу ящик, который ждёт пароль (один раз за открытие страницы).
   const waiting = !mlAttentionShown && new URLSearchParams(location.search).has("attention") && mlAccounts.find(a => a.needs_password);
   if (waiting) { mlAttentionShown = true; mlSelected = waiting.id; }
