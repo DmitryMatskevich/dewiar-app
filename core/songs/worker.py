@@ -252,7 +252,7 @@ def _alignment_windows(phrases, context):
     return windows
 
 
-def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None):
+def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None, vocal_factory=None):
     release_qwen_model()
     import re
     import numpy as np
@@ -274,13 +274,18 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None):
                         start_ms=min(p.get('recovery_window',p)['start_ms'] for p in group),
                         end_ms=max(p['end_ms'] for p in group))
         phrases.append(combined)
-    from songs.onset_check import existing_vocals, retry_long_onset
+    from songs.onset_check import existing_vocals, retry_long_onset, retry_stem_alignment, suspicious_onset
     vocal_path = vocal_path or existing_vocals(audio)
     vocal_audio = None
-    if vocal_path:
-        vx, vsr = sf.read(str(vocal_path), dtype='float32', always_2d=True)
+    def load_vocals(path):
+        if not path:
+            return None
+        vx, vsr = sf.read(str(path), dtype='float32', always_2d=True)
         if abs(len(vx)/vsr-len(samples)/sr) < .1:
-            vocal_audio = (np.mean(vx,axis=1),vsr)
+            return (np.mean(vx,axis=1),vsr)
+        return None
+    vocal_audio = load_vocals(vocal_path)
+    tried_vocal_factory = False
     bounds = [(a/1000, b/1000) for a, b in _alignment_windows(phrases, context)]
     for i, phrase in enumerate(phrases):
         progress(f'Сверяем времена слов: {i+1}/{len(phrases)}')
@@ -299,8 +304,16 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None):
         units = list(result)
         from songs.alignment_words import measured_words
         words = measured_words(phrase['text'], units, round(start*1000), round(end*1000))
+        if (vocal_audio is None and vocal_factory and not tried_vocal_factory and
+                (len(words)<len(matches) or suspicious_onset(words,None))):
+            tried_vocal_factory = True
+            vocal_audio = load_vocals(vocal_factory())
+        words, stem_check = retry_stem_alignment(model, phrase['text'], words,
+                                                round(start*1000), round(end*1000), vocal_audio)
+        if stem_check:
+            phrase['vocal_alignment_check'] = stem_check
         words, onset_check = retry_long_onset(model, samples, sr, phrase['text'], words,
-                                            round(end*1000), vocal_audio)
+                                             round(end*1000), vocal_audio)
         if onset_check:
             phrase['onset_check'] = onset_check
         if words:
@@ -347,6 +360,8 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None):
                     phrase['end_ms']=words[-1]['end_ms']
                 if combined.get('onset_check'):
                     phrase['onset_check']=copy.deepcopy(combined['onset_check'])
+                if combined.get('vocal_alignment_check'):
+                    phrase['vocal_alignment_check']=copy.deepcopy(combined['vocal_alignment_check'])
                 if phrase['timing_quality']=='word_partial':
                     phrase['alignment_warning']='Часть слов имеет измеренные времена; остальные подсвечиваются приблизительно'
                 else:
@@ -379,7 +394,7 @@ def _separate_vocals_for_intro(audio, output, progress):
         return None
     folder = Path(output).parent/'intro-vocal-check'
     folder.mkdir(parents=True, exist_ok=True)
-    progress('Проверяем начало вокала по отделённому голосу')
+    progress('Готовим вокальную дорожку для проверки вступления и проигрышей')
     env = dict(os.environ, HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1', PYTHONDONTWRITEBYTECODE='1')
     for key in ('PYTHONHOME', 'PYTHONPATH', 'DYLD_LIBRARY_PATH', '_MEIPASS2'):
         env.pop(key, None)
@@ -533,7 +548,20 @@ def main():
                     if args.baseline and args.baseline.is_file():
                         context.insert(0, json.loads(args.baseline.read_text()))
                     initial_start = (timed.get('phrases') or [{}])[0].get('start_ms', 0)
-                    align_phrases(args.input,timed,progress,context)
+                    generated = []
+                    def vocals_for_timing():
+                        path = _separate_vocals_for_intro(args.input,args.output,progress)
+                        if path:
+                            generated.append(path)
+                        return path
+                    try:
+                        align_phrases(args.input,timed,progress,context,vocal_factory=vocals_for_timing)
+                    finally:
+                        # Only this job's temporary separator outputs, never a
+                        # selected karaoke file or an existing cached stem.
+                        import shutil
+                        for path in generated:
+                            shutil.rmtree(path.parent,ignore_errors=True)
                     align_intro_from_vocals(args.input,args.output,timed,context,progress,initial_start)
             elif step == 'consensus':
                 from songs.consensus import consensus, choose_spine, recover_omissions

@@ -1,8 +1,71 @@
 """Conservative retry of an aligner stretching a first word over a musical break."""
 import hashlib
 import json
+import re
 from pathlib import Path
 from .alignment_words import measured_words
+
+
+def retry_stem_alignment(model, text, words, start_ms, end_ms, vocals):
+    """Check a failed mixture alignment against two crops of the same vocal stem.
+
+    Cropping just before the second word loses a first word followed by a pause.
+    Keep the whole original window instead. Accept only complete, stable lexical
+    alignments that retain the later anchors and have vocal evidence at onset.
+    """
+    count = len(re.findall(r'\S+', text))
+    suspicious = suspicious_onset(words, vocals)
+    if vocals is None or (not suspicious and len(words) >= count):
+        return words, None
+    import numpy as np
+    samples, sr = vocals
+    trials = []
+    for offset in (0, 240):
+        start = start_ms + offset
+        if end_ms <= start:
+            return words, None
+        units = list(model.align(
+            audio=(samples[round(start*sr/1000):round(end_ms*sr/1000)], sr),
+            text=text, language='Russian')[0])
+        trials.append(measured_words(text, units, start, end_ms))
+    report = dict(reason='incomplete_or_stretched_mixture_alignment', applied=False,
+                  status='vocal_alignment_not_confirmed',
+                  retry_starts_ms=[t[0]['start_ms'] if t else None for t in trials],
+                  trials=trials)
+    if any(len(t) != count for t in trials) or not count:
+        report['rejected']='missing_words'
+        return words, report
+    first, second = trials
+    # Word attacks must be stable; sung tails/reverb have a wider boundary.
+    if any(abs(a['start_ms']-b['start_ms']) > 160 or
+           abs(a['end_ms']-b['end_ms']) > 600 for a,b in zip(first, second)):
+        report['rejected']='unstable_words'
+        return words, report
+    # A window boundary is not evidence for the first syllable.
+    if first[0]['start_ms'] < start_ms + 340 or suspicious_onset(first, vocals):
+        report['rejected']='unconfirmed_onset'
+        return words, report
+    # Reliable later words keep this retry on the same occurrence of a chorus.
+    anchors = {w['char_start']:w for w in first}
+    original = words[1:] if suspicious else words
+    if any(w['char_start'] not in anchors or
+           abs(anchors[w['char_start']]['start_ms']-w['start_ms']) > 600 or
+           abs(anchors[w['char_start']]['end_ms']-w['end_ms']) > 900 for w in original):
+        report['rejected']='moved_later_words'
+        return words, report
+    if suspicious:
+        # Do not turn a genuinely sustained vowel into an instrumental break.
+        onset = first[0]['start_ms']
+        def rms(a, b):
+            block=samples[max(0,round(a*sr/1000)):min(len(samples),round(b*sr/1000))]
+            return float(np.sqrt(np.mean(block**2))) if len(block) else 0
+        voice=rms(onset, min(onset+700, first[0]['end_ms']+200))
+        if voice <= 1e-4 or rms(onset-900, onset-100) >= voice*.22:
+            report['rejected']='no_preceding_vocal_pause'
+            return words, report
+    chosen=min(trials,key=lambda t:sum(w['end_ms']-w['start_ms'] for w in t))
+    report.update(applied=True, status='stable_vocal_alignment', start_ms=chosen[0]['start_ms'])
+    return chosen, report
 
 
 def existing_vocals(audio):
