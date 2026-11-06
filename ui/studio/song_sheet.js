@@ -456,12 +456,20 @@ window.SongSheet = (() => {
     const state=chordPopoverState, popover=chordPopoverElement();
     if(!state||!state.variants.length) return;
     const shape=state.variants[state.index];
-    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><b contenteditable="true" spellcheck="false" data-chord-name-edit role="textbox" aria-label="Название аккорда" title="Изменить название аккорда">${esc(state.customName||state.symbol)}</b><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<label class="song-chord-description">Описание аккорда<input type="text" data-chord-description maxlength="160" value="${esc(state.description||'')}" placeholder="например, баррэ на 2 ладу" aria-label="Описание аккорда"></label><p class="song-chord-popover-status" role="status"></p>`;
+    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><input class="song-chord-name-input" data-chord-name-edit value="${esc(state.customName??state.symbol)}" maxlength="24" size="6" spellcheck="false" aria-label="Название аккорда" title="Название аккорда, например Bm или G7"><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<p class="song-chord-popover-status" role="status"></p>`;
     const redraw=selector=>renderChordPopover(selector);
     const nameEditor=popover.querySelector('[data-chord-name-edit]');
-    nameEditor.addEventListener('input',()=>{ state.customName=nameEditor.textContent.replace(/\s+/g,' ').trim().slice(0,24); });
+    nameEditor.addEventListener('input',()=>{
+      const symbol=nameEditor.value.replace(/\s+/g,'').replace(/^[a-g]/,s=>s.toUpperCase());
+      state.customName=symbol;
+      const variants=chordVariants(symbol,{song_id:state.songId});
+      if(!variants.length)return;
+      state.symbol=symbol;state.variants=variants;state.variantNames=variants.map(()=>symbol);state.index=0;state.pinned=false;
+      redraw('[data-chord-name-edit]');
+      const updated=popover.querySelector('[data-chord-name-edit]');
+      updated.setSelectionRange(updated.value.length,updated.value.length);
+    });
     nameEditor.addEventListener('keydown',event=>{ if(event.key==='Enter'){ event.preventDefault(); nameEditor.blur(); } });
-    popover.querySelector('[data-chord-description]').addEventListener('input',event=>{ state.description=event.currentTarget.value.slice(0,160); });
     popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; redraw('[data-chord-pin]'); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
     popover.querySelectorAll('[data-chord-transpose]').forEach(button=>button.onclick=()=>{
@@ -488,12 +496,12 @@ window.SongSheet = (() => {
       const status=popover.querySelector('[role="status"]');
       popover.querySelectorAll('button').forEach(button=>button.disabled=true);
       try {
-        if(state.symbol==='?')throw Error('Выберите звучащие струны для аккорда.');
+        if(!state.customName || !/^[A-G](?:#|b)?(?:m7b5|(?:m|maj|min|dim|aug|sus|add)?\d*)(?:\/[A-G](?:#|b)?)?$/.test(state.customName))throw Error('Введите название аккорда сверху, например Bm или G7.');
         const apply=state.trigger.applySongChord || chordApplyHandlers.get(state.songId);
         if(!apply)throw Error('Редактор песни недоступен. Изменения оставлены в окне.');
-        const refresh=await apply({trigger:state.trigger,original:state.original,symbol:state.symbol,name:(state.customName||state.symbol).trim(),description:state.description||'',shape});
+        const refresh=await apply({trigger:state.trigger,original:state.original,symbol:state.customName,name:state.customName,description:state.description||'',shape:state.variants[state.index]});
         // No localStorage writes while experimenting: cancellation is a real rollback.
-        setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:'');
+        setPinnedVoicing(state.customName,state.songId,state.pinned?state.variants[state.index]:'');
         if(typeof refresh==='function')refresh();
         hideChordPopover();
       } catch(error) { status.textContent=error.message||'Не удалось применить аккорд.'; }

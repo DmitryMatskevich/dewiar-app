@@ -348,7 +348,7 @@ window.SongReview = (() => {
       livePreviewChords.hidden=!chordLine;
       livePreviewChords.querySelectorAll('[data-live-chord-index]').forEach(trigger=>{
         const index=Number(trigger.dataset.liveChordIndex),draft=liveChordDraft[index];
-        trigger.applySongChord=({symbol,shape})=>{
+        trigger.applySongChord=async({symbol,shape})=>{
           if(liveChordDraft[index]!==draft)throw Error('Аккорды фразы изменились. Откройте нужную смену снова.');
           const input=liveChords.querySelector(`[data-live-chord="${index}"] [data-live-chord-name]`);
           if(!input)throw Error('Редактор фразы уже закрыт.');
@@ -356,7 +356,8 @@ window.SongReview = (() => {
           Object.assign(draft,{name:symbol,voicing_fingering:shape,voicing_key_shift:0,voicing_source:'manual'});
           delete draft.voicing_probability;
           input.title=window.SongSheet.chordTooltip(symbol,draft);
-          return ()=>updateLivePreview();
+          updateLivePreview();
+          if(!await saveLiveEdit())throw Error(liveStatus.textContent);
         };
       });
     }
@@ -436,7 +437,7 @@ window.SongReview = (() => {
         method:'manual',verified:true});renderLiveChords();
     });
     livePlay?.addEventListener('click',event=>{ event.preventDefault(); event.stopPropagation(); playLivePhrase(); });
-    document.getElementById('song-live-edit-save')?.addEventListener('click',async()=>{
+    async function saveLiveEdit(){
       const button=document.getElementById('song-live-edit-save');button.disabled=true;liveStatus.textContent='Сохраняем…';
       if (livePhraseId && liveAudio?.dataset.phraseId===livePhraseId) liveAudio.pause();
       try {
@@ -487,9 +488,11 @@ window.SongReview = (() => {
             ? 'Слово и времена слов сохранены; аккорды фразы обновлены. Воспроизведение осталось на паузе.'
             : 'Текст и аккорды сохранены. Для изменённой фразы времена слов нужно проверить заново. Воспроизведение осталось на паузе.';
         liveEditor.hidden=true;
-      } catch(error) { liveStatus.textContent=`${error.message||'Не удалось сохранить правку'}. Исправления оставлены в редакторе.`; }
+        return true;
+      } catch(error) { liveStatus.textContent=`${error.message||'Не удалось сохранить правку'}. Исправления оставлены в редакторе.`; return false; }
       finally { button.disabled=false; }
-    });
+    }
+    document.getElementById('song-live-edit-save')?.addEventListener('click',saveLiveEdit);
     sync();
     document.querySelectorAll('.song-phrase[data-phrase-id]').forEach(el => {
       const pid = el.dataset.phraseId, k = key(row.song_id, pid);

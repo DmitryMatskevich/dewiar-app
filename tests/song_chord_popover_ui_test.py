@@ -14,7 +14,8 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
     store=SongStore(Path(tmp)/'songs');seed(store)
     row=store.list()[0];sid=row['song_id']
     chords=[dict(name='Em',start_ms=0,end_ms=3000,voicing_fingering='0-0-0-2-2-0'),
-            dict(name='Am',start_ms=3000,end_ms=6000,voicing_fingering='0-1-2-2-0-x')]
+            dict(name='Am',start_ms=3000,end_ms=6000,voicing_fingering='0-1-2-2-0-x'),
+            dict(name='N',start_ms=6000,end_ms=12000)]
     store.patch(sid,dict(chords=chords))
     server=make_server(store)
     thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -58,10 +59,10 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert pop.is_visible() and pop.locator(b1).get_attribute('aria-pressed')=='true'
         for _ in range(2):
             pop.locator('[data-chord-string-toggle="5"]').click();assert pop.is_visible()
-        heading=pop.locator('.song-chord-popover-head b').inner_text()
+        heading=pop.locator('[data-chord-name-edit]').input_value()
         page.locator('#test-banner').click()
         page.locator('#song-guitar-content .song-chord-tip[data-chord-name="Am"]').first.hover()
-        assert pop.is_visible() and pop.locator('.song-chord-popover-head b').inner_text()==heading
+        assert pop.is_visible() and pop.locator('[data-chord-name-edit]').input_value()==heading
         for selector in ['[data-chord-pin]','[data-chord-next]','[data-chord-prev]',
                          '[data-chord-transpose="1"]','[data-chord-transpose="-1"]']:
             pop.locator(selector).click();assert pop.is_visible(),selector
@@ -77,10 +78,13 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
 
         trigger.hover();pop.locator(b1).click()
         assert pop.locator('.song-chord-popover-head [data-chord-apply]').count()==1
-        pop.locator('[data-chord-name-edit]').fill('Bm')
-        pop.locator('[data-chord-description]').fill('Баррэ на втором ладу')
-        chosen_name=pop.locator('.song-chord-popover-head b').inner_text()
+        pop.locator('[data-chord-name-edit]').fill('')
+        pop.locator('[data-chord-name-edit]').press('B')
+        pop.locator('[data-chord-name-edit]').press('m')
+        assert pop.locator('[data-chord-description]').count()==0
+        chosen_name=pop.locator('[data-chord-name-edit]').input_value()
         chosen_shape='-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())
+        assert page.evaluate('(s)=>SongSheet.inferChordName(s)',chosen_shape)=='Bm'
         # A rejected save must leave the draft and the window intact.
         def fail_save(route):
             if route.request.post_data_json.get('cmd')=='song_edit_chords':
@@ -94,7 +98,8 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
         saved=store.get(sid)
         assert saved['chords'][0]['name']==chosen_name
-        assert saved['chords'][0]['description']=='Баррэ на втором ладу'
+        assert saved['chords'][0]['start_ms']==0
+        assert all(saved['chords'][-1][key]==value for key,value in chords[-1].items())
         assert saved['chords'][0]['voicing_fingering']==chosen_shape
         page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
         tip=page.locator(f'#song-guitar-content .song-chord-tip[data-chord-name="{chosen_name}"]').first
@@ -102,16 +107,13 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())==chosen_shape
         pop.locator('[data-chord-close]').click()
 
-        # A shape-only edit in the phrase preview is a draft until Save.
+        # One save from the phrase popover persists and returns to the sheet.
         page.locator('.song-paper-edit-chords').first.click()
         preview=page.locator('#song-live-edit-preview-chords .song-chord-tip').first
         preview.hover();pop.locator('[data-chord-next]').click()
         phrase_shape='-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())
         assert phrase_shape!=chosen_shape
         pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
-        assert page.locator('#song-live-editor').is_visible()
-        assert store.get(sid)['chords'][0]['voicing_fingering']==chosen_shape
-        page.locator('#song-live-edit-save').click()
         page.locator('#song-live-editor').wait_for(state='hidden')
         assert store.get(sid)['chords'][0]['voicing_fingering']==phrase_shape
 

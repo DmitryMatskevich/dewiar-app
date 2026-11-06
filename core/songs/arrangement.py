@@ -104,10 +104,14 @@ def edit_chords(store, args):
             raise ValueError('Некорректный список аккордов')
         cleaned = []
         for event in events:
-            name = clean_chord(event.get('name'))
+            # N is the recognizer's no-chord marker; preserve these intervals
+            # when a user edits another event in the same song.
+            name = 'N' if event.get('name') == 'N' else clean_chord(event.get('name'))
             start = event.get('start_ms')
-            if not name or not isinstance(start,(int,float)) or not math.isfinite(start) or start < 0:
-                raise ValueError('Укажите название аккорда и положительное время')
+            if not name:
+                raise ValueError('Неизвестное название аккорда: ' + str(event.get('name') or ''))
+            if not isinstance(start,(int,float)) or not math.isfinite(start) or start < 0:
+                raise ValueError('Некорректная сохранённая позиция аккорда')
             anchor = event.get('anchor')
             if anchor:
                 phrase = next((p for p in row.get('phrases',[]) if p['phrase_id']==anchor.get('phrase_id')), None)
