@@ -214,7 +214,10 @@ html.st-light .song-chord-popover { --ink:#1d2230; --muted:rgba(29,34,48,.75); -
 .song-chord-popover-status:empty { display:none; }
 .song-chord-popover-head { display:grid; grid-template-columns:30px minmax(0,1fr) 30px auto; align-items:center; gap:4px; margin:0 -14px 10px; padding:10px 12px 10px 14px; border-radius:16px 16px 0 0; background-color:rgba(255,255,255,.06); }
 html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
-.song-chord-popover-head b { font-size:22px; text-align:center; }
+.song-chord-popover-head b { min-width:0; overflow:hidden; padding:2px 4px; border-radius:5px; font-size:22px; text-align:center; white-space:nowrap; text-overflow:ellipsis; cursor:text; }
+.song-chord-popover-head b:focus { outline:2px solid var(--accent); outline-offset:1px; }
+.song-chord-description { display:block; margin:8px 0 0; color:var(--muted); font-size:12px; }
+.song-chord-description input { display:block; box-sizing:border-box; width:100%; margin-top:4px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font:inherit; }
 .song-chord-popover-head > div { display:flex; gap:4px; }
 .song-chord-popover-btn { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:5px; border:0; border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; }
 .song-chord-popover-btn:hover, .song-chord-popover-btn:focus-visible, .song-chord-popover-btn.is-pinned { color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); }

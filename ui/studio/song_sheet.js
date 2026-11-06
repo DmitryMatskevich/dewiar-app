@@ -373,7 +373,8 @@ window.SongSheet = (() => {
   function chordTooltip(symbol,evidence) {
     const pinned=pinnedVoicing(symbol,evidence?.song_id), exact=exactVoicing(evidence), shape=pinned || exact || chordFingering(symbol), probability=exact?voicingProbability(evidence):null;
     if(!shape) return `${symbol}: позиция на грифе не определена`;
-    return `${symbol} · 1→6: ${shape}${pinned?' · закреплено':exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
+    const description=String(evidence?.description||'').trim();
+    return `${symbol}${description?` · ${description}`:''} · 1→6: ${shape}${pinned?' · закреплено':exact?'':' · оценочная позиция'}${probability===null?'':` · вероятность ${probability}%`}`;
   }
   function chordVariants(symbol,evidence) {
     const result=[], add=shape=>{ const normalized=exactVoicing({voicing_fingering:shape}); if(normalized&&!result.includes(normalized)) result.push(normalized); };
@@ -455,28 +456,32 @@ window.SongSheet = (() => {
     const state=chordPopoverState, popover=chordPopoverElement();
     if(!state||!state.variants.length) return;
     const shape=state.variants[state.index];
-    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><b>${esc(state.symbol)}</b><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<button type="button" class="btn primary small song-chord-apply" data-chord-apply title="Применить выбранный аккорд и аппликатуру и закрыть окно">Применить</button><p class="song-chord-popover-status" role="status"></p>`;
+    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><b contenteditable="true" spellcheck="false" data-chord-name-edit role="textbox" aria-label="Название аккорда" title="Изменить название аккорда">${esc(state.customName||state.symbol)}</b><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<label class="song-chord-description">Описание аккорда<input type="text" data-chord-description maxlength="160" value="${esc(state.description||'')}" placeholder="например, баррэ на 2 ладу" aria-label="Описание аккорда"></label><p class="song-chord-popover-status" role="status"></p>`;
     const redraw=selector=>renderChordPopover(selector);
+    const nameEditor=popover.querySelector('[data-chord-name-edit]');
+    nameEditor.addEventListener('input',()=>{ state.customName=nameEditor.textContent.replace(/\s+/g,' ').trim().slice(0,24); });
+    nameEditor.addEventListener('keydown',event=>{ if(event.key==='Enter'){ event.preventDefault(); nameEditor.blur(); } });
+    popover.querySelector('[data-chord-description]').addEventListener('input',event=>{ state.description=event.currentTarget.value.slice(0,160); });
     popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; redraw('[data-chord-pin]'); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
     popover.querySelectorAll('[data-chord-transpose]').forEach(button=>button.onclick=()=>{
       const symbol=transpose(state.symbol,Number(button.dataset.chordTranspose)||0);
       const variants=chordVariants(symbol,{song_id:state.songId});
       if(!variants.length)return;
-      state.symbol=symbol;state.variants=variants;state.variantNames=variants.map(()=>symbol);state.index=0;state.pinned=false;
+      state.symbol=symbol;state.customName=symbol;state.variants=variants;state.variantNames=variants.map(()=>symbol);state.index=0;state.pinned=false;
       redraw(`[data-chord-transpose="${button.dataset.chordTranspose}"]`);
     });
     popover.querySelectorAll('[data-chord-fret]').forEach(button=>button.onclick=()=>{
       const values=shape.split('-'), string=Number(button.dataset.chordString), fret=Number(button.dataset.chordFret);
-      values[string]=values[string]===String(fret)?'0':String(fret); state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.variantNames[state.index]=state.symbol;state.pinned=false;
+      values[string]=values[string]===String(fret)?'0':String(fret); state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.customName=state.symbol; state.variantNames[state.index]=state.symbol;state.pinned=false;
       redraw(`[data-chord-string="${string}"][data-chord-fret="${fret}"]`);
     });
     popover.querySelectorAll('[data-chord-string-toggle]').forEach(button=>button.onclick=()=>{
       const values=shape.split('-'), string=Number(button.dataset.chordStringToggle), current=values[string];
-      values[string]=current==='x'?'0':current==='0'?'x':'0'; state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.variantNames[state.index]=state.symbol;state.pinned=false;
+      values[string]=current==='x'?'0':current==='0'?'x':'0'; state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.customName=state.symbol; state.variantNames[state.index]=state.symbol;state.pinned=false;
       redraw(`[data-chord-string-toggle="${string}"]`);
     });
-    const moveVariant=(delta,selector)=>{ state.index=(state.index+delta+state.variants.length)%state.variants.length;state.symbol=state.variantNames[state.index]; redraw(selector); };
+    const moveVariant=(delta,selector)=>{ state.index=(state.index+delta+state.variants.length)%state.variants.length;state.symbol=state.variantNames[state.index];state.customName=state.symbol; redraw(selector); };
     popover.querySelector('[data-chord-prev]').onclick=()=>moveVariant(-1,'[data-chord-prev]');
     popover.querySelector('[data-chord-next]').onclick=()=>moveVariant(1,'[data-chord-next]');
     popover.querySelector('[data-chord-apply]').onclick=async()=>{
@@ -486,7 +491,7 @@ window.SongSheet = (() => {
         if(state.symbol==='?')throw Error('Выберите звучащие струны для аккорда.');
         const apply=state.trigger.applySongChord || chordApplyHandlers.get(state.songId);
         if(!apply)throw Error('Редактор песни недоступен. Изменения оставлены в окне.');
-        const refresh=await apply({trigger:state.trigger,original:state.original,symbol:state.symbol,shape});
+        const refresh=await apply({trigger:state.trigger,original:state.original,symbol:state.symbol,name:(state.customName||state.symbol).trim(),description:state.description||'',shape});
         // No localStorage writes while experimenting: cancellation is a real rollback.
         setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:'');
         if(typeof refresh==='function')refresh();
@@ -505,7 +510,7 @@ window.SongSheet = (() => {
     const evidence={song_id:trigger.dataset.songId||'',voicing_fingering:trigger.dataset.chordFingering||'',voicing_probability:trigger.dataset.chordProbability};
     const variants=chordVariants(symbol,evidence); if(!variants.length) return;
     const pinnedShape=pinnedVoicing(symbol,evidence.song_id); let index=Math.max(0,variants.indexOf(pinnedShape));
-    chordPopoverState={trigger,symbol,original:symbol,songId:evidence.song_id,variants,variantNames:variants.map(()=>symbol),index,pinned:!!pinnedShape};
+    chordPopoverState={trigger,symbol,customName:symbol,description:trigger.dataset.chordDescription||'',original:symbol,songId:evidence.song_id,variants,variantNames:variants.map(()=>symbol),index,pinned:!!pinnedShape};
     trigger.setAttribute('aria-expanded','true'); renderChordPopover();
   }
   function bindChordPopovers() {
@@ -533,7 +538,7 @@ window.SongSheet = (() => {
       const timing=Number.isFinite(start) ? ` data-start-ms="${start}"${Number.isFinite(end)?` data-end-ms="${end}"`:''}${Number.isFinite(nextStart)?` data-next-start-ms="${nextStart}"`:''}` : '';
       const chordEvidence={...chord,song_id:chord.song_id||line.song_id};
       const shape=exactVoicing(chordEvidence);
-      const attrs=` data-chord-name="${esc(chord.name)}" data-source-chord-name="${esc(chord.source_name||chord.name)}" data-chord-key-shift="${Number(chord.key_shift)||0}" data-song-id="${esc(chordEvidence.song_id||'')}"${shape?` data-chord-fingering="${esc(shape)}"`:''}${Number.isFinite(Number(chord.voicing_probability))?` data-chord-probability="${chord.voicing_probability}"`:''}`;
+      const attrs=` data-chord-name="${esc(chord.name)}" data-source-chord-name="${esc(chord.source_name||chord.name)}" data-chord-description="${esc(chord.description||'')}" data-chord-key-shift="${Number(chord.key_shift)||0}" data-song-id="${esc(chordEvidence.song_id||'')}"${shape?` data-chord-fingering="${esc(shape)}"`:''}${Number.isFinite(Number(chord.voicing_probability))?` data-chord-probability="${chord.voicing_probability}"`:''}`;
       const tooltip=chordTooltip(chord.name,chordEvidence);
       html+=`<span class="song-chord-tip" title="${esc(tooltip)}" role="button" tabindex="0" aria-label="${esc(tooltip)}" aria-expanded="false"${attrs}${timing}>${esc(chord.name)}</span>`;
       cursor=at+chord.name.length;
@@ -619,6 +624,7 @@ window.SongSheet = (() => {
       pause:'<path d="M8 4v16M16 4v16"/>',
       stop:'<rect x="5" y="5" width="14" height="14" rx="1"/>',
       pin:'<path d="m14 4 6 6-3 3-2-2-4 4v4l-2 2-1-5-5-1 2-2h4l4-4-2-2Z"/>',
+      check:'<path d="m5 12 4 4L19 6"/>',
       mic:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/>',
       system:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M7 10h2l2-3 3 7 2-4h1"/>',
       upload:'<path d="M12 16V4m-5 5 5-5 5 5M4 16v4h16v-4"/>'
@@ -702,7 +708,7 @@ window.SongSheet = (() => {
       <button class="btn small" id="song-finish-review">Отметить песню готовой</button><p id="song-finish-status" role="status"></p></details>`;
   }
   function bind(row, getCurrent, accept) {
-    chordApplyHandlers.set(row.song_id,async({trigger,original,symbol,shape})=>{
+    chordApplyHandlers.set(row.song_id,async({trigger,original,symbol,name,description,shape})=>{
       const current=getCurrent();
       if(current?.song_id!==row.song_id)throw Error('Откройте исходную песню, чтобы применить аккорд.');
       const sourceName=trigger.dataset.sourceChordName||original, start=Number(trigger.dataset.startMs);
@@ -710,8 +716,9 @@ window.SongSheet = (() => {
       const matches=events.map((event,index)=>event.name===sourceName&&Number(event.start_ms)===start?index:-1).filter(index=>index>=0);
       if(matches.length!==1)throw Error('Смена аккорда уже изменилась. Правка оставлена в окне.');
       const shift=Number(trigger.dataset.chordKeyShift)||0,index=matches[0];
-      events[index]={...events[index],name:symbol===original?sourceName:transpose(symbol,-shift),
-        voicing_fingering:shape,voicing_key_shift:shift,voicing_source:'manual',verified:true,method:'manual'};
+      const displayName=(name||symbol).trim();
+      events[index]={...events[index],name:shift?transpose(displayName,-shift):displayName,
+        description:description||'',voicing_fingering:shape,voicing_key_shift:shift,voicing_source:'manual',verified:true,method:'manual'};
       delete events[index].voicing_probability;
       const saved=await core.call('song_edit_chords',{song_id:row.song_id,base_revision:current.revision,chords:events});
       return ()=>accept(saved);

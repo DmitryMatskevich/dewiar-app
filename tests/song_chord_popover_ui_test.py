@@ -76,6 +76,9 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         pop.locator('[data-chord-close]').click()
 
         trigger.hover();pop.locator(b1).click()
+        assert pop.locator('.song-chord-popover-head [data-chord-apply]').count()==1
+        pop.locator('[data-chord-name-edit]').fill('Bm')
+        pop.locator('[data-chord-description]').fill('Баррэ на втором ладу')
         chosen_name=pop.locator('.song-chord-popover-head b').inner_text()
         chosen_shape='-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())
         # A rejected save must leave the draft and the window intact.
@@ -91,6 +94,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
         saved=store.get(sid)
         assert saved['chords'][0]['name']==chosen_name
+        assert saved['chords'][0]['description']=='Баррэ на втором ладу'
         assert saved['chords'][0]['voicing_fingering']==chosen_shape
         page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
         tip=page.locator(f'#song-guitar-content .song-chord-tip[data-chord-name="{chosen_name}"]').first
