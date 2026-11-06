@@ -114,6 +114,7 @@ window.SongSheet = (() => {
       if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
       if(text) lines.push({kind:'chords',text,phrase_id:phraseId,chord_marks:chords.map(c=>({name:c.name,at:c.at,
+        start_ms:c.start_ms,end_ms:c.end_ms,
         voicing_fingering:c.voicing_fingering||c.fingering||c.voicing?.fingering,
         voicing_probability:c.voicing_probability??c.fingering_probability??c.voicing?.probability}))});
       if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
@@ -143,6 +144,8 @@ window.SongSheet = (() => {
     for(const word of words) {
       if(Number(word.dataset.start)<=ms && ms<Number(word.dataset.end) && (!selected || Number(word.dataset.start)>=Number(selected.dataset.start))) selected=word;
     }
+    const old=paper.querySelector('.song-paper-word.current-word');
+    const oldChord=paper.querySelector('.song-paper-chord.current-chord');
     const instrumentals=[...paper.querySelectorAll('.song-paper-instrumental[data-start-ms][data-end-ms]')];
     let activeInstrumental=null;
     for(const marker of instrumentals) {
@@ -156,13 +159,25 @@ window.SongSheet = (() => {
         parts.find(part=>Number(part.dataset.cueStep)===cue.count)?.classList.add('countdown-lit');
       }
     }
-    const old=paper.querySelector('.song-paper-word.current-word');
+    const chordSpans=[...paper.querySelectorAll('.song-paper-chord[data-start-ms]')];
+    let activeChord=null;
+    for(const chord of chordSpans) {
+      const start=Number(chord.dataset.startMs);
+      const end=Number(chord.dataset.endMs);
+      const nextStart=Number(chord.dataset.nextStartMs);
+      const effectiveEnd=Number.isFinite(end)&&end>start ? end : (Number.isFinite(nextStart) ? nextStart : Infinity);
+      const isActive=Number.isFinite(start)&&start<=ms&&ms<effectiveEnd;
+      if(isActive&&(!activeChord||start>=Number(activeChord.dataset.startMs))) activeChord=chord;
+      chord.classList.toggle('current-chord',chord===activeChord);
+    }
     const previousLine=paper.querySelector('.song-paper-line.playing-line');
-    if(selected===old && !activeInstrumental) return;
+    if(selected===old && activeChord===oldChord && !activeInstrumental) return;
     old?.classList.remove('current-word');
+    oldChord?.classList.remove('current-chord');
     previousLine?.classList.remove('playing-line');
     selected?.classList.add('current-word');
-    const line=(selected?.closest('.song-paper-line')||activeInstrumental?.closest('.song-paper-line'));
+    activeChord?.classList.add('current-chord');
+    const line=(selected?.closest('.song-paper-line')||activeChord?.closest('.song-paper-line')||activeInstrumental?.closest('.song-paper-line'));
     line?.classList.add('playing-line');
     selected?.closest('.song-paper-lyrics')?.classList.add('playing-line');
     if(scroll && line && line!==previousLine) {
@@ -323,10 +338,14 @@ window.SongSheet = (() => {
   function chordLineHTML(line) {
     if(!line.chord_marks?.length) return esc(line.text);
     let cursor=0,html='';
-    for(const chord of line.chord_marks) {
+    for(let index=0; index<line.chord_marks.length; index++) {
+      const chord=line.chord_marks[index];
       const at=Math.max(cursor,Math.min(line.text.length,Number(chord.at)||0));
       html+=esc(line.text.slice(cursor,at));
-      html+=`<span class="song-chord-tip" title="${esc(chordTooltip(chord.name,chord))}" aria-label="${esc(chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
+      const start=Number(chord.start_ms), end=Number(chord.end_ms);
+      const nextStart=Number(line.chord_marks[index+1]?.start_ms);
+      const timing=Number.isFinite(start) ? ` data-start-ms="${start}"${Number.isFinite(end)?` data-end-ms="${end}"`:''}${Number.isFinite(nextStart)?` data-next-start-ms="${nextStart}"`:''}` : '';
+      html+=`<span class="song-paper-chord song-chord-tip"${timing} title="${esc(chordTooltip(chord.name,chord))}" aria-label="${esc(chordTooltip(chord.name,chord))}">${esc(chord.name)}</span>`;
       cursor=at+chord.name.length;
     }
     return html+esc(line.text.slice(cursor));
