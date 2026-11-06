@@ -133,6 +133,7 @@ $$("nav button[data-p]").forEach(b => b.onclick = () => {
   $$("section").forEach(s => s.classList.toggle("cur", voicePage
     ? (s.id === "p-voice" || s.id === "p-sound")
     : s.id === "p-" + b.dataset.p));
+  window.dispatchEvent(new CustomEvent("dewiar:studio-page", { detail: { page: b.dataset.p } }));
   if (SOUL_TABS.some(t => t[0] === b.dataset.p)) { $('nav button[data-p="diary"]').classList.add("cur"); $$(".stabs button").forEach(x => x.classList.toggle("on", x.dataset.go === b.dataset.p)); try { LS.set("soul_tab", b.dataset.p); } catch (e) { } }
   if (b.dataset.p === "soul") loadSoul();
   if (b.dataset.p === "const") loadConst();

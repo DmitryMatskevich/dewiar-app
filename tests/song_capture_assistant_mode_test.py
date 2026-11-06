@@ -11,10 +11,11 @@ from engine_commands import CommandsMixin
 
 class FakeCapture:
     def start(self, song_id, target, backend, source):
+        self.source = source
         return {"song_id": song_id, "running": True, "source": source}
 
     def stop(self, song_id):
-        return {"song_id": song_id, "status": "queued"}
+        return self.complete({"song_id": song_id, "status": "queued"}, microphone=self.source == 'microphone')
 
 
 class FakeAnalyzer:
@@ -42,6 +43,7 @@ class AssistantCaptureModeTest(unittest.TestCase):
             song_capture=FakeCapture(), song_analyzer=FakeAnalyzer(), song_sources=FakeSources(),
             events=[], cancelled=0, states=[],
         )
+        engine.song_capture.complete = MethodType(CommandsMixin._song_capture_finished, engine)
         engine.emit = lambda name, **data: engine.events.append((name, data))
         engine.cancel_turn = lambda: setattr(engine, "cancelled", engine.cancelled + 1)
         engine.set_state = lambda state: engine.states.append(state)

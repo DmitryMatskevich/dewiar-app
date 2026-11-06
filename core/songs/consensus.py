@@ -22,6 +22,26 @@ def choose_spine(hypotheses):
     if not available:
         return None
     timed = next((h for h in available if h['model'].startswith('Whisper')), available[0])
+    # With two recognizers, keep a fuller provisional transcript when the other
+    # omits an entire interval. Strong song-wide agreement is required; a lone
+    # unrelated introductory hallucination cannot become the display spine.
+    timed_tokens = list(map(normalized, tokens(timed['phrases'])))
+    for candidate in available:
+        if candidate is timed:
+            continue
+        candidate_tokens = list(map(normalized, tokens(candidate['phrases'])))
+        matched = sum(b.size for b in difflib.SequenceMatcher(None, timed_tokens,
+            candidate_tokens, autojunk=False).get_matching_blocks())
+        if matched < 12 or matched/max(1,len(candidate_tokens)) < .5:
+            continue
+        for phrase in candidate['phrases']:
+            local = [p for p in timed['phrases'] if p.get('start_ms',0) < phrase.get('end_ms',0)
+                     and p.get('end_ms',0) > phrase.get('start_ms',0)]
+            words = list(map(normalized,tokens([phrase])))
+            near = list(map(normalized,tokens(local)))
+            coverage = sum(b.size for b in difflib.SequenceMatcher(None,words,near,autojunk=False).get_matching_blocks())
+            if len(words) >= 8 and coverage < len(words)*.5:
+                return candidate
     baseline = next((h for h in available if 'gigaam' in h['model'].lower()), None)
     if baseline and baseline is not timed:
         for p in baseline['phrases']:
@@ -50,11 +70,21 @@ def consensus(phrases, hypotheses, choose_majority=False):
             continue
         seen.add(model)
         alternative = tokens(hyp.get('phrases', []))
-        align = difflib.SequenceMatcher(None, list(map(normalized, base)),
-                                       list(map(normalized, alternative)), autojunk=False)
-        for tag, a, b, c, d in align.get_opcodes():
+        timed = all('start_ms' in p and 'end_ms' in p for p in [*output, *hyp.get('phrases', [])])
+        if timed:
+            from .reconciliation import scan, timed_edits
+            src_tokens, dst_tokens = scan(output), scan(hyp.get('phrases', []))
+            operations = timed_edits(src_tokens, dst_tokens)
+        else:
+            operations = difflib.SequenceMatcher(None, list(map(normalized, base)),
+                list(map(normalized, alternative)), autojunk=False).get_opcodes()
+        for tag, a, b, c, d in operations:
             if tag == 'equal' or (tag == 'replace' and b-a == d-c):
-                for i, word in zip(range(a, b), alternative[c:d]):
+                for i, (index, word) in zip(range(a, b), enumerate(alternative[c:d], c)):
+                    if timed:
+                        src, dst = src_tokens[i], dst_tokens[index]
+                        if src['start_ms'] >= dst['end_ms']+1500 or dst['start_ms'] >= src['end_ms']+1500:
+                            continue
                     evidence[i].append(word)
     cursor = 0
     for phrase in output:
@@ -182,14 +212,25 @@ def recover_omissions(phrases, hypotheses):
                 q.update(words=[],agreement=[],alignment_stale=True,timing_quality='phrase',review_state='needs_review')
                 q.setdefault('recovered_spans',[]).append(evidence)
             else:
+                # A local ASR window may end before the next global phrase.
+                # Its missing suffix belongs after prev, not at the song's end.
+                if nxt:
+                    index = next(k for k,p in enumerate(output) if p is nxt[1])
+                elif prev:
+                    index = next(k for k,p in enumerate(output) if p is prev[1]) + 1
+                else:
+                    index = next((k for k,p in enumerate(output)
+                                  if p.get('start_ms',0) >= source['end_ms']),len(output))
+                before = output[index] if index < len(output) else None
                 start = max(source['start_ms'],prev[1]['end_ms'] if prev else source['start_ms'])
-                end = min(source['end_ms'],nxt[1]['start_ms'] if nxt else source['end_ms'])
+                end = min(source['end_ms'],before['start_ms'] if before else source['end_ms'])
                 if end <= start:
                     start,end = source['start_ms'],source['end_ms']
                 q = dict(text=text,start_ms=start,end_ms=end,words=[],timing_quality='phrase',
                     phrase_id=f"coverage-{source.get('phrase_id','segment')}-{c}-{d}",
                     review_state='needs_review',alignment_stale=True,recovered_spans=[evidence],
+                    recovery_order={'after_phrase_id':prev[1].get('phrase_id') if prev else None,
+                                    'before_phrase_id':before.get('phrase_id') if before else None},
                     alignment_warning='Фраза восстановлена по двум распознавателям; время требует проверки')
-                index = next((k for k,p in enumerate(output) if nxt and p is nxt[1]),len(output))
                 output.insert(index,q)
     return output

@@ -234,6 +234,9 @@
   #voice .lead { margin-bottom: 16px; }
   #vcard { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 14px;
            padding: 20px 22px; border-radius: 20px; overflow: hidden; }
+  #vphrase-row { display:flex; align-items:flex-start; gap:8px; }
+  #vphrase-row #vphrase { flex:1; min-width:0; user-select:text; -webkit-user-select:text; }
+  #v-copy { flex:none; margin-top:2px; }
   #vsay { font-size: 12.5px; font-weight: 700; color: var(--cue); }
   #vphrase { font-size: 23px; line-height: 1.32; font-weight: 750; text-wrap: pretty; min-height: 3.9em; }
   #vmeter { display: flex; align-items: center; gap: 3px; height: 26px; }
@@ -367,7 +370,7 @@
   <div id="voice" class="over hidden" role="dialog" aria-label="Запоминаю ваш голос">
     <h2>Запоминаю ваш голос<button class="ib" id="v-x" title="Отменить"><svg viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button></h2>
     <p class="lead">Прочитайте фразы вслух обычным голосом, как на встрече. Звук не сохраняю — только отпечаток голоса.</p>
-    <div id="vcard" class="blk"><span id="vsay">Скажите</span><div id="vphrase"></div><div id="vmeter"></div></div>
+    <div id="vcard" class="blk"><span id="vsay">Скажите</span><div id="vphrase-row"><div id="vphrase"></div><button class="ib" id="v-copy" type="button" title="Скопировать фразу" aria-label="Скопировать фразу"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg></button></div><div id="vmeter"></div></div>
     <div id="vsteps"></div>
     <p id="vnote"></p>
   </div>
@@ -466,6 +469,16 @@ function voiceShow(e) {
     $("#vnote").textContent = "Попробуйте ещё раз."; $("#vnote").classList.add("bad");
   } else if (e.step === "cancel") voiceHide();
 }
+$("#v-copy").onclick = async () => {
+  const phrase = $("#vphrase").textContent.trim();
+  if (!phrase) return;
+  try {
+    await core.call("dictation_copy_text", {text: phrase, copy_only: true});
+    $("#vnote").textContent = "Фраза скопирована";
+  } catch (e) {
+    $("#vnote").textContent = "Не удалось скопировать фразу";
+  }
+};
 function voiceHide() { $("#voice").classList.add("hidden"); vstep = null; core.call("prompter_state").then(s => { st = s; render(); }).catch(() => {}); }
 $("#v-rec").onclick = () => { voiceShow.n = 0; core.call("prompter_voice", { action: "start" }).catch(e => voiceShow({ step: "error", error: e.message })); };
 $("#v-x").onclick = () => { if (vstep === "listen" || vstep === "model") core.call("prompter_voice", { action: "cancel" }).catch(() => {}); voiceHide(); };
@@ -771,9 +784,9 @@ async function createMeetingVideo() {
   catch (e) { videoExportBusy = false; videoExportResult = {error: e.message}; renderMeetingVideo(); }
 }
 function renderSum(e) {
-  show("sum"); $("#title").textContent = "Итог встречи";
+  show("sum"); $("#title").textContent = st?.meeting_group_finalized ? "Общий итог встречи" : st?.meeting_group ? "Итог блока встречи" : "Итог встречи";
   meetingSummaryPath = e.path || e.summary_path || meetingSummaryPath || "";
-  const progress = e.phase === "stopping" ? "Сохраняю запись…" : e.phase === "queued" ? "Расшифровка ожидает обработки…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : "Подвожу итог встречи…";
+  const progress = e.phase === "stopping" ? "Сохраняю запись…" : e.phase === "queued" ? "Расшифровка ожидает обработки…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : e.phase === "group" ? "Собираю общий итог блоков встречи…" : "Подвожу итог встречи…";
   const icon = path => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
   const play = icon("M8 5v14l11-7z"), trash = icon("M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7");
   const busy = !!(st?.processing || st?.summary_busy || st?.recording?.export_busy);
@@ -783,6 +796,8 @@ function renderSum(e) {
   $("#sum").innerHTML = `<div class="sum-actions" role="toolbar" aria-label="Действия со встречей">
     <button class="go" id="again" type="button" title="Настроить и начать новую встречу">${icon("M12 4v16M4 12h16")}Новая</button>
     <button class="ghost blk" id="all-meetings" type="button" title="Открыть раздел со всеми встречами">${icon("M4 5h16M4 12h16M4 19h16")}Встречи</button>
+    <button class="ghost blk" id="continue-meeting" type="button" title="Начать следующий блок этой встречи" ${busy ? "disabled" : ""}>${icon("M5 12h13M13 6l6 6-6 6")}Продолжить встречу</button>
+    ${st?.meeting_group && !st?.meeting_group_finalized ? `<button class="ghost blk" id="finalize-meeting-group" type="button" title="Сформировать общий итог и оставить итоги блоков отдельными" ${busy ? "disabled" : ""}>${icon("M5 5h14M5 12h14M5 19h14")}Общий итог</button>` : ""}
     <button class="ghost blk" type="button" id="create-meeting-video" hidden>${play}<span>Видео</span></button>
     <button class="ghost blk" type="button" id="play-meeting-audio" title="Воспроизвести общую аудиозапись встречи" ${st?.recording?.audio_file ? "" : "hidden"}>${play}Аудио</button>
     <button class="ghost blk" type="button" id="remove-video" title="Удалить видео встречи в корзину" aria-label="Удалить видео встречи" hidden ${busy ? "disabled" : ""}>${trash}<span>Видео</span></button>
@@ -793,6 +808,16 @@ function renderSum(e) {
   renderMeetingVideo();
   if ($("#again")) $("#again").onclick = () => { dismissedSummary = st?.meeting?.id || ""; show("setup"); $("#title").textContent = "Встречи"; };
   $("#all-meetings").onclick = () => api()?.open_settings?.("prompter");
+  $("#continue-meeting")?.addEventListener("click", async () => {
+    const button = $("#continue-meeting"); button.disabled = true;
+    try { st = await core.call("prompter_continue"); videoExportBusy = false; videoExportResult = null; render(); }
+    catch (err) { button.disabled = false; $("#meeting-video-result").textContent = err.message || "Не удалось продолжить встречу"; }
+  });
+  $("#finalize-meeting-group")?.addEventListener("click", async () => {
+    const button = $("#finalize-meeting-group"); button.disabled = true;
+    try { st = await core.call("prompter_group_finalize"); render(); }
+    catch (err) { button.disabled = false; $("#meeting-video-result").textContent = err.message || "Не удалось собрать общий итог"; }
+  });
   $("#play-meeting-audio").onclick = () => core.call("ws_open", {path:st.recording.audio_file}).catch(err => { $("#meeting-video-result").textContent = err.message; });
   $("#remove-video").onclick = () => confirmResultRemoval(true);
   $("#remove-meeting").onclick = () => confirmResultRemoval(false);
@@ -912,6 +937,7 @@ core.on("prompter", (e) => {
   else if (e.kind === "summary") {
     st.on = false; st.summary = e.summary; st.summary_path = e.path || st.summary_path;
     st.summary_busy = !!e.busy; st.summary_progress = {phase:e.phase,part:e.part,parts:e.parts};
+    if (e.group_finalized) st.meeting_group_finalized = true;
     if (dismissedSummary !== (st.meeting?.id || "")) renderSum(e);
   }
   else if (e.kind === "video") { videoExportBusy = !!e.busy; videoExportResult = e; renderMeetingVideo(); }

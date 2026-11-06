@@ -274,6 +274,7 @@ class Prompter:
         self._summary_busy = False
         self._summary_progress = {}
         self._completed_job = None
+        self._meeting_group = None  # продолжение одной встречи: сохранённые завершённые блоки
         self._job_owner = None
         self._text_job_lock = threading.Lock()  # длинные расшифровки не запускают несколько моделей одновременно
         self._post_thread = None
@@ -677,6 +678,8 @@ class Prompter:
                     "files": [{"name": f["name"], "chars": f["chars"]} for f in self.files], "lines": self.lines[-30:],
                     "hints": self.hints[-20:], "sheet": self.sheet, "summary": self.summary,
                     "summary_path": self._summary_path,
+                    "meeting_group": bool(getattr(self, "_meeting_group", None)),
+                    "meeting_group_finalized": bool(getattr(self, "_meeting_group", None) and self._meeting_group.get("finalized")),
                     "summary_preview": preview, "recording": rec, "schedules": self.schedules(),
                     "brain": bool(self.eng.s.active_llm()), "loopback": True, "voice": self.voice_info()}
 
@@ -943,6 +946,9 @@ class Prompter:
         started = local_datetime(m.get("started") or time.time())
         who = m.get("participants") or "не указаны (в тексте: «Вы» и «Собеседник»)"
         rows = [f"# {title}", f"# Начало: {started:%d.%m.%Y %H:%M}", f"# Участники: {who}"]
+        if m.get("ended"):
+            ended = local_datetime(m["ended"])
+            rows.insert(2, f"# Завершение: {ended:%d.%m.%Y %H:%M}")
         if m.get("dual"):
             rows.append("# Подписи: «Вы» — ваш микрофон, «Собеседник» — звук компьютера (все остальные участники)")
         elif m.get("place") == "live":
@@ -963,6 +969,23 @@ class Prompter:
                 p.write_text(new, encoding="utf-8")
         except OSError as exc:
             log.info("🎬 Участники в текст записи не вписаны: %s", exc)
+
+    def _transcript_set_ended(self, ended):
+        """Добавить точное время завершения в уже пополняемый текст расшифровки."""
+        if not ended or not self._transcript_path:
+            return
+        try:
+            path = Path(self._transcript_path)
+            text = path.read_text(encoding="utf-8")
+            stamp = local_datetime(ended).strftime("%d.%m.%Y %H:%M")
+            row = f"# Завершение: {stamp}"
+            if re.search(r"(?m)^# Завершение: .*?$", text):
+                text = re.sub(r"(?m)^# Завершение: .*?$", row, text, count=1)
+            else:
+                text = re.sub(r"(?m)^(# Начало: .*\n)", rf"\1{row}\n", text, count=1)
+            path.write_text(text, encoding="utf-8")
+        except OSError as exc:
+            log.info("🎬 Время завершения не добавлено в расшифровку: %s", exc)
 
     def _transcript_write(self, line):
         path = Path(self._transcript_path) if self._transcript_path else None
@@ -1169,7 +1192,7 @@ class Prompter:
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
               auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
               capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None,
-              schedule_id=None, record_me=None):
+              schedule_id=None, record_me=None, continue_group=False):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
         if self.on:
@@ -1180,6 +1203,8 @@ class Prompter:
                 self._post_busy = False  # поздно завершившийся I/O больше не удерживает приложение
         if self._post_busy:
             raise ValueError("Завершаю сохранение записи и освобождаю устройства. Попробуйте через несколько секунд.")
+        if not continue_group:
+            self._meeting_group = None
         live = place == "live"
         if record and not consent:
             raise ValueError("для записи переговоров подтвердите согласие участников")
@@ -1408,6 +1433,114 @@ class Prompter:
         self._state()
         return self.public()
 
+    def continue_meeting(self):
+        """Start the next recording block while keeping completed block summaries."""
+        with self._lock:
+            if self.on:
+                raise ValueError("Встреча уже идёт.")
+            job = self._completed_job
+            if job is None or job._summary_busy or self._post_busy:
+                raise ValueError("Сначала дождитесь обработки текущего блока встречи.")
+            if self._meeting_group is None:
+                self._meeting_group = {"started": job.meeting.get("started"), "title": job.meeting.get("title", "Встреча"), "blocks": []}
+            self._meeting_group["finalized"] = False
+            blocks = self._meeting_group["blocks"]
+            if not any(x.meeting.get("id") == job.meeting.get("id") for x in blocks):
+                blocks.append(job)
+            m = dict(job.meeting)
+        return self.start(
+            title=m.get("title", "Встреча"), goal=m.get("goal", ""), mode=m.get("mode", "auto"),
+            them=m.get("them", True), me=m.get("me", True), knowledge=m.get("knowledge", False),
+            keep_text=m.get("keep_text", False), place=m.get("place", "online"), nudge=m.get("nudge", True),
+            participants=m.get("participants", ""), topics=m.get("topics", ""), record=m.get("record", False),
+            deferred=m.get("deferred", True), source=m.get("source", "system"), consent=bool(m.get("record")),
+            auto_frames=m.get("auto_frames", False), auto_interval=self._frame_interval,
+            frame_quality=self._frame_quality, frame_video=self._video_enabled,
+            auto_first_frame=False, capture_source=self._capture_source, capture_region=self._capture_region,
+            capture_application=self._capture_application, record_source=m.get("audio_source"),
+            record_me=bool(m.get("dual")), continue_group=True)
+
+    def finalize_meeting_group(self):
+        """Combine all completed blocks into a shared result in the background."""
+        with self._lock:
+            if self.on or self._post_busy:
+                raise ValueError("Сначала завершите запись текущего блока.")
+            current = self._completed_job
+            if current is None or current._summary_busy:
+                raise ValueError("Сначала дождитесь обработки текущего блока встречи.")
+            if self._meeting_group is None:
+                raise ValueError("У этой встречи пока нет продолженных блоков.")
+            blocks = self._meeting_group["blocks"]
+            if not any(x.meeting.get("id") == current.meeting.get("id") for x in blocks):
+                blocks.append(current)
+            group = self._meeting_group
+            current._summary_busy = True
+        threading.Thread(target=self._build_meeting_group_summary, args=(current, group),
+                         name="prompter-group-summary", daemon=True).start()
+        return current.public()
+
+    def _build_meeting_group_summary(self, owner, group):
+        """Write a meeting-level summary while retaining every block's own result."""
+        blocks = list(group.get("blocks") or [])
+        if not blocks:
+            return
+        first = blocks[0]
+        last = blocks[-1]
+        started = float(group.get("started") or first.meeting.get("started") or time.time())
+        ended = float(last.meeting.get("ended") or time.time())
+        owner._emit("summary", summary="", busy=True, phase="group")
+        summaries = []
+        links = []
+        for index, block in enumerate(blocks, 1):
+            summaries.append(f"БЛОК {index}:\n{block.summary or '(итог блока недоступен)'}")
+            if block._summary_path:
+                try:
+                    rel = Path(block._summary_path).resolve().relative_to((self.eng.workspace.ensure() / "Встречи").resolve())
+                    target = quote(str(rel).replace("\\", "/"), safe="/._-")
+                    links.append(f"- [Итог блока {index}](dwr-file:{target})")
+                except (OSError, ValueError):
+                    pass
+        title = str(group.get("title") or "Встреча")
+        prompt = (f"ВСТРЕЧА: {title}\nЧисло блоков: {len(blocks)}\n"
+                  f"Время всей встречи: {local_datetime(started):%d.%m.%Y %H:%M} — {local_datetime(ended):%d.%m.%Y %H:%M}\n\n"
+                  "Ниже итоги отдельных блоков одной встречи. Составь единый общий итог всей встречи: объедини повторы, сохрани решения, сроки, ответственных и разногласия. Не добавляй факты, которых нет в блоках.\n\n"
+                  + "\n\n".join(summaries))
+        try:
+            overall = owner._ask_model(SUMMARY_SYSTEM, prompt, max_tokens=1800) or "_Общий итог не получился — сохранены итоги отдельных блоков._"
+        except Exception as exc:  # noqa: BLE001
+            log.info("🎬 Общий итог встречи не получился: %s", exc)
+            overall = "_Общий итог не получился — сохранены итоги отдельных блоков._"
+        duration = max(1, round((ended - started) / 60))
+        body = (f"# {title} — общий итог\n\n## Итоги всей встречи\n"
+                f"- Начало: {local_datetime(started):%d.%m.%Y %H:%M}\n"
+                f"- Завершение: {local_datetime(ended):%d.%m.%Y %H:%M}\n"
+                f"- Блоков: {len(blocks)}\n\n*{duration} мин · Встречи Dewiar*\n\n"
+                + overall + "\n\n## Итоги по блокам\n" + ("\n".join(links) if links else "\n".join(f"- Блок {i}" for i in range(1, len(blocks) + 1))))
+        base = first._base_name or re.sub(r"[\\/:*?\"<>|]+", " ", title).strip() or "Встреча"
+        path = ""
+        try:
+            folder = self.eng.workspace.ensure() / "Встречи"
+            folder.mkdir(parents=True, exist_ok=True)
+            target = folder / f"{base} — общий итог.md"
+            suffix = 2
+            while target.exists():
+                target = folder / f"{base} — общий итог ({suffix}).md"
+                suffix += 1
+            pending = target.with_suffix(".md.tmp")
+            pending.write_text(body, encoding="utf-8")
+            os.replace(pending, target)
+            path = str(target)
+        except OSError as exc:
+            log.info("🎬 Общий итог встречи не сохранён: %s", exc)
+        with owner._lock:
+            owner.meeting.update({"started": started, "ended": ended, "title": title})
+            owner.summary = body
+            owner._summary_path = path
+            owner._summary_busy = False
+            owner._summary_progress = {}
+            group["finalized"] = True
+        owner._emit("summary", summary=body, path=path, busy=False, group_finalized=True)
+
     def _after_stop(self, stt_thread, summary):
         """Освободить захват и дождаться хвоста до обработки файлов; UI не ждёт I/O."""
         job = None
@@ -1417,6 +1550,7 @@ class Prompter:
                 stt_thread.join(timeout=60)
                 if stt_thread.is_alive():
                     raise RuntimeError("Распознавание ещё занято; запись сохранена. Дождитесь завершения перед новой встречей.")
+            self._transcript_set_ended(self.meeting.get("ended"))
             if any(t and t.is_alive() for t in (self._loop_thread, self._frame_thread, self._ocr_thread)):
                 raise RuntimeError("Сохранение записи ещё не завершено. Дождитесь освобождения устройств.")
             with self._lock:
@@ -2685,8 +2819,10 @@ class Prompter:
                 decisions = got[:600]
         m["decisions"] = decisions
         preview = self._summary_preview(m)
+        ended = local_datetime(m.get("ended") or time.time())
         body = (f"# {m.get('title', 'Встреча')}\n\n## Итоги\n"
-                f"- Когда: {preview['when']}\n- Участники: {preview['participants']}\n- Темы: {preview['topics']}\n"
+                f"- Начало: {started:%d.%m.%Y %H:%M}\n- Завершение: {ended:%d.%m.%Y %H:%M}\n"
+                f"- Участники: {preview['participants']}\n- Темы: {preview['topics']}\n"
                 f"- Что решили: {preview['decisions']}\n\n"
                 f"*{started:%d.%m.%Y %H:%M} · {mins} мин · Встречи Dewiar*\n\n"
                 + (f"**Цель:** {m['goal']}\n\n" if m.get("goal") else "")

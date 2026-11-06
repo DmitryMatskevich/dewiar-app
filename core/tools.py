@@ -1359,9 +1359,10 @@ def t_mail(a, ctx):
                                       unanswered=bool(a.get("unanswered")))
             if not items:
                 return "В почтовом индексе ничего не найдено. Для обновления скажите «проверь почту сейчас»."
-            return "\n".join(f"[{m['id']}] {'● ' if m['unread'] else ''}{m['date'][:22]} · {m['from']} · «{m['subject']}» · на {m['account']}"
+            return "\n".join(f"[{m['id']}] [переписка {m.get('thread_id','')}, {m.get('thread_count',1)} писем] "
+                             f"{'● ' if m.get('thread_unread_count', int(bool(m.get('unread')))) else ''}{m['date'][:22]} · {m['from']} · «{m['subject']}» · на {m['account']}"
                              + (" · важно: " + ", ".join(m['reasons']) if m['reasons'] else "")
-                             + (" · уже отвечено" if m['answered'] else "") for m in items)
+                             + (" · уже отвечено" if m.get('thread_answered', m['answered']) else "") for m in items)
         if action == "open":
             if not _mail_text_allowed(ctx):
                 raise ToolError("Текст письма разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы его открыть.")
@@ -1371,7 +1372,26 @@ def t_mail(a, ctx):
                     f"Получено на: {msg.get('account','')}\n"
                     + ("ВНИМАНИЕ: сервер аутентификации письма сообщил SPF/DKIM/DMARC fail.\n" if re.search(r"(?:spf|dkim|dmarc)\s*=\s*fail\b", msg.get("authentication_results", ""), re.I) else "")
                     + f"Вложения: {', '.join(msg.get('files', [])) or 'нет'}\n\n{msg.get('text','')[:10000]}")
-        raise ToolError("Действие почты должно быть check, list, open или search.")
+        if action == "thread":
+            if not _mail_text_allowed(ctx):
+                raise ToolError("Текст писем разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы прочитать переписку.")
+            items = service.mail_thread(a.get("thread_id", ""))
+            if not items:
+                return "В этой переписке нет сообщений."
+            parts, remaining = [], 30000
+            for item in items[:12]:
+                message = service.open_mail(item["id"])
+                header = (f"От: {message.get('from','')} · Дата: {message.get('date','')} · "
+                          f"Тема: {message.get('subject','')} · Ящик: {message.get('account','')} · "
+                          f"Папка: {'Отправленные' if message.get('folder') == 'SENT' else 'Входящие'}")
+                body = str(message.get("text") or "")[:min(7000, remaining)]
+                parts.append(header + "\n\n" + (body or "(пустое письмо)"))
+                remaining -= len(body)
+                if remaining <= 0:
+                    break
+            suffix = "\n\nПоказаны последние 12 писем переписки." if len(items) > 12 else ""
+            return "\n\n--- Следующее письмо в переписке ---\n\n".join(parts) + suffix
+        raise ToolError("Действие почты должно быть check, list, open, thread или search.")
     except (ValueError, OSError) as e:
         raise ToolError(str(e)) from e
 
@@ -1450,9 +1470,24 @@ def t_mail_reply(a, ctx):
         if action in ("prepare", "revise", "get") and not _mail_text_allowed(ctx):
             raise ToolError("Текст письма разрешено передавать только локальной модели. Переключите Dewiar на локальную модель, чтобы подготовить ответ.")
         if action == "prepare":
-            return _format_mail_draft(service.reply_prepare(a.get("message_id", ""), a.get("body", "")))
+            draft = service.reply_prepare(a.get("message_id", ""), a.get("body", ""))
+            engine = ctx.get("engine")
+            if engine:
+                try:
+                    engine.emit("mail_reply_draft", draft_id=draft["id"], revision=draft["revision"],
+                                message_id=a.get("message_id", ""),
+                                thread_id=service.thread_id_for_message(a.get("message_id", "")))
+                except Exception:  # noqa: BLE001
+                    pass
+            return _format_mail_draft(draft)
         if action == "revise":
             draft = service.reply_revise(a.get("draft_id", ""), a.get("revision", 0), a.get("patch") or {})
+            engine = ctx.get("engine")
+            if engine:
+                try:
+                    engine.emit("mail_reply_draft", draft_id=draft["id"], revision=draft["revision"])
+                except Exception:  # noqa: BLE001
+                    pass
             return _format_mail_draft(draft)
         if action == "get":
             return _format_mail_draft(service.draft_get(a.get("draft_id", "")))
@@ -2759,10 +2794,11 @@ TOOLS = {
     "read_email": ("Прочитать одно письмо целиком по точному id в скобках из read_emails.",
                    S({"uid": {"type": "string", "description": "id вида account:uidvalidity:uid из списка почты"}}, ["uid"]),
                    "safe", t_read_email, "Прочитать письмо"),
-    "mail": ("Почтовая сводка и заголовки из локального индекса. action=check проверяет ящики сейчас; list/search показывают список, "
-             "open читает полное письмо только по его id [account:uid]. Фильтры: important, unanswered, unread_only, account_id, query.",
-             S({"action": {"type": "string", "enum": ["check", "list", "open", "search"]},
-                "message_id": {"type": "string"}, "query": {"type": "string"}, "account_id": {"type": "string"},
+    "mail": ("Почтовая сводка и заголовки из локального индекса. action=check проверяет ящики сейчас; list/search показывают переписки "
+             "и их точные message_id/thread_id; open читает одно письмо, thread читает всю переписку по thread_id. "
+             "Текст писем открывай только по запросу пользователя и с учётом настройки приватности. Фильтры: important, unanswered, unread_only, account_id, query.",
+             S({"action": {"type": "string", "enum": ["check", "list", "open", "thread", "search"]},
+                "message_id": {"type": "string"}, "thread_id": {"type": "string"}, "query": {"type": "string"}, "account_id": {"type": "string"},
                 "limit": {"type": "integer"}, "refresh": {"type": "boolean"}, "important": {"type": "boolean"},
                 "unanswered": {"type": "boolean"}, "unread_only": {"type": "boolean"}}),
              "safe", t_mail, "Почта"),

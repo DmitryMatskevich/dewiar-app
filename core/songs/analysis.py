@@ -20,14 +20,15 @@ class SongAnalyzer:
         "chords": "Подбираем аккорды",
     }
     STEP_WORKERS = {
-        "lyrics": "whisper,qwen,consensus,align",
+        "lyrics": "whisper,qwen_large,consensus,align",
         "structure": "structure",
         "chords": "chords",
     }
     MODEL_LABELS = {
         "gigaam": "GigaAM (как в голосовом вводе)",
         "whisper": "Whisper large-v2",
-        "qwen": "Qwen3-ASR",
+        "qwen": "Qwen3-ASR 0.6B",
+        "qwen_large": "Qwen3-ASR 1.7B",
     }
 
     def __init__(self, root: Path, store, host, emit):
@@ -223,6 +224,8 @@ class SongAnalyzer:
                                if item.get("model")})
                 run["hypotheses"] = list(merged.values())
             selected = copy.deepcopy(result.get("selected") or {})
+            if 'comparison' in result:
+                run['comparison'] = copy.deepcopy(result['comparison'])
             selected_phrases = selected.get("phrases") or []
             if selected_phrases:
                 run["phrases"] = selected_phrases
@@ -306,8 +309,11 @@ class SongAnalyzer:
                         return
                     fresh = self.store.patch(song_id, {"stage_label": label})
                     self.emit("song_analysis", song_id=song_id, running=True, song=fresh)
+                steps=self.STEP_WORKERS[logical]
+                if logical=='lyrics' and 'qwen' in (self.saved_models(self.store.get(song_id) or {}) or []):
+                    steps=steps.replace(',qwen_large,',',qwen,')
                 result = analyze(path, folder / "result.json", rerun_id, cancel, progress,
-                                 steps=self.STEP_WORKERS[logical], resume=True)
+                                 steps=steps, resume=True)
                 if cancel.is_set():
                     return
                 updated = self._apply_step_result(song_id, rerun_id, base_run_id, logical, result)
@@ -338,10 +344,11 @@ class SongAnalyzer:
 
         The singing pipeline always keeps the consensus/alignment stages; the
         selected recognizers only control which independent hypotheses are
-        produced.  An omitted selection preserves the historical ensemble.
+        produced. Default to two independent music recognizers; GigaAM remains
+        available as an explicit comparison without changing voice-input settings.
         """
         if models is None:
-            return tuple(cls.MODEL_LABELS)
+            return ('whisper', 'qwen_large')
         if not isinstance(models, (list, tuple, set)):
             raise ValueError("Список распознавателей должен быть массивом")
         result=[]
@@ -351,7 +358,16 @@ class SongAnalyzer:
                 result.append(key)
         if not result:
             raise ValueError("Выберите хотя бы один распознаватель")
+        if 'qwen' in result and 'qwen_large' in result:
+            raise ValueError('Выберите одну версию Qwen: это одно семейство распознавателей')
         return tuple(result)
+
+    @staticmethod
+    def saved_models(row):
+        # Earlier versions recorded this field in the change log but omitted
+        # it from the store whitelist. Recover the choice without a migration.
+        return row.get('analysis_models') or next((edit.get('changes',{}).get('analysis_models')
+            for edit in reversed(row.get('edits',[])) if edit.get('changes',{}).get('analysis_models')),None)
 
     def start(self, song_id: str, full=False, models=None):
         row = self.store.get(song_id)
@@ -364,7 +380,8 @@ class SongAnalyzer:
         path = (self.root / rel).resolve() if rel else None
         if not path or self.root not in path.parents or not path.is_file():
             raise ValueError("Сначала сохраните полную запись песни")
-        selected_models = self.normalize_models(models) if full else ("gigaam",)
+        requested=models if models is not None else self.saved_models(row)
+        selected_models = self.normalize_models(requested) if full else ("gigaam",)
         with self._lock:
             if song_id in self._running:
                 raise ValueError("Распознавание уже идёт")
@@ -469,7 +486,7 @@ class SongAnalyzer:
                 try:
                     if cancel.is_set():
                         return
-                    steps = [key for key in ('whisper', 'qwen') if key in models]
+                    steps = [key for key in ('whisper', 'qwen', 'qwen_large') if key in models]
                     # Consensus can use the selected GigaAM baseline, a single
                     # heavy recognizer, or both.  Keeping it in every full run
                     # makes the result comparable and leaves raw hypotheses.

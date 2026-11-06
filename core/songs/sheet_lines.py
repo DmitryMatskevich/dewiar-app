@@ -27,6 +27,7 @@ def _balance_soft_wraps(text, bounds, soft, max_chars):
 def readable_sheet(rows, max_chars=42, section_starts=()):
     output, group = [], []
     starts = set(section_starts)
+    seen_changes = set()
 
     def flush():
         if not group:
@@ -39,13 +40,16 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
             text += row['text']
             spans.append((offset,len(text),row))
             cues.extend(dict(w, phrase_id=row.get('phrase_id'),
-                             phrase_char_start=w['char_start'],
+                             phrase_char_start=row.get('source_char_offset',0)+w['char_start'],
                              char_start=offset+w['char_start'], char_end=offset+w['char_end'])
                         for w in display_words(row))
             # The full sheet already shows the original change (including intro/gap rows).
             # Carry-in marks belong to isolated phrase previews, not new changes.
-            marks.extend(dict(m,char_index=offset+m['char_index']) for m in row.get('chords',[])
-                         if m.get('char_index') is not None and not m.get('continued'))
+            for m in row.get('chords',[]):
+                key=(m.get('start_ms'),m.get('name'))
+                if m.get('char_index') is not None and key not in seen_changes:
+                    marks.append(dict(m,char_index=offset+m['char_index']))
+                    seen_changes.add(key)
         # Preserve explicit line breaks; otherwise use punctuation and word limits.
         words = list(re.finditer(r'\S+',text))
         bounds, begin, soft = [0],0,set()
@@ -83,8 +87,8 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
                     continue
                 source_spans.append({
                     'phrase_id': owner.get('phrase_id'),
-                    'phrase_char_start': left - lo,
-                    'phrase_char_end': right - lo,
+                    'phrase_char_start': owner.get('source_char_offset',0) + left - lo,
+                    'phrase_char_end': owner.get('source_char_offset',0) + right - lo,
                     'display_char_start': left - a,
                     'display_char_end': right - a,
                 })
@@ -96,7 +100,7 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
             cells=[{'char_index':pos,'text':content[pos:positions[j+1] if j+1<len(positions) else len(content)],
                     'chords':list(dict.fromkeys(grouped.get(pos,[])))} for j,pos in enumerate(positions)]
             pid=source.get('phrase_id')
-            display_id=pid if pid not in shown else f'{pid}:line:{a}'
+            display_id=pid if pid not in shown and not source.get('source_char_offset') else f"{pid}:line:{source.get('source_char_offset',0)+a}"
             shown.add(pid)
             output.append({**source,'phrase_id':display_id,'text':content,'cells':cells,'chords':chosen,
                 'unplaced_chords':[], 'display_only':True,'source_phrase_ids':[r.get('phrase_id') for r in owners],
@@ -107,7 +111,9 @@ def readable_sheet(rows, max_chars=42, section_starts=()):
 
     for row in rows:
         if not row.get('text'):
-            flush();output.append(row);continue
+            flush();output.append(row)
+            seen_changes.update((c.get('start_ms'),c.get('name')) for c in row.get('unplaced_chords',[]))
+            continue
         if group and (row.get('start_ms',0)-group[-1].get('end_ms',0)>2500 or row.get('phrase_id') in starts):
             flush()
         group.append(row)

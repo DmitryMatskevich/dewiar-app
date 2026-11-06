@@ -13,8 +13,8 @@ os.environ["DEWIAR_CONFIG_DIR"] = str(TMP / "config")
 os.environ["DEWIAR_STATE_DIR"] = str(TMP / "state")
 sys.path.insert(0, str(ROOT / "core"))
 
-from mail_service import MailService, MailServiceError  # noqa: E402
-from tools import TOOLS, t_mail_importance  # noqa: E402
+from mail_service import MailService, MailServiceError, _message_date_for_quote  # noqa: E402
+from tools import TOOLS, t_mail, t_mail_importance  # noqa: E402
 import mail as mail_module  # noqa: E402
 import mail_keychain  # noqa: E402
 
@@ -36,7 +36,8 @@ class FakeMail:
     def inbox(self, **kwargs):
         return self.latest
 
-    def read(self, uid, expected_uidvalidity=""):
+    def read(self, uid, folder="INBOX", expected_uidvalidity=""):
+        self.last_folder = folder
         return {"uid": uid, "from": "Client <client@example.org>", "reply_to": "reply@example.org",
                 "to": "Dmitry <d@dcnt.ru>", "cc": "Colleague <colleague@example.org>, dm@sklad-podolsk.ru",
                 "subject": "Новая заявка", "date": "Mon, 02 Nov 2026 10:00:00 +0300",
@@ -54,8 +55,11 @@ class FakeMail:
         self.trashed.append(str(uid))
         return {"state": "moved", "folder": "Trash"}
 
+    def special_folder(self, flag):
+        return "Sent" if flag == "\\Sent" else ""
+
     def uidvalidity(self, folder="INBOX"):
-        return "77"
+        return "88" if folder == "Sent" else "77"
 
 
 class MailServiceTests(unittest.TestCase):
@@ -94,6 +98,46 @@ class MailServiceTests(unittest.TestCase):
         self.assertIn("Склад в Подольске", reasons)
         self.assertFalse(self.service.classify({"from": "client@example.org", "to": "d@dcnt.ru",
             "subject": "anything", "reply_to": "client@example.org"})[0])
+
+    def test_mail_list_collapses_replies_into_one_expandable_conversation(self):
+        spec = next(item for item in self.service.rules["accounts"] if item["id"] == "dcnt")
+        messages = [
+            {"uid": "101", "message_id": "<root@example.org>", "references": "", "in_reply_to": "",
+             "from": "Client <client@example.org>", "to": "d@dcnt.ru", "subject": "Запрос цены",
+             "date": "Mon, 02 Nov 2026 10:00:00 +0300", "unread": False},
+            {"uid": "102", "message_id": "<reply@example.org>", "references": "<root@example.org>",
+             "in_reply_to": "<root@example.org>", "from": "Dmitry <d@dcnt.ru>", "to": "client@example.org",
+             "subject": "Re: Запрос цены", "date": "Mon, 02 Nov 2026 11:00:00 +0300", "unread": False},
+            {"uid": "103", "message_id": "<answer@example.org>",
+             "references": "<root@example.org> <reply@example.org> <sent@example.org>", "in_reply_to": "<sent@example.org>",
+             "from": "Client <client@example.org>", "to": "d@dcnt.ru", "subject": "Re: Запрос цены",
+             "date": "Mon, 02 Nov 2026 12:00:00 +0300", "unread": True},
+            {"uid": "104", "message_id": "<sent@example.org>",
+             "references": "<root@example.org> <reply@example.org>", "in_reply_to": "<reply@example.org>",
+             "from": "Dmitry <d@dcnt.ru>", "to": "client@example.org", "subject": "Re: Запрос цены",
+             "date": "Mon, 02 Nov 2026 11:30:00 +0300", "unread": False},
+        ]
+        with self.service._db() as db:
+            for message in messages[:3]:
+                self.service._store_message(db, spec, message, "77", "INBOX")
+            self.service._store_message(db, spec, messages[3], "88", "SENT")
+
+        conversations = self.service.list_mail(limit=20)
+        self.assertEqual(len(conversations), 1)
+        self.assertEqual(conversations[0]["subject"], "Re: Запрос цены")
+        self.assertEqual(conversations[0]["thread_count"], 4)
+        self.assertEqual(conversations[0]["thread_unread_count"], 1)
+        self.assertEqual(len(self.service.list_mail(unread=True)), 1)
+        thread = self.service.mail_thread(conversations[0]["thread_id"])
+        self.assertEqual([item["message_id"] for item in thread],
+                         ["<answer@example.org>", "<sent@example.org>", "<reply@example.org>", "<root@example.org>"])
+        with patch.object(self.service, "configured", return_value=True):
+            thread_text = t_mail({"action": "thread", "thread_id": conversations[0]["thread_id"]}, {"mail": self.service})
+        self.assertIn("Здравствуйте!", thread_text)
+        self.assertIn("Отправленные", thread_text)
+        sent = next(item for item in thread if item["folder"] == "SENT")
+        self.service.open_mail(sent["id"])
+        self.assertEqual(self.box.last_folder, "Sent")
 
     def test_importance_rules_match_sender_and_exact_or_partial_subject(self):
         self.service.importance_rule_add(sender_address="client@example.org", importance="important")
@@ -149,6 +193,29 @@ class MailServiceTests(unittest.TestCase):
         self.assertEqual(detail["text"], "Здравствуйте!\nПодскажите цену.")
         with self.assertRaises(MailServiceError):
             self.service.open_mail("dcnt:76:42")
+
+    def test_server_received_date_overrides_bad_sender_date_for_sorting_and_quotes(self):
+        received = 1793945497.0  # 2026-11-06 09:11:37 +0300
+        row = {"uid": "43", "from": "Client <client@example.org>", "to": "d@dcnt.ru",
+               "subject": "Старое Date", "date": "Sun, 04 Jan 2015 14:24:00 +0300",
+               "received_at": received, "message_id": "<bad-date>"}
+        with self.service._db() as db:
+            self.service._store_message(db, self.service.rules["accounts"][0], row, "77", "INBOX")
+            stored = db.execute("SELECT received_at FROM messages WHERE uid='43'").fetchone()[0]
+        self.assertEqual(stored, received)
+        quoted = _message_date_for_quote(row["date"], received)
+        self.assertIn("Получено Fri, 06 Nov 2026 09:11:37 +0300", quoted)
+        self.assertIn("заголовке письма: Sun, 04 Jan 2015", quoted)
+
+    def test_reply_draft_to_bad_date_mail_quotes_server_receipt_time(self):
+        received = 1793945497.0
+        original = {**self.box.read("42"), "account_id": "dcnt", "date": "Sun, 04 Jan 2015 14:24:00 +0300",
+                    "received_at": received, "message_id": "<source@example.org>"}
+        with patch.object(self.service, "open_mail", return_value=original):
+            draft = self.service.reply_prepare("dcnt:77:42", "Проверочный ответ")
+        self.assertIn("Проверочный ответ", draft["body"])
+        self.assertIn("Получено Fri, 06 Nov 2026 09:11:37 +0300", draft["body"])
+        self.assertIn("заголовке письма: Sun, 04 Jan 2015", draft["body"])
 
     def _index_action_message(self, uid="42"):
         row = {"uid": uid, "from": "Client <client@example.org>", "to": "d@dcnt.ru", "cc": "",

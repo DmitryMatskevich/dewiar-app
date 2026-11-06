@@ -53,6 +53,10 @@ def main():
         tab.on('pageerror', lambda e: errors.append(str(e)))
         tab.goto((ui / 'test.html').as_uri())
         for row in rows:
+            if not row.get('guitar_sheet'):
+                assert not row.get('phrases'), (row['title'], 'Missing sheet for existing lyrics')
+                outcomes.append({'title': row['title'], 'status': 'no_lyrics_yet'})
+                continue
             tab.locator(f'.song-card-actions [data-song-open="{row["song_id"]}"]').click()
             tab.wait_for_function('(id)=>document.querySelector(".song-paper")?.dataset.songId===id', arg=row['song_id'])
             before = tab.evaluate('JSON.stringify(rows)')

@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 import wave
@@ -35,7 +36,7 @@ class FakeMicCapture(FakeCapture):
     kind = ''
     rate, channels = 16000, 1
     def read(self):
-        return self.read_native()
+        return self.read_native().replace(b'\x00\x00', b'\x00\x10')
 
 
 class CaptureTest(unittest.TestCase):
@@ -50,6 +51,7 @@ class CaptureTest(unittest.TestCase):
             json.dumps(state)
             handle = manager._active[sid]
             self.assertTrue(handle['capture'].sent.wait(2))
+            while not handle['frames']: time.sleep(.005)
             saved = manager.stop(sid)
             self.assertEqual(saved['audio']['duration_ms'], 1000)
             self.assertEqual(saved['status'], 'queued')
@@ -60,6 +62,7 @@ class CaptureTest(unittest.TestCase):
                 self.assertEqual(wav.getnframes(), 48000)
             manager.start(sid)
             self.assertTrue(manager._active[sid]['capture'].sent.wait(2))
+            while not manager._active[sid]['frames']: time.sleep(.005)
             second = manager.stop(sid)
             self.assertNotEqual(second['audio']['path'], saved['audio']['path'])
             self.assertTrue(old.exists())
@@ -75,6 +78,7 @@ class CaptureTest(unittest.TestCase):
             state = manager.start(sid, source='microphone')
             self.assertEqual(state['source'], 'Синтетический источник')
             self.assertTrue(manager._active[sid]['capture'].sent.wait(2))
+            while not manager._active[sid]['frames']: time.sleep(.005)
             saved = manager.stop(sid)
             self.assertEqual(saved['status'], 'queued')
             with wave.open(str(Path(tmp) / saved['audio']['path'])) as wav:

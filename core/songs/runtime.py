@@ -18,7 +18,7 @@ def python_path():
     return next((p for p in candidates if p.is_file()), None)
 
 
-def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen,consensus,align,chords', resume=False):
+def analyze(path, output, run_id, cancel, progress, steps='whisper,qwen_large,consensus,align,chords', resume=False):
     python = python_path()
     if not python:
         raise RuntimeError('Модуль полного разбора песен не установлен; доступен базовый текст')

@@ -1,7 +1,7 @@
 /* Local Contacts UI. Permission requests are native and only from the explicit button. */
 (() => {
   const $c=s=>document.querySelector(s),section=$c('#p-contacts');if(!section)return;
-  let lastDraftId=null,preview=null,selected=new Set(),shown=50,permissionTimer=null,pending=null,busy=false,localOffset=0,requestId=makeRequestId(),lastPermissionPopup='';
+  let lastDraftId=null,preview=null,selected=new Set(),shown=50,permissionTimer=null,pending=null,busy=false,localOffset=0,requestId=makeRequestId(),lastPermissionPopup='',editingId=null;
   function makeRequestId(){return globalThis.crypto?.randomUUID?.()||'contact_'+Date.now()+'_'+Math.random().toString(36).slice(2);}
   function message(text,error=false,opts={}){
     const el=$c('#ct-status');el.textContent=text;el.classList.toggle('bad',error);
@@ -10,6 +10,8 @@
   async function operation(fn){if(busy){message('Предыдущее действие с контактами ещё выполняется. Дождитесь результата.');return;}busy=true;section.setAttribute('aria-busy','true');try{return await fn();}catch(e){message(e.message||String(e),true);}finally{busy=false;section.removeAttribute('aria-busy');}}
   const fullName=r=>[r.family_name,r.given_name,r.middle_name].filter(Boolean).join(' ')||r.organization||'Без имени';
   const details=r=>[...(r.phones||[]),...(r.emails||[]),r.organization,r.birthday?`День рождения: ${String(r.birthday.day).padStart(2,'0')}.${String(r.birthday.month).padStart(2,'0')}${r.birthday.year?'.'+r.birthday.year:''}`:''].filter(Boolean).join('\n');
+  const icon=(name)=>name==='edit'?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>';
+  function socialUrl(kind,value){const v=String(value||'').trim();if(!v)return'';if(kind==='telegram'){const m=v.match(/^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/([A-Za-z0-9_]{5,32})\/?$/i);const user=m?m[1]:v.replace(/^@/,'');return /^[A-Za-z0-9_]{5,32}$/.test(user)?'https://t.me/'+user:'';}const digits=v.replace(/\D/g,'');return digits.length>=7&&digits.length<=15?'https://wa.me/'+digits:'';}
   function setPermission(s){
     const labels={authorized:'Разрешён полный доступ.',limited:'Разрешён доступ только к выбранным в macOS контактам. «Все» означает все доступные Dewiar карточки.',denied:'Доступ запрещён. Включите Dewiar в системных настройках Контактов.',restricted:'Доступ ограничен системой.',not_determined:'Доступ ещё не запрашивался.',unavailable:'Чтение системной адресной книги доступно только на Mac.'};
     const text=s.pending?'Ожидаю ответ в системном окне macOS…':s.requested&&!s.pending&&s.state==='not_determined'?'Запрос уже отправлен, но macOS не подтвердила доступ. Проверьте системные настройки и нажмите «Проверить доступ».':s.request_supported===false?'Запуск из исходников: для выдачи доступа Dewiar откройте Dewiar.app.':labels[s.state]||'Не удалось определить доступ.';
@@ -57,7 +59,9 @@
   async function loadLocal(){
     const data=await core.call('contacts_list',{query:$c('#ct-local-search').value,offset:localOffset});const list=$c('#ct-local-list');list.replaceChildren();
     $c('#ct-local-total').textContent=`Найдено: ${data.total}. Показано: ${data.items.length?localOffset+1:0}–${localOffset+data.items.length}.`;$c('#ct-local-prev').disabled=localOffset===0;$c('#ct-local-next').disabled=localOffset+data.items.length>=data.total;
-    for(const row of data.items){const box=document.createElement('details');box.className='ct-item';const summary=document.createElement('summary');summary.textContent=row.display_name||fullName(row);summary.title='Открыть локальную карточку: телефоны, почта и сведения. Данные не отправляются модели автоматически.';box.append(summary);const text=document.createElement('p');text.style.whiteSpace='pre-line';text.textContent=details(row)||'Только имя';box.append(text);const remove=document.createElement('button');remove.className='btn small danger';remove.textContent='Удалить копию из Dewiar';remove.title='Удалить только локальную копию. Системная карточка в Контактах macOS останется.';remove.onclick=()=>operation(async()=>{if(!await ask(`Удалить локальную копию «${row.display_name}» из Dewiar? Карточка macOS останется.`,{ok:'Удалить копию'}))return;await core.call('contacts_delete',{id:row.id,confirmed:true});await load();message('Локальная копия удалена; Контакты macOS не изменены.');});box.append(remove);list.append(box);}
+    for(const row of data.items){const box=document.createElement('details');box.className='ct-item';const summary=document.createElement('summary');summary.textContent=row.display_name||fullName(row);summary.title='Открыть локальную карточку: телефоны, почта и сведения. Данные не отправляются модели автоматически.';box.append(summary);const text=document.createElement('p');text.style.whiteSpace='pre-line';text.textContent=details(row)||'Только имя';box.append(text);
+      for(const [kind,label,value] of [['telegram','Telegram',row.telegram],['whatsapp','WhatsApp',row.whatsapp]]){const href=socialUrl(kind,value);if(href){const a=document.createElement('a');a.className='ct-social-link';a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`${label}: ${value}`;box.append(a);}}
+      const actions=document.createElement('div');actions.className='ct-card-actions';const edit=document.createElement('button');edit.type='button';edit.className='ct-icon-btn';edit.innerHTML=icon('edit');edit.title='Редактировать контакт';edit.setAttribute('aria-label','Редактировать контакт');edit.onclick=()=>operation(async()=>{const full=await core.call('contacts_get',{id:row.id});openForm(full,row.id);});const remove=document.createElement('button');remove.type='button';remove.className='ct-icon-btn danger';remove.innerHTML=icon('delete');remove.title='Удалить локальную копию из Dewiar';remove.setAttribute('aria-label','Удалить локальную копию из Dewiar');remove.onclick=()=>operation(async()=>{if(!await ask(`Удалить локальную копию «${row.display_name}» из Dewiar? Карточка macOS останется.`,{ok:'Удалить копию'}))return;await core.call('contacts_delete',{id:row.id,confirmed:true});await load();message('Локальная копия удалена; Контакты macOS не изменены.');});actions.append(edit,remove);box.append(actions);list.append(box);}
   }
   function renderPreview(){
     if(!preview)return;
@@ -67,10 +71,11 @@
     $c('#ct-more').hidden=rows.length<=shown;$c('#ct-source-total').textContent=`Доступно: ${preview.count}. Найдено фильтром: ${rows.length}.${preview.limited?' Системный доступ ограничен выбранными контактами.':''}`;updateSelected();
   }
   function updateSelected(){$c('#ct-import').textContent=`Импортировать выбранные (${selected.size})`;$c('#ct-import').disabled=!selected.size;}
-  function openForm(draft={}){
-    requestId=makeRequestId();$c('#ct-form').hidden=false;
+  function openForm(draft={},id=null){
+    editingId=id;$c('#ct-form-title').textContent=id?'Редактировать контакт':'Новая карточка';$c('#ct-form').querySelector('[type="submit"]').textContent=id?'Сохранить изменения':'Проверить и создать';$c('#ct-form').hidden=false;
     for(const key of ['given_name','family_name','middle_name','organization'])$c(`[data-ct="${key}"]`).value=draft[key]||'';
-    $c('[data-ct=phones]').value='';$c('[data-ct=emails]').value='';$c('[data-ct=birthday]').value='';$c('#ct-to-mac').checked=true;
+    for(const key of ['phones','emails'])$c(`[data-ct="${key}"]`).value=(draft[key]||[]).join('\n');for(const key of ['telegram','whatsapp'])$c(`[data-ct="${key}"]`).value=draft[key]||'';
+    const b=draft.birthday;$c('[data-ct=birthday]').value=b?`${b.year||2000}-${String(b.month).padStart(2,'0')}-${String(b.day).padStart(2,'0')}`:'';$c('#ct-to-mac').checked=true;$c('#ct-to-mac').closest('label').hidden=!!id;
     $c('#ct-form').scrollIntoView({block:'nearest'});$c('[data-ct=family_name]').focus();
   }
   async function loadProposal(){
@@ -95,12 +100,13 @@
   $c('#ct-local-prev').onclick=()=>operation(async()=>{localOffset=Math.max(0,localOffset-100);await loadLocal();});
   $c('#ct-local-next').onclick=()=>operation(async()=>{localOffset+=100;await loadLocal();});
   $c('#ct-suggest').onchange=e=>operation(async()=>{try{await core.call('contacts_suggest_set',{enabled:e.target.checked});}catch(error){e.target.checked=!e.target.checked;throw error;}});
-  $c('#ct-new').onclick=()=>openForm();$c('#ct-form-cancel').onclick=()=>{$c('#ct-form').hidden=true;};
+  $c('#ct-new').onclick=()=>openForm();$c('#ct-form-cancel').onclick=()=>{$c('#ct-form').hidden=true;editingId=null;};
   $c('#ct-form').onsubmit=e=>{e.preventDefault();return operation(async()=>{
-    const row={};for(const key of ['given_name','family_name','middle_name','organization'])row[key]=$c(`[data-ct="${key}"]`).value.trim();
+    const row={};for(const key of ['given_name','family_name','middle_name','organization','telegram','whatsapp'])row[key]=$c(`[data-ct="${key}"]`).value.trim();
     for(const key of ['phones','emails'])row[key]=$c(`[data-ct="${key}"]`).value.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean);
     const birth=$c('[data-ct=birthday]').value;if(birth){const [year,month,day]=birth.split('-').map(Number);row.birthday={year,month,day};}
     if(!row.given_name&&!row.family_name&&!row.organization)throw Error('Укажите имя, фамилию или организацию');
+    if(editingId){if(!await ask(`Сохранить изменения контакта «${fullName(row)}» в Dewiar?`,{ok:'Сохранить'}))return;await core.call('contacts_update',{id:editingId,contact:row,confirmed:true});$c('#ct-form').hidden=true;editingId=null;await load();message('Контакт обновлён в Dewiar. Контакты macOS не изменены.');return;}
     const toMac=$c('#ct-to-mac').checked,where=toMac?'в Dewiar и Контактах macOS':'только в Dewiar';
     if(!await ask(`Создать контакт «${fullName(row)}» ${where}?\n${details(row)}${toMac?'\nСистемные Контакты могут синхронизировать его через ваши учётные записи.':''}`,{ok:toMac?'Создать в обоих приложениях':'Создать в Dewiar'}))return;
     const result=await core.call('contacts_create',{contact:row,to_mac:toMac,request_id:requestId,confirmed:true});$c('#ct-form').hidden=true;requestId=makeRequestId();await load();message(result.already_exists?'Такая карточка уже есть в Dewiar; дубликат не создавался.':result.saved_mac?'Карточка сохранена в Dewiar и Контактах macOS.':'Карточка сохранена только в Dewiar.');

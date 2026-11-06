@@ -79,6 +79,18 @@ class FullSongTests(unittest.TestCase):
         self.assertEqual(row['phrases'][0]['text'],'Текст исправлен')
         self.assertEqual(row['candidate_run_id'],'run')
 
+    def test_qwen_spine_has_editable_ids_and_persists_audio_comparison(self):
+        self.store.patch(self.sid,{'status':'running','active_run_id':'qwen-run'})
+        rows=[{'text':'Полная строка для правки','start_ms':0,'end_ms':5000}]
+        report={'accepted':1,'needs_review':0,'proposals':[]}
+        row=self.store.save_full_analysis(self.sid,'qwen-run',[],'not-selected',{
+            'selected':{'phrases':rows},'comparison':report})
+        self.assertEqual(row['analysis_runs'][-1]['comparison'],report)
+        self.assertEqual(row['phrases'][0]['phrase_id'],'qwen-run-0')
+        updated=self.store.edit_phrase(self.sid,'qwen-run-0','Исправленная строка','',False,row['revision'])
+        self.assertEqual(updated['phrases'][0]['text'],'Исправленная строка')
+        self.assertNotIn('phrase_id',rows[0])
+
     def test_manual_split_without_timing_is_rejected(self):
         row = self.result()
         row['phrases'][0]['words']=[]
@@ -170,7 +182,7 @@ class FullSongTests(unittest.TestCase):
             lambda event,**data: done.set() if not data.get('running') else None)
         with patch('songs.runtime.analyze',return_value={'hypotheses':[
                 {'model':'Whisper-test','phrases':self.phrases}]}):
-            analyzer.start(self.sid,full=True)
+            analyzer.start(self.sid,full=True,models=['gigaam','whisper','qwen'])
             self.assertTrue(done.wait(3))
         row=self.store.get(self.sid)
         self.assertEqual(row['status'],'review')

@@ -164,7 +164,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         from songs.capture import SongCaptureManager
         self.song_store = SongStore(STATE_DIR / "songs")
         self.song_store.recover_interrupted()
-        self.song_capture = SongCaptureManager(STATE_DIR / "songs", self.song_store, self.emit)
+        self.song_capture = SongCaptureManager(STATE_DIR / "songs", self.song_store, self.emit,
+                                               on_complete=self._song_capture_finished)
         from songs.analysis import SongAnalyzer
         self.song_analyzer = SongAnalyzer(STATE_DIR / "songs", self.song_store, self, self.emit)
         self.song_analyzer.resume_interrupted()
@@ -692,6 +693,8 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
     # ---------- события наружу ----------
 
     def _queue_song_instrumental(self, song):
+        if self.stopping.is_set():
+            return
         if not getattr(self, "song_instrumental", None) or not isinstance(song, dict):
             return
         song_id = str(song.get("song_id") or "")

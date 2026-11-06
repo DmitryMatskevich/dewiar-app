@@ -64,6 +64,20 @@ def _stamp(value):
         return time.time()
 
 
+def _message_date_for_quote(date_header, received_at):
+    """Prefer the server receipt time when a sender's Date header is clearly stale or invalid."""
+    try:
+        sent = email.utils.parsedate_to_datetime(date_header).timestamp()
+        received = float(received_at)
+        if abs(received - sent) > 36 * 60 * 60:
+            local = time.strftime("%a, %d %b %Y %H:%M:%S %z", time.localtime(received))
+            return f"Получено {local} (в заголовке письма: {date_header})"
+    except (TypeError, ValueError, OverflowError):
+        if received_at:
+            return "Получено " + time.strftime("%a, %d %b %Y %H:%M:%S %z", time.localtime(float(received_at)))
+    return date_header or ""
+
+
 def _atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -331,6 +345,24 @@ class MailService:
             raise MailServiceError("Такого почтового ящика нет в правилах.")
         return self._accounts[account_id]
 
+    def account_add(self, address, label=""):
+        """Add a mailbox without credentials; the UI collects its app password separately."""
+        address = str(address or "").strip().lower()
+        if len(address) > 254 or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", address):
+            raise MailServiceError("Введите корректный адрес почты.")
+        with self._lock:
+            if any(item["address"] == address for item in self.rules.get("accounts", [])):
+                raise MailServiceError("Этот адрес уже добавлен.")
+            local = address.split("@", 1)[0].lower()
+            slug = re.sub(r"[^a-z0-9_-]+", "-", local).strip("-_")[:24] or "mail"
+            account_id = f"{slug}-{uuid.uuid4().hex[:8]}"
+            candidate = json.loads(json.dumps(self.rules))
+            candidate["accounts"].append({"id": account_id, "address": address,
+                                          "label": str(label or "").strip()[:80] or address,
+                                          "enabled": False, "sent_copy": "auto"})
+            self.save_rules(candidate)
+            return next(account for account in self.accounts() if account["id"] == account_id)
+
     def account_save(self, account_id, patch):
         box = self.account_get(account_id)
         spec = next(x for x in self.rules["accounts"] if x["id"] == account_id)
@@ -516,6 +548,10 @@ class MailService:
                 sent_folder = box.special_folder("\\Sent")
                 if sent_folder:
                     srows = box.inbox(limit=500, folder=sent_folder)
+                    sent_uidvalidity = box.uidvalidity(sent_folder)
+                    with self._db() as db:
+                        for sr in srows:
+                            self._store_message(db, spec, sr, sent_uidvalidity, "SENT")
                     for sr in srows:
                         if sr.get("message_id"):
                             sent_ids.append(sr["message_id"])
@@ -565,7 +601,8 @@ class MailService:
                   from_self=excluded.from_self,updated_at=excluded.updated_at""",
                   (spec["id"], folder, str(uidvalidity), str(row.get("uid")), row.get("message_id", ""), row.get("in_reply_to", ""),
                    row.get("references", ""), sender_addr, row.get("from", ""), json.dumps(recipients), json.dumps(cc),
-                   row.get("subject", ""), row.get("date", ""), _stamp(row.get("date", "")), json.dumps(delivered),
+                   row.get("subject", ""), row.get("date", ""),
+                   float(row["received_at"]) if row.get("received_at") is not None else _stamp(row.get("date", "")), json.dumps(delivered),
                    "important" if important else "normal", reason_dump, auth_results, int(auth_warning), int(row.get("unread", False)), int(row.get("answered", False)),
                    int(from_self), time.time()))
 
@@ -738,6 +775,105 @@ class MailService:
                 "unavailable": [{"id": a["id"], "address": a["address"], "error": a["last_error"] or "Ящик не подключён"}
                                 for a in accounts if not a["enabled"] or a["last_error"]]}
 
+    @staticmethod
+    def _thread_key(row):
+        return row["message_id"] or f"{row['account_id']}:{row['folder']}:{row['uidvalidity']}:{row['uid']}"
+
+    @staticmethod
+    def _base_subject(subject):
+        value = str(subject or "").strip().casefold()
+        previous = None
+        while value != previous:
+            previous = value
+            value = re.sub(r"^\s*(?:(?:re|fw|fwd)(?:\s*\[\d+\])?\s*:\s*)+", "", value, flags=re.I)
+            value = re.sub(r"^\s*\[fwd:\s*|\s*\(fwd\)\s*$", "", value, flags=re.I).strip()
+        return " ".join(value.split())
+
+    @staticmethod
+    def _is_reply_subject(subject):
+        return bool(re.match(r"^\s*(?:(?:re|fw|fwd)(?:\s*\[\d+\])?\s*:\s*)+", str(subject or ""), re.I))
+
+    def _thread_groups(self, rows):
+        """Build conservative RFC-style conversation groups from Message-ID ancestry.
+
+        References is preferred, then In-Reply-To. When a client strips both headers,
+        a matching base subject is used only when at least one message is marked Re/Fw.
+        """
+        rows = list(rows)
+        parents, row_roots = {}, {}
+        for row in rows:
+            mid = row["message_id"]
+            if not mid:
+                continue
+            refs = re.findall(r"<[^<>\s]+>", str(row["refs"] or ""))
+            if not refs:
+                refs = re.findall(r"<[^<>\s]+>", str(row["in_reply_to"] or ""))[:1]
+            if refs:
+                for parent, child in zip(refs, refs[1:]):
+                    parents.setdefault(child, parent)
+                parents[mid] = refs[-1]
+
+        def root(mid):
+            current, visited = mid, set()
+            while current in parents and current not in visited:
+                visited.add(current)
+                current = parents[current]
+            return current
+
+        roots_by_subject = {}
+        for row in rows:
+            key = self._thread_key(row)
+            mid = row["message_id"] or key
+            row_roots[key] = root(mid)
+            base = self._base_subject(row["subject"])
+            if base:
+                item = roots_by_subject.setdefault(base, {})
+                entry = item.setdefault(row_roots[key], {"reply": False})
+                entry["reply"] = entry["reply"] or self._is_reply_subject(row["subject"])
+
+        # RFC 5256's REFERENCES algorithm has a base-subject fallback. Requiring an
+        # explicit reply/forward marker avoids folding unrelated same-title mail.
+        aliases = {}
+        for subject_roots in roots_by_subject.values():
+            roots = list(subject_roots)
+            if len(roots) > 1 and any(info["reply"] for info in subject_roots.values()):
+                canonical = roots[0]
+                for candidate in roots[1:]:
+                    aliases[candidate] = canonical
+
+        def canonical(value):
+            visited = set()
+            while value in aliases and value not in visited:
+                visited.add(value); value = aliases[value]
+            return value
+
+        groups = {}
+        for row in rows:
+            key = self._thread_key(row)
+            row_roots[key] = canonical(row_roots[key])
+            groups.setdefault(row_roots[key], []).append(row)
+        return groups, row_roots
+
+    def _unique_thread_messages(self, rows, rank):
+        unique, order = {}, []
+        for row in rows:
+            key = self._thread_key(row)
+            public = self._public_row(row)
+            message_key = row["message_id"] or key
+            if message_key not in unique:
+                unique[message_key] = (row, public); order.append(message_key)
+                continue
+            old_row, old = unique[message_key]
+            deliveries = old.setdefault("received_on", [old["account"]])
+            if public["account"] not in deliveries:
+                deliveries.append(public["account"])
+            if rank.get(public["account_id"], 10_000) < rank.get(old["account_id"], 10_000):
+                public["received_on"] = deliveries
+                unique[message_key] = (row, public)
+        result = [unique[key] for key in order]
+        result.sort(key=lambda item: item[0]["received_at"], reverse=True)
+        return result
+
     def list_mail(self, limit=30, unread=False, query="", important=False, account_id="", unanswered=False, incoming_only=False):
         clauses, args = ["folder='INBOX'"], []
         if incoming_only:
@@ -754,28 +890,59 @@ class MailService:
             clauses.append("(sender_name LIKE ? OR subject LIKE ? OR recipients LIKE ? OR cc LIKE ?)")
             args.extend([f"%{query}%"] * 4)
         with self._db() as db:
-            rows = db.execute("SELECT * FROM messages WHERE " + " AND ".join(clauses) + " ORDER BY received_at DESC LIMIT ?",
-                              [*args, max(1, min(200, int(limit)))]).fetchall()
+            matching = db.execute("SELECT * FROM messages WHERE " + " AND ".join(clauses) + " ORDER BY received_at DESC",
+                                  args).fetchall()
+            all_rows = db.execute("SELECT * FROM messages ORDER BY received_at DESC").fetchall()
         priority = (self.rules.get("reply_preferences") or {}).get("reply_from_priority", [])
         rank = {account_id: i for i, account_id in enumerate(priority)}
-        chosen, order = {}, []
-        for row in rows:
-            key = row["message_id"] or f"{row['account_id']}:{row['uid']}"
-            public = self._public_row(row)
-            if key not in chosen:
-                chosen[key] = public; order.append(key)
-            else:
-                old = chosen[key]
-                deliveries = old.setdefault("received_on", [old["account"]])
-                if public["account"] not in deliveries:
-                    deliveries.append(public["account"])
-                if rank.get(public["account_id"], 10_000) < rank.get(old["account_id"], 10_000):
-                    public["received_on"] = deliveries
-                    chosen[key] = public
-        return [chosen[key] for key in order]
+        groups, row_roots = self._thread_groups(all_rows)
+        matching_roots = {row_roots[self._thread_key(row)] for row in matching}
+        conversations = []
+        for thread_id, rows in groups.items():
+            if thread_id not in matching_roots:
+                continue
+            messages = self._unique_thread_messages(rows, rank)
+            if not messages:
+                continue
+            latest_row, latest = messages[0]
+            latest.update(thread_id=thread_id, thread_count=len(messages),
+                          thread_unread_count=sum(bool(item[1]["unread"]) for item in messages),
+                          thread_important=any(item[1]["importance"] == "important" for item in messages),
+                          thread_answered=any(item[1]["answered"] for item in messages))
+            deliveries = latest.setdefault("received_on", [latest["account"]])
+            for _, public in messages[1:]:
+                for address in public.get("received_on", [public["account"]]):
+                    if address not in deliveries:
+                        deliveries.append(address)
+            conversations.append((latest_row["received_at"], latest))
+        conversations.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in conversations[:max(1, min(200, int(limit)))]]
+
+    def mail_thread(self, thread_id):
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM messages ORDER BY received_at DESC").fetchall()
+        groups, _ = self._thread_groups(rows)
+        messages = groups.get(str(thread_id))
+        if not messages:
+            raise MailServiceError("Переписка не найдена в локальном индексе. Обновите входящие.")
+        priority = (self.rules.get("reply_preferences") or {}).get("reply_from_priority", [])
+        rank = {account_id: i for i, account_id in enumerate(priority)}
+        return [item[1] for item in self._unique_thread_messages(messages, rank)]
+
+    def thread_id_for_message(self, message_key):
+        account_id, validity, uid, folder = self._parse_message_key(message_key)
+        with self._db() as db:
+            rows = db.execute("SELECT * FROM messages ORDER BY received_at DESC").fetchall()
+        _, row_roots = self._thread_groups(rows)
+        target = next((row for row in rows if row["account_id"] == account_id and row["folder"] == folder
+                       and row["uidvalidity"] == validity and row["uid"] == uid), None)
+        if not target:
+            raise MailServiceError("Письмо отсутствует в локальном индексе.")
+        return row_roots[self._thread_key(target)]
 
     def _public_row(self, row):
-        return {"id": f"{row['account_id']}:{row['uidvalidity']}:{row['uid']}", "uid": row["uid"], "uidvalidity": row["uidvalidity"], "account_id": row["account_id"],
+        suffix = ":s" if row["folder"] == "SENT" else ""
+        return {"id": f"{row['account_id']}:{row['uidvalidity']}:{row['uid']}{suffix}", "uid": row["uid"], "uidvalidity": row["uidvalidity"], "account_id": row["account_id"], "folder": row["folder"],
                 "account": next((a["address"] for a in self.rules.get("accounts", []) if a["id"] == row["account_id"]), ""),
                 "from": row["sender_name"], "sender": row["sender"], "to": ", ".join(json.loads(row["recipients"] or "[]")),
                 "cc": ", ".join(json.loads(row["cc"] or "[]")), "subject": row["subject"], "date": row["date"],
@@ -784,46 +951,51 @@ class MailService:
                 "auth_warning": bool(row["auth_warning"]), "authentication_results": row["auth_results"]}
 
     def open_mail(self, message_key):
-        account_id, validity, uid = self._parse_message_key(message_key)
+        account_id, validity, uid, folder = self._parse_message_key(message_key)
         with self._db() as db:
-            known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=? LIMIT 1",
-                               (account_id, validity, uid)).fetchone()
+            known = db.execute("SELECT folder FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=? LIMIT 1",
+                               (account_id, folder, validity, uid)).fetchone()
         if not known:
-            raise MailServiceError("Письмо отсутствует в локальном индексе. Обновите входящие.")
+            raise MailServiceError("Письмо отсутствует в локальном индексе. Обновите переписку.")
         box = self.account_get(account_id)
-        if str(box.uidvalidity("INBOX")) != validity:
-            raise MailServiceError("Папка входящих изменилась. Обновите список, чтобы открыть актуальное письмо.")
-        detail = box.read(uid, expected_uidvalidity=validity)
+        mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
+        if not mailbox or str(box.uidvalidity(mailbox)) != validity:
+            raise MailServiceError("Папка с письмом изменилась. Обновите переписку, чтобы открыть актуальное письмо.")
+        detail = (box.read(uid, expected_uidvalidity=validity) if folder == "INBOX" else
+                  box.read(uid, folder=mailbox, expected_uidvalidity=validity))
         detail.update(account_id=account_id, id=message_key,
-                      account=next((a["address"] for a in self.rules["accounts"] if a["id"] == account_id), ""))
+                      account=next((a["address"] for a in self.rules["accounts"] if a["id"] == account_id), ""), folder=folder)
         return detail
 
     def delete_mail(self, message_key):
         """Move one selected inbox copy to the server Trash; leave other account copies untouched."""
-        account_id, validity, uid = self._parse_message_key(message_key)
+        account_id, validity, uid, folder = self._parse_message_key(message_key)
         with self._db() as db:
-            known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=?",
-                               (account_id, validity, uid)).fetchone()
+            known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?",
+                               (account_id, folder, validity, uid)).fetchone()
         if not known:
             raise MailServiceError("Письмо уже удалено или отсутствует в текущей версии папки.")
         box = self.account_get(account_id)
-        if str(box.uidvalidity("INBOX")) != validity:
-            raise MailServiceError("Папка входящих изменилась. Обновите список; удаление остановлено.")
+        mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
+        if not mailbox or str(box.uidvalidity(mailbox)) != validity:
+            raise MailServiceError("Папка с письмом изменилась. Обновите список; удаление остановлено.")
         try:
-            result = box.move_to_trash(uid, expected_uidvalidity=validity)
+            result = (box.move_to_trash(uid, expected_uidvalidity=validity) if folder == "INBOX" else
+                      box.move_to_trash(uid, folder=mailbox, expected_uidvalidity=validity))
         except MailError as exc:
             raise MailServiceError(str(exc)) from exc
         with self._db() as db:
-            db.execute("DELETE FROM messages WHERE account_id=? AND folder='INBOX' AND uidvalidity=? AND uid=?",
-                       (account_id, validity, uid))
+            db.execute("DELETE FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?",
+                       (account_id, folder, validity, uid))
         self._notify_counts()
         return {"state": result["state"], "folder": result.get("folder", ""), "id": message_key}
 
     @staticmethod
     def _parse_message_key(message_key):
-        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+", message_key):
+        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+(?::s)?", message_key):
             raise MailServiceError("Письмо выбирается по id из списка.")
-        return tuple(message_key.split(":", 2))
+        parts = message_key.split(":")
+        return (parts[0], parts[1], parts[2], "SENT" if len(parts) == 4 else "INBOX")
 
     @staticmethod
     def _draft_view(draft_id, revision, state, payload):
@@ -858,7 +1030,8 @@ class MailService:
         subject = str(original.get("subject") or "").strip()
         subject = subject if re.match(r"^\s*re\s*:", subject, re.I) else "Re: " + (subject or "(без темы)")
         quote = "\n".join("> " + line for line in (original.get("text") or "").splitlines())
-        quoted = f"\n\n{original.get('date','')} · {original.get('from','')} написал(а):\n{quote}" if quote else ""
+        quote_date = _message_date_for_quote(original.get("date"), original.get("received_at"))
+        quoted = f"\n\n{quote_date} · {original.get('from','')} написал(а):\n{quote}" if quote else ""
         signature = (self.rules.get("signature_by_account") or {}).get(account_id, "")
         text = (body or "").strip()
         if signature:
@@ -868,7 +1041,7 @@ class MailService:
                    "in_reply_to": original.get("message_id", ""), "references": " ".join(x for x in
                      (original.get("references", ""), original.get("message_id", "")) if x), "attachments": [],
                    "original": {"from": original.get("from"), "to": original.get("to"), "cc": original.get("cc"),
-                                "subject": original.get("subject"), "date": original.get("date"), "text": original.get("text"),
+                                "subject": original.get("subject"), "date": original.get("date"), "received_at": original.get("received_at"), "text": original.get("text"),
                                 "files": original.get("files", [])}}
         draft_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:
@@ -881,15 +1054,17 @@ class MailService:
         account_id = original["account_id"]
         box = self.account_get(account_id)
         try:
-            validity = message_key.split(":", 2)[1]
-            raw = box.read_raw(original["uid"], expected_uidvalidity=validity)
+            _, validity, _, folder = self._parse_message_key(message_key)
+            mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
+            raw = (box.read_raw(original["uid"], expected_uidvalidity=validity) if folder == "INBOX" else
+                   box.read_raw(original["uid"], folder=mailbox, expected_uidvalidity=validity))
         except MailError as exc:
             raise MailServiceError(str(exc)) from exc
         subject = str(original.get("subject") or "(без темы)").strip()
         subject = subject if re.match(r"^\s*fwd?\s*:", subject, re.I) else "Fwd: " + subject
         details = ["---------- Пересланное сообщение ----------",
                    "От: " + str(original.get("from") or "—"),
-                   "Дата: " + str(original.get("date") or "—"),
+                   "Дата: " + (_message_date_for_quote(original.get("date"), original.get("received_at")) or "—"),
                    "Тема: " + str(original.get("subject") or "(без темы)"),
                    "Кому: " + str(original.get("to") or "—")]
         if original.get("cc"):
@@ -902,7 +1077,7 @@ class MailService:
                    "forward_eml_b64": base64.b64encode(raw).decode("ascii"),
                    "forward_filename": re.sub(r'[\\/:*?"<>|\r\n]+', "_", subject)[:110] + ".eml",
                    "original": {"from": original.get("from"), "to": original.get("to"), "cc": original.get("cc"),
-                                "subject": original.get("subject"), "date": original.get("date"),
+                                "subject": original.get("subject"), "date": original.get("date"), "received_at": original.get("received_at"),
                                 "text": original.get("text"), "files": original.get("files", [])}}
         draft_id, now = uuid.uuid4().hex, time.time()
         with self._db() as db:

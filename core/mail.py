@@ -118,6 +118,21 @@ def _dec(v):
         return v or ""
 
 
+def _imap_internaldate(parts):
+    """Parse the server's IMAP INTERNALDATE from FETCH response parts as a Unix timestamp."""
+    for part in parts or []:
+        metadata = part[0] if isinstance(part, tuple) and part else part
+        if not isinstance(metadata, bytes):
+            continue
+        match = re.search(rb'INTERNALDATE\s+"([^"]+)"', metadata, re.I)
+        if match:
+            try:
+                return email.utils.parsedate_to_datetime(match.group(1).decode("ascii")).timestamp()
+            except (TypeError, ValueError, OverflowError, UnicodeDecodeError):
+                pass
+    return None
+
+
 def _text_of(msg, limit=20000):
     """Письмо -> (текст до limit символов, имена вложений). Текст — из text/plain, а если его нет — html без разметки.
     Часть с именем файла считается вложением, даже если это текст."""
@@ -647,7 +662,7 @@ class Mail:
             uids = (data[0] or b"").split()[::-1]
             out, q = [], (query or "").lower().strip()
             for uid in uids[: max(limit * (8 if q else 1), limit)]:
-                typ, d = m.uid("fetch", uid, "(FLAGS BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES REPLY-TO DELIVERED-TO X-ORIGINAL-TO ENVELOPE-TO AUTHENTICATION-RESULTS)] BODYSTRUCTURE)")
+                typ, d = m.uid("fetch", uid, "(FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES REPLY-TO DELIVERED-TO X-ORIGINAL-TO ENVELOPE-TO AUTHENTICATION-RESULTS)] BODYSTRUCTURE)")
                 raw = next((x[1] for x in d if isinstance(x, tuple) and isinstance(x[1], bytes)), b"")
                 structure = b" ".join(x[0] if isinstance(x, tuple) and isinstance(x[0], bytes)
                                        else x if isinstance(x, bytes) else b"" for x in d)
@@ -670,7 +685,7 @@ class Mail:
                         "delivered_to": msg.get("Delivered-To", ""), "x_original_to": msg.get("X-Original-To", ""),
                         "authentication_results": _dec(msg.get("Authentication-Results", "")),
                         "subject": _dec(msg.get("Subject")) or "(без темы)",
-                        "date": msg.get("Date", ""), "snippet": "", "files": names,
+                        "date": msg.get("Date", ""), "received_at": _imap_internaldate(d), "snippet": "", "files": names,
                         "unread": "\\Seen" not in flags, "answered": "\\Answered" in flags}
                 if q and q not in (item["from"] + " " + item["subject"] + " " + item["to"] + " " + item["cc"]).lower():
                     continue
@@ -696,7 +711,7 @@ class Mail:
                 raise MailError(f"нет папки {folder}")
             if expected_uidvalidity and _mailbox_uidvalidity(m) != str(expected_uidvalidity):
                 raise MailError("Папка входящих изменилась; обновите список писем.")
-            typ, d = m.uid("fetch", uid.encode(), "(BODY.PEEK[])")
+            typ, d = m.uid("fetch", uid.encode(), "(INTERNALDATE BODY.PEEK[])")
             raw = next((x[1] for x in d if isinstance(x, tuple)), b"")
             if not raw:
                 raise MailError("такого письма нет")
@@ -708,7 +723,7 @@ class Mail:
                     "references": msg.get("References", ""), "delivered_to": msg.get("Delivered-To", ""),
                     "x_original_to": msg.get("X-Original-To", ""), "authentication_results": _dec(msg.get("Authentication-Results", "")),
                     "subject": _dec(msg.get("Subject")),
-                    "date": msg.get("Date", ""), "text": body, "files": files}
+                    "date": msg.get("Date", ""), "received_at": _imap_internaldate(d), "text": body, "files": files}
         finally:
             try:
                 m.logout()

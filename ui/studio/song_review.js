@@ -311,7 +311,7 @@ window.SongReview = (() => {
         const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
         const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
         const fingering=rowElement?.querySelector('[data-live-chord-fingering]');
-        const evidence={...chord,song_id:row.song_id};
+        const evidence={...chord,...window.SongSheet.voicingAtShift(chord,0),song_id:row.song_id};
         const shape=window.SongSheet?.chordFingering(name,evidence)||'';
         if(fingering) {
           fingering.textContent=shape?`1→6 ${shape}`:'—';
@@ -331,7 +331,7 @@ window.SongReview = (() => {
         const charIndex=changedTime||!Number.isFinite(anchorIndex)
           ? Math.round(Math.max(0,Math.min(1,ratio))*Math.max(0,text.length-1))
           : anchorIndex;
-        return {...chord,name,char_index:Math.max(0,Math.min(Math.max(0,text.length-1),charIndex)),start_ms:startMs};
+        return {...chord,draft_index:index,name,char_index:Math.max(0,Math.min(Math.max(0,text.length-1),charIndex)),start_ms:startMs};
       }).filter(chord=>chord.name);
       const width=Math.max(42,text.length+Math.max(1,...events.map(chord=>chord.name.length)));
       const placed=window.SongSheet?.compactChords({text,start_ms:liveTarget.startMs,end_ms:liveTarget.endMs,chords:events},0,width)||[];
@@ -340,11 +340,25 @@ window.SongReview = (() => {
         const at=Math.max(cursor,chord.at);
         const evidence={...chord,song_id:row.song_id};
         const tooltip=window.SongSheet.chordTooltip(chord.name,evidence);
-        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(tooltip)}" aria-label="${esc(tooltip)}" aria-expanded="false" data-chord-name="${esc(chord.name)}" data-song-id="${esc(row.song_id||'')}">${esc(chord.name)}</span>`;
+        const shape=window.SongSheet.chordFingering(chord.name,evidence);
+        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(tooltip)}" role="button" tabindex="0" aria-label="${esc(tooltip)}" aria-expanded="false" data-chord-name="${esc(chord.name)}" data-chord-fingering="${esc(shape)}" data-live-chord-index="${chord.draft_index}" data-song-id="${esc(row.song_id||'')}">${esc(chord.name)}</span>`;
         cursor=at+chord.name.length;
       }
       livePreviewChords.innerHTML=chordLine;
       livePreviewChords.hidden=!chordLine;
+      livePreviewChords.querySelectorAll('[data-live-chord-index]').forEach(trigger=>{
+        const index=Number(trigger.dataset.liveChordIndex),draft=liveChordDraft[index];
+        trigger.applySongChord=({symbol,shape})=>{
+          if(liveChordDraft[index]!==draft)throw Error('Аккорды фразы изменились. Откройте нужную смену снова.');
+          const input=liveChords.querySelector(`[data-live-chord="${index}"] [data-live-chord-name]`);
+          if(!input)throw Error('Редактор фразы уже закрыт.');
+          input.value=symbol;
+          Object.assign(draft,{name:symbol,voicing_fingering:shape,voicing_key_shift:0,voicing_source:'manual'});
+          delete draft.voicing_probability;
+          input.title=window.SongSheet.chordTooltip(symbol,draft);
+          return ()=>updateLivePreview();
+        };
+      });
     }
     function renderLiveChords() {
       liveChords.innerHTML=liveChordDraft.map((chord,index)=>{
@@ -460,7 +474,7 @@ window.SongReview = (() => {
             throw Error(`Время аккорда ${index+1} должно находиться в границах текущей фразы: ${formatSeconds(liveTarget.startMs)}–${formatSeconds(liveTarget.endMs)}`);
           return {...draft,name,start_ms:Math.round(seconds*1000),verified:true,method:draft.method||'manual'};
         });
-        const signature=events=>JSON.stringify(events.map(({name,start_ms,anchor})=>({name,start_ms,anchor})));
+        const signature=events=>JSON.stringify(events.map(({name,start_ms,anchor,voicing_fingering,voicing_key_shift})=>({name,start_ms,anchor,voicing_fingering,voicing_key_shift})));
         if(signature(oldPhraseEvents)!==signature(newPhraseEvents)) {
           const keep=(current.chords||[]).filter(c=>c.name==='N'||!oldPhraseEvents.includes(c));
           current=await core.call('song_edit_chords',{song_id:row.song_id,base_revision:current.revision,

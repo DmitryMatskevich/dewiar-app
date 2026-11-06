@@ -24,6 +24,31 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+_qwen_cache = None
+_qwen_cache_repo = None
+
+
+def release_qwen_model():
+    global _qwen_cache, _qwen_cache_repo
+    _qwen_cache = _qwen_cache_repo = None
+    gc.collect()
+
+
+def qwen_model(repo):
+    """Reuse only the weights within one worker; each crop is a new decoding."""
+    global _qwen_cache, _qwen_cache_repo
+    if repo not in ('Qwen/Qwen3-ASR-0.6B','Qwen/Qwen3-ASR-1.7B'):
+        raise ValueError('Неизвестная модель Qwen для песен')
+    if _qwen_cache is None or _qwen_cache_repo != repo:
+        release_qwen_model()
+        import torch
+        from qwen_asr import Qwen3ASRModel
+        _qwen_cache=Qwen3ASRModel.from_pretrained(snapshot(repo),
+            dtype=torch.float32,device_map='cpu',attn_implementation='eager',
+            max_inference_batch_size=1,max_new_tokens=512)
+        _qwen_cache_repo=repo
+    return _qwen_cache
+
 
 def save(path, value):
     path = Path(path)
@@ -44,38 +69,39 @@ def snapshot(repo):
     return snapshot_download(repo, local_files_only=True)
 
 
-def qwen_transcribe(audio, progress):
+def qwen_transcribe(audio, progress, windows=None, model_repo='Qwen/Qwen3-ASR-0.6B'):
     import numpy as np
     import soundfile as sf
-    import torch
-    from qwen_asr import Qwen3ASRModel
     # CPU float32 is conservative on Apple Silicon; MPS has unsupported ops
     # in some transformers versions. Performance is measured, not assumed.
-    model = Qwen3ASRModel.from_pretrained(snapshot('Qwen/Qwen3-ASR-0.6B'),
-        dtype=torch.float32, device_map='cpu', attn_implementation='eager',
-        max_inference_batch_size=1, max_new_tokens=512)
+    model = qwen_model(model_repo)
     samples, sr = sf.read(audio, dtype='float32', always_2d=True)
     samples = np.mean(samples, axis=1)
     phrases = []
-    chunk = sr * 25
-    for start in range(0, len(samples), chunk):
-        end = min(start+chunk, len(samples))
+    if windows is None:
+        windows = [(start, min(start+25000, round(len(samples)/sr*1000)))
+                   for start in range(0, round(len(samples)/sr*1000), 25000)]
+    for start_ms, end_ms in windows:
+        start = max(0, round(start_ms/1000*sr))
+        end = min(round(end_ms/1000*sr), len(samples))
+        if end <= start:
+            continue
         progress(f'Qwen3: {round(start/len(samples)*100)}%')
         results = model.transcribe(audio=(samples[start:end], sr), language='Russian')
         text = results[0].text.strip()
         if text:
-            phrases.append({'text': text, 'start_ms': round(start/sr*1000),
+            phrases.append({'phrase_id': f'qwen-{start_ms}-{end_ms}',
+                            'text': text, 'start_ms': round(start/sr*1000),
                             'end_ms': round(end/sr*1000), 'timing_quality': 'chunk'})
-    del model
-    gc.collect()
-    return {'model': 'Qwen3-ASR-0.6B', 'input': 'mixture', 'phrases': phrases}
+    return {'model': model_repo.split('/')[-1], 'input': 'mixture', 'phrases': phrases}
 
 
-def whisper_transcribe(audio, run_id):
+def whisper_transcribe(audio, run_id, start_ms=0, end_ms=None):
     import mlx_whisper
     import librosa
     from songs.consensus import phrases_from_words
-    samples, _ = librosa.load(str(audio), sr=16000, mono=True)
+    samples, _ = librosa.load(str(audio), sr=16000, mono=True, offset=start_ms/1000,
+                            duration=None if end_ms is None else (end_ms-start_ms)/1000)
     result = mlx_whisper.transcribe(samples,
         path_or_hf_repo=snapshot('mlx-community/whisper-large-v2-mlx'), language='ru',
         # Singing attention timestamps can erase complete decoded segments.
@@ -84,9 +110,94 @@ def whisper_transcribe(audio, run_id):
         word_timestamps=False, condition_on_previous_text=False,
         hallucination_silence_threshold=None, verbose=None)
     phrases = phrases_from_words(result.get('segments', []), run_id)
+    for phrase in phrases:
+        phrase['start_ms'] += start_ms
+        phrase['end_ms'] += start_ms
     return {'model': 'Whisper-large-v2-MLX', 'input': 'mixture', 'phrases': phrases,
             'decoded_segments': result.get('segments', []),
             'decoded_text': result.get('text', ''), 'text_first': True}
+
+
+def repair_disagreements(audio, base, hypotheses, progress, max_windows=None, previous=None, checkpoint=None):
+    from songs.reconciliation import (propose_repairs, confirms, confirm_coverage,
+                                      apply_repairs, family, fresh_agreements, boundary_windows, protect_prior_agreement,
+                                      quarantine_credit_phrases)
+    proposals = propose_repairs(base['phrases'], [h for h in hypotheses if h is not base])
+    report = {'algorithm': 'time_local_audio_consensus_v2', 'proposals': proposals,
+              'rechecks': [], 'errors': [], 'max_windows': max_windows}
+    # A user-selected single-model comparison must not load other ASR models.
+    if not {'whisper', 'qwen'} <= {family(h['model']) for h in hypotheses}:
+        report['reason'] = 'Для проверки спорных мест выберите Whisper и Qwen'
+        return copy.deepcopy(base['phrases']), report
+    import hashlib
+    digest=hashlib.sha256()
+    with open(audio,'rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+    report['audio_sha256']=digest.hexdigest()
+    qwen_repo=('Qwen/Qwen3-ASR-1.7B' if any(h['model']=='Qwen3-ASR-1.7B' for h in hypotheses)
+               else 'Qwen/Qwen3-ASR-0.6B')
+    report['qwen_model']=qwen_repo
+    cache={}
+    if (previous or {}).get('audio_sha256')==report['audio_sha256']:
+        cache={(r['start_ms'],r['end_ms']):r for r in previous.get('rechecks',[])
+               if r.get('hypotheses')}
+    visited=set()
+    for sweep in range(2):
+        windows=[]
+        for p in proposals:
+            if len(set(p.get('confirmed_models',[])))>=2:continue
+            a,b=p['start_ms'],p['end_ms']
+            candidates=[(a,b)] if sweep==0 else (
+                [(t,min(t+16000,b)) for t in range(a,max(a+1,b-8000),8000)]
+                if b-a>16000 and not p.get('coverage') else [(max(0,a-3000),b+3000)])
+            for window in candidates:
+                if window not in visited and window not in windows:windows.append(window)
+        if sweep==0:
+            for window in boundary_windows(hypotheses):
+                if window not in windows:windows.append(window)
+        for index,(start,end) in enumerate(windows):
+            if max_windows is not None and len(visited)>=max_windows:break
+            visited.add((start,end))
+            progress(f'Проверка звука {sweep+1}/2: участок {index+1}/{len(windows)}')
+            evidence=copy.deepcopy(cache.get((start,end),{}).get('hypotheses',[]))
+            if (previous or {}).get('qwen_model','Qwen/Qwen3-ASR-0.6B')!=qwen_repo:
+                evidence=[h for h in evidence if family(h['model'])!='qwen']
+            for model in ('whisper','qwen'):
+                if model not in {family(h['model']) for h in evidence}:
+                    try:
+                        if model=='whisper':
+                            h=whisper_transcribe(audio,f'recheck-{sweep}-{index}',start,end)
+                        elif qwen_repo.endswith('1.7B'):
+                            h=qwen_transcribe(audio,progress,[(start,end)],model_repo=qwen_repo)
+                        else:
+                            h=qwen_transcribe(audio,progress,[(start,end)])
+                        evidence.append(h)
+                    except Exception as exc:
+                        report['errors'].append({'model':model,'start_ms':start,'error':str(exc)[:500]})
+            report['rechecks'].append({'start_ms':start,'end_ms':end,'hypotheses':evidence})
+            for p in proposals:
+                if len(p.get('confirmed_models',[]))>=2:continue
+                if start<p['end_ms'] and end>p['start_ms']:
+                    if p.get('coverage'):
+                        # A wider crop includes adjacent lyrics. Without word
+                        # times they cannot safely replace this whole block.
+                        if start==p['start_ms'] and end==p['end_ms']:confirm_coverage(p,evidence)
+                    else:
+                        confirmed=[h['model'] for h in evidence if confirms(p,h)]
+                        if len(confirmed)>len(p.get('confirmed_models',[])):
+                            p['confirmed_models']=confirmed
+            if checkpoint:checkpoint(report)
+    keys={(p['begin'],p['end'],tuple(p['context'])) for p in proposals}
+    for p in fresh_agreements(base['phrases'],report['rechecks']):
+        key=(p['begin'],p['end'],tuple(p['context']))
+        if key not in keys:
+            proposals.append(p);keys.add(key)
+    protect_prior_agreement(base,hypotheses,proposals)
+    repaired = apply_repairs(base['phrases'], proposals)
+    repaired,report['quarantined_phrases']=quarantine_credit_phrases(repaired,hypotheses,report['rechecks'])
+    report['accepted'] = sum(p['status'] == 'two_model_audio_agreement' for p in proposals)
+    report['needs_review'] = len(proposals)-report['accepted']
+    return repaired, report
 
 
 def _token_coverage(reference, candidate):
@@ -122,6 +233,10 @@ def _alignment_windows(phrases, context):
                     continue
                 a, b = candidate.get('start_ms'), candidate.get('end_ms')
                 if isinstance(a, (int, float)) and isinstance(b, (int, float)) and b > a:
+                    # Repeated choruses elsewhere in the recording cannot
+                    # widen the search window of this particular occurrence.
+                    if a >= end+2000 or b <= start-2000:
+                        continue
                     supported.append((int(a), int(b)))
         if supported:
             start = min(start, *(a for a, _ in supported))
@@ -137,7 +252,8 @@ def _alignment_windows(phrases, context):
     return windows
 
 
-def align_phrases(audio, hypothesis, progress, context=()):
+def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None):
+    release_qwen_model()
     import re
     import numpy as np
     import soundfile as sf
@@ -148,8 +264,23 @@ def align_phrases(audio, hypothesis, progress, context=()):
         dtype=torch.float32, device_map='cpu', attn_implementation='eager')
     samples, sr = sf.read(audio, dtype='float32', always_2d=True)
     samples = np.mean(samples, axis=1)
-    aligned = 0
-    phrases = hypothesis['phrases']
+    from songs.phrase_timeline import ordered_phrases, alignment_groups
+    originals = ordered_phrases(hypothesis['phrases'], context)
+    groups = alignment_groups(originals)
+    phrases = []
+    for group in groups:
+        combined = copy.deepcopy(group[0])
+        combined.update(text=' '.join(p['text'] for p in group),
+                        start_ms=min(p.get('recovery_window',p)['start_ms'] for p in group),
+                        end_ms=max(p['end_ms'] for p in group))
+        phrases.append(combined)
+    from songs.onset_check import existing_vocals, retry_long_onset
+    vocal_path = vocal_path or existing_vocals(audio)
+    vocal_audio = None
+    if vocal_path:
+        vx, vsr = sf.read(str(vocal_path), dtype='float32', always_2d=True)
+        if abs(len(vx)/vsr-len(samples)/sr) < .1:
+            vocal_audio = (np.mean(vx,axis=1),vsr)
     bounds = [(a/1000, b/1000) for a, b in _alignment_windows(phrases, context)]
     for i, phrase in enumerate(phrases):
         progress(f'Сверяем времена слов: {i+1}/{len(phrases)}')
@@ -164,21 +295,20 @@ def align_phrases(audio, hypothesis, progress, context=()):
             continue
         result = model.align(audio=(samples[round(start*sr):round(end*sr)],sr),
                              text=phrase['text'], language='Russian')[0]
-        matches = list(re.finditer(r'\S+', phrase['text']))
+        matches = [m for m in re.finditer(r'\S+', phrase['text']) if normalized(m.group())]
         units = list(result)
-        if len(units) != len(matches):
-            phrase['alignment_warning'] = 'Выравниватель изменил число слов; оставлены времена Whisper'
-            continue
-        words = []
-        for unit, match in zip(units,matches):
-            if normalized(unit.text) != normalized(match.group()):
-                words = []
-                break
-            a,b = round((start+unit.start_time)*1000),round((start+unit.end_time)*1000)
-            if b <= a or a < round(start*1000) or b > round(end*1000) or (words and a < words[-1]['end_ms']):
-                continue
-            words.append({'text':match.group(),'char_start':match.start(),'char_end':match.end(),
-                          'start_ms':a,'end_ms':b,'method':'qwen3_forced_aligner','verified':False})
+        from songs.alignment_words import measured_words
+        words = measured_words(phrase['text'], units, round(start*1000), round(end*1000))
+        words, onset_check = retry_long_onset(model, samples, sr, phrase['text'], words,
+                                            round(end*1000), vocal_audio)
+        if onset_check:
+            phrase['onset_check'] = onset_check
+        if words:
+            # A contextual crop can start before the coarse ASR segment.
+            # Retain every measured word inside its parent phrase, including
+            # partial alignments and the last sung word near a segment edge.
+            phrase['start_ms']=min(int(phrase.get('start_ms') or 0),words[0]['start_ms'])
+            phrase['end_ms']=max(int(phrase.get('end_ms') or 0),words[-1]['end_ms'])
         if words and len(words) == len(matches):
             phrase.update(words=words, alignment_stale=False, timing_quality='word_estimated')
             # Segment start can be the beginning of the file even when the
@@ -191,13 +321,45 @@ def align_phrases(audio, hypothesis, progress, context=()):
             if i == 0 and int(phrase.get('end_ms') or 0) - words[-1]['end_ms'] >= 1200:
                 phrase['end_ms'] = words[-1]['end_ms']
             phrase.pop('alignment_warning', None)
-            aligned += 1
+        elif words:
+            phrase.update(words=words,alignment_stale=False,timing_quality='word_partial',
+                alignment_warning='Часть слов имеет измеренные времена; остальные подсвечиваются приблизительно')
         else:
             phrase['words'] = []
             phrase['alignment_stale'] = True
             phrase['timing_quality'] = 'phrase'
             phrase['alignment_warning'] = 'Выравниватель не подтвердил все слова; времена оставлены на уровне фразы'
+    # Return timings to the original phrase IDs/character spans, including
+    # partial words. Tighten each measured edge, not just the song's first row.
+    for combined, group in zip(phrases,groups):
+        offset = 0
+        for phrase in group:
+            text = phrase['text']
+            words = [dict(w,char_start=w['char_start']-offset,char_end=w['char_end']-offset)
+                     for w in combined.get('words',[]) if offset <= w['char_start']
+                     and w['char_end'] <= offset+len(text)]
+            if words:
+                phrase.update(words=words,alignment_stale=False,
+                    timing_quality='word_estimated' if len(words)==len(re.findall(r'\S+',text)) else 'word_partial')
+                if words[0]['char_start']==0:
+                    phrase['start_ms']=words[0]['start_ms']
+                if words[-1]['char_end']==len(text):
+                    phrase['end_ms']=words[-1]['end_ms']
+                if combined.get('onset_check'):
+                    phrase['onset_check']=copy.deepcopy(combined['onset_check'])
+                if phrase['timing_quality']=='word_partial':
+                    phrase['alignment_warning']='Часть слов имеет измеренные времена; остальные подсвечиваются приблизительно'
+                else:
+                    phrase.pop('alignment_warning',None)
+            else:
+                phrase.update(words=[],alignment_stale=True,timing_quality='phrase',
+                    alignment_warning=combined.get('alignment_warning','Не удалось уточнить времена слов'))
+            offset += len(text)+1
+    hypothesis['phrases'] = originals
+    aligned = sum(p.get('timing_quality') == 'word_estimated' for p in originals)
+    partial = sum(p.get('timing_quality') == 'word_partial' for p in originals)
     hypothesis['alignment'] = {'model':'Qwen3-ForcedAligner-0.6B','phrases_aligned':aligned,
+                               'phrases_partially_aligned':partial,
                                'phrases_total':len(hypothesis['phrases']),'review_required':True}
     del model
     gc.collect()
@@ -295,15 +457,18 @@ def align_intro_from_vocals(audio, output, hypothesis, context, progress, origin
     if (aligned.get('timing_quality') != 'word_estimated' or
             not aligned.get('words') or aligned['words'][0]['start_ms'] - original_start < 1500):
         onset = _vocal_onset_ms(vocals)
-        if onset >= original_start + 1200:
-            first['start_ms'] = onset
-            first['alignment_warning'] = 'Начало вокала найдено по отделённому голосу; слова требуют проверки'
+        if original_start + 1200 <= onset < int(first.get('end_ms') or 0):
+            # Stem energy alone is not a lexical onset: guitar leakage or a
+            # loud second line can be mistaken for the first sung syllable.
+            # Keep it as review evidence; never cut off already decoded words.
+            first['alignment_warning'] = 'Начало вокала требует проверки по записи'
             hypothesis.setdefault('alignment', {})['intro_vocal_check'] = {
-                'source': 'HTDemucs vocal stem onset', 'start_ms': onset,
+                'source': 'HTDemucs vocal stem onset', 'suggested_start_ms': onset,
+                'applied': False,
                 'end_ms': int(first.get('end_ms') or 0)}
             import shutil
             shutil.rmtree(vocals.parent, ignore_errors=True)
-            return True
+            return False
         import shutil
         shutil.rmtree(vocals.parent, ignore_errors=True)
         return False
@@ -324,7 +489,7 @@ def main():
     parser.add_argument('--run-id', default='worker')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--baseline',type=Path)
-    parser.add_argument('--steps', default='whisper,qwen,consensus,align,chords')
+    parser.add_argument('--steps', default='whisper,qwen_large,consensus,align,chords')
     args = parser.parse_args()
     progress_path = args.output.with_suffix('.progress.json')
     def progress(label):
@@ -337,19 +502,21 @@ def main():
         try:
             progress({'whisper': 'Whisper large-v2: слова и времена',
                       'qwen': 'Qwen3: независимый вариант текста',
+                      'qwen_large': 'Qwen3-ASR 1.7B: независимый вариант текста',
                       'align': 'Уточняем времена слов',
                       'structure': 'Размечаем куплеты и припевы',
-                      'consensus': 'Сверяем слова трёх распознавателей',
+                      'consensus': 'Сравниваем распознавания с исходной записью',
                       'chords': 'Определяем смены аккордов по звуку'}[step])
             if step == 'whisper':
                 hyp = whisper_transcribe(args.input, args.run_id)
                 hyp['seconds'] = round(time.monotonic()-start, 2)
                 result['hypotheses'] = [h for h in result['hypotheses'] if h['model'] != hyp['model']]
                 result['hypotheses'].append(hyp)
-            elif step == 'qwen':
-                hyp = qwen_transcribe(args.input, progress)
+            elif step in ('qwen','qwen_large'):
+                hyp = qwen_transcribe(args.input, progress,model_repo=(
+                    'Qwen/Qwen3-ASR-1.7B' if step=='qwen_large' else 'Qwen/Qwen3-ASR-0.6B'))
                 hyp['seconds'] = round(time.monotonic()-start, 2)
-                result['hypotheses'] = [h for h in result['hypotheses'] if h['model'] != hyp['model']]
+                result['hypotheses'] = [h for h in result['hypotheses'] if not h['model'].startswith('Qwen3-ASR')]
                 result['hypotheses'].append(hyp)
             elif step == 'chords':
                 from songs.harmony import infer_chords
@@ -373,11 +540,17 @@ def main():
                 hypotheses = list(result['hypotheses'])
                 if args.baseline and args.baseline.is_file():
                     hypotheses.insert(0,json.loads(args.baseline.read_text()))
-                timed = next((h for h in hypotheses if h['model'].startswith('Whisper') and h.get('phrases')),None)
                 base = choose_spine(hypotheses)
                 if base:
-                    result['selected'] = {'model':'conservative_word_vote', 'phrases':consensus(
-                        recover_omissions(base['phrases'], hypotheses),[h for h in hypotheses if h is not base],choose_majority=True)}
+                    def checkpoint(report):
+                        result['comparison']=report
+                        save(args.output,result)
+                    repaired, comparison = repair_disagreements(args.input, base, hypotheses, progress,
+                        previous=result.get('comparison'),checkpoint=checkpoint)
+                    result['comparison'] = comparison
+                    # Votes describe uncertainty; they cannot undo a fresh audio repair.
+                    result['selected'] = {'model':'time_local_audio_consensus_v2', 'spine_model':base['model'], 'phrases':consensus(
+                        recover_omissions(repaired, hypotheses),[h for h in hypotheses if h is not base],choose_majority=False)}
         except Exception as exc:
             result['errors'].append({'step': step, 'error': str(exc)[:1000]})
         save(args.output, result)

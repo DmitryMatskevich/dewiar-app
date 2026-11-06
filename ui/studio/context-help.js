@@ -214,6 +214,8 @@ window.showHelp=showHelp;
   const selector='button,input,select,textarea,summary,[role="button"],a[data-go],[data-quota],[data-routing-summary]';
   const cache=new WeakMap();
   function describe(el){
+    // The fretboard supplies precise pitch/action titles, not generic page help.
+    if(el.matches('.song-chord-tip')||el.closest('.song-chord-popover'))return;
     if(el.matches('[data-section-help]'))return;
     const prior=cache.get(el),current=el.getAttribute('title')||'';
     const original=prior&&current===prior.generated?prior.original:current;

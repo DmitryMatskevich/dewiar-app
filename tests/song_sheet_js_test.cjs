@@ -4,6 +4,14 @@ const row={title:'Test',guitar_sheet:[{text:'One two',cells:[{text:'One ',char_i
 assert.equal(s.chordFingering('Em'),'0-0-0-2-2-0');
 assert.equal(s.chordFingering('Am'),'0-1-2-2-0-x');
 assert.equal(s.chordFingering('C/G'),'0-1-0-2-3-3');
+assert.equal(s.fretNote(4,2),'B'); // A string, second fret
+assert.equal(s.fretNote(1,1),'C'); // B string, first fret
+assert.equal(s.fretNote(0,0),'E');
+assert.equal(s.fretNote(5,12),'E');
+assert.equal(s.fretNote(2,2),'A');
+assert.equal(s.voicingAtShift({voicing_fingering:'0-0-0-2-2-0'},1).voicing_fingering,'1-1-1-3-3-1');
+assert.equal(s.voicingAtShift({voicing_fingering:'0-0-0-2-2-0'},-1).voicing_fingering,'');
+assert.equal(s.voicingAtShift({voicing_fingering:'1-1-1-3-3-1',voicing_key_shift:1},0).voicing_fingering,'0-0-0-2-2-0');
 assert.equal(s.chordFingerings('Am').length,3);
 assert.match(s.chordTooltip('Am'),/1→6: 0-1-2-2-0-x/);
 assert.ok(!s.chordTooltip('Am').includes('другие варианты'));

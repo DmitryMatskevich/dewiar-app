@@ -1,6 +1,6 @@
 """Почта: подключение, проверка, письмо с вложением из папки ассистента, чтение входящих — через поддельные
 SMTP и IMAP серверы (без шифрования, на 127.0.0.1)."""
-import base64, email, os, socket, socketserver, sys, tempfile, threading
+import base64, email, os, socket, socketserver, sys, tempfile, threading, time
 from email.message import EmailMessage
 from pathlib import Path
 from unittest.mock import patch
@@ -77,7 +77,7 @@ class IMAP(socketserver.StreamRequestHandler):
                 if raw:
                     flags = r"\Seen" if seen else ""
                     structure = ' BODYSTRUCTURE ("APPLICATION" "PDF" ("NAME" "счёт.pdf") NIL NIL "BASE64" 5)' if uid == 1 else ""
-                    self.w(f"* {uid} FETCH (UID {uid} FLAGS ({flags}){structure} BODY[] {{{len(raw)}}}".encode() + b"\r\n" + raw + b")\r\n")
+                    self.w(f"* {uid} FETCH (UID {uid} FLAGS ({flags}) INTERNALDATE \"06-Nov-2026 10:00:00 +0300\"{structure} BODY[] {{{len(raw)}}}".encode() + b"\r\n" + raw + b")\r\n")
                 self.w(f"{tag} OK done")
             elif cmd.startswith("LOGOUT"): self.w("* BYE"); self.w(f"{tag} OK bye"); return
             else: self.w(f"{tag} OK")
@@ -121,6 +121,12 @@ forwarded = email.message_from_bytes(SENT[-1])
 eml_part = next((part for part in forwarded.walk() if part.get_filename() == "Fwd_Original.eml"), None)
 ok(forward_result["accepted_by_smtp"] and eml_part and eml_part.get_payload(decode=True) == original_eml,
    "пересылка отправляет исходное письмо MIME файлом .eml с вложениями")
+reply_result = m.send_reply({"to": ["client@example.org"], "cc": [], "subject": "Re: Original",
+                             "body": "Проверочный ответ", "in_reply_to": "<source@example.org>"})
+reply_message = email.message_from_bytes(SENT[-1])
+reply_sent_at = email.utils.parsedate_to_datetime(reply_message["Date"]).timestamp()
+ok(reply_result["accepted_by_smtp"] and abs(reply_sent_at - time.time()) < 5,
+   "дата заголовка отправленного ответа соответствует текущим часам, а не дате цитаты")
 class MoveIMAP:
     capabilities = (b"IMAP4rev1", b"MOVE")
     def __init__(self): self.calls = []
@@ -165,6 +171,8 @@ except Exception: ok(True, "вложить файл вне папки ассис
 box = m.inbox(limit=5)
 ok([x["uid"] for x in box] == ["2", "1"] and box[1]["files"] == ["счёт.pdf"] and box[0]["unread"] and not box[1]["unread"],
    "входящие: новые сверху, вложения и «непрочитано» видны")
+ok(box[0]["received_at"] is not None and box[0]["received_at"] > email.utils.parsedate_to_datetime(box[0]["date"]).timestamp(),
+   "время доставки берётся из IMAP INTERNALDATE отдельно от даты отправителя")
 ok([x["uid"] for x in m.inbox(unread=True)] == ["2"], "только непрочитанные")
 ok([x["uid"] for x in m.inbox(query="счёт")] == ["1"], "поиск по слову")
 full = m.read("1")

@@ -12,6 +12,22 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 class CommandsMixin:
     # ---------- команды из интерфейса ----------
 
+    def _song_capture_finished(self, saved, *, microphone=False, shutting_down=False):
+        """One completion path for manual stop, silence, device error and exit."""
+        if microphone and self.song_mic_capture_active:
+            self.song_mic_capture_active = False
+            if not getattr(self, "server", False):
+                self.set_mute(self._song_capture_resume_muted)
+        stopping = getattr(self, "stopping", None)
+        if shutting_down or (stopping and stopping.is_set()) or saved.get("status") != "queued":
+            return saved
+        try:
+            return self.song_analyzer.start(saved["song_id"], full=True)
+        except Exception as exc:
+            # Audio remains durable and retryable even if scheduling fails.
+            return self.song_store.patch(saved["song_id"], {
+                "status": "queued", "stage_label": "Запись сохранена. Продолжите пакетную обработку: " + str(exc)[:160]})
+
     def _screenshot_cmd(self, text):
         """Two local steps without invoking an LLM, with normal screen permission policy."""
         from screen_document import parse_command
@@ -331,6 +347,9 @@ class CommandsMixin:
             if cmd=='contacts_create':
                 if a.get('confirmed') is not True:raise ValueError('Подтвердите карточку перед созданием')
                 result=book.create(a.get('contact') or {},a.get('to_mac',True),a.get('request_id'));self.emit('contacts_changed');return result
+            if cmd=='contacts_update':
+                if a.get('confirmed') is not True:raise ValueError('Подтвердите изменение карточки')
+                result=book.update(a.get('id'),a.get('contact') or {});self.emit('contacts_changed');return result
             if cmd=='contacts_delete':
                 if a.get('confirmed') is not True:raise ValueError('Подтвердите удаление локальной копии')
                 result=book.delete(a.get('id'));self.emit('contacts_changed');return result
@@ -507,6 +526,10 @@ class CommandsMixin:
                 return pr.enroll_stop(save=act != "cancel")
             if cmd == "prompter_stop":
                 return pr.stop(summary=a.get("summary", True))
+            if cmd == "prompter_continue":
+                return pr.continue_meeting()
+            if cmd == "prompter_group_finalize":
+                return pr.finalize_meeting_group()
             if cmd == "prompter_video":
                 return pr.export_meeting_video()
             if cmd == "prompter_pause":
@@ -706,6 +729,9 @@ class CommandsMixin:
                 raise ValueError(str(e)) from e
             except OSError as e:
                 raise ValueError(f"не получилось: {e}") from e
+        if cmd in ("mail_scope_update", "mail_scope_state"):
+            from mail_scope import command
+            return command(self, cmd, a)
         if cmd.startswith("mail_"):              # почта: настройки, проверка, тестовое письмо
             from mail import MailError, guess
             try:
@@ -713,6 +739,8 @@ class CommandsMixin:
                     self.mail.activate()
                 if cmd == "mail_accounts":
                     return self.mail.accounts()
+                if cmd == "mail_account_add":
+                    return {"account": self.mail.account_add(a.get("address", ""), a.get("label", ""))}
                 if cmd == "mail_account_save":
                     return self.mail.account_save(a.get("account_id", ""), a.get("patch") or {})
                 if cmd == "mail_account_test":
@@ -738,6 +766,8 @@ class CommandsMixin:
                                                query=a.get("query", ""), important=bool(a.get("important")),
                                                account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")),
                                                incoming_only=bool(a.get("incoming_only")))
+                if cmd == "mail_thread":
+                    return self.mail.mail_thread(a.get("thread_id", ""))
                 if cmd == "mail_unread_count":
                     return self.mail.unread_count()
                 if cmd == "mail_badge_counts":
@@ -1853,17 +1883,7 @@ class CommandsMixin:
                         raise
                 return self.song_capture.start(song_id, a.get("target", "all"), a.get("backend", "auto"), source=source)
             if action == "stop":
-                was_mic_capture = self.song_mic_capture_active
-                try:
-                    saved = self.song_capture.stop(song_id)
-                finally:
-                    if was_mic_capture:
-                        self.song_mic_capture_active = False
-                        if not getattr(self, "server", False):
-                            self.set_mute(self._song_capture_resume_muted)
-                if saved.get("status") == "queued":
-                    return self.song_analyzer.start(song_id, full=True)
-                return saved
+                return self.song_capture.stop(song_id)
             return self.song_capture.state(song_id)
         if cmd == "song_attach_audio":
             # The UI sends a data URL so the file is copied into Dewiar's

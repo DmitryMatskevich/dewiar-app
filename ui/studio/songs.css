@@ -206,9 +206,12 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper-chords { font-weight:700; }
 .song-chord-tip { cursor:help; text-decoration:underline dotted color-mix(in srgb,currentColor 35%,transparent); text-underline-offset:3px; }
 .song-chord-tip.current-chord { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 28%,var(--field)); outline:2px solid var(--accent,#4d78c9); border-radius:3px; }
-.song-chord-popover { position:fixed; z-index:1000; width:300px; padding:0 14px 12px; border:1px solid var(--line); border-radius:16px; background-color:#171b2d; background-image:none; color:#f4f4f6; box-shadow:0 14px 36px rgba(0,0,0,.24); font:14px/1.3 system-ui,sans-serif; }
-html.st-light .song-chord-popover { background-color:#f6f8fc; color:#1d2230; border-color:rgba(29,34,48,.14); }
+.song-chord-popover { --ink:#f4f4f6; --muted:rgba(244,244,246,.75); --line:rgba(244,244,246,.2); position:fixed; z-index:1000; width:300px; padding:0 14px 12px; border:1px solid var(--line); border-radius:16px; background-color:#171b2d; background-image:none; color:var(--ink); box-shadow:0 14px 36px rgba(0,0,0,.24); font:14px/1.3 system-ui,sans-serif; }
+html.st-light .song-chord-popover { --ink:#1d2230; --muted:rgba(29,34,48,.75); --line:rgba(29,34,48,.2); background-color:#f6f8fc; color:var(--ink); border-color:rgba(29,34,48,.14); }
 .song-chord-popover[hidden] { display:none; }
+.song-chord-apply { width:100%; margin-top:8px; }
+.song-chord-popover-status { margin:8px 0 0; font-size:13px; }
+.song-chord-popover-status:empty { display:none; }
 .song-chord-popover-head { display:grid; grid-template-columns:30px minmax(0,1fr) 30px auto; align-items:center; gap:4px; margin:0 -14px 10px; padding:10px 12px 10px 14px; border-radius:16px 16px 0 0; background-color:rgba(255,255,255,.06); }
 html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 .song-chord-popover-head b { font-size:22px; text-align:center; }
@@ -220,8 +223,9 @@ html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 .song-chord-fret-head { margin:0 18px 3px 0; color:var(--muted); text-align:center; font-size:12px; }
 .song-chord-diagram { border-top:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent); padding:4px 18px 4px 0; }
 .song-chord-string { color:var(--muted); font-weight:600; text-align:left; }
-.song-chord-grid { display:grid; grid-column:2 / span 4; grid-row:1; grid-template-columns:repeat(4,1fr); height:22px; }
-.song-chord-fret { position:relative; width:100%; height:22px; padding:0; border:0; border-right:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent); background:transparent; color:inherit; cursor:pointer; }
+.song-chord-grid { display:grid; grid-column:2 / span 4; grid-row:1; grid-template-columns:repeat(4,1fr); height:24px; }
+.song-chord-fret { position:relative; width:100%; height:24px; padding:0; border:0; border-right:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent); background:transparent; color:inherit; cursor:pointer; }
+.song-chord-popover button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .song-chord-fret:first-child { border-left:1px solid color-mix(in srgb,var(--line) 80%,transparent); }
 .song-chord-fret::before { content:''; position:absolute; left:50%; top:50%; width:4px; height:4px; border-radius:50%; background:var(--muted); transform:translate(-50%,-50%); opacity:.38; }
 .song-chord-fret.filled::before { width:14px; height:14px; background:var(--accent); opacity:1; }
@@ -257,3 +261,9 @@ html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 
 .song-card-actions [hidden] { display:none; }
 @media(max-width:600px) { .song-card { grid-template-columns:minmax(0,1fr); } .song-card-actions { justify-content:flex-end; } }
+
+/* Recording controls remain visible outside collapsed song properties. */
+.song-record-stop { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.song-record-stop svg { width:22px; height:22px; flex:0 0 22px; }
+.song-recording-banner { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin:12px 0 20px; padding:16px; border:1px solid var(--accent,#475bff); border-radius:16px; }
+.song-recording-banner .song-record-stop { flex-shrink:0; }

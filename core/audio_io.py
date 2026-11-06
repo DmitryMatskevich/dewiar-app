@@ -498,6 +498,13 @@ class TapCapture:
             if kind in ("ready", "tap"):
                 self._ready.set()
             if kind == "tap":
+                # `tap` describes the native format of the selected process
+                # (often 48 kHz/stereo). The helper resamples and downmixes
+                # before writing stdout; the recorder must keep the negotiated
+                # output format from the `ready` event (16 kHz/mono). Using
+                # the input format here makes a 16 kHz stream play 3x fast.
+                pass
+            elif kind == "ready":
                 try:
                     self.rate = int(ev.get("rate") or self.rate)
                     self.channels = int(ev.get("channels") or self.channels)

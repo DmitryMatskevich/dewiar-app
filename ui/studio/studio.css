@@ -2150,6 +2150,7 @@ html.framed .py-drawer { top: 38px; }
 /* Почта: адаптивная трёхпанельная схема, знакомая по macOS Mail, в токенах Dewiar. */
 .ml-mail-app { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
 .ml-sidebar { min-width:0; padding:10px; border:1px solid var(--line); border-radius:14px; background:color-mix(in srgb,var(--field) 62%,transparent); }
+.ml-nav-heading { margin:2px 8px 6px; font-size:13px; letter-spacing:.02em; }
 .ml-nav-group { display:grid; gap:3px; padding-bottom:12px; border-bottom:1px solid var(--line); }
 .ml-badge-filters { display:grid; gap:8px; margin:12px 0; padding:10px 9px; border:1px solid var(--line); border-radius:12px; color:var(--muted); font-size:12px; }
 .ml-badge-filters legend { padding:0 4px; color:var(--ink); font-weight:650; }
@@ -2163,6 +2164,12 @@ html.framed .py-drawer { top: 38px; }
 .ml-mailboxes-head h3 { margin:0; font-size:13px; letter-spacing:.02em; }
 .ml-mailboxes-head .hint { font-size:11px; }
 .ml-accounts { display:grid; gap:3px; }
+.ml-add-account { width:100%; min-height:40px; display:flex; align-items:center; justify-content:center; gap:7px; margin-top:7px; border:1px dashed var(--line); border-radius:9px; background:transparent; color:var(--accent); font:inherit; cursor:pointer; }
+.ml-add-account:hover,.ml-add-account:focus-visible { background:color-mix(in srgb,var(--accent) 10%,var(--field)); outline-color:var(--accent); }
+.ml-add-account > span { font-size:20px; line-height:1; }
+.ml-add-account-form { display:grid; gap:8px; margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--field); }
+.ml-add-account-form[hidden] { display:none; }
+.ml-add-account-form .f { min-width:0; }
 .ml-account { width:100%; min-width:0; display:grid; gap:2px; padding:8px 10px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
 .ml-account:hover,.ml-account:focus-visible,.ml-account.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
 .ml-account b { font-size:13px; overflow-wrap:anywhere; }
@@ -2193,6 +2200,14 @@ html.framed .py-drawer { top: 38px; }
 .ml-message-date { flex:none; color:var(--ink); opacity:.78; font-size:11px; }
 .ml-message-subject { font-size:12px; }
 .ml-message-meta { color:var(--ink); opacity:.78; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.ml-thread-messages { display:grid; gap:4px; margin:0 0 12px; padding:10px; border:1px solid var(--line); border-radius:11px; background:color-mix(in srgb,var(--field) 70%,transparent); }
+.ml-thread-messages[hidden] { display:none; }
+.ml-thread-heading { padding:0 4px 4px; font-size:13px; }
+.ml-thread-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 10px; padding:8px 10px; border:0; border-radius:8px; background:transparent; color:var(--ink); text-align:left; font:inherit; cursor:pointer; }
+.ml-thread-item:hover,.ml-thread-item:focus-visible,.ml-thread-item.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
+.ml-thread-item b,.ml-thread-item span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ml-thread-item span { grid-column:1/-1; font-size:12px; }
+.ml-thread-item time { grid-column:2; grid-row:1; color:var(--muted); font-size:11px; white-space:nowrap; }
 .ml-empty { min-height:150px; display:grid; place-content:center; gap:7px; padding:24px; text-align:center; }
 .ml-empty span { max-width:380px; color:var(--ink); opacity:.8; font-size:13px; }
 .ml-detail { min-width:0; max-height:min(68vh,760px); overflow:auto; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--field); }

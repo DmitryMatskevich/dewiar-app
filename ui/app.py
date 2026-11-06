@@ -2269,7 +2269,7 @@ class Api:
         except Exception:  # noqa: BLE001
             x = y = None
         win = webview.create_window(PROMPTER_TITLE, self._url("prompter.html"), width=w, height=h, x=x, y=y,
-                                    resizable=False, frameless=True, easy_drag=False, on_top=True, hidden=True,
+                                    resizable=True, frameless=True, easy_drag=False, on_top=True, hidden=True,
                                     background_color="#16131d", js_api=self, **_no_shadow())
         self._prompter = win
         win.events.closed += lambda *a: setattr(self, "_prompter", None)

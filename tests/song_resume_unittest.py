@@ -122,5 +122,21 @@ class ResumeTests(unittest.TestCase):
             self.service.resume(self.sid)
             start.assert_called_once_with(self.sid, full=True)
 
+    def test_resume_keeps_previously_selected_song_models(self):
+        self.audio('interrupted')
+        self.store.patch(self.sid,{'analysis_models':['whisper','qwen']})
+        with patch('songs.analysis.threading.Thread'):
+            row=self.analyzer.start(self.sid,full=True)
+        self.assertEqual(row['analysis_models'],['whisper','qwen'])
+
+    def test_old_card_can_recover_model_choice_from_recorded_change(self):
+        self.audio('interrupted')
+        self.store.patch(self.sid,{'analysis_models':['whisper','qwen']})
+        path=self.store.root/self.sid/'song.json'
+        old=json.loads(path.read_text());old.pop('analysis_models');path.write_text(json.dumps(old))
+        with patch('songs.analysis.threading.Thread'):
+            row=self.analyzer.start(self.sid,full=True)
+        self.assertEqual(row['analysis_models'],['whisper','qwen'])
+
 
 if __name__ == '__main__': unittest.main()

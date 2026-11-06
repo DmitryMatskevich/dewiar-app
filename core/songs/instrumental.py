@@ -33,7 +33,7 @@ class InstrumentalManager:
 
     def _folder(self, song_id):
         # Store validates IDs on get; resolve again before any filesystem operation.
-        if not self.store.get(song_id):
+        if not self.store.exists(song_id):
             raise ValueError("Песня не найдена")
         path = (self.root / song_id / "karaoke").resolve()
         if self.root not in path.parents:

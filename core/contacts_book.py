@@ -29,6 +29,10 @@ def clean(row,imported=False):
         values=row.get(key,[])
         if not isinstance(values,list) or len(values)>50 or any(not isinstance(v,str) or len(v)>300 for v in values):raise ValueError('Некорректные телефоны или адреса')
         out[key]=list(dict.fromkeys(v.strip() for v in values if v.strip()))
+    for key in ('telegram','whatsapp'):
+        value=row.get(key,'')
+        if not isinstance(value,str) or len(value)>300:raise ValueError('Проверьте ссылки Telegram и WhatsApp')
+        out[key]=unicodedata.normalize('NFC',value.strip())
     if not imported and any(not phone(v) or len(phone(v))<3 for v in out['phones']):raise ValueError('Проверьте телефон')
     if not imported and any(not re.fullmatch(r'[^\s@]+@[^\s@]+',v) for v in out['emails']):raise ValueError('Проверьте адрес электронной почты')
     out['birthday']=None
@@ -196,6 +200,19 @@ class ContactBook:
             try:self.save()
             except OSError:self.data=prior;raise
             return {'deleted':True,'mac_unchanged':True}
+
+    def update(self,rid,payload):
+        row=clean(payload)
+        with self.lock:
+            old=self.data['records'].get(rid)
+            if old is None:raise ValueError('Контакт не найден')
+            prior=copy.deepcopy(self.data)
+            self.data['records'][rid]=dict(row,source_ids=list(old.get('source_ids',[])),created=old.get('created',time.time()),updated=time.time())
+            try:self.save()
+            except OSError:
+                self.data=prior
+                raise ValueError('Не удалось сохранить контакт. Локальная адресная книга не изменена.') from None
+            return {'id':rid,'display_name':name(row),'mac_unchanged':True}
 
     def proposal(self,text,scope,force=False,defer_native=False):
         if not self.data['suggest'] and not force:return None

@@ -38,6 +38,7 @@ class SongStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / "index.json"
         self._lock = threading.RLock()
+        self._card_cache = {}
 
     def _read_index(self) -> list[str]:
         try:
@@ -78,12 +79,39 @@ class SongStore:
             return None
         return data if isinstance(data, dict) else None
 
+    def exists(self, song_id: str) -> bool:
+        """Validate identity/existence without loading recognition history."""
+        return self._path(song_id).is_file()
+
+    def _card(self, song_id):
+        path = self._path(song_id)
+        try:
+            stat = path.stat()
+        except OSError:
+            self._card_cache.pop(song_id, None)
+            return None
+        signature = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+        cached = self._card_cache.get(song_id)
+        if cached and cached[0] == signature:
+            return cached[1]
+        row = self._read(song_id)
+        if not row:
+            self._card_cache.pop(song_id, None)
+            return None
+        fields = {'song_id', 'title', 'artist', 'status', 'stage', 'stage_label',
+                  'capabilities', 'audio', 'phrases', 'analysis_state',
+                  'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
+                  'revision', 'source', 'source_ref', 'recording_version'}
+        card = {key: row[key] for key in fields if key in row}
+        self._card_cache[song_id] = (signature, card)
+        return card
+
     def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False) -> list[dict]:
         query = _clean(query, 120).casefold()
         with self._lock:
             rows = []
             for song_id in reversed(self._read_index()):
-                row = self._read(song_id)
+                row = self._card(song_id) if compact else self._read(song_id)
                 if not row:
                     continue
                 haystack = f"{row.get('title', '')} {row.get('artist', '')}".casefold()
@@ -178,7 +206,7 @@ class SongStore:
             allowed = {"title", "artist", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
-                       "harmony", "analysis_errors", "source_candidates", "selected_source_id"}
+                       "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
             if "status" in changes and changes["status"] not in STATUS:
@@ -239,12 +267,16 @@ class SongStore:
             selected = (result.get('selected') or {}).get('phrases')
             if not selected:
                 selected = consensus(recover_omissions(base['phrases'], hypotheses), [h for h in hypotheses if h is not base])
+            selected = copy.deepcopy(selected)
+            for index, phrase in enumerate(selected):
+                phrase.setdefault('phrase_id', f'{run_id}-{index}')
             keep = bool(row.get('phrase_history'))
             harmony = result.get('harmony') or {}
             has_chords = any(c.get('name') != 'N' for c in harmony.get('events', []))
             run = {'run_id': run_id, 'created_at': _now(), 'model': 'ensemble',
                    'audio_path': row.get('audio', {}).get('path'), 'phrases': selected,
                    'hypotheses': hypotheses, 'harmony': harmony, 'errors': result.get('errors', []),
+                   'comparison': copy.deepcopy(result.get('comparison', {})),
                    'alignment':(result.get('selected') or {}).get('alignment')}
             changes = {'analysis_runs': [*row.get('analysis_runs', []), run], 'active_run_id': None,
                        'candidate_run_id': run_id if keep else None, 'status': 'review' if selected or keep else 'partial', 'stage': 'review',

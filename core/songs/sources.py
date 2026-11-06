@@ -92,6 +92,28 @@ def _public_http_url(url):
     return parsed
 
 
+def _decode_reference_html(body, content_type=''):
+    """Respect legacy poetry pages' declared encoding instead of losing Cyrillic."""
+    from email.message import Message
+    header = Message()
+    header['Content-Type'] = content_type
+    declared = header.get_content_charset()
+    # HTML5 charset and legacy http-equiv declarations both contain charset=.
+    # Inspect only meta tags, not scripts or text quoting another document.
+    meta = next((m.group(1).decode('ascii', 'ignore')
+                 for tag in re.findall(br'<meta\b[^>]*>', body[:8192], re.I)
+                 for m in [re.search(br'charset\s*=\s*[\"\']?\s*([a-z0-9_.:-]+)', tag, re.I)]
+                 if m), None)
+    candidates = (['utf-8-sig'] if body.startswith(b'\xef\xbb\xbf') else [])
+    candidates += [declared, meta, 'utf-8']
+    for encoding in dict.fromkeys(c for c in candidates if c):
+        try:
+            return body.decode(encoding), encoding
+        except (LookupError, UnicodeError, ValueError):
+            continue
+    return body.decode('utf-8', 'replace'), 'utf-8-replacement'
+
+
 def check_reference(url, candidate_kind='reference'):
     """Fetch a direct source page, validate redirects, and extract only visible chord lines."""
     current = str(url or '').strip()
@@ -121,7 +143,8 @@ def check_reference(url, candidate_kind='reference'):
         if 'html' not in content_type:
             return {'status':'unavailable','http_status':status,'error':'По ссылке нет страницы HTML'}
         parser = _VisibleText()
-        parser.feed(body.decode('utf-8', 'replace'))
+        decoded, encoding = _decode_reference_html(body, content_type)
+        parser.feed(decoded)
         visible = re.sub(r'[ \t\xa0]+', ' ', ''.join(parser.parts))
         visible = re.sub(r'\n\s*\n+', '\n', visible).strip()
         if not visible:
@@ -139,6 +162,7 @@ def check_reference(url, candidate_kind='reference'):
         chord_names = list(dict.fromkeys(chord_names))[:80]
         page_title = re.sub(r'\s+', ' ', ''.join(parser.title)).strip()[:240]
         return {'status':'available','http_status':status,'final_url':final_url,
+                'text_encoding':encoding,
                 'page_title':page_title,'checked_at':__import__('time').time(),
                 'has_readable_text':True,'chord_names':chord_names,
                 'chords_extractable':len(chord_names)>=2,

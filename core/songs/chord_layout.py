@@ -43,7 +43,12 @@ def _vocal_bounds(phrase):
              if isinstance(word.get('start_ms'), (int, float))
              and isinstance(word.get('end_ms'), (int, float))
              and word.get('end_ms') > word.get('start_ms')]
-    if words:
+    if words and not phrase.get('alignment_stale'):
+        if phrase.get('timing_quality') == 'word_partial':
+            first=next((w for w in words if w.get('char_start')==0),None)
+            last=next((w for w in words if w.get('char_end')==len(phrase.get('text',''))),None)
+            return (int(first['start_ms']) if first else start,
+                    int(last['end_ms']) if last else end)
         start = min(int(word['start_ms']) for word in words)
         end = max(int(word['end_ms']) for word in words)
     return start, max(start, end)
@@ -53,6 +58,8 @@ def _anchor(event, phrase):
     anchor = event.get('anchor') or {}
     if anchor.get('phrase_id') == phrase.get('phrase_id') and anchor.get('kind') in {'manual', 'char_ctc'}:
         index = anchor.get('grapheme_index')
+        if isinstance(index,int):
+            index -= phrase.get('source_char_offset',0)
         if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(phrase['text']):
             return index, anchor['kind']
     if not phrase.get('alignment_stale'):
@@ -85,6 +92,33 @@ def _anchor(event, phrase):
     return None, 'line'
 
 
+def _vocal_slices(phrase):
+    """Split only measured pauses between adjacent text tokens, preserving edits."""
+    text = str(phrase.get('text') or '')
+    if phrase.get('alignment_stale'):
+        return [phrase]
+    words = sorted([w for w in phrase.get('words',[]) if
+                    isinstance(w.get('char_start'),int) and isinstance(w.get('char_end'),int) and
+                    isinstance(w.get('start_ms'),(int,float)) and isinstance(w.get('end_ms'),(int,float)) and
+                    w['end_ms']>w['start_ms']],key=lambda w:w['char_start'])
+    cuts = [0]
+    for a,b in zip(words,words[1:]):
+        if (b['start_ms']-a['end_ms']>=2500 and
+                not text[a['char_end']:b['char_start']].strip()):
+            cuts.append(b['char_start'])
+    if len(cuts)==1:
+        return [phrase]
+    slices=[]
+    for a,b in zip(cuts,cuts[1:]+[len(text)]):
+        value=text[a:b].rstrip()
+        selected=[dict(w,char_start=w['char_start']-a,char_end=w['char_end']-a)
+                  for w in words if a<=w['char_start'] and w['char_end']<=a+len(value)]
+        slices.append({**phrase,'text':value,'words':selected,'source_char_offset':a,
+                       'start_ms':phrase['start_ms'] if a==0 else selected[0]['start_ms'],
+                       'end_ms':phrase['end_ms'] if b==len(text) else selected[-1]['end_ms']})
+    return slices
+
+
 def layout_chords(phrases, events):
     valid = []
     for event in events or []:
@@ -102,7 +136,7 @@ def layout_chords(phrases, events):
         valid.append({**base, **voicing, 'name': name, 'start_ms': start})
     valid.sort(key=lambda e: e['start_ms'])
     out, used = [], set()
-    for phrase in phrases or []:
+    for phrase in [part for p in phrases or [] for part in _vocal_slices(p)]:
         text = str(phrase.get('text') or '')
         if not text:
             continue
@@ -139,12 +173,29 @@ def layout_chords(phrases, events):
         cells = [{'text': text[pos:(positions[j+1] if j+1 < len(positions) else len(text))],
                   'chords': grouped.get(pos, []), 'char_index': pos} for j,pos in enumerate(positions)]
         out.append({**phrase, 'cells': cells, 'chords': marks, 'unplaced_chords': unplaced,
+                    'start_ms':vocal_ps,'end_ms':vocal_pe,
                     'timing_quality': 'estimated' if any(m.get('anchor_quality','').startswith('estimated') for m in marks) else 'anchored' if marks and not unplaced else 'line'})
     # Смены в проигрыше/паузе тоже нужны: не теряем их из-за отсутствия текста.
     for i,event in enumerate(valid):
         if i not in used:
             out.append({'text': '', 'start_ms': event['start_ms'], 'end_ms': event['start_ms'],
                         'cells': [], 'chords': [], 'unplaced_chords': [event], 'timing_quality': 'gap'})
+    # A sustained chord can cover a real break without a new change inside it.
+    # Keep that instrumental cue too; no chord is invented for unvoiced silence.
+    vocal_rows=sorted((r for r in out if r.get('text')),key=lambda r:r['start_ms'])
+    cursor=0
+    for row in vocal_rows:
+        finish=row['start_ms']
+        if finish-cursor>=1500 and not any(not r.get('text') and cursor<=r['start_ms']<finish for r in out):
+            active=max((e for e in events or [] if e.get('start_ms',0)<=cursor),
+                       key=lambda e:e.get('start_ms',0),default=None)
+            changes=[e for e in valid if cursor<=e['start_ms']<finish]
+            if active and clean_chord(active.get('name')) and (active.get('end_ms') is None or active['end_ms']>cursor):
+                changes.insert(0,active)
+            if changes:
+                out.append({'text':'','start_ms':cursor,'end_ms':finish,'cells':[],'chords':[],
+                            'unplaced_chords':[dict(e) for e in changes],'timing_quality':'gap'})
+        cursor=max(cursor,row['end_ms'])
     ordered = sorted(out, key=lambda row: row.get('start_ms', 0))
     grouped_rows = []
     for row in ordered:

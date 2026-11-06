@@ -10,6 +10,17 @@ from songs.public import public_song
 
 
 class EvidenceTests(unittest.TestCase):
+    def test_quarantined_credit_remains_visible_in_review_evidence(self):
+        credit={'text':'Субтитры добавил Петров','start_ms':180000,'end_ms':195000}
+        row={'phrases':[{'phrase_id':'last','text':'Последняя строка','start_ms':150000,'end_ms':160000}],
+             'selected_run_id':'r','analysis_runs':[{'run_id':'r','comparison':{
+                 'quarantined_phrases':[{'phrase':credit,'label':'Возможная служебная вставка'}]}}]}
+        before=copy.deepcopy(row)
+        issue=next(i for i in review_evidence(row)['issues'] if i['code']=='possible_asr_credit')
+        self.assertIn(credit['text'],issue['label'])
+        self.assertEqual(issue['start_ms'],180000)
+        self.assertEqual(row,before)
+
     def test_display_cues_keep_aligned_times_and_estimate_only_missing_words(self):
         from songs.playback_layout import display_words
         p={'phrase_id':'p','text':'Мы тихо идём домой','start_ms':0,'end_ms':8000,

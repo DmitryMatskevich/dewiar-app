@@ -12,7 +12,8 @@ with tempfile.TemporaryDirectory() as td,sync_playwright() as pw:
  ''')
  browser=getattr(pw,os.environ.get('DEWIAR_TEST_BROWSER','chromium')).launch();page=browser.new_page(viewport={'width':640,'height':850});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
  page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'});showCap('','')")
- select=page.get_by_label('Область работы Лиры');select.select_option('follow');page.mouse.move(400,450)
+ assert page.get_by_label('Область работы Лиры').count()==0
+ page.locator('#assistant-topbar').dispatch_event('pointerdown',{'button':0,'pointerId':1});page.mouse.move(400,450)
  assert page.evaluate('drag===null&&moves.length===0')
  assert page.locator('#assistant-topbar #b-voice-inline').count()==0
  assert page.locator('.ask-actions #b-voice-inline').count()==1

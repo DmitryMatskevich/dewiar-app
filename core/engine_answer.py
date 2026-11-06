@@ -391,6 +391,11 @@ class AnswerMixin:
             turn = Turn(self.turn_n)
             turn.via = via
             turn.asked = text                         # о чём просили (save_note без просьбы записать — не пишем)
+            try:
+                from mail_scope import context as mail_scope_context
+                turn.mail_context = mail_scope_context(self)
+            except Exception:  # noqa: BLE001
+                turn.mail_context = ""
             turn.report = report
             turn.back_to = prev if handoff and self.s.get("team", "back") is not False else None
             turn.persona = self.s.get("persona")      # кто отвечает; по нему _cancel_locked решает, возвращать ли слово главному
@@ -1441,6 +1446,7 @@ class AnswerMixin:
         В конце: ответ в мессенджер (turn.via["done"]), история, «продолжение разговора», возврат к главному
         персонажу после специалиста и передача слова, если её попросил инструмент. Отменённый ход в историю не идёт."""
         turn.images = list(images or [])
+        mail_context = getattr(turn, "mail_context", "")
         role = self._conversation_model_role(text, has_images=bool(images))
         prof = self.s.active_llm(role)
         visual_task = bool(IMAGE_ACTION_RX.search(text) and (IMAGE_SUBJECT_RX.search(text) or images))
@@ -1469,6 +1475,8 @@ class AnswerMixin:
             if not prof:
                 raise LLMError("Не выбрана доступная языковая модель. Откройте настройки → «Модели» и выберите подключённую модель.")
             msgs = self._messages(text, images, prof)
+            if mail_context:
+                msgs = _put_context(msgs, mail_context)
             if visual_task and images and str(prof.get("kind", "")).endswith("_subscription"):
                 # The subscription's text adapter cannot consume image blocks. Keep the
                 # user's instruction in the chat request; the image tool receives the
@@ -1499,6 +1507,8 @@ class AnswerMixin:
                 prof = dict(prof, temperature=temp)       # творческая просьба — смелее (отзыв 17.10 про креатив)
                 log.info("🎨 Творческая просьба — температура %.2f", temp)
             specs = self.toolbox.specs() if self.s.get("tools", "enabled_all") is not False else []
+            if mail_context:
+                specs = [tool for tool in specs if tool.get("name") in {"mail", "mail_reply", "mail_importance"}]
             mode = (self.s.get("llm", "tools_modes") or {}).get(self._tools_key(prof))
             if mode in ("native", "prompt"):
                 prof = dict(prof, tools_mode=mode)
@@ -1555,6 +1565,11 @@ class AnswerMixin:
                 system = self._system(False) + ("\n\nСейчас действия (музыка, скриншоты, программы) недоступны: модель на "
                                                 "этом компьютере не успевает с ними. Если просят действие — честно скажи "
                                                 "это одной фразой.")
+            if mail_context:
+                from mail_scope import system_note as mail_scope_system_note
+                system += mail_scope_system_note()
+                if not specs:
+                    system += " Почтовые инструменты в этой конфигурации сейчас недоступны; не выдумывай действия или результаты."
             kb = self._persona_knowledge(text, turn)
             if kb:
                 ctx.append(kb.strip())

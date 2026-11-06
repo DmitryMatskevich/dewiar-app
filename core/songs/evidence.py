@@ -63,6 +63,20 @@ def review_evidence(row):
     run = next((r for r in reversed(row.get('analysis_runs',[]))
                 if r.get('run_id') == row.get('selected_run_id')), {})
     issues.extend(omission_warnings(phrases, run.get('hypotheses',[])))
+    for entry in run.get('comparison',{}).get('quarantined_phrases',[]):
+        p=entry['phrase']
+        owner=min(phrases,key=lambda q:abs(q.get('start_ms',0)-p['start_ms']),default={})
+        issues.append({'code':'possible_asr_credit','phrase_id':owner.get('phrase_id'),
+            'start_ms':p['start_ms'],'end_ms':p['end_ms'],
+            'label':f"{entry['label']} ({p['start_ms']/1000:.1f}–{p['end_ms']/1000:.1f} с): «{p['text']}»."})
+    unresolved = [p for p in run.get('comparison',{}).get('proposals',[])
+                  if p.get('status') != 'two_model_audio_agreement']
+    for p in unresolved[:12]:
+        start,end=p['start_ms'],p['end_ms']
+        owner=next((q for q in phrases if q.get('start_ms',0)<end and q.get('end_ms',0)>start),{})
+        issues.append({'code':'asr_disagreement','phrase_id':owner.get('phrase_id'),
+            'start_ms':start,'end_ms':end,
+            'label':f'Распознаватели расходятся около {start/1000:.1f}–{end/1000:.1f} с; проверьте запись.'})
     references = [compare_reference(phrases, r) for r in row.get('source_candidates', [])
                   if r.get('kind') == 'lyrics' and r.get('plain_lyrics')]
     return {'issues': issues, 'references': [r for r in references if r]}

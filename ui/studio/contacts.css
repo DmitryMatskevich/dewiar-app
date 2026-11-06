@@ -1,5 +1,11 @@
 #p-contacts .ct-permission,#p-contacts #ct-preview,#p-contacts #ct-proposal,#p-contacts #ct-form { padding:16px 18px; margin:14px 0; background:var(--panel); border-radius:16px; }
 #p-contacts .ct-item { display:block; padding:12px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+#p-contacts .ct-card-actions { display:flex; align-items:center; gap:8px; margin-top:10px; }
+#p-contacts .ct-icon-btn { display:inline-grid; place-items:center; width:38px; height:38px; padding:8px; border:1px solid var(--line); border-radius:12px; color:var(--text); background:var(--panel); cursor:pointer; }
+#p-contacts .ct-icon-btn:hover { background:var(--panel-hover,var(--line)); }
+#p-contacts .ct-icon-btn.danger { color:var(--danger,#b42318); }
+#p-contacts .ct-icon-btn svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+#p-contacts .ct-social-link { display:block; margin:5px 0; }
 #p-contacts .ct-choice { display:flex; align-items:flex-start; gap:12px; cursor:pointer; }
 #p-contacts .ct-choice input { margin-top:5px; flex:none; }
 #p-contacts .ct-choice b,#p-contacts .ct-choice .hint { display:block; }

@@ -513,11 +513,12 @@
         <p class="hint">Можно запустить один распознаватель или сравнить несколько. Для пения итог выбирается по их совпадению; исходные варианты останутся в карточке песни.</p>
         <div class="song-model-options">
           <label class="song-model-option"><input type="checkbox" data-song-model="whisper" checked><span><b>Whisper large-v2</b><small>Надёжный базовый вариант для русской песни и временных сегментов.</small></span></label>
-          <label class="song-model-option"><input type="checkbox" data-song-model="qwen" checked><span><b>Qwen3-ASR</b><small>Независимая проверка; на распевах может иначе разделить слова.</small></span></label>
-          <label class="song-model-option"><input type="checkbox" data-song-model="gigaam" checked><span><b>GigaAM — как в голосовом вводе</b><small>Та же локальная модель ввода текста; на долгих гласных возможны обрывы, поэтому лучше сравнивать её с Whisper.</small></span></label>
+          <label class="song-model-option"><input type="checkbox" data-song-model="qwen"><span><b>Qwen3-ASR 0.6B</b><small>Быстрый независимый вариант для сравнения с Whisper.</small></span></label>
+          <label class="song-model-option"><input type="checkbox" data-song-model="qwen_large" checked><span><b>Qwen3-ASR 1.7B</b><small>Более подробная проверка песни; работает дольше. Используется установленная локальная модель.</small></span></label>
+          <label class="song-model-option"><input type="checkbox" data-song-model="gigaam"><span><b>GigaAM — как в голосовом вводе</b><small>Дополнительный вариант для сравнения. По умолчанию Whisper и Qwen повторно проверяют спорные места по записи.</small></span></label>
         </div>
         <p class="hint">Во время песни модели получают полную запись. Отделённый голос используется только для проверки границ вокала и не заменяет исходный звук.</p>
-        <div class="actions"><button class="btn" data-song-transcribe-cancel>Отмена</button><button class="btn primary" data-song-transcribe-submit>Запустить выбранные</button></div>
+        <div class="actions"><button class="btn" id="song-transcribe-cancel" data-song-transcribe-cancel>Отмена</button><button class="btn primary" id="song-transcribe-submit" data-song-transcribe-submit>Запустить выбранные</button></div>
         <p class="song-save-status" data-song-transcribe-status role="status"></p>
       </div>
     </div>
@@ -531,6 +532,7 @@
     <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
       <div class="ml-mail-app">
         <aside class="ml-sidebar" aria-label="Ящики и представления">
+          <h3 class="ml-nav-heading">Что посмотреть</h3>
           <div class="ml-nav-group" role="group" aria-label="Представления писем">
             <button type="button" class="ml-view-item selected" data-ml-view="all" aria-pressed="true"><span>Все входящие</span></button>
             <button type="button" class="ml-view-item" data-ml-view="unread" aria-pressed="false"><span>Непрочитанные</span></button>
@@ -542,10 +544,16 @@
             <label><input type="checkbox" data-mail-badge-filter="important"><span>Важные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unread"><span>Непрочитанные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unanswered"><span>Без ответа</span></label>
-            <p id="ml-badge-help">Учитываются письма, которые соответствуют всем отмеченным условиям.</p>
+            <p id="ml-badge-help">На значке будет число писем, которые подходят под все отмеченные условия.</p>
           </fieldset>
           <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
           <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>
+          <button type="button" class="ml-add-account" id="ml-add-account-toggle" aria-expanded="false" aria-controls="ml-add-account-form"><span aria-hidden="true">＋</span> Добавить ящик</button>
+          <form id="ml-add-account-form" class="ml-add-account-form" hidden>
+            <label class="f">Адрес почты<input id="ml-new-address" type="email" required autocomplete="email" placeholder="name@example.com"></label>
+            <label class="f">Название <i>необязательно</i><input id="ml-new-label" type="text" maxlength="80" placeholder="Рабочая почта"></label>
+            <div class="actions"><button type="submit" class="btn primary">Продолжить</button><button type="button" class="btn" id="ml-add-account-cancel">Отмена</button></div>
+          </form>
           <p class="ml-sidebar-note">Заголовки обновляются каждые пять минут. Пароли хранятся в Связке ключей macOS.</p>
         </aside>
         <div class="ml-workspace" role="region" aria-label="Почта">
@@ -567,6 +575,7 @@
                 <button class="btn danger" type="button" id="ml-delete-message">Удалить</button>
                 <button class="btn" type="button" id="ml-close-message">Закрыть письмо</button>
               </div>
+              <div id="ml-thread-messages" class="ml-thread-messages" hidden aria-label="Письма в переписке"></div>
               <h3 id="ml-message-subject"></h3>
               <div id="ml-message-head"></div>
               <pre id="ml-message-body"></pre>
@@ -904,10 +913,11 @@
     </div>
     <h2>Карточки Dewiar</h2><p id="ct-count" class="hint"></p>
     <div class="actions"><button id="ct-new" class="btn primary">Создать контакт</button><input id="ct-local-search" type="search" placeholder="Поиск в Dewiar…" aria-label="Найти локальный контакт"></div>
-    <form id="ct-form" hidden><h2>Новая карточка</h2><div class="row">
+    <form id="ct-form" hidden><h2 id="ct-form-title">Новая карточка</h2><div class="row">
       <label class="f">Фамилия<input data-ct="family_name" maxlength="300"></label><label class="f">Имя<input data-ct="given_name" maxlength="300"></label><label class="f">Отчество<input data-ct="middle_name" maxlength="300"></label>
       <label class="f">Организация<input data-ct="organization" maxlength="300"></label><label class="f">Дата рождения (необязательно)<input data-ct="birthday" type="date"></label>
       <label class="f">Телефоны, по одному в строке<textarea data-ct="phones"></textarea></label><label class="f">Почта, по одному адресу в строке<textarea data-ct="emails"></textarea></label>
+      <label class="f">Telegram (имя пользователя или ссылка)<input data-ct="telegram" placeholder="@username или t.me/username"></label><label class="f">WhatsApp (номер телефона)<input data-ct="whatsapp" placeholder="+7 900 123-45-67"></label>
     </div><label class="f"><span><input id="ct-to-mac" type="checkbox" checked> Сохранить также в Контактах macOS</span><span class="hint">По умолчанию новая карточка создаётся в обоих приложениях. Системная адресная книга может синхронизировать её через ваши учётные записи.</span></label>
       <div class="actions"><button class="btn primary" type="submit">Проверить и создать</button><button id="ct-form-cancel" class="btn" type="button">Отмена</button></div>
     </form>

@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
 const core={on(){},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='songs_list')return structuredClone(rows);
  if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
+ if(cmd==='song_transcribe')return structuredClone(rows.find(r=>r.song_id===a.song_id));
  if(cmd==='song_resume'){const r=rows.find(item=>item.song_id===a.song_id);r.status='running';r.processing={busy:true,can_resume:false};r.stage='sources';r.stage_label='Сохраняем выбранную запись';return structuredClone(r);}
  if(cmd==='songs_instrumental_prepare_all')return {started:[{song_id:'1'}],ready:[{song_id:'2'}],already_running:[],missing_audio:[],errors:[]};
  if(cmd==='song_full_audio'){if(window.failAudio)throw Error('fixture audio error');if(window.delayAudio)await new Promise(r=>window.releaseAudio=r);return {data:audioData};}
@@ -52,6 +53,26 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     assert not tab.locator('[data-song-karaoke="1"]').is_disabled()
     assert tab.locator('[data-song-karaoke="2"]').is_disabled()
     assert not stop.is_visible()
+    tab.locator('.song-card-main[data-song-open="1"]').click()
+    tab.locator('.song-properties > summary').click()
+    tab.locator('#song-start-transcribe').click()
+    dialog=tab.locator('#song-transcribe-dialog')
+    assert dialog.is_visible()
+    assert dialog.locator('[data-song-model="whisper"]').is_checked()
+    assert dialog.locator('[data-song-model="qwen_large"]').is_checked()
+    assert not dialog.locator('[data-song-model="qwen"]').is_checked()
+    assert not dialog.locator('[data-song-model="gigaam"]').is_checked()
+    dialog.locator('#song-transcribe-cancel').click()
+    assert not dialog.is_visible()
+    tab.locator('#song-start-transcribe').click()
+    dialog.locator('[data-song-model="qwen"]').check()
+    assert not dialog.locator('[data-song-model="qwen_large"]').is_checked()
+    dialog.locator('[data-song-model="qwen_large"]').check()
+    assert not dialog.locator('[data-song-model="qwen"]').is_checked()
+    dialog.locator('#song-transcribe-submit').click()
+    tab.wait_for_function("calls.some(([cmd,a])=>cmd==='song_transcribe'&&a.models.join(',')==='whisper,qwen_large')")
+    assert not dialog.is_visible()
+    tab.locator('#songs-detail-close').click()
     create_button = tab.locator('#songs-new-create')
     karaoke_button = tab.locator('#songs-instrumental-all')
     assert create_button.get_attribute('title').startswith('Создать новую песню')
