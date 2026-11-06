@@ -416,7 +416,7 @@ window.SongSheet = (() => {
     if(!state||!state.variants.length) { popover.hidden=true; return; }
     const shape=state.variants[state.index];
     popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><b>${esc(state.symbol)}</b><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin title="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}" aria-label="${state.pinned?'Открепить выбранную аппликатуру':'Закрепить выбранную аппликатуру'}">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Закрыть подсказку" aria-label="Закрыть подсказку">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}`;
-    popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:''); renderChordPopover(); positionChordPopover(popover,state.trigger); };
+    popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; setPinnedVoicing(state.symbol,state.songId,state.pinned?shape:''); if(state.pinned&&state.edited&&state.symbol!=='?'){ state.trigger.textContent=state.symbol; state.trigger.dataset.chordName=state.symbol; const tooltip=chordTooltip(state.symbol,{song_id:state.songId,voicing_fingering:shape}); state.trigger.title=tooltip; state.trigger.setAttribute('aria-label',tooltip); } renderChordPopover(); positionChordPopover(popover,state.trigger); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
     popover.querySelectorAll('[data-chord-transpose]').forEach(button=>button.onclick=()=>{
       state.symbol=transpose(state.symbol,Number(button.dataset.chordTranspose)||0);
@@ -425,11 +425,11 @@ window.SongSheet = (() => {
     });
     popover.querySelectorAll('[data-chord-fret]').forEach(button=>button.onclick=()=>{
       const values=shape.split('-'), string=Number(button.dataset.chordString), fret=Number(button.dataset.chordFret);
-      values[string]=values[string]===String(fret)?'0':String(fret); state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
+      values[string]=values[string]===String(fret)?'0':String(fret); state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.edited=true; state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
     });
     popover.querySelectorAll('[data-chord-string-toggle]').forEach(button=>button.onclick=()=>{
       const values=shape.split('-'), string=Number(button.dataset.chordStringToggle), current=values[string];
-      values[string]=current==='x'?'0':current==='0'?'x':'0'; state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
+      values[string]=current==='x'?'0':current==='0'?'x':'0'; state.variants[state.index]=values.join('-'); state.symbol=inferChordName(state.variants[state.index]); state.edited=true; state.pinned=false; renderChordPopover(); positionChordPopover(popover,state.trigger);
     });
     const moveVariant=delta=>{ state.index=(state.index+delta+state.variants.length)%state.variants.length; if(state.pinned) setPinnedVoicing(state.symbol,state.songId,state.variants[state.index]); renderChordPopover(); positionChordPopover(popover,state.trigger); };
     popover.querySelector('[data-chord-prev]').onclick=()=>moveVariant(-1);
