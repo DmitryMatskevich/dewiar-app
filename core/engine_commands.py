@@ -1135,10 +1135,16 @@ class CommandsMixin:
                 return task.public()
             from file_converter import is_conversion_command, requested_target
             conversion_target = requested_target(a.get("text", ""))
+            from file_converter import webpage_url
+            page_url = webpage_url(a.get('text', ''))
             if is_conversion_command(a.get("text", "")) and not conversion_target:
                 self._say_quick("Укажите формат результата: PDF, DOCX (Word), XLSX (Excel), CSV, HTML, MD, TXT, PNG, GIF, WAV или MP3.", a.get("text", ""))
                 return True
             if conversion_target:
+                if not files and not (a.get("images") or a.get("image")) and page_url:
+                    task = self.tasks.create_webpage_conversion(page_url, conversion_target, goal=a.get('text', ''))
+                    self._say_quick(f'Начала получать HTML-страницу и преобразовывать её локально в {conversion_target.upper()}. Результат покажу здесь сверху; он также сохранён в задаче {task.id}.', a.get('text', ''))
+                    return task.public()
                 if not files and not (a.get("images") or a.get("image")):
                     self._say_quick("Прикрепите файл и повторите команду: «Лира, преобразовать в PDF», например.", a.get("text", ""))
                     return True

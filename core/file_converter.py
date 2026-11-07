@@ -10,13 +10,18 @@ from __future__ import annotations
 import csv
 import html
 import io
+import ipaddress
 import os
 import posixpath
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -110,6 +115,62 @@ def is_text_extraction_command(text: str) -> bool:
     return bool(re.search(r"\b(?:извлеч\w*\s+текст|распозн\w*\s+текст|вытащ\w*\s+текст|прочит\w*\s+текст|получ\w*\s+текст|ocr)\b", value))
 
 
+def webpage_url(text: str) -> str | None:
+    match = re.search(r"https?://[^\s<>\"']+", str(text or ""), re.I)
+    if not match: return None
+    return match.group(0).rstrip(".,;:!?)»]")
+
+
+def _validate_public_web_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ConversionError("Укажите публичную ссылку на страницу HTTP или HTTPS")
+    host = parsed.hostname.rstrip(".").encode("idna").decode("ascii")
+    try:
+        addresses = {entry[4][0] for entry in socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+    except OSError as exc:
+        raise ConversionError(f"Не удалось найти адрес сайта: {exc}") from exc
+    if not addresses or any(not ipaddress.ip_address(address.split("%", 1)[0]).is_global for address in addresses):
+        raise ConversionError("Ссылки на локальные и внутренние адреса запрещены")
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, ""))
+
+
+def fetch_webpage(url: str, dest: str | Path, *, cancel=None) -> Path:
+    """Fetch one public HTML page safely, without cookies, proxies, scripts or model calls."""
+    current = _validate_public_web_url(url)
+    no_redirect = type("NoRedirect", (urllib.request.HTTPRedirectHandler,), {"redirect_request": lambda self, req, fp, code, msg, headers, newurl: None})
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), no_redirect())
+    for _ in range(4):
+        if cancel is not None and cancel.is_set(): raise ConversionError("Загрузка страницы отменена")
+        request = urllib.request.Request(current, headers={"User-Agent": "Dewiar/1.0 (local document conversion)", "Accept": "text/html,application/xhtml+xml"})
+        try:
+            response = opener.open(request, timeout=20)
+        except urllib.error.HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308} and exc.headers.get("Location"):
+                current = _validate_public_web_url(urllib.parse.urljoin(current, exc.headers["Location"]))
+                continue
+            raise ConversionError(f"Сайт вернул HTTP {exc.code}") from exc
+        except (OSError, urllib.error.URLError) as exc:
+            raise ConversionError(f"Не удалось загрузить страницу: {exc}") from exc
+        with response:
+            content_type = response.headers.get_content_type().lower()
+            if content_type not in {"text/html", "application/xhtml+xml"}:
+                raise ConversionError(f"Ссылка ведёт на {content_type}, а нужна HTML-страница")
+            length = int(response.headers.get("Content-Length") or 0)
+            if length > 10 * 1024 * 1024: raise ConversionError("HTML-страница больше 10 МБ")
+            data = response.read(10 * 1024 * 1024 + 1)
+            if len(data) > 10 * 1024 * 1024: raise ConversionError("HTML-страница больше 10 МБ")
+            encoding = response.headers.get_content_charset() or "utf-8"
+            try: value = data.decode(encoding, errors="replace")
+            except LookupError: value = data.decode("utf-8", errors="replace")
+            if "<html" not in value[:20000].lower() and "<!doctype html" not in value[:20000].lower():
+                raise ConversionError("Полученный ответ не похож на HTML-страницу")
+            target = Path(dest); target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(value, encoding="utf-8")
+            return target
+    raise ConversionError("Слишком много перенаправлений страницы")
+
+
 def _ext(path: Path) -> str:
     return path.suffix.lower().lstrip(".")
 
@@ -122,11 +183,11 @@ def targets_for(path: str | Path) -> list[str]:
     if ext in AUDIO_EXTS or ext in VIDEO_EXTS:
         return sorted(MEDIA_OUT)
     if ext == "xlsx":
-        return ["csv", "tsv", "html", "pdf", "txt", "md"]
+        return ["csv", "tsv", "html", "pdf", "txt", "md", "docx"]
     if ext in {"csv", "tsv"}:
         return ["xlsx", "csv", "tsv", "txt", "md", "html", "docx", "pdf"]
     if ext == "pdf":
-        return ["txt", "md", "html"]
+        return ["txt", "md", "html", "docx"]
     if ext == "docx":
         return ["txt", "md", "html", "xlsx", "csv", "pdf"]
     if ext in TEXT_EXTS:
@@ -237,6 +298,19 @@ def _html_to_text(value: str, markdown=False) -> str:
     return parser.text()
 
 
+def _html_to_markdown(value: str) -> str:
+    parser = _HTMLBlocks()
+    parser.feed(value)
+    rendered = []
+    for kind, content in parser.blocks:
+        if kind == "table": rendered.append(_rows_markdown(content))
+        elif kind.startswith("h"): rendered.append("#" * int(kind[1:]) + " " + str(content))
+        elif kind == "li": rendered.append("- " + str(content))
+        elif kind == "pre": rendered.append("```\n" + str(content) + "\n```")
+        else: rendered.append(str(content))
+    return "\n\n".join(item for item in rendered if item.strip())
+
+
 class _HTMLTable(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -273,6 +347,14 @@ def _markdown_html(value: str) -> str:
     def flush():
         nonlocal para
         if para:
+            table_rows = _markdown_table_rows("\n".join(para).splitlines())
+            if table_rows:
+                width = max(map(len, table_rows))
+                normal = [row + [""] * (width - len(row)) for row in table_rows]
+                out.append("<table><thead><tr>" + "".join("<th>" + html.escape(cell) + "</th>" for cell in normal[0]) +
+                           "</tr></thead><tbody>" + "".join("<tr>" + "".join("<td>" + html.escape(cell) + "</td>" for cell in row) + "</tr>" for row in normal[1:]) + "</tbody></table>")
+                para = []
+                return
             text = " ".join(x.strip() for x in para).strip()
             text = html.escape(text)
             text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
@@ -364,17 +446,67 @@ class _HTMLBlocks(HTMLParser):
 
 def _markdown_blocks(value: str) -> list[tuple[str, object]]:
     blocks = []
-    for para in re.split(r"\n\s*\n", value.replace("\r\n", "\n").replace("\r", "\n")):
-        lines = para.splitlines()
-        if not para.strip(): continue
-        heading = re.match(r"^\s*(#{1,6})\s+(.*)", lines[0])
-        if heading: blocks.append(("h" + str(len(heading.group(1))), heading.group(2).strip())); continue
-        if all(re.match(r"\s*[-*+]\s+", line) for line in lines if line.strip()):
-            blocks.extend(("li", re.sub(r"^\s*[-*+]\s+", "", line).strip()) for line in lines if line.strip()); continue
-        if all(re.match(r"\s*\d+[.)]\s+", line) for line in lines if line.strip()):
-            blocks.extend(("li", re.sub(r"^\s*\d+[.)]\s+", "", line).strip()) for line in lines if line.strip()); continue
-        blocks.append(("p", " ".join(line.strip() for line in lines)))
+    lines = value.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip():
+            i += 1; continue
+        if i + 1 < len(lines):
+            table_rows = _markdown_table_rows(lines[i:])
+            if table_rows:
+                blocks.append(("table", table_rows))
+                i += len(table_rows) + 1
+                continue
+        j = i + 1
+        while j < len(lines) and lines[j].strip(): j += 1
+        para = "\n".join(lines[i:j])
+        para_lines = para.splitlines()
+        heading = re.match(r"^\s*(#{1,6})\s+(.*)", para_lines[0])
+        if heading: blocks.append(("h" + str(len(heading.group(1))), heading.group(2).strip())); i = j; continue
+        if all(re.match(r"\s*[-*+]\s+", line) for line in para_lines if line.strip()):
+            blocks.extend(("li", re.sub(r"^\s*[-*+]\s+", "", line).strip()) for line in para_lines if line.strip()); i = j; continue
+        if all(re.match(r"\s*\d+[.)]\s+", line) for line in para_lines if line.strip()):
+            blocks.extend(("li", re.sub(r"^\s*\d+[.)]\s+", "", line).strip()) for line in para_lines if line.strip()); i = j; continue
+        blocks.append(("p", " ".join(line.strip() for line in para_lines)))
+        i = j
     return blocks
+
+
+def _split_markdown_row(line: str) -> list[str] | None:
+    line = line.strip()
+    if "|" not in line:
+        return None
+    if line.startswith("|"): line = line[1:]
+    if line.endswith("|") and not line.endswith("\\|"): line = line[:-1]
+    cells, current, escaped = [], [], False
+    for char in line:
+        if char == "|" and not escaped:
+            cells.append("".join(current).strip()); current = []
+        else:
+            current.append(char)
+        escaped = char == "\\" and not escaped
+        if char != "\\": escaped = False
+    cells.append("".join(current).strip())
+    return [cell.replace("\\|", "|").replace("\\\\", "\\") for cell in cells]
+
+
+def _is_markdown_separator(row: list[str] | None) -> bool:
+    return bool(row) and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in row)
+
+
+def _markdown_table_rows(lines: list[str]) -> list[list[str]] | None:
+    if len(lines) < 2: return None
+    header = _split_markdown_row(lines[0])
+    sep = _split_markdown_row(lines[1])
+    if not header or not _is_markdown_separator(sep) or len(header) != len(sep): return None
+    rows = [header]
+    i = 2
+    while i < len(lines) and lines[i].strip():
+        row = _split_markdown_row(lines[i])
+        if row is None: break
+        rows.append(row + [""] * max(0, len(header) - len(row)))
+        i += 1
+    return rows
 
 
 def _write_docx(blocks: list[tuple[str, object]], dest: Path) -> None:
@@ -417,7 +549,7 @@ def _write_docx(blocks: list[tuple[str, object]], dest: Path) -> None:
         zf.writestr("word/document.xml", document)
 
 
-def _docx_text(path: Path, markdown=False) -> str:
+def _docx_blocks(path: Path) -> list[tuple[str, object]]:
     try:
         with zipfile.ZipFile(path) as zf:
             root = ET.fromstring(zf.read("word/document.xml"))
@@ -432,26 +564,62 @@ def _docx_text(path: Path, markdown=False) -> str:
             text = "".join(node.text or "" for node in child.iter() if node.tag.endswith("}t"))
             ppr = child.find("w:pPr/w:pStyle", XML_NS)
             style = ppr.attrib.get(f"{{{XML_NS['w']}}}val", "") if ppr is not None else ""
-            if markdown and style.lower().startswith("heading"):
-                m = re.search(r"(\d+)$", style)
-                text = "#" * min(6, int(m.group(1)) if m else 1) + " " + text
             if text.strip():
-                blocks.append(text.strip())
+                if style.lower().startswith("heading"):
+                    m = re.search(r"(\d+)$", style)
+                    blocks.append(("h" + str(min(6, int(m.group(1)) if m else 1)), text.strip()))
+                else:
+                    blocks.append(("p", text.strip()))
         elif child.tag.endswith("}tbl"):
             rows = []
             for row in child.findall(".//w:tr", XML_NS):
                 cells = [" ".join("".join(node.text or "" for node in p.iter() if node.tag.endswith("}t"))
-                                   for p in cell.findall(".//w:p", XML_NS)).strip().replace("|", "\\|")
+                                   for p in cell.findall(".//w:p", XML_NS)).strip()
                          for cell in row.findall("w:tc", XML_NS)]
                 rows.append(cells)
-            if markdown and rows:
-                width = max(map(len, rows))
-                rows = [r + [""] * (width - len(r)) for r in rows]
-                blocks.append("| " + " | ".join(rows[0]) + " |\n| " + " | ".join(["---"] * width) + " |" +
-                              "\n" + "\n".join("| " + " | ".join(r) + " |" for r in rows[1:]))
+            if rows: blocks.append(("table", rows))
+    return blocks
+
+
+def _docx_text(path: Path, markdown=False) -> str:
+    blocks = _docx_blocks(path)
+    rendered = []
+    for kind, value in blocks:
+        if kind == "table":
+            rows = value
+            if markdown:
+                rendered.append(_rows_markdown(rows))
             else:
-                blocks.extend("\t".join(row) for row in rows)
-    return "\n\n".join(blocks)
+                rendered.append("\n".join("\t".join(row) for row in rows))
+        elif kind.startswith("h") and markdown:
+            rendered.append("#" * int(kind[1:]) + " " + str(value))
+        else:
+            rendered.append(str(value))
+    return "\n\n".join(rendered)
+
+
+def _docx_html(path: Path, title: str) -> str:
+    out = []
+    for kind, value in _docx_blocks(path):
+        if kind == "table":
+            out.append(_rows_html(value, title).split("<body>", 1)[1].split("</body>", 1)[0])
+        elif kind.startswith("h"):
+            out.append(f"<{kind}>{html.escape(str(value))}</{kind}>")
+        else:
+            out.append("<p>" + html.escape(str(value)) + "</p>")
+    return "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + html.escape(title) + "</title></head><body>" + "".join(out) + "</body></html>"
+
+
+def _write_pdf_text(src: Path) -> str:
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(src), strict=False)
+        text = "\n\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+    except Exception as exc:
+        raise ConversionError(f"Не удалось извлечь текст PDF: {exc}") from exc
+    if not text:
+        raise ConversionError("В PDF нет текстового слоя. Для скана нужен отдельный OCR")
+    return text
 
 
 def _csv_rows(path: Path) -> tuple[list[list[str]], str]:
@@ -681,7 +849,7 @@ def _write_text_format(src: Path, target: str, dest: Path) -> Path:
         text = _docx_text(src, markdown=target == "md")
     elif ext in {"html", "htm"}:
         raw = _read_text(src)
-        text = _html_to_text(raw, markdown=target == "md")
+        text = _html_to_markdown(raw) if target == "md" else _html_to_text(raw)
     elif ext == "pdf":
         try:
             from pypdf import PdfReader
@@ -704,6 +872,11 @@ def _write_text_format(src: Path, target: str, dest: Path) -> Path:
     if target == "html":
         if ext in {"html", "htm"}:
             dest.write_text(_read_text(src), encoding="utf-8")
+        elif ext == "docx":
+            dest.write_text(_docx_html(src, src.stem), encoding="utf-8")
+        elif ext == "pdf":
+            dest.write_text("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + html.escape(src.stem) +
+                            "</title></head><body>" + "".join("<p>" + html.escape(line) + "</p>" for line in text.splitlines() if line.strip()) + "</body></html>", encoding="utf-8")
         elif ext in {"md", "markdown"}:
             dest.write_text(_markdown_html(text), encoding="utf-8")
         elif ext in {"csv", "tsv"}:
@@ -730,7 +903,31 @@ def _text_to_table(src: Path) -> list[list[str]]:
             return table
         text = _html_to_text(raw)
     elif _ext(src) == "docx":
-        text = _docx_text(src)
+        blocks = _docx_blocks(src)
+        tables = [rows for kind, rows in blocks if kind == "table"]
+        if tables:
+            result = []
+            for index, rows in enumerate(tables):
+                if index: result.append([])
+                result.extend(rows)
+            return result
+        text = "\n".join(str(value) for _kind, value in blocks)
+    elif _ext(src) in {"md", "markdown"}:
+        lines = _read_text(src).replace("\r\n", "\n").replace("\r", "\n").splitlines()
+        tables = []
+        i = 0
+        while i < len(lines):
+            parsed = _markdown_table_rows(lines[i:])
+            if parsed:
+                tables.append(parsed); i += len(parsed) + 1
+            else: i += 1
+        if tables:
+            result = []
+            for index, rows in enumerate(tables):
+                if index: result.append([])
+                result.extend(rows)
+            return result
+        text = _read_text(src)
     else:
         text = _read_text(src)
     return [[line] for line in text.splitlines()]
@@ -846,12 +1043,15 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
     elif target in {"txt", "md", "html"} and ext in (TEXT_EXTS | {"docx", "pdf", "xlsx"}):
         _write_text_format(src, target, dest)
         backend = "stdlib" if ext not in {"pdf"} else "pypdf"
-    elif target == "docx" and ext in (TEXT_EXTS | {"docx", "pdf"}):
+    elif target == "docx" and ext in (TEXT_EXTS | {"docx", "pdf", "xlsx"}):
         if ext == "docx":
             raise ConversionError("Файл уже в DOCX")
         if ext == "pdf":
-            raise ConversionError("PDF → редактируемый DOCX пока не поддерживается без потери структуры")
-        if ext in {"csv", "tsv"}:
+            text = _write_pdf_text(src)
+            blocks = [("p", line) for line in text.splitlines() if line.strip()]
+        elif ext == "xlsx":
+            blocks = [("table", _xlsx_sheet(src))]
+        elif ext in {"csv", "tsv"}:
             blocks = [("table", _csv_rows(src)[0])]
         elif ext in {"html", "htm"}:
             parser = _HTMLBlocks(); parser.feed(_read_text(src)); blocks = parser.blocks
@@ -891,10 +1091,24 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
     elif target in {"pdf", "html", "txt", "docx", "xlsx", "csv"} and ext in (OFFICE_EXTS | {"pdf"}):
         if ext == "pdf" and target == "pdf":
             raise ConversionError("Файл уже PDF")
-        generated = _office_convert(src, target, outdir, cancel)
-        if generated != dest:
+        if ext == "pdf" and target in {"html", "txt", "docx"}:
+            if target == "docx":
+                text = _write_pdf_text(src)
+                _write_docx([("p", line) for line in text.splitlines() if line.strip()], dest)
+                backend = "pypdf + stdlib OOXML"
+            else:
+                _write_text_format(src, target, dest)
+                backend = "pypdf"
+            generated = None
+        elif ext == "xlsx" and target == "docx":
+            _write_docx([("table", _xlsx_sheet(src))], dest)
+            backend = "stdlib OOXML"
+            generated = None
+        else:
+            generated = _office_convert(src, target, outdir, cancel)
+            backend = "LibreOffice"
+        if generated is not None and generated != dest:
             _move_office_result(generated, dest)
-        backend = "LibreOffice"
     else:
         raise ConversionError(f"Преобразование .{ext or '?'} → .{target} не поддерживается")
     if not dest.is_file() or dest.stat().st_size == 0:

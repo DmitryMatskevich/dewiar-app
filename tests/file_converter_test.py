@@ -58,6 +58,15 @@ class ExtractionCommandHarness(CommandsMixin):
     def __init__(self): self.tasks=ExtractionTasks(); self.quick=[]
     def _say_quick(self, text, source=''): self.quick.append((text,source))
 
+class WebPageTasks:
+    def create_webpage_conversion(self, url, target, goal=''):
+        self.seen = (url, target, goal)
+        return type('WebTask', (), {'id':'page-task','public': lambda _self: {'id':'page-task','status':'running'}})()
+
+class WebPageCommandHarness(CommandsMixin):
+    def __init__(self): self.tasks=WebPageTasks(); self.quick=[]
+    def _say_quick(self, text, source=''): self.quick.append((text,source))
+
 
 class FileConverterTest(unittest.TestCase):
     def setUp(self):
@@ -162,6 +171,85 @@ class FileConverterTest(unittest.TestCase):
         body = zipfile.ZipFile(docx).read("word/document.xml").decode()
         self.assertIn("<w:tbl>", body)
         self.assertIn("Name", body)
+
+    def test_requested_document_conversion_matrix_preserves_tables(self):
+        from unittest.mock import patch
+        table = [["Артикул", "Количество", "Код"], ["A-01", "3", "0012"], ["B-02", "7", "0045"]]
+        md = self.root / "таблица.md"
+        md.write_text("# Склад\n\nОстатки на сегодня.\n\n" + FC._rows_markdown(table) + "\n", encoding="utf-8")
+        docx = self.root / "таблица.docx"
+        FC._write_docx([("h1", "Склад"), ("p", "Остатки на сегодня."), ("table", table)], docx)
+        xlsx = self.root / "таблица.xlsx"
+        FC._build_xlsx(table, xlsx)
+        html_path = self.root / "таблица.html"
+        html_path.write_text("<!doctype html><meta charset=utf-8><h1>Склад</h1><p>Остатки на сегодня.</p>" + FC._rows_html(table, "Склад"), encoding="utf-8")
+
+        # Run every requested text/document route through the same conversion entry point.
+        for source, targets in ((docx, ("md", "txt", "html", "pdf")),
+                                (html_path, ("md", "txt", "pdf", "docx")),
+                                (xlsx, ("md", "txt", "pdf", "docx", "html"))):
+            for target in targets:
+                with self.subTest(source=source.suffix, target=target):
+                    result = FC.convert(source, target, self.out)["path"]
+                    self.assertTrue(result.is_file() and result.stat().st_size > 0)
+
+        # Semantic table exports retain columns, cell order, Cyrillic and leading zeroes.
+        for source in (md, docx, html_path, xlsx):
+            for target in (("csv",) if source == xlsx else ("xlsx", "csv")):
+                with self.subTest(source=source.suffix, target=target):
+                    converted = FC.convert(source, target, self.out)["path"]
+                    if target == "xlsx":
+                        rows = FC._xlsx_sheet(converted)
+                    else:
+                        with converted.open(encoding="utf-8-sig", newline="") as stream:
+                            rows = list(csv.reader(stream))
+                    self.assertEqual(rows[:3], table)
+        docx_from_md = FC.convert(md, "docx", self.out)["path"]
+        self.assertEqual(FC._text_to_table(docx_from_md), table)
+        md_html = FC.convert(md, "html", self.out)["path"].read_text(encoding="utf-8")
+        self.assertIn("<table>", md_html)
+        self.assertIn("<td>0012</td>", md_html)
+
+        # A text-layer PDF exercises all four PDF destinations and keeps extracted text.
+        pdf_source = FC.convert(docx, "pdf", self.out)["path"]
+        self.assertIn("A-01", FC._write_pdf_text(pdf_source))
+        for target in ("md", "txt", "html", "docx"):
+            with self.subTest(source=".pdf", target=target):
+                converted = FC.convert(pdf_source, target, self.out)["path"]
+                self.assertTrue(converted.is_file() and converted.stat().st_size > 0)
+        pdf_docx = FC.convert(pdf_source, "docx", self.out)["path"]
+        self.assertIn("A-01", FC._docx_text(pdf_docx))
+
+    def test_markdown_tables_are_parsed_with_escaped_delimiters(self):
+        source = self.root / "pipes.md"
+        source.write_text("| Name | Value |\n| :--- | ---: |\n| Pipe \\| cable | 001 |\n", encoding="utf-8")
+        self.assertEqual(FC._text_to_table(source), [["Name", "Value"], ["Pipe | cable", "001"]])
+        blocks = FC._markdown_blocks(source.read_text(encoding="utf-8"))
+        self.assertEqual(blocks, [("table", [["Name", "Value"], ["Pipe | cable", "001"]])])
+
+    def test_webpage_url_extract_and_ssrf_guards(self):
+        self.assertEqual(FC.webpage_url("Лира, преобразуй страницу https://example.com/docs?q=1 в MD"), "https://example.com/docs?q=1")
+        self.assertIsNone(FC.webpage_url("Лира, преобразуй документ в MD"))
+        for url in ("file:///etc/passwd", "http://127.0.0.1/admin", "http://localhost/"):
+            with self.subTest(url=url), self.assertRaises(FC.ConversionError):
+                FC._validate_public_web_url(url)
+        self.assertIn('docx', FC.targets_for('report.pdf'))
+        self.assertIn('docx', FC.targets_for('report.xlsx'))
+
+    def test_lira_page_command_routes_url_to_background_conversion(self):
+        harness = WebPageCommandHarness()
+        result = harness._command('say', {'text':'Лира, преобразовать страницу https://example.com/guide в MD'})
+        self.assertEqual(result['id'], 'page-task')
+        self.assertEqual(harness.tasks.seen, ('https://example.com/guide', 'md', 'Лира, преобразовать страницу https://example.com/guide в MD'))
+        self.assertIn('HTML-страницу', harness.quick[0][0])
+
+    def test_html_to_markdown_keeps_page_heading_and_table(self):
+        html_source = "<html><body><h1>Склад</h1><p>Проверка страницы</p><table><tr><th>Код</th><th>Кол-во</th></tr><tr><td>001</td><td>2</td></tr></table></body></html>"
+        result = FC._html_to_markdown(html_source)
+        self.assertIn("# Склад", result)
+        self.assertIn("Проверка страницы", result)
+        self.assertIn("| Код | Кол-во |", result)
+        self.assertIn("| 001 | 2 |", result)
 
     def test_raster_conversion_including_gif(self):
         from PIL import Image

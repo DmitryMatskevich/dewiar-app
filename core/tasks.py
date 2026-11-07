@@ -699,6 +699,18 @@ class TaskManager:
         output_dir.mkdir(parents=True, exist_ok=True)
         inputs = list(task.data.get('conversion_inputs') or [])
         target = task.data.get('conversion_target') or ''
+        page_url = str(task.data.get('conversion_url') or '')
+        if page_url:
+            from file_converter import fetch_webpage
+            from urllib.parse import urlsplit
+            host = (urlsplit(page_url).hostname or 'page').replace(':', '_')
+            page_path = task.dir / 'inputs' / (host[:100] + '.html')
+            task.data.update(activity='Загружаю HTML-страницу…', finished=False, progress=[0, 1])
+            task.save(); self._emit(task)
+            fetch_webpage(page_url, page_path, cancel=task.cancel)
+            inputs = [{'path': page_path.relative_to(task.dir).as_posix(), 'name': page_path.name, 'size': page_path.stat().st_size}]
+            task.data['conversion_inputs'] = inputs
+            task.journal('HTML-страница загружена; преобразую локально без языковой модели.')
         lock, finished, results = _threading.Lock(), [0], []
         task.data.update(activity='Преобразование файлов…', finished=False, progress=[0, len(inputs)])
         task.journal(f'Начал локальное преобразование файлов (параллельных потоков: {min(4, len(inputs))}).')
@@ -769,6 +781,26 @@ class TaskManager:
             self._beat(task)
             task.save()
             self._emit(task)
+
+    def create_webpage_conversion(self, url, target, goal=''):
+        """Fetch a public web page and convert its HTML in the background as a native task."""
+        from file_converter import normalise_target, _validate_public_web_url
+        from urllib.parse import urlsplit
+        target = normalise_target(target)
+        if target not in {'md', 'txt', 'html', 'pdf', 'docx'}:
+            raise ValueError('Страницу можно преобразовать в MD, TXT, HTML, PDF или DOCX')
+        parsed_url = urlsplit(str(url or '').strip())
+        if parsed_url.scheme not in {'http', 'https'} or not parsed_url.hostname or parsed_url.username or parsed_url.password:
+            raise ValueError('Укажите публичную ссылку на страницу HTTP или HTTPS')
+        safe_url = _validate_public_web_url(url)
+        task = self.create(f'Преобразовать страницу {parsed_url.hostname} в {target.upper()}',
+                           (goal or f'Извлечь HTML-страницу и преобразовать в {target.upper()}').strip(), start=False)
+        task.data.update(workflow='file-conversion', conversion_target=target, conversion_inputs=[],
+                         conversion_url=safe_url, progress=[0, 1], activity='Подготовка к загрузке HTML-страницы…',
+                         conversion_workers=1)
+        task.save()
+        task.journal('Создана фоновая задача: загрузить публичную HTML-страницу и преобразовать локально. Модели не используются.')
+        return self.start(task.id)
 
     def _run_media(self, t):
         try:
