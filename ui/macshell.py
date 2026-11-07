@@ -596,6 +596,28 @@ def make_api(app):
             open_target('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders')
             return True
 
+        def open_mac_privacy_settings(self, category):
+            """Open a specific macOS privacy pane without changing its permission."""
+            panes = {
+                'accessibility': 'Privacy_Accessibility',
+                'full-disk': 'Privacy_AllFiles',
+                'remote-desktop': 'Privacy_RemoteDesktop',
+                'app-management': 'Privacy_AppManagement',
+                'mail': 'Privacy_Mail',
+            }
+            pane = panes.get(str(category or ''))
+            if not pane:
+                return False
+            open_target(f'x-apple.systempreferences:com.apple.preference.security?{pane}')
+            return True
+
+        def open_keychain_access(self):
+            app = '/System/Applications/Utilities/Keychain Access.app'
+            if not os.path.exists(app):
+                raise OSError('Не найдено приложение «Связка ключей» macOS')
+            open_target(app)
+            return True
+
         def open_screen_settings(self):
             open_target("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
             return True

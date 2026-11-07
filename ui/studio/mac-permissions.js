@@ -52,6 +52,8 @@
   for (const [button, method] of [['mic-settings','open_microphone_settings'],['screen-settings','open_screen_settings'],['files-settings','open_files_settings']]) {
     byId(button).onclick = e => action(e.currentTarget, a => a[method]());
   }
+  box.querySelectorAll('[data-mac-privacy]').forEach(button => button.onclick = e => action(e.currentTarget, a => a.open_mac_privacy_settings(button.dataset.macPrivacy)));
+  byId('keychain').onclick = e => action(e.currentTarget, a => a.open_keychain_access());
   box.querySelectorAll('[data-mac-folder]').forEach(button => button.onclick = e => action(e.currentTarget, a => a.request_files_access(button.dataset.macFolder)));
   byId('refresh').onclick = refresh;
   byId('later').onclick = () => { byId('setup').hidden = true; };

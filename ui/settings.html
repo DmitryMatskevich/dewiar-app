@@ -1704,7 +1704,7 @@
   <section id="p-safety">
     <h1>Безопасность</h1>
     <p class="lead">Что ассистент видит, что хранит и куда отправляет — на одной странице. Сверху стоп-кран: одно нажатие, и наружу не уходит ничего.</p>
-    <div class="prof on" id="mac-access" hidden style="padding:18px;margin-bottom:20px">
+    <div class="prof on" id="mac-access" hidden style="padding:10px 18px 18px;margin-bottom:20px">
       <h2>Доступы macOS</h2>
       <div id="mac-access-setup" hidden><p>Подготовка к работе: разрешите нужные функции кнопками ниже и подтвердите системные запросы macOS. Можно настроить доступы позже в этом разделе.</p><button class="btn" id="mac-access-later" title="Закрыть подсказку подготовки. Разрешения не запрашиваются, раздел остаётся доступным.">Настрою позже</button></div>
       <p class="hint" id="mac-access-source" hidden>Запущена версия из исходников. Системное разрешение может относиться к Python или Терминалу. Чтобы выдать доступ самому Dewiar, откройте Dewiar.app.</p>
@@ -1723,6 +1723,17 @@
       <p class="hint">Dewiar проверит эти папки после запроса доступа к экрану. Подтвердите Allow / «Разрешить», если macOS покажет запрос. При отказе откроются настройки «Файлы и папки». Можно вернуться сюда и повторить проверку.</p>
       <p class="hint" id="mac-access-result" role="status" aria-live="polite"></p>
       <div class="actions"><button class="btn" id="mac-access-refresh" title="Повторно проверить разрешения экрана и микрофона. Для файлов показывает последний результат; повторная проверка папки запускается только её кнопкой.">Проверить доступы</button></div>
+      <h3>Другие разрешения macOS</h3>
+      <p class="hint">Кнопки открывают соответствующий раздел «Конфиденциальность и безопасность». Включайте доступ только если он нужен функции Dewiar; macOS может попросить перезапустить приложение.</p>
+      <div class="actions mac-access-extra">
+        <button class="btn" data-mac-privacy="accessibility" title="Открыть Универсальный доступ — разрешение на управление интерфейсом и устройством.">Управление устройством</button>
+        <button class="btn" data-mac-privacy="full-disk" title="Открыть Полный доступ к диску. Даёт приложению широкий доступ к данным на Mac.">Полный доступ к диску</button>
+        <button class="btn" data-mac-privacy="remote-desktop" title="Открыть Remote Desktop — доступ приложений к экрану и системному звуку через удалённый рабочий стол.">Remote Desktop</button>
+        <button class="btn" data-mac-privacy="app-management" title="Открыть Управление приложениями — возможность обновлять или удалять другие приложения.">Управление приложениями</button>
+        <button class="btn" data-mac-privacy="mail" title="Открыть разрешение macOS для доступа приложения к Mail.">Доступ к Почте</button>
+      </div>
+      <div class="actions"><button class="btn" id="mac-access-keychain" title="Открыть приложение «Связка ключей» для просмотра сертификатов и ключей. Это не выдаёт Dewiar доступ к ним.">Сертификаты и ключи</button></div>
+      <p class="hint">Dewiar не запрашивает общий доступ к паролям веб-браузеров. Просмотр сертификатов в «Связке ключей» не выдаёт приложению разрешений.</p>
       <label class="check" style="display:flex;gap:10px;align-items:center;margin-top:14px"><input type="checkbox" id="mac-access-startup" title="При каждом запуске открывать страницу подготовки доступов. Автоматический запрос записи экрана настраивается отдельным переключателем выше.">Показывать настройку доступов при каждом запуске</label>
       <p class="hint">При включённом запросе доступа к экрану Dewiar обращается к macOS один раз для новой сборки, если доступ ещё не выдан. Сам запрос не начинает запись. Повторный запуск после отказа не вызывает новое системное окно.</p>
     </div>
