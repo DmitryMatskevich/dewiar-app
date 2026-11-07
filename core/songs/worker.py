@@ -497,6 +497,31 @@ def align_intro_from_vocals(audio, output, hypothesis, context, progress, origin
     return True
 
 
+def verify_reference_candidate(audio, phrase, proposal, hypotheses, progress):
+    """Independent, unprompted audio decoding; the publication never enters ASR."""
+    from songs.reconciliation import family
+    from songs.reference_text import tokens
+    if not {'whisper','qwen'} <= {family(h.get('model','')) for h in hypotheses}:
+        return {'confirmed':False,'reason':'Для проверки нужны выбранные Whisper и Qwen'}
+    start,end=phrase.get('start_ms',0),phrase.get('end_ms',0)
+    if not 0<end-start<=30000:
+        return {'confirmed':False,'reason':'Фраза требует ручной проверки границ'}
+    cur=proposal['current'];ts=tokens(phrase['text'])
+    left=[t['norm'] for t in ts if t['end']<=cur['char_start']][-2:]
+    right=[t['norm'] for t in ts if t['start']>=cur['char_end']][:2]
+    needle=left+[t['norm'] for t in tokens(proposal['alternative']['text'])]+right
+    if len(left)<2 or len(right)<2:return {'confirmed':False,'reason':'Недостаточно контекста'}
+    repo='Qwen/Qwen3-ASR-1.7B' if any(h.get('model')=='Qwen3-ASR-1.7B' for h in hypotheses) else 'Qwen/Qwen3-ASR-0.6B'
+    decoded=[whisper_transcribe(audio,'reference-check',start,end),
+             qwen_transcribe(audio,progress,[(start,end)],model_repo=repo)]
+    evidence=[]
+    for hyp in decoded:
+        text=' '.join(p['text'] for p in hyp.get('phrases',[]));words=[t['norm'] for t in tokens(text)]
+        match=any(words[i:i+len(needle)]==needle for i in range(len(words)-len(needle)+1))
+        evidence.append({'model':hyp['model'],'text':text,'matches':match})
+    return {'confirmed':all(h['matches'] for h in evidence),'hypotheses':evidence,'start_ms':start,'end_ms':end}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', type=Path, required=True)
@@ -504,7 +529,7 @@ def main():
     parser.add_argument('--run-id', default='worker')
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--baseline',type=Path)
-    parser.add_argument('--steps', default='whisper,qwen_large,consensus,align,chords')
+    parser.add_argument('--steps', default='whisper,qwen_large,consensus,text_reference,align,structure,chords')
     args = parser.parse_args()
     progress_path = args.output.with_suffix('.progress.json')
     def progress(label):
@@ -521,6 +546,7 @@ def main():
                       'align': 'Уточняем времена слов',
                       'structure': 'Размечаем куплеты и припевы',
                       'consensus': 'Сравниваем распознавания с исходной записью',
+                      'text_reference': 'Сверка с источником текста: ищем публикации',
                       'chords': 'Определяем смены аккордов по звуку'}[step])
             if step == 'whisper':
                 hyp = whisper_transcribe(args.input, args.run_id)
@@ -533,6 +559,22 @@ def main():
                 hyp['seconds'] = round(time.monotonic()-start, 2)
                 result['hypotheses'] = [h for h in result['hypotheses'] if not h['model'].startswith('Qwen3-ASR')]
                 result['hypotheses'].append(hyp)
+            elif step == 'text_reference':
+                from songs.text_reference import run
+                context_path=args.output.parent/'reference_context.json'
+                context=json.loads(context_path.read_text()) if context_path.is_file() else {}
+                context['hypotheses']=list(result.get('hypotheses') or [])
+                if args.baseline and args.baseline.is_file():
+                    context['hypotheses'].append(json.loads(args.baseline.read_text()))
+                selected=result.get('selected') or {}
+                phrases=copy.deepcopy(context.get('current_phrases') or selected.get('phrases') or [])
+                for phrase in phrases:
+                    if phrase.get('phrase_id') in context.get('protected_phrase_ids',[]):phrase['manual_edited']=True
+                def verify(phrase,item):
+                    return verify_reference_candidate(args.input,phrase,item,result.get('hypotheses',[]),
+                        lambda label:progress('Сверка с источником текста: '+label))
+                selected['phrases'],result['text_reference']=run(phrases,context,verify=verify,progress=progress)
+                result['selected']=selected
             elif step == 'chords':
                 from songs.harmony import infer_chords
                 result['harmony'] = infer_chords(args.input)

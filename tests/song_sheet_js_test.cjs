@@ -12,7 +12,45 @@ assert.equal(s.fretNote(2,2),'A');
 assert.equal(s.voicingAtShift({voicing_fingering:'0-0-0-2-2-0'},1).voicing_fingering,'1-1-1-3-3-1');
 assert.equal(s.voicingAtShift({voicing_fingering:'0-0-0-2-2-0'},-1).voicing_fingering,'');
 assert.equal(s.voicingAtShift({voicing_fingering:'1-1-1-3-3-1',voicing_key_shift:1},0).voicing_fingering,'0-0-0-2-2-0');
-assert.equal(s.chordFingerings('Am').length,3);
+assert.ok(s.chordFingerings('Am').length>8);
+// Asking for a single tooltip shape must never truncate the cached chooser.
+assert.equal(s.chordFingerings('Ab',1).length,1);
+const abShapes=s.chordFingerings('Ab');
+assert.ok(abShapes.length>8);
+for(const shape of ['4-1-1-1-3-4','4-4-5-6-6-4','8-9-8-6-x-x','8-9-8-10-11-x','11-13-13-13-11-x']) {
+  assert.ok(abShapes.includes(shape),`Missing Ab movable CAGED shape: ${shape}`);
+}
+assert.deepEqual(s.chordFingerings('H'),s.chordFingerings('B'));
+assert.equal(s.transpose('Hm/F#',1),'Cm/G');
+assert.ok(s.chordFingerings('G').includes('15-12-12-12-14-15'));
+assert.ok(s.chordFingerings('Am').includes('12-13-14-14-12-x'));
+const qualities={'':[0,4,7],m:[0,3,7],'7':[0,4,7,10],maj7:[0,4,7,11],m7:[0,3,7,10],
+  sus2:[0,2,7],sus4:[0,5,7],add9:[0,2,4,7],'6':[0,4,7,9],m6:[0,3,7,9],
+  dim:[0,3,6],dim7:[0,3,6,9],m7b5:[0,3,6,10],aug:[0,4,8],mMaj7:[0,3,7,11],
+  '9':[0,2,4,7,10],m9:[0,2,3,7,10],maj9:[0,2,4,7,11],'11':[0,2,4,5,7,10],
+  m11:[0,2,3,5,7,10],maj11:[0,2,4,5,7,11],'13':[0,2,4,7,9,10],m13:[0,2,3,7,9,10],maj13:[0,2,4,7,9,11]};
+const midi=[64,59,55,50,45,40];
+for(const [root,name] of ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'].entries()) {
+  for(const [suffix,intervals] of Object.entries(qualities)) {
+    const variants=s.chordFingerings(name+suffix);
+    if(intervals.length<=4) assert.ok(variants.length,`No shapes: ${name+suffix}`);
+    assert.equal(variants.length,new Set(variants).size);
+    for(const shape of variants) {
+      const frets=shape.split('-').map(f=>f==='x'?-1:Number(f));
+      assert.ok(frets.every(f=>f>=-1&&f<=15),shape);
+      const stopped=frets.filter(f=>f>0);
+      assert.ok(!stopped.length||Math.max(...stopped)-Math.min(...stopped)<=3,shape);
+      const notes=frets.flatMap((f,i)=>f<0?[]:[midi[i]+f]);
+      assert.equal(Math.min(...notes)%12,root,`${name+suffix}: ${shape}`);
+      assert.deepEqual([...new Set(notes.map(n=>n%12))].sort((a,b)=>a-b),intervals.map(n=>(n+root)%12).sort((a,b)=>a-b),`${name+suffix}: ${shape}`);
+    }
+  }
+}
+for(const shape of s.chordFingerings('B7/D#')) {
+  const notes=shape.split('-').flatMap((f,i)=>f==='x'?[]:[midi[i]+Number(f)]);
+  assert.equal(Math.min(...notes)%12,3,shape);
+}
+console.log('Movable CAGED forms, cache, 15-fret limit, full chord tones and bass: OK');
 assert.match(s.chordTooltip('Am'),/1→6: 0-1-2-2-0-x/);
 assert.ok(!s.chordTooltip('Am').includes('другие варианты'));
 assert.equal(s.chordFingering('Am',{voicing_fingering:'5-5-7-7-6-5'}),'5-5-7-7-6-5');

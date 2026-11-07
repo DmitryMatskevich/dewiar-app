@@ -15,12 +15,14 @@ from pathlib import Path
 
 class SongAnalyzer:
     STEP_LABELS = {
-        "lyrics": "Распознаём слова",
+        "lyrics": "Распознавание слов с аудио",
+        "text_reference": "Сверка с источником текста",
         "structure": "Размечаем части",
         "chords": "Подбираем аккорды",
     }
     STEP_WORKERS = {
-        "lyrics": "whisper,qwen_large,consensus,align",
+        "lyrics": "whisper,qwen_large,consensus,text_reference,align,structure",
+        "text_reference": "text_reference,align,structure",
         "structure": "structure",
         "chords": "chords",
     }
@@ -43,6 +45,21 @@ class SongAnalyzer:
     def running(self, song_id):
         with self._lock:
             return song_id in self._running
+
+    @staticmethod
+    def _progress_patch(label):
+        stage = ('text_reference' if label.startswith('Сверка с источником текста') else
+                 'structure' if label.startswith('Размечаем куплеты') else
+                 'chords' if label.startswith('Определяем смены аккордов') else None)
+        return {'stage_label':label,**({'stage':stage} if stage else {})}
+
+    @staticmethod
+    def _reference_context(folder, row, current=False):
+        data={k:copy.deepcopy(row.get(k)) for k in ('title','artist','source_candidates')}
+        data['source_candidates']=data.get('source_candidates') or []
+        data['protected_phrase_ids']=list(row.get('phrase_history') or {})
+        if current:data['current_phrases']=copy.deepcopy(row.get('phrases') or [])
+        (folder/'reference_context.json').write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
 
     def resume_interrupted(self, song_id=None):
         """Reconnect to detached workers, commit finished work, or restart safely."""
@@ -117,7 +134,7 @@ class SongAnalyzer:
                     label=json.loads((folder/'result.progress.json').read_text())['label']
                     row=self.store.get(song_id)
                     if row and row.get('active_run_id')==run_id and label!=row.get('stage_label'):
-                        fresh=self.store.patch(song_id,{'stage_label':label})
+                        fresh=self.store.patch(song_id,self._progress_patch(label))
                         self.emit('song_analysis',song_id=song_id,running=True,song=fresh)
                 except (OSError,ValueError,KeyError,TypeError):pass
                 time.sleep(1)
@@ -226,6 +243,8 @@ class SongAnalyzer:
             selected = copy.deepcopy(result.get("selected") or {})
             if 'comparison' in result:
                 run['comparison'] = copy.deepcopy(result['comparison'])
+            if 'text_reference' in result:
+                run['text_reference'] = copy.deepcopy(result['text_reference'])
             selected_phrases = selected.get("phrases") or []
             if selected_phrases:
                 run["phrases"] = selected_phrases
@@ -238,7 +257,10 @@ class SongAnalyzer:
                 "analysis_errors": copy.deepcopy(result.get("errors") or []),
                 "review_state": "needs_review",
             }
-            if logical in {"lyrics", "align"} and selected_phrases:
+            if 'text_reference' in result and logical in {'lyrics','text_reference'}:
+                from .text_reference import result_patch
+                changes.update(result_patch(row,result['text_reference']))
+            if logical in {"lyrics", "align", "text_reference"} and selected_phrases:
                 # Never overwrite a phrase which the user has already edited;
                 # the rerun remains available in analysis_runs for comparison.
                 # Timing is independent evidence, however: an improved vocal
@@ -291,6 +313,7 @@ class SongAnalyzer:
                 )
             changes["stage_label"] = {
                 "lyrics": "Распознавание слов обновлено; проверьте текст по записи",
+                "text_reference": "Сверка с источником текста завершена",
                 "structure": "Разметка частей обновлена; проверьте куплеты и припевы",
                 "chords": "Проверка аккордов завершена; проверьте результат",
             }[logical]
@@ -307,11 +330,12 @@ class SongAnalyzer:
                     row = self.store.get(song_id) or {}
                     if row.get("active_run_id") != rerun_id or cancel.is_set():
                         return
-                    fresh = self.store.patch(song_id, {"stage_label": label})
+                    fresh = self.store.patch(song_id, self._progress_patch(label))
                     self.emit("song_analysis", song_id=song_id, running=True, song=fresh)
                 steps=self.STEP_WORKERS[logical]
                 if logical=='lyrics' and 'qwen' in (self.saved_models(self.store.get(song_id) or {}) or []):
                     steps=steps.replace(',qwen_large,',',qwen,')
+                self._reference_context(folder,self.store.get(song_id) or {},current=logical=='text_reference')
                 result = analyze(path, folder / "result.json", rerun_id, cancel, progress,
                                  steps=steps, resume=True)
                 if cancel.is_set():
@@ -392,7 +416,7 @@ class SongAnalyzer:
                 labels = ", ".join(self.MODEL_LABELS[key] for key in selected_models)
                 updated = self.store.patch(song_id, {"status": "running", "analysis_state": "transcribing", "stage": "lyrics",
                                                      "active_run_id": run_id, "analysis_models": list(selected_models),
-                                                     "stage_label": f"Распознаём слова: {labels}"})
+                                                     "stage_label": f"Распознавание слов с аудио: {labels}"})
                 self.emit("song_analysis", song_id=song_id, running=True, song=updated)
                 args = (song_id, path, run_id, True, selected_models) if full else (song_id, path, run_id, False, selected_models)
                 threading.Thread(target=self._run, args=args, name=f"song-lyrics-{song_id[:8]}", daemon=True).start()
@@ -473,13 +497,14 @@ class SongAnalyzer:
                         row = self.store.get(song_id) or {}
                         if row.get('active_run_id') != run_id or cancel.is_set():
                             return
-                        fresh = self.store.patch(song_id, {'stage_label': label})
+                        fresh = self.store.patch(song_id, self._progress_patch(label))
                     self.emit('song_analysis', song_id=song_id, running=True, song=fresh)
                 progress('Базовый текст недоступен; запускаем выбранные модели' if basic_error else 'Базовый текст сохранён; запускаем выбранные модели')
                 folder = path.parent.parent / 'analysis' / run_id
                 folder.mkdir(parents=True, exist_ok=True)
                 import json
                 (folder/'gigaam.json').write_text(json.dumps({'model': model, 'phrases': phrases}, ensure_ascii=False))
+                self._reference_context(folder,self.store.get(song_id) or {})
                 while not self._heavy_slots.acquire(timeout=.5):
                     if cancel.is_set():
                         return
@@ -490,7 +515,7 @@ class SongAnalyzer:
                     # Consensus can use the selected GigaAM baseline, a single
                     # heavy recognizer, or both.  Keeping it in every full run
                     # makes the result comparable and leaves raw hypotheses.
-                    steps += ['consensus', 'align', 'chords']
+                    steps += ['consensus', 'text_reference', 'align', 'structure', 'chords']
                     result = analyze(path, folder/'result.json', run_id, cancel, progress,
                                      steps=','.join(steps))
                 except InterruptedError:

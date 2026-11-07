@@ -42,6 +42,8 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         trigger=page.locator('#song-guitar-content .song-chord-tip[data-chord-name="Em"]').first
         trigger.hover()
         assert pop.is_visible()
+        assert pop.locator('[data-chord-transpose="-1"] path').get_attribute('d')=='M12 4v16m-6-6 6 6 6-6'
+        assert pop.locator('[data-chord-transpose="1"] path').get_attribute('d')=='M12 20V4m-6 6 6-6 6 6'
         a2='[data-chord-string="4"][data-chord-fret="2"]'
         b1='[data-chord-string="1"][data-chord-fret="1"]'
         pop.locator(a2).hover()
@@ -129,6 +131,36 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert page.locator('#song-guitar-content .song-chord-tip').first.inner_text()==display_name
         page.locator('#song-guitar-content .song-chord-tip').first.hover()
         assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())==transposed_shape
+        pop.locator('[data-chord-close]').click()
+
+        # Expanded chooser after the sheet has already requested tooltip shapes.
+        page.locator('#song-key-down').click()
+        page.locator('#song-guitar-content .song-chord-tip').first.hover()
+        pop.locator('[data-chord-name-edit]').fill('Ab')
+        total=int(pop.locator('.song-chord-variants span').inner_text().split('/')[1])
+        assert total>8,total
+        shapes=[]
+        for _ in range(total):
+            shape='-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())
+            shapes.append(shape)
+            for string,value in enumerate(shape.split('-')):
+                if value not in ('x','0'):
+                    dot=pop.locator(f'[data-chord-string="{string}"][data-chord-fret="{value}"]')
+                    assert dot.count()==1 and dot.get_attribute('aria-pressed')=='true',shape
+                    assert int(value)<=15
+            assert max(map(int,pop.locator('.song-chord-fret-head b').all_inner_texts()))<=15
+            pop.locator('[data-chord-next]').click()
+            assert pop.is_visible()
+        assert len(set(shapes))==total
+        assert '4-1-1-1-3-4' in shapes  # G shape moved up one fret
+        assert '11-13-13-13-11-x' in shapes  # A-family barre high on the neck
+        for _ in range(shapes.index('11-13-13-13-11-x')):
+            pop.locator('[data-chord-next]').click()
+        pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
+        assert store.get(sid)['chords'][0]['voicing_fingering']=='11-13-13-13-11-x'
+        page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
+        page.locator('#song-guitar-content .song-chord-tip').first.hover()
+        assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())=='11-13-13-13-11-x'
         pop.locator('[data-chord-close]').click()
 
         # Small-screen light/dark geometry, opaque surface, native pitch title.

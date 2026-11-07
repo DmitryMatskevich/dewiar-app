@@ -66,7 +66,7 @@ def consensus(phrases, hypotheses, choose_majority=False):
     seen = set()
     for hyp in hypotheses:
         model = hyp.get('model')
-        if not model or model in seen:
+        if not model or model in seen or not hyp.get('phrases'):
             continue
         seen.add(model)
         alternative = tokens(hyp.get('phrases', []))

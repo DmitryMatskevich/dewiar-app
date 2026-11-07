@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 
-STAGES = ("identify", "sources", "record", "lyrics", "structure", "chords", "review")
+STAGES = ("identify", "sources", "record", "lyrics", "text_reference", "structure", "chords", "karaoke", "review")
 STATUS = {"queued", "recording", "running", "needs_input", "review", "ready", "partial", "failed", "cancelled", "interrupted"}
 
 
@@ -208,7 +208,7 @@ class SongStore:
             allowed = {"title", "artist", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
-                       "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result"}
+                       "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
             if "status" in changes and changes["status"] not in STATUS:
@@ -279,6 +279,7 @@ class SongStore:
                    'audio_path': row.get('audio', {}).get('path'), 'phrases': selected,
                    'hypotheses': hypotheses, 'harmony': harmony, 'errors': result.get('errors', []),
                    'comparison': copy.deepcopy(result.get('comparison', {})),
+                   'text_reference': copy.deepcopy(result.get('text_reference', {})),
                    'alignment':(result.get('selected') or {}).get('alignment')}
             changes = {'analysis_runs': [*row.get('analysis_runs', []), run], 'active_run_id': None,
                        'candidate_run_id': run_id if keep else None, 'status': 'review' if selected or keep else 'partial', 'stage': 'review',
@@ -287,6 +288,9 @@ class SongStore:
                        'stage_label': 'Новый разбор сохранён; ваши правки оставлены' if keep else
                            'Текст не распознан; проверьте запись' if not selected else
                            'Текст и аккорды готовы к проверке' if has_chords else 'Текст готов; аккорды не определены'}
+            if 'text_reference' in result:
+                from .text_reference import result_patch
+                changes.update(result_patch(row,result['text_reference']))
             if not keep:
                 chords = harmony.get('events', [])
                 changes.update(phrases=selected, words=[w for p in selected for w in p.get('words', [])],

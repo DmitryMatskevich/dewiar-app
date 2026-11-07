@@ -67,6 +67,24 @@ class SongStepRestartTests(unittest.TestCase):
         self.assertIsNone(row["active_run_id"])
         self.assertIn("Проверка аккордов завершена", row["stage_label"])
 
+    def test_text_source_retry_uses_current_text_and_keeps_chords(self):
+        def fake_analyze(path, output, run_id, cancel, progress, steps, resume):
+            self.assertEqual(steps,"text_reference,align,structure")
+            context=json.loads((output.parent/'reference_context.json').read_text())
+            self.assertEqual(context['current_phrases'][0]['text'],self.phrase['text'])
+            progress('Сверка с источником текста: ищем публикации')
+            self.assertEqual(self.store.get(self.sid)['stage'],'text_reference')
+            return {'selected':{'phrases':[self.phrase]},'text_reference':{'state':'not_found','references':[]},'errors':[]}
+        before=self.store.get(self.sid)
+        with patch('songs.runtime.analyze',side_effect=fake_analyze):
+            self.analyzer.rerun_step(self.sid,'text_reference')
+            self.assertTrue(self.done.wait(3))
+        row=self.store.get(self.sid)
+        self.assertEqual(row['text_reference']['state'],'not_found')
+        self.assertEqual(row['chords'],before['chords'])
+        self.assertEqual(row['audio'],before['audio'])
+        self.assertEqual(row['phrases'][0]['text'],self.phrase['text'])
+
 
 if __name__ == "__main__":
     unittest.main()

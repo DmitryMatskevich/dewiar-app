@@ -6,8 +6,8 @@ window.SongSheet = (() => {
   function transpose(name, steps) {
     if (!steps) return name;
     const notes = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-    const pitch = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
-    return String(name).replace(/(^|\/)([A-G])([#b]?)/g, (_,prefix,n,acc) => prefix + notes[((pitch[n]+(acc==='#'?1:acc==='b'?-1:0)+steps)%12+12)%12]);
+    const pitch = {C:0,D:2,E:4,F:5,G:7,A:9,B:11,H:11};
+    return String(name).replace(/(^|\/)([A-H])([#b]?)/g, (_,prefix,n,acc) => prefix + notes[((pitch[n]+(acc==='#'?1:acc==='b'?-1:0)+steps)%12+12)%12]);
   }
   const widths = new Map(), playback = new Map();
   const columns = row => widths.get(row.song_id) || 42;
@@ -274,8 +274,34 @@ window.SongSheet = (() => {
     if(sources.length) extras.push(`Источники:\n${sources.join('\n')}`);
     return [body,...extras].filter(Boolean).join('\n\n');
   }
-  const NOTE_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+  const NOTE_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11,H:11};
   const STRING_PC=[4,11,7,2,9,4]; // standard tuning, first (thinnest) string to sixth
+  const STRING_MIDI=[64,59,55,50,45,40], MAX_CHORD_FRET=15;
+  // Standard movable forms, strings 1→6. Muted strings stay muted; open
+  // strings become the barre when a form moves. B/H uses the A-family barre.
+  const CHORD_FORMS=[
+    [0,'0-1-0-2-3-x'],[7,'3-0-0-0-2-3'],[2,'2-3-2-0-x-x'],[9,'0-2-2-2-0-x'],[4,'0-0-1-2-2-0'],[11,'2-4-4-4-2-x'],
+    [0,'3-4-5-5-3-x'],[7,'3-3-3-5-5-3'],[2,'1-3-2-0-x-x'],[9,'0-1-2-2-0-x'],[4,'0-0-0-2-2-0'],[11,'2-3-4-4-2-x'],
+    [0,'0-1-3-2-3-x'],[7,'1-0-0-0-2-3'],[2,'2-1-2-0-x-x'],[9,'0-2-0-2-0-x'],[4,'0-0-1-0-2-0'],[11,'2-0-2-1-2-x'],
+    [0,'0-0-0-2-3-x'],[7,'2-0-0-0-2-3'],[2,'2-2-2-0-x-x'],[9,'0-2-1-2-0-x'],[4,'0-0-1-1-2-0'],
+    [2,'1-1-2-0-x-x'],[9,'0-1-0-2-0-x'],[4,'0-0-0-0-2-0'],[11,'2-3-2-4-2-x'],
+    [2,'0-3-2-0-x-x'],[9,'0-0-2-2-0-x'],[2,'3-3-2-0-x-x'],[9,'0-3-2-2-0-x'],[4,'0-0-2-2-2-0'],
+    [0,'0-3-0-2-3-x'],[4,'2-0-1-2-2-0'],[9,'0-2-2-2-0-2'],[4,'0-2-1-2-2-0'],
+    [9,'2-1-2-2-0-x'],[4,'0-2-0-2-2-0']
+  ].map(([root,shape])=>({root,frets:shape.split('-').map(f=>f==='x'?-1:Number(f))}));
+  function fingeringFingers(positions) {
+    // A barre can bridge higher frets/mutes, but cannot cross an open or
+    // lower-fretted sounding string. Count each separate group as one finger.
+    let fingers=0;
+    for(const fret of new Set(positions.filter(f=>f>0))) {
+      let grouped=false;
+      for(const value of positions) {
+        if(value>=0 && value<fret) grouped=false;
+        if(value===fret && !grouped) { fingers++;grouped=true; }
+      }
+    }
+    return fingers;
+  }
   const CHORD_INTERVALS={
     '':[0,4,7],maj:[0,4,7],major:[0,4,7],m:[0,3,7],min:[0,3,7],minor:[0,3,7],
     '7':[0,4,7,10],maj7:[0,4,7,11],major7:[0,4,7,11],m7:[0,3,7,10],min7:[0,3,7,10],
@@ -299,10 +325,10 @@ window.SongSheet = (() => {
       if(shape) localStorage.setItem(key,shape); else localStorage.removeItem(key);
     } catch (_) {}
   }
-  function chordFingerings(symbol,limit=3) {
+  function chordFingerings(symbol,limit=Infinity) {
     const cacheKey=String(symbol);
     if(fingeringCache.has(cacheKey)) return fingeringCache.get(cacheKey).slice(0,limit);
-    const match=String(symbol).match(/^([A-G])([#b]?)(.*?)(?:\/([A-G])([#b]?))?$/i);
+    const match=String(symbol).match(/^([A-H])([#b]?)(.*?)(?:\/([A-H])([#b]?))?$/i);
     if(!match) { fingeringCache.set(cacheKey,[]);return []; }
     const [,letter,accidental,suffix,slashLetter,slashAccidental]=match;
     const root=NOTE_PC[letter.toUpperCase()];
@@ -317,34 +343,51 @@ window.SongSheet = (() => {
     const tones=[...new Set(intervals.map(n=>(rootPc+n)%12))];
     if(slashLetter&&!tones.includes(bassPc)) { fingeringCache.set(cacheKey,[]);return []; }
     const requiredMask=tones.reduce((mask,n)=>mask|(1<<n),0);
-    const options=STRING_PC.map(open=>[-1,...Array.from({length:13},(_,f)=>f).filter(f=>tones.includes((open+f)%12))]);
+    const options=STRING_PC.map(open=>[-1,...Array.from({length:MAX_CHORD_FRET+1},(_,f)=>f).filter(f=>tones.includes((open+f)%12))]);
     const found=new Map();
-    function visit(string,mask,positions,lowestPc) {
-      if(string===6) {
-        if(mask!==requiredMask || lowestPc!==bassPc) return;
+    function add(positions,template=false) {
+        const notes=positions.flatMap((f,i)=>f<0?[]:[STRING_MIDI[i]+f]);
+        const mask=notes.reduce((value,n)=>value|(1<<(n%12)),0);
+        if(mask!==requiredMask || Math.min(...notes)%12!==bassPc) return;
         const played=positions.filter(f=>f>=0), fretted=played.filter(f=>f>0);
         const min=fretted.length?Math.min(...fretted):0,max=fretted.length?Math.max(...fretted):0;
         const spread=max-min;
+        if(max>MAX_CHORD_FRET || spread>3 || fingeringFingers(positions)>4) return;
         const distinct=new Set(fretted).size;
         const score=fretted.reduce((sum,f)=>sum+f,0)+max*1.25+distinct*0.7+
           positions.filter(f=>f<0).length*7+Math.max(0,spread-4)*2-
           positions.filter(f=>f===0).length*0.8;
         const shape=positions.map(f=>f<0?'x':String(f)).join('-');
         const previous=found.get(shape);
-        if(!previous||score<previous.score) found.set(shape,{score,shape});
-        return;
-      }
+        found.set(shape,{score,shape,position:min,template:template||!!previous?.template});
+    }
+    for(const form of CHORD_FORMS) for(let shift=-MAX_CHORD_FRET;shift<=MAX_CHORD_FRET;shift++) {
+      if(((form.root+shift)%12+12)%12!==rootPc) continue;
+      const positions=form.frets.map(f=>f<0?-1:f+shift);
+      if(positions.some((f,i)=>form.frets[i]>=0&&(f<0||f>MAX_CHORD_FRET))) continue;
+      add(positions,true);
+    }
+    function visit(string,mask,positions,min,max) {
+      if(string===6) { if(mask===requiredMask) add(positions);return; }
       for(const fret of options[string]) {
+        const nextMin=fret>0?Math.min(min,fret):min, nextMax=Math.max(max,fret);
+        if(nextMin!==Infinity && nextMax-nextMin>3) continue;
         const nextMask=fret<0?mask:mask|(1<<((STRING_PC[string]+fret)%12));
-        // Strings are visited 1→6; every played lower string replaces the
-        // current bass candidate, leaving the lowest sounding string at leaf.
-        const nextLowest=fret<0?lowestPc:(STRING_PC[string]+fret)%12;
-        visit(string+1,nextMask,[...positions,fret],nextLowest);
+        visit(string+1,nextMask,[...positions,fret],nextMin,nextMax);
       }
     }
-    // Search from the first string through the sixth so bass-note validation is exact.
-    visit(0,0,[],null);
-    const result=[...found.values()].sort((a,b)=>a.score-b.score||a.shape.localeCompare(b.shape)).slice(0,Math.max(3,limit)).map(item=>item.shape);
+    visit(0,0,[],Infinity,0);
+    const ranked=[...found.values()].sort((a,b)=>a.score-b.score||a.shape.localeCompare(b.shape));
+    // Retain every movable form and two useful alternatives at each position,
+    // instead of filling the list with near-identical low-fret fingerings.
+    const perPosition=new Map();
+    const selected=ranked.filter(item=>{
+      const count=perPosition.get(item.position)||0;perPosition.set(item.position,count+1);
+      return item.template||count<2;
+    });
+    selected.sort((a,b)=>Number(b.template)-Number(a.template)||a.score-b.score||a.shape.localeCompare(b.shape));
+    const result=selected.map(item=>item.shape);
+    // Cache the complete selection, even when a tooltip asks for just one.
     fingeringCache.set(cacheKey,result);return result.slice(0,limit);
   }
   function exactVoicing(evidence) {
@@ -379,7 +422,7 @@ window.SongSheet = (() => {
   function chordVariants(symbol,evidence) {
     const result=[], add=shape=>{ const normalized=exactVoicing({voicing_fingering:shape}); if(normalized&&!result.includes(normalized)) result.push(normalized); };
     add(pinnedVoicing(symbol,evidence?.song_id)); add(exactVoicing(evidence));
-    chordFingerings(symbol,8).forEach(add);
+    chordFingerings(symbol).forEach(add);
     return result;
   }
   function inferChordName(shape) {
@@ -407,7 +450,8 @@ window.SongSheet = (() => {
     const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'];
     const fretted=values.map(Number).filter(Number.isFinite).filter(value=>value>0);
     const minFret=fretted.length ? Math.min(...fretted) : 1;
-    const base=minFret<=4 ? 1 : minFret;
+    const maxFret=fretted.length ? Math.max(...fretted) : 0;
+    const base=maxFret<=4 ? 1 : Math.min(minFret,MAX_CHORD_FRET-3);
     const fretLabels=Array.from({length:4},(_,column)=>base+column);
     const rows=labels.map((label,row)=>{
       const value=values[row]??'x', fret=Number(value);
@@ -456,11 +500,11 @@ window.SongSheet = (() => {
     const state=chordPopoverState, popover=chordPopoverElement();
     if(!state||!state.variants.length) return;
     const shape=state.variants[state.index];
-    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('left')}</button><input class="song-chord-name-input" data-chord-name-edit value="${esc(state.customName??state.symbol)}" maxlength="24" size="6" spellcheck="false" aria-label="Название аккорда" title="Название аккорда, например Bm или G7"><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('right')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<p class="song-chord-popover-status" role="status"></p>`;
+    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('down')}</button><input class="song-chord-name-input" data-chord-name-edit value="${esc(state.customName??state.symbol)}" maxlength="24" size="6" spellcheck="false" aria-label="Название аккорда" title="Название аккорда, например Bm или G7"><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('up')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<p class="song-chord-popover-status" role="status"></p>`;
     const redraw=selector=>renderChordPopover(selector);
     const nameEditor=popover.querySelector('[data-chord-name-edit]');
     nameEditor.addEventListener('input',()=>{
-      const symbol=nameEditor.value.replace(/\s+/g,'').replace(/^[a-g]/,s=>s.toUpperCase());
+      const symbol=nameEditor.value.replace(/\s+/g,'').replace(/^[a-h]/,s=>s.toUpperCase());
       state.customName=symbol;
       const variants=chordVariants(symbol,{song_id:state.songId});
       if(!variants.length)return;
