@@ -34,6 +34,7 @@ assert.equal(refs.length,3);assert.equal(refs[0].url,'https://chords.example/a')
 const copiedWithSources=s.plainText({source_candidates:[{url:'https://chords.example/a#fragment',title:'Аккорды',source_check:{status:'available'}},{url:'https://lyrics.example/a',kind:'lyrics',title:'Текст',source_check:{status:'available'}},{url:'https://video.example/a',title:'Запись',source_check:{status:'available'}}],guitar_sheet:[{text:'Строка',cells:[{char_index:0,chords:['Em']},{char_index:5,chords:['Am']}]}]});
 assert.ok(copiedWithSources.endsWith('Источники:\nАккорды — https://chords.example/a\nТекст — https://lyrics.example/a\nЗапись — https://video.example/a'));
 assert.ok(copiedWithSources.includes('Em — 0-0-0-2-2-0'));assert.ok(copiedWithSources.includes('Am — 0-1-2-2-0-x'));
+assert.ok(!copiedWithSources.includes('(оценка)'));
 const sheetExample={title:'Title',artist:'Artist',source_candidates:[{url:'https://chords.example/a',title:'Chords',source_check:{status:'available'}}],guitar_sheet:Array.from({length:5},(_,i)=>({text:'Line '+i,cells:[{char_index:0,chords:['Am']}]}))};
 assert.equal(s.sheetRows(sheetExample).filter(r=>r.kind==='space').length,1);
 assert.ok(s.plainText(sheetExample).startsWith(s.sheetRows(sheetExample).map(r=>r.text).join('\n')));

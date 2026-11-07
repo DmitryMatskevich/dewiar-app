@@ -72,12 +72,13 @@ with tempfile.TemporaryDirectory(prefix='dewiar-live-editor-ui-') as temp, sync_
     start = html.index('const core=')
     end = html.index('</script>', start)
     mock = '''window.calls=[];window.row=ROW;window.audioData=AUDIO;
-const core={on(){},async call(cmd,args){calls.push([cmd,args]);
+window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,args){calls.push([cmd,args]);
  if(cmd==='songs_list')return [structuredClone(row)];
  if(cmd==='song_get')return structuredClone(row);
  if(cmd==='song_full_audio')return {data:audioData};
- if(cmd==='song_phrase_audio')return {data:audioData,start_ms:0,end_ms:8000,phrase_start_ms:0,phrase_end_ms:8000};
+ if(cmd==='song_phrase_audio'){const p=row.phrases.find(p=>p.phrase_id===args.phrase_id);if(window.deferClip)await new Promise(resolve=>window.releaseClip=resolve);return {data:audioData,start_ms:p.start_ms,end_ms:p.end_ms,phrase_start_ms:p.start_ms,phrase_end_ms:p.end_ms};}
  if(cmd==='song_edit_phrase'){
+   if(window.rejectSave)throw Error('Тест: сохранение отклонено');
    const p=row.phrases.find(x=>x.phrase_id===args.phrase_id);
    if(args.word_start!==undefined){let w=p.words.find(x=>x.char_start===args.word_start);if(!w){const token=[...p.text.matchAll(/\\S+/g)].find(x=>x.index===args.word_start);w={text:token[0],char_start:token.index,char_end:token.index+token[0].length,start_ms:args.word_start_ms,end_ms:args.word_end_ms,method:'manual_word_edit_estimated'};p.words.push(w);}const from=w.char_start,to=w.char_end,delta=args.text.length-(to-from);p.text=p.text.slice(0,from)+args.text+p.text.slice(to);p.words.forEach(x=>{if(x===w){x.text=args.text;x.char_end=from+args.text.length;}else if(x.char_start>=to){x.char_start+=delta;x.char_end+=delta;}});}
    else {p.text=args.text;p.words=[];p.alignment_stale=true;}
@@ -132,7 +133,12 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert page.locator('#song-live-edit-text').input_value() == phrase_text
     assert page.locator('#song-live-edit-save').evaluate("e=>e.closest('.song-live-editor-head')!==null")
     assert page.locator('#song-live-edit-save').inner_text() == 'Сохранить'
-    assert page.locator('#song-live-edit-close').count() == 0
+    assert page.locator('#song-live-edit-close').is_visible()
+    assert page.locator('#song-live-edit-previous').is_disabled()
+    assert page.locator('#song-live-edit-next').is_enabled()
+    controls=['play','previous','next','save','close']
+    boxes=[page.locator('#song-live-edit-'+name).bounding_box() for name in controls]
+    assert all(a['x']+a['width']<=b['x'] for a,b in zip(boxes,boxes[1:])),boxes
     live_play = page.locator('#song-live-edit-play')
     assert live_play.count() == 1
     assert 'не выходя из редактора' in live_play.get_attribute('aria-label')
@@ -170,7 +176,7 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert 'C' not in chord_preview.inner_text()
     page.locator('#song-live-edit-save').click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_phrase')")
-    assert page.locator('#song-live-editor').is_hidden()
+    assert page.locator('#song-live-editor').is_visible()
     assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
     assert 'времена слов нужно проверить заново' in page.locator('#song-live-edit-status').inner_text()
     assert page.evaluate("row.phrases[0].text") == 'Я тихо смеюсь.'
@@ -201,6 +207,64 @@ const core={on(){},async call(cmd,args){calls.push([cmd,args]);
     assert args['line_id']=='joined-line-1'
     assert args['text']=='улыбаюсь. цельной четверта.'
     assert page.evaluate("row.phrases.find(p=>p.phrase_id==='phrase-2').text")=='цельной четверта.'
+    # Navigate without leaving the editor. Save persists in place; transitions
+    # save dirty fields, stop the old clip and load the neighbouring phrase.
+    page.locator('.song-paper-edit-lyrics[data-song-edit-line="phrase-1"]').click()
+    page.locator('#song-live-edit-text').fill('Первая фраза исправлена.')
+    page.locator('#song-live-edit-save').click()
+    page.wait_for_function("row.phrases[0].text==='Первая фраза исправлена.'")
+    assert page.locator('#song-live-editor').is_visible()
+    saved_count=page.evaluate("calls.filter(([cmd])=>cmd==='song_edit_phrase').length")
+    assert page.evaluate("SongReview.protectedView(row.song_id)")
+    page.evaluate("handlers.song_instrumental({song_id:row.song_id})")
+    assert page.locator('#song-live-editor').is_visible()
+    page.locator('#song-live-edit-save').click()
+    assert page.evaluate("calls.filter(([cmd])=>cmd==='song_edit_phrase').length")==saved_count
+    page.locator('#song-live-edit-text').fill('Первая фраза после перехода.')
+    page.locator('#song-live-edit-next').click()
+    page.wait_for_function("document.querySelector('#song-live-edit-text').value==='цельной четверта.'")
+    assert page.evaluate("row.phrases[0].text")=='Первая фраза после перехода.'
+    assert page.locator('#song-live-edit-next').is_disabled()
+    assert page.locator('#song-live-edit-previous').is_enabled()
+    assert page.locator('#song-live-edit-target').inner_text().startswith('8.000–10.000 с')
+    live_play.click()
+    page.wait_for_function("!document.querySelector('#song-live-edit-audio').paused")
+    assert page.evaluate("calls.filter(([cmd])=>cmd==='song_phrase_audio').at(-1)[1].phrase_id")=='phrase-2'
+    page.locator('#song-live-edit-previous').click()
+    assert page.locator('#song-live-edit-audio').evaluate('(a)=>a.paused')
+    assert page.locator('#song-live-edit-text').input_value()=='Первая фраза после перехода.'
+    assert page.locator('#song-review-audio').evaluate('(a)=>a.paused')
+    page.locator('#song-live-edit-text').fill('Несохранённая правка.')
+    page.evaluate('window.rejectSave=true')
+    page.locator('#song-live-edit-next').click()
+    assert 'сохранение отклонено' in page.locator('#song-live-edit-status').inner_text()
+    assert page.locator('#song-live-edit-text').input_value()=='Несохранённая правка.'
+    assert page.locator('#song-live-editor').is_visible()
+    page.evaluate('window.rejectSave=false')
+    page.locator('#song-live-edit-next').click()
+    page.wait_for_function("row.phrases[0].text==='Несохранённая правка.'")
+    page.locator('#song-live-edit-close').click()
+    assert page.locator('#song-live-editor').is_hidden()
+    assert page.locator('#song-live-edit-audio').evaluate('(a)=>a.paused')
+
+    page.locator('.song-paper-edit-lyrics[data-song-edit-line="phrase-1"]').click()
+    page.evaluate('window.deferClip=true')
+    live_play.click()
+    page.wait_for_function('!!window.releaseClip')
+    page.locator('#song-live-edit-next').click()
+    page.evaluate('window.deferClip=false;window.releaseClip()')
+    assert page.locator('#song-live-edit-text').input_value()=='цельной четверта.'
+    assert page.locator('#song-live-edit-audio').evaluate('(a)=>a.paused')
+    assert live_play.is_enabled()
+    page.locator('#song-live-edit-previous').click()
+    evidence=ROOT/'work/phrase-navigation-check';evidence.mkdir(parents=True,exist_ok=True)
+    page.locator('#song-live-editor').screenshot(path=str(evidence/'editor-wide.png'))
+    page.set_viewport_size({'width':375,'height':812})
+    for selector in ('#song-live-edit-play','#song-live-edit-previous','#song-live-edit-next','#song-live-edit-save','#song-live-edit-close'):
+        assert page.locator(selector).is_visible()
+        box=page.locator(selector).bounding_box()
+        assert 0<=box['x'] and box['x']+box['width']<=375,(selector,box)
+    page.locator('#song-live-editor').screenshot(path=str(evidence/'editor.png'))
     assert not errors, errors
     browser.close()
 

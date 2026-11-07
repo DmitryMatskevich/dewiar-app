@@ -265,8 +265,8 @@ window.SongSheet = (() => {
       .find(chord=>transpose(chord.name,offset(row))===name);
     const fingerings=names.map(name=>{
       const source=evidenceFor(name)||{};
-      const evidence={...source,...voicingAtShift(source,offset(row)),song_id:row.song_id}, exact=exactVoicing(evidence), pinned=pinnedVoicing(name,row.song_id), shape=chordFingering(name,evidence);
-      return `${name} — ${shape || 'позиция не определена'}${pinned?' (закреплено)':shape && !exact?' (оценка)':''}`;
+      const evidence={...source,...voicingAtShift(source,offset(row)),song_id:row.song_id}, pinned=pinnedVoicing(name,row.song_id), shape=chordFingering(name,evidence);
+      return `${name} — ${shape || 'позиция не определена'}${pinned?' (закреплено)':''}`;
     });
     const sources=sourceLinks(row).map(source=>`${source.title} — ${source.url}`);
     const extras=[];
@@ -662,7 +662,13 @@ window.SongSheet = (() => {
       </div><div class="song-current-edit-wrap"><div class="song-copy-preview" id="song-copy-panel" hidden><p class="hint">Текст в выбранной тональности, аппликатуры использованных аккордов и проверенные ссылки на источники.</p><textarea id="song-copy-preview" aria-label="Текст с аккордами, аппликатурами и источниками" readonly rows="16" wrap="off">${esc(plainText(row))}</textarea></div>
       <section class="song-live-editor" id="song-live-editor" aria-label="Правка текущей фразы и аккордов" hidden>
         <audio id="song-live-edit-audio" preload="auto" aria-label="Прослушивание текущей фразы"></audio>
-        <div class="song-live-editor-head"><div><b>Правка во время прослушивания</b><p class="hint" id="song-live-edit-target"></p></div><div class="actions"><button type="button" class="btn song-icon-btn" id="song-live-edit-play" title="Проиграть текущую фразу, не выходя из редактора" aria-label="Проиграть текущую фразу, не выходя из редактора">${icon('play')}</button><button type="button" class="btn primary small" id="song-live-edit-save" title="Сохранить правку и закрыть редактор">Сохранить</button></div></div>
+        <div class="song-live-editor-head"><div><b>Правка во время прослушивания</b><p class="hint" id="song-live-edit-target"></p></div><div class="actions">
+          <button type="button" class="btn song-icon-btn" id="song-live-edit-play" title="Проиграть текущую фразу, не выходя из редактора" aria-label="Проиграть текущую фразу, не выходя из редактора">${icon('play')}</button>
+          <button type="button" class="btn song-icon-btn" id="song-live-edit-previous" title="Сохранить изменения и перейти к предыдущей фразе в редакторе" aria-label="Предыдущая фраза">${icon('previous')}</button>
+          <button type="button" class="btn song-icon-btn" id="song-live-edit-next" title="Сохранить изменения и перейти к следующей фразе в редакторе" aria-label="Следующая фраза">${icon('next')}</button>
+          <button type="button" class="btn primary small" id="song-live-edit-save" title="Сохранить текст и аккорды, оставаясь в редакторе фразы">Сохранить</button>
+          <button type="button" class="btn small" id="song-live-edit-close" title="Закрыть редактор фразы и вернуться к тексту песни">Закрыть</button>
+        </div></div>
         <div class="song-live-preview" id="song-live-preview"><b>Фраза после правки</b><div class="song-live-preview-chords" id="song-live-edit-preview-chords" aria-hidden="true"></div><p id="song-live-edit-preview" aria-live="polite"></p></div>
         <p class="song-save-status" id="song-live-edit-status" role="status">После сохранения песня останется на паузе.</p>
         <input type="hidden" id="song-live-edit-mode" value="phrase">

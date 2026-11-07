@@ -431,7 +431,7 @@
     } catch(error) { if(request===openRequest)toast(error.message || 'Песня не найдена',4000,'bad');return false; }
   }
   function closeDetail() { stopCard(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
-  async function load() { try { state.rows = await call("songs_list", { q: state.query, status: state.status, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
+  async function load() { try { state.rows = await call("songs_list", { q: state.query, status: state.status, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
   async function create(source, title, artist) { try { const row = await call("song_create", { source, title, artist }); await load(); renderDetail(row); if (source === "query") renderDetail(await call("song_find_sources", {song_id: row.song_id})); } catch (error) { toast(error.message || "Не удалось создать карточку", 4000, "bad"); } }
   async function createMicSong() {
     const title=`Запись с микрофона · ${new Date().toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`;
@@ -551,7 +551,9 @@
   core.on("song_capture", () => { if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load(); });
   core.on("song_analysis", () => { if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load(); });
   core.on("song_instrumental", event => {
-    if (state.current?.song_id === event.song_id) call("song_get", {song_id:event.song_id}).then(renderDetail).catch(()=>{});
+    if (state.current?.song_id === event.song_id && !SongReview.protectedView(event.song_id)) call("song_get", {song_id:event.song_id}).then(fresh=>{
+      if(state.current?.song_id===event.song_id&&!SongReview.protectedView(event.song_id))renderDetail(fresh);
+    }).catch(()=>{});
     if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load();
   });
   core.on("settings", () => { const on = !S || !S.features || S.features.songs !== false; const b = document.querySelector('nav button[data-p="songs"]'); if (b) b.hidden = !on; if (!on && document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) document.querySelector('nav button[data-p="home"]')?.click(); });

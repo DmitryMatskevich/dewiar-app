@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         phrase_shape='-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())
         assert phrase_shape!=chosen_shape
         pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
-        page.locator('#song-live-editor').wait_for(state='hidden')
+        page.locator('#song-live-editor').wait_for(state='visible')
         assert store.get(sid)['chords'][0]['voicing_fingering']==phrase_shape
 
         # Editing a displayed transposition must not transpose the stored name twice.
