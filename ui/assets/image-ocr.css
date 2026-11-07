@@ -16,4 +16,15 @@ body.light .image-ocr-panel { background:#f1f5fa; color:#192b40; }
 body.light .image-ocr-panel textarea { background:white; }
 body.light .image-ocr-panel #image-ocr-error { color:#9b1a29; }
 .att,.ch-chip { flex-wrap:wrap; }
-.att button.image-ocr-action,.ch-chip button.image-ocr-action { min-height:30px; padding:4px 7px; font-size:12px; line-height:1.3; border:1px solid currentColor; border-radius:7px; color:inherit; flex:none; }
+.att button.image-ocr-action,.ch-chip button.image-ocr-action { display:grid; place-items:center; width:28px; height:28px; padding:3px; border:0; border-radius:50%; color:inherit; background:transparent; flex:none; font-size:0; }
+.att button.image-ocr-action:hover,.ch-chip button.image-ocr-action:hover { color:var(--ink); background:rgba(255,255,255,.1); }
+.att button.image-ocr-action svg,.ch-chip button.image-ocr-action svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.att button.image-extract-task { display:grid; place-items:center; width:26px; height:26px; padding:3px; border:0; border-radius:50%; color:var(--muted); background:transparent; flex:none; }
+.att button.image-extract-task:hover { color:var(--ink); background:rgba(255,255,255,.1); }
+.att button.image-extract-task svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+
+#bot .native-operation-result { margin-top:8px; padding-top:8px; border-top:1px solid rgba(127,127,127,.2); }
+#bot .native-operation-result pre { max-height:220px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0; padding:8px; border-radius:9px; background:rgba(127,127,127,.10); font:inherit; }
+#bot .native-operation-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+#bot .native-operation-actions button { border:0; outline:0; border-radius:9px; padding:6px 10px; color:inherit; background:rgba(127,127,127,.16); font:inherit; cursor:pointer; }
+#bot .native-operation-actions button:hover { background:rgba(127,127,127,.25); }

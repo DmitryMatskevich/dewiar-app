@@ -230,7 +230,8 @@ function chatAttsRender() {
     const attachment = chAtts[+b.dataset.i];
     if (attachment.kind !== "image") return;
     const ocr = document.createElement("button"); ocr.type = "button"; ocr.className = "image-ocr-action";
-    ocr.textContent = "Извлечь текст"; ocr.title = "Распознать текст картинки локально (OCR)";
+    ocr.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM7 8h10M7 11h7M7 14h10M7 17h6"/><path d="M17 15v4m-2-2h4"/></svg>`;
+    ocr.title = "Распознать текст картинки локальным OCR и вставить его в черновик"; ocr.setAttribute("aria-label", ocr.title);
     ocr.onclick = () => window.extractImageText(attachment, text => {
       const input = $("#ch-text"); input.value = [input.value.trimEnd(), text].filter(Boolean).join("\n\n");
       input.dispatchEvent(new Event("input", {bubbles:true})); input.focus();

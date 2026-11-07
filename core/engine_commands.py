@@ -1118,6 +1118,38 @@ class CommandsMixin:
             # картинки (вставленные, снимок экрана) — как файлы: сохраняются во «Входящие» и видны в ленте «Чата»
             images = []
             files = list(a.get("files") or [])
+            text_request = str(a.get('text') or '')
+            from file_converter import is_text_extraction_command
+            extract_text = is_text_extraction_command(text_request)
+            if extract_text:
+                if not files:
+                    for k, im in enumerate(([a['image']] if a.get('image') else []) + list(a.get('images') or [])):
+                        mime = im[5:im.index(';')] if im.startswith('data:') and ';' in im[:40] else 'image/jpeg'
+                        ext = {'image/png':'.png','image/webp':'.webp','image/gif':'.gif','image/tiff':'.tiff','image/bmp':'.bmp'}.get(mime,'.jpg')
+                        files.append({'name':time.strftime('Картинка %d.%m %H-%M-%S') + (f' ({k + 1})' if k else '') + ext, 'b64':im})
+                if not files:
+                    self._say_quick('Прикрепите изображение или PDF и повторите команду «Лира, извлечь текст».', text_request)
+                    return True
+                task = self.tasks.create_text_extraction(files, goal=text_request)
+                self._say_quick(f'Начала локально извлекать текст из вложения. Покажу его здесь сверху; файл также сохранён в результатах задачи {task.id}.', text_request)
+                return task.public()
+            from file_converter import is_conversion_command, requested_target
+            conversion_target = requested_target(a.get("text", ""))
+            if is_conversion_command(a.get("text", "")) and not conversion_target:
+                self._say_quick("Укажите формат результата: PDF, DOCX (Word), XLSX (Excel), CSV, HTML, MD, TXT, PNG, GIF, WAV или MP3.", a.get("text", ""))
+                return True
+            if conversion_target:
+                if not files and not (a.get("images") or a.get("image")):
+                    self._say_quick("Прикрепите файл и повторите команду: «Лира, преобразовать в PDF», например.", a.get("text", ""))
+                    return True
+                if not files:
+                    for k, im in enumerate(([a["image"]] if a.get("image") else []) + list(a.get("images") or [])):
+                        mime = im[5:im.index(";")] if im.startswith("data:") and ";" in im[:40] else "image/jpeg"
+                        ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(mime, ".jpg")
+                        files.append({"name": time.strftime("Картинка %d.%m %H-%M-%S") + (f" ({k + 1})" if k else "") + ext, "b64": im})
+                task = self.tasks.create_file_conversion(files, conversion_target, goal=a.get("text", ""))
+                self._say_quick(f"Начала локально преобразовывать вложение в {conversion_target.upper()}. Покажу готовый файл здесь сверху; он также сохранён в задаче {task.id}.", a.get("text", ""))
+                return task.public()
             for k, im in enumerate(([a["image"]] if a.get("image") else []) + list(a.get("images") or [])):
                 mime = im[5:im.index(";")] if im.startswith("data:") and ";" in im[:40] else "image/jpeg"
                 ext = {"image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}.get(mime, ".jpg")
@@ -1988,6 +2020,81 @@ class CommandsMixin:
         if cmd == "task_create":
             t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""), start=a.get("start", True),team=a.get('team'))
             return t.public()
+        if cmd == "file_convert":
+            t = self.tasks.create_file_conversion(a.get("files") or [], a.get("target") or "", goal=a.get("goal", ""))
+            return t.public()
+        if cmd == 'text_extract':
+            t = self.tasks.create_text_extraction(a.get('files') or [], goal=a.get('goal', ''))
+            return t.public()
+        if cmd == 'task_read_result':
+            t = self.tasks.get(a.get('id'))
+            rel = str(a.get('path') or '')
+            allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
+            src = (t.dir / rel).resolve()
+            outdir = (t.dir / 'outputs').resolve()
+            if t.data.get('workflow') not in {'text-extraction', 'file-conversion'} or rel not in allowed or outdir not in src.parents:
+                raise ValueError('Такого текстового результата у задачи нет')
+            if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
+                raise ValueError('Этот результат нельзя показать как текст')
+            content = src.read_text(encoding='utf-8', errors='replace')
+            return {'text':content[:30000], 'truncated':len(content) > 30000}
+        if cmd in {"file_convert_begin", "file_convert_chunk", "file_convert_finish", "file_convert_abort"}:
+            import base64 as _b64
+            import shutil as _shutil
+            import time as _time
+            import uuid as _uuid
+            from file_converter import normalise_target as _target, targets_for as _targets
+            sessions = self.__dict__.setdefault("_file_conversion_uploads", {})
+            lock = self.__dict__.setdefault("_file_conversion_uploads_lock", threading.RLock())
+            upload_id = str(a.get("upload_id") or "")
+            if cmd == "file_convert_begin":
+                name = Path(str(a.get("name") or "file")).name
+                try: size = int(a.get("size") or 0)
+                except (TypeError, ValueError): raise ValueError("Не удалось определить размер файла")
+                target_fmt = _target(a.get("target") or "")
+                if not name or not size or size > 2 * 1024**3: raise ValueError("Поддерживаются файлы от 1 байта до 2 ГБ")
+                if target_fmt not in _targets(name): raise ValueError(f"Формат .{Path(name).suffix.lstrip('.') or '?'} нельзя преобразовать в .{target_fmt}")
+                root = self.workspace.ensure() / ".media-cache" / "file-conversion-uploads"
+                root.mkdir(parents=True, exist_ok=True)
+                now = _time.time()
+                with lock:
+                    for key, old in list(sessions.items()):
+                        if now - old["created"] > 3600:
+                            _shutil.rmtree(old["dir"], ignore_errors=True); sessions.pop(key, None)
+                    token = _uuid.uuid4().hex
+                    folder = root / token; folder.mkdir()
+                    path = folder / re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", name)[:140]
+                    path.touch()
+                    sessions[token] = {"dir": folder, "path": path, "name": name, "size": size,
+                                       "received": 0, "target": target_fmt, "created": now}
+                return {"upload_id": token, "chunk_bytes": 2 * 1024 * 1024}
+            with lock:
+                session = sessions.get(upload_id)
+                if not session:
+                    raise ValueError("Загрузка истекла или не найдена. Начните преобразование заново.")
+                if cmd == "file_convert_abort":
+                    sessions.pop(upload_id, None); folder = session["dir"]
+                    _shutil.rmtree(folder, ignore_errors=True)
+                    return {"aborted": True}
+                if cmd == "file_convert_chunk":
+                    raw = str(a.get("b64") or "")
+                    if raw.startswith("data:"): raw = raw.split(",", 1)[-1]
+                    try: data = _b64.b64decode(raw, validate=True)
+                    except (ValueError, _b64.binascii.Error) as exc: raise ValueError("Блок файла повреждён") from exc
+                    if not data or len(data) > 2 * 1024 * 1024 or session["received"] + len(data) > session["size"]:
+                        raise ValueError("Неверный размер блока файла")
+                    with session["path"].open("ab") as stream: stream.write(data)
+                    session["received"] += len(data)
+                    return {"received": session["received"], "size": session["size"]}
+                if session["received"] != session["size"]:
+                    raise ValueError(f"Загружено {session['received']} из {session['size']} байт")
+                sessions.pop(upload_id, None)
+            try:
+                task = self.tasks.create_file_conversion_from_paths([{"name": session["name"], "path": session["path"]}],
+                                                                    session["target"], goal=a.get("goal", ""))
+                return task.public()
+            finally:
+                _shutil.rmtree(session["dir"], ignore_errors=True)
         if cmd == 'media_transcribe':
             sources = a.get('sources') or []
             uploads = a.get('files') or []

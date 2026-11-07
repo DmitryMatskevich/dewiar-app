@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -521,6 +522,254 @@ class TaskManager:
             task.save()
             return self.start(task.id)
 
+    def create_file_conversion(self, files, target, goal=''):
+        """Create a parallel, deterministic conversion workflow. `files` are current-message uploads."""
+        import base64
+        from file_converter import normalise_target
+        target = normalise_target(target)
+        if not isinstance(files, list) or not 1 <= len(files) <= 10:
+            raise ValueError('Прикрепите от 1 до 10 файлов для преобразования')
+        prepared, total = [], 0
+        for item in files:
+            if not isinstance(item, dict):
+                raise ValueError('Не удалось прочитать вложение')
+            name = Path(str(item.get('name') or 'file')).name
+            if not name or name in {'.', '..'}:
+                raise ValueError('У вложения нет имени файла')
+            raw = str(item.get('b64') or '')
+            if raw.startswith('data:'):
+                raw = raw.split(',', 1)[-1]
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError(f'Вложение «{name}» повреждено при передаче') from exc
+            if not data:
+                raise ValueError(f'Файл «{name}» пуст')
+            if len(data) > 11 * 1024 * 1024:
+                raise ValueError(f'«{name}» больше 11 МБ; пока преобразуйте его из папки Dewiar')
+            total += len(raw)
+            prepared.append((name[:160], data))
+        if total > 14_000_000:
+            raise ValueError('Суммарный размер вложений слишком велик для одного сообщения. Запустите преобразование по одному файлу.')
+        from file_converter import targets_for
+        for name, _ in prepared:
+            if target not in targets_for(name):
+                raise ValueError(f'Формат .{Path(name).suffix.lstrip(".") or "?"} нельзя преобразовать в .{target}')
+        return self._create_conversion_task(prepared, target, goal)
+
+    def create_file_conversion_from_paths(self, files, target, goal=''):
+        """Stage already-uploaded files without holding multi-hundred-MB data in RAM."""
+        from file_converter import normalise_target, targets_for
+        target = normalise_target(target)
+        if not isinstance(files, list) or not 1 <= len(files) <= 10:
+            raise ValueError('Прикрепите от 1 до 10 файлов для преобразования')
+        prepared = []
+        for item in files:
+            path = Path(item.get('path') or '').resolve()
+            name = Path(str(item.get('name') or path.name)).name
+            if not path.is_file() or not name:
+                raise ValueError('Загруженный файл не найден')
+            if path.stat().st_size > 2 * 1024**3:
+                raise ValueError(f'«{name}» больше 2 ГБ')
+            if target not in targets_for(name):
+                raise ValueError(f'Формат .{Path(name).suffix.lstrip(".") or "?"} нельзя преобразовать в .{target}')
+            prepared.append((name[:160], path))
+        return self._create_conversion_task(prepared, target, goal)
+
+    def _create_conversion_task(self, prepared, target, goal=''):
+        import shutil
+        title = f'Преобразовать {len(prepared)} файл' + ('а' if 2 <= len(prepared) <= 4 else 'ов' if len(prepared) > 4 else '') + f' в {target.upper()}'
+        task = self.create(title, (goal or f'Преобразовать вложения в формат {target.upper()}').strip(), start=False)
+        input_dir = task.dir / 'inputs'
+        input_dir.mkdir(parents=True, exist_ok=True)
+        inputs = []
+        for index, (name, data) in enumerate(prepared, 1):
+            clean = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', name).strip(' .')[:140] or f'file-{index}'
+            dest = input_dir / f'{index:02d}-{clean}'
+            if isinstance(data, Path):
+                shutil.copyfile(data, dest)
+                size = dest.stat().st_size
+            else:
+                dest.write_bytes(data)
+                size = len(data)
+            inputs.append({'path': dest.relative_to(task.dir).as_posix(), 'name': clean, 'size': size})
+        plan = ['Проверить доступность всех входных файлов и целевого формата',
+                f'Преобразовать {len(inputs)} файл(а) локальными средствами без языковых моделей',
+                'Проверить и сохранить результаты в outputs/']
+        (task.dir / 'план.md').write_text('# ' + task.title + '\n\n' + '\n'.join('- [ ] ' + x for x in plan) + '\n', encoding='utf-8')
+        task.data.update(workflow='file-conversion', conversion_target=target, conversion_inputs=inputs,
+                         progress=[0, len(inputs)], activity='Подготовка к преобразованию…', conversion_workers=min(4, len(inputs)))
+        task.save()
+        task.journal(f'Создана локальная задача преобразования: {len(inputs)} файл(а) → {target.upper()}. Модели не используются.')
+        return self.start(task.id)
+
+    def create_text_extraction(self, files, goal=''):
+        """Stage attached images/PDFs for local OCR or PDF text-layer extraction."""
+        import base64
+        import shutil
+        if not isinstance(files, list) or not 1 <= len(files) <= 10:
+            raise ValueError('Прикрепите от 1 до 10 изображений или PDF-файлов')
+        prepared, total = [], 0
+        for item in files:
+            if not isinstance(item, dict):
+                raise ValueError('Не удалось прочитать вложение')
+            name = Path(str(item.get('name') or 'file')).name
+            ext = Path(name).suffix.lower()
+            if ext != '.pdf' and ext not in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff'}:
+                raise ValueError(f'Извлечение текста поддерживает изображения и PDF: «{name}»')
+            raw = str(item.get('b64') or '')
+            if raw.startswith('data:'):
+                raw = raw.split(',', 1)[-1]
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError(f'Вложение «{name}» повреждено при передаче') from exc
+            if not data or len(data) > 11 * 1024 * 1024:
+                raise ValueError(f'«{name}»: выберите непустой файл размером до 11 МБ')
+            total += len(raw)
+            prepared.append((name[:160], data))
+        if total > 14_000_000:
+            raise ValueError('Суммарный размер вложений слишком велик. Запустите извлечение по одному файлу.')
+        title = f'Извлечь текст из {len(prepared)} файл' + ('а' if 2 <= len(prepared) <= 4 else 'ов' if len(prepared) > 4 else '')
+        task = self.create(title, (goal or 'Локально извлечь текст из вложений').strip(), start=False)
+        input_dir = task.dir / 'inputs'; input_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        for index, (name, data) in enumerate(prepared, 1):
+            clean = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', name).strip(' .')[:140] or f'file-{index}'
+            path = input_dir / f'{index:02d}-{clean}'; path.write_bytes(data)
+            records.append({'path': path.relative_to(task.dir).as_posix(), 'name': clean, 'size': len(data)})
+        checklist = ['Распознать текст на изображениях локальным OCR или извлечь PDF-текстовый слой',
+                     'Сохранить текстовые файлы в outputs/ без использования моделей']
+        (task.dir / 'план.md').write_text('# ' + task.title + '\n\n' + '\n'.join('- [ ] ' + x for x in checklist) + '\n', encoding='utf-8')
+        task.data.update(workflow='text-extraction', extraction_inputs=records,
+                         progress=[0, len(records)], activity='Подготовка к извлечению текста…')
+        task.save(); task.journal(f'Создана задача локального извлечения текста из {len(records)} файл(а). Модели не используются.')
+        return self.start(task.id)
+
+    def _run_text_extraction(self, task):
+        from file_converter import convert
+        output_dir = task.dir / 'outputs'; output_dir.mkdir(parents=True, exist_ok=True)
+        inputs = list(task.data.get('extraction_inputs') or [])
+        results, errors = [], []
+        for index, record in enumerate(inputs, 1):
+            if task.cancel.is_set(): break
+            try:
+                src = task.dir / record['path']; name = Path(record['name'])
+                if name.suffix.lower() == '.pdf':
+                    converted = convert(src, 'txt', output_dir, cancel=task.cancel)
+                    final = Path(converted['path'])
+                else:
+                    import base64
+                    from image_ocr import extract
+                    mime = {'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp',
+                            '.gif':'image/gif','.bmp':'image/bmp','.tif':'image/tiff','.tiff':'image/tiff'}.get(name.suffix.lower(),'image/png')
+                    payload = 'data:' + mime + ';base64,' + base64.b64encode(src.read_bytes()).decode('ascii')
+                    recognized = extract(payload, wait=True)
+                    if recognized.get('status') == 'error': raise ValueError(recognized.get('error') or 'OCR недоступен')
+                    text = recognized.get('text') or ''
+                    final = output_dir / (name.stem + '.txt')
+                    if final.exists(): final = output_dir / (name.stem + f' ({index}).txt')
+                    final.write_text(text, encoding='utf-8')
+                results.append({'path': final.relative_to(task.dir).as_posix(), 'title': final.name, 'source': record['name']})
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f'{record["name"]}: {exc}')
+            task.data.update(progress=[index, len(inputs)], activity=f'Обработано {index} из {len(inputs)} файлов…')
+            task.save(); self._emit(task)
+        stopped = task.cancel.is_set()
+        success = bool(results) and not errors and not stopped
+        summary = (f'Готово: извлечён текст из {len(results)} файл(а).' if success else
+                   f'Извлечение завершено с ошибками. Готово файлов: {len(results)} из {len(inputs)}.' if results else
+                   'Текст не извлечён.')
+        if errors: summary += '\n\nОшибки:\n' + '\n'.join('- ' + error for error in errors)
+        if any(Path(item['name']).suffix.lower() == '.pdf' for item in inputs):
+            summary += '\n\nPDF обрабатывается по доступному текстовому слою; сканированные PDF без текстового слоя требуют распознавания страниц.'
+        (task.dir / 'итог.md').write_text(summary + '\n', encoding='utf-8')
+        task.data.update(status='stopped' if stopped else 'done' if success else 'failed', finished=success,
+                         activity='', outputs=results, result=summary, error='; '.join(errors)[:2000] if errors else '',
+                         progress=[len(results) + len(errors), len(inputs)])
+        task.journal(summary)
+        self.host.announce('Задача извлечения текста ' + ('готова. Результаты — во вкладке «Результаты».' if success else 'завершилась с ошибками. Подробности — в журнале.'))
+        task.save(); self._beat(task); self._emit(task)
+
+    def _run_file_conversion(self, task):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from file_converter import ConversionError, convert
+        import threading as _threading
+        output_dir = task.dir / 'outputs'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        inputs = list(task.data.get('conversion_inputs') or [])
+        target = task.data.get('conversion_target') or ''
+        lock, finished, results = _threading.Lock(), [0], []
+        task.data.update(activity='Преобразование файлов…', finished=False, progress=[0, len(inputs)])
+        task.journal(f'Начал локальное преобразование файлов (параллельных потоков: {min(4, len(inputs))}).')
+        self._emit(task)
+
+        def worker(item):
+            src = (task.dir / item['path']).resolve()
+            if task.dir.resolve() not in src.parents:
+                raise ConversionError('Небезопасный путь входного файла')
+            temporary = output_dir / '.conversion' / Path(item['path']).stem
+            temporary.mkdir(parents=True, exist_ok=True)
+            converted = convert(src, target, temporary, cancel=task.cancel)
+            return item, converted
+
+        try:
+            errors = []
+            with ThreadPoolExecutor(max_workers=max(1, min(4, len(inputs))), thread_name_prefix=f'convert-{task.id}') as pool:
+                futures = {pool.submit(worker, item): item for item in inputs}
+                for future in as_completed(futures):
+                    item = futures[future]
+                    try:
+                        record, converted = future.result()
+                        converted_path = Path(converted['path'])
+                        with lock:
+                            final = output_dir / converted_path.name
+                            n = 2
+                            while final.exists():
+                                final = output_dir / f'{converted_path.stem} ({n}){converted_path.suffix}'
+                                n += 1
+                            converted_path.replace(final)
+                            results.append({'path': final.relative_to(task.dir).as_posix(), 'title': final.name,
+                                            'source': record['name'], 'backend': converted.get('backend', ''),
+                                            'warning': converted.get('warning', '')})
+                        if converted.get('warning'):
+                            task.journal(f'Примечание для «{record["name"]}»: {converted["warning"]}')
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f'{item["name"]}: {exc}')
+                    finally:
+                        with lock:
+                            finished[0] += 1
+                            task.data.update(progress=[finished[0], len(inputs)],
+                                             activity=f'Преобразовано {finished[0]} из {len(inputs)} файлов…')
+                            task.save()
+                        self._emit(task)
+            shutil.rmtree(output_dir / '.conversion', ignore_errors=True)
+            stopped = task.cancel.is_set()
+            success = bool(results) and not errors and not stopped
+            summary = (f'Готово: {len(results)} файл(а) преобразовано в {target.upper()}.' if success else
+                       f'Преобразование завершено с ошибками. Готово файлов: {len(results)} из {len(inputs)}.' if results else
+                       'Преобразование не выполнено.')
+            if errors:
+                summary += '\n\nОшибки:\n' + '\n'.join('- ' + e for e in errors)
+            (task.dir / 'итог.md').write_text(summary + '\n', encoding='utf-8')
+            (task.dir / 'план.md').write_text('\n'.join('- [x] ' + line for line in [
+                'Проверить доступность всех входных файлов и целевого формата',
+                f'Преобразовать {len(inputs)} файл(а) локальными средствами без языковых моделей',
+                'Проверить и сохранить результаты в outputs/']) + '\n', encoding='utf-8')
+            task.data.update(status='stopped' if stopped else 'done' if success else 'failed', finished=success,
+                             activity='', outputs=results, result=summary,
+                             error='; '.join(errors)[:2000] if errors else '', conversion_errors=errors,
+                             progress=[finished[0], len(inputs)])
+            task.journal(summary)
+            self.host.announce(f'Задача «{task.title}» ' + ('готова. Результаты — во вкладке «Результаты».' if success else 'завершилась с ошибками. Подробности — в журнале задачи.'))
+        except Exception as exc:  # noqa: BLE001
+            task.data.update(status='stopped' if task.cancel.is_set() else 'failed', activity='', error=str(exc))
+            task.journal(f'Ошибка локального преобразования: {exc}')
+        finally:
+            self._beat(task)
+            task.save()
+            self._emit(task)
+
     def _run_media(self, t):
         try:
             from transcript_editor import VERSION as CLEAN_VERSION
@@ -883,8 +1132,11 @@ class TaskManager:
         import time as _t
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
-        runner = (self._run_link_download if t.data.get('workflow') == 'link-download' else self._run_media if t.data.get('workflow') == 'media-transcription'
-                  else self._run_media_translation if t.data.get('workflow') == 'video-translation' else self._run)
+        runner = (self._run_link_download if t.data.get('workflow') == 'link-download' else
+                  self._run_media if t.data.get('workflow') == 'media-transcription' else
+                  self._run_media_translation if t.data.get('workflow') == 'video-translation' else
+                  self._run_file_conversion if t.data.get('workflow') == 'file-conversion' else
+                  self._run_text_extraction if t.data.get('workflow') == 'text-extraction' else self._run)
         t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
         self._emit(t)

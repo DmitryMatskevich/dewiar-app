@@ -1,4 +1,4 @@
-"""Real HUD and Studio attachment actions: local OCR, review/copy/insert, failures and stale reads."""
+"""Studio image OCR review/copy/insert; HUD task OCR and top results live in file_converter_ui_test."""
 import base64
 import io
 import re
@@ -11,7 +11,7 @@ image=Image.new('RGB',(2000,100),'white');buffer=io.BytesIO();image.save(buffer,
 URL='data:image/png;base64,'+base64.b64encode(buffer.getvalue()).decode()
 with sync_playwright() as p:
     browser=p.chromium.launch()
-    for name in ('hud','settings'):
+    for name in ('settings',):
         page=browser.new_page(viewport={'width':420,'height':850});errors=[]
         page.on('pageerror',lambda error:errors.append(str(error)))
         page.route(re.compile(r'^https?://'),lambda route:route.abort())
@@ -72,4 +72,4 @@ const file=new File([bytes],'pasted.png',{type:'image/png'});await window[add]([
         assert not errors,errors
         page.close()
     browser.close()
-print('ALL OK: HUD + Studio pasted image, original OCR pixels, review/edit/copy/insert, literal text, no auto-send, empty/error/stale states, responsive layout, removal')
+print('ALL OK: Studio pasted image, original OCR pixels, review/edit/copy/insert, literal text, no auto-send, empty/error/stale states, responsive layout, removal')

@@ -10,7 +10,7 @@ MAX_PIXELS = 36_000_000
 _LOCK = threading.Lock()
 
 
-def extract(data_url):
+def extract(data_url, *, wait=False):
     from PIL import Image, ImageOps
     from ocr import recognize_result
 
@@ -25,7 +25,7 @@ def extract(data_url):
         raise ValueError("Не удалось прочитать данные картинки.") from exc
     if not data or len(data) > MAX_BYTES:
         raise ValueError("Для OCR выберите непустую картинку размером до 10 МБ.")
-    if not _LOCK.acquire(blocking=False):
+    if not _LOCK.acquire(blocking=wait):
         raise ValueError("Другая картинка уже распознаётся. Дождитесь результата.")
     try:
         try:

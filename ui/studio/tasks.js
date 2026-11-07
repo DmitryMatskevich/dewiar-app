@@ -141,8 +141,8 @@ function renderPlan(text, live, activity) {
     ${live && activity ? `<div class="pnow"><i class="tspin"></i><span>${escH(activity)}</span></div>` : ""}
     <div class="hint" style="margin-top:8px">Выполнено ${done} из ${items.length}</div>`;
 }
-const OUT_ICON = { html: "🌐", htm: "🌐", pdf: "📕", png: "🖼", jpg: "🖼", jpeg: "🖼", webp: "🖼", svg: "🖼", md: "📝", txt: "📝", srt: "💬",
-                   csv: "📊", xlsx: "📊", docx: "📄", pptx: "📽", mp3: "🎵", wav: "🎵", mp4: "🎬", zip: "🗜" };
+const OUT_ICON = { html: "🌐", htm: "🌐", pdf: "📕", png: "🖼", jpg: "🖼", jpeg: "🖼", webp: "🖼", gif: "🖼", bmp: "🖼", tif: "🖼", tiff: "🖼", svg: "🖼", md: "📝", txt: "📝", srt: "💬",
+                   csv: "📊", tsv: "📊", xlsx: "📊", docx: "📄", odt: "📄", pptx: "📽", mp3: "🎵", mpeg: "🎵", wav: "🎵", flac: "🎵", ogg: "🎵", opus: "🎵", m4a: "🎵", aac: "🎵", mp4: "🎬", zip: "🗜" };
 /* Результат показывается прямо с диска (file://): # и ? в имени файла иначе читаются как якорь и строка запроса;
    t.dir — абсолютный путь ядра, в Windows с буквой диска и «\» -> file:///C:/… */
 function outUrl(t, rel) { const p = (t.dir + "/" + rel).replace(/\\/g, "/"); return "file://" + (p.startsWith("/") ? "" : "/") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F"); }

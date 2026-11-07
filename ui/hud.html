@@ -265,7 +265,7 @@
   #task .tbtn button:first-child { background: var(--brand); }
   #task .tbtn button:hover { filter: brightness(1.15); } #task .tbtn button:disabled { opacity: .6; }
   #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(214,228,240,.3); border-top-color: #D6E4F0; animation: tspin .9s linear infinite; flex: none; }
-  #bar #b-tasks { position: relative; color: #77dfb4; }
+  #bar #b-tasks { position: relative; color: var(--muted); }
   #b-tasks[hidden] { display: none; }
   #b-tasks.working { animation: taskPulse 1.8s ease-in-out infinite; }
   #bar #b-tasks.attention { color: #ffce77; }
@@ -458,6 +458,13 @@
   .att .ic { display: grid; place-items: center; background: rgba(139,140,247,.25); font-size: 9.5px; font-weight: 600; letter-spacing: .02em; }
   .att span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
   .att button { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 3px; }
+  .att .att-convert { width: 25px; height: 25px; flex: none; display: grid; place-items: center; padding: 0; border-radius: 50%; color: #93b2ff; background: rgba(99,130,235,.14); }
+  .att .att-convert:hover, .att .att-convert[aria-expanded="true"] { color: #fff; background: rgba(86,120,232,.48); }
+  .att-convert svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .att .att-format-picker { position: absolute; z-index: 30; top: calc(100% + 5px); right: 2px; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 1px solid rgba(255,255,255,.17); border-radius: 10px; background: #202634; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+  .att-format-picker[hidden] { display: none; }
+  .att .att-format-picker button { padding: 6px 8px; border-radius: 6px; color: var(--ink); font-size: 11px; text-align: left; }
+  .att .att-format-picker button:hover { background: rgba(255,255,255,.12); color: #fff; }
   body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
 
   #bar { flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; margin-top: 8px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; position: relative; z-index: 2; }
@@ -737,10 +744,10 @@ body.mini #assistant-topbar{display:none}
     <button class="btn" id="b-type" hidden title="Написать вопрос"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
     <button class="btn" id="b-team" hidden title="Кто отвечает — выбрать персонажа"><i id="team-dot" class="gi"></i><svg class="chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
     <button class="btn" id="a-meet" title="Начать встречу: запись экрана и двух дорожек звука" aria-label="Начать встречу"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h5M8 12h3M16 10v4"/><path d="M6 22h12"/></svg></button>
-    <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <button class="btn" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
     <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-tasks" hidden title="Задачи — ход выполнения" aria-label="Открыть задачи"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12h8M8 16h5"/></svg><span id="b-tasks-count" hidden aria-hidden="true"></span></button>
+    <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания" aria-label="Открыть календарь"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg><span id="b-cal-count" hidden aria-hidden="true"></span></button>
     <button class="btn" data-open-canvas title="Холст и схемы" aria-label="Холст и схемы"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m6 16 4-4 4 3 4-7"/></svg></button>
     <!-- Чат расположен в нижней панели рядом с другими разделами. -->
@@ -1969,6 +1976,7 @@ $('b-notes').onclick = guard($('b-notes'), async () => {
 }, () => 'Ожидается разрешение доступа к файлам в macOS…');
 /* фоновые задачи и обновления — строкой в карточке */
 const tasks = {}, doneAt = {}, dismissed = new Set();
+const isNativeTask = t => ["file-conversion", "text-extraction"].includes(t?.workflow);
 /* Готовая расшифровка открывает сохранённый текст, а не предлагает действия с исходным роликом.
    Экспорт остальных видов задач остаётся доступен; карточка висит 30 минут или пока её не скроют. */
 function renderDone(el, t) {
@@ -2015,6 +2023,49 @@ function renderDone(el, t) {
   });
 }
 function renderTask() { renderTask_(); requestAnimationFrame(fitCap); }
+const nativeResultShown = new Set();
+async function showNativeTaskResult(t) {
+  if (!t || nativeResultShown.has(t.id)) return;
+  nativeResultShown.add(t.id);
+  const outs = t.outputs || [];
+  const extracting = t.workflow === "text-extraction";
+  if (t.status !== "done") {
+    showCap("", `${extracting ? "Не удалось извлечь текст" : "Не удалось преобразовать файл"}: ${t.error || t.result || "ошибка обработки"}`, true);
+    return;
+  }
+  const lines = outs.map(o => o.source ? `${o.source} → ${o.title || o.path}` : (o.title || o.path));
+  showCap("", extracting ? `Текст извлечён${lines.length ? ": " + lines.join("; ") : ""}. Результат:` : `Преобразование завершено${lines.length ? ": " + lines.join("; ") : ""}. Готовые файлы:`);
+  const box = document.createElement("div"); box.className = "native-operation-result";
+  const actions = document.createElement("div"); actions.className = "native-operation-actions";
+  const status = document.createElement("span"); status.className = "native-operation-status"; status.setAttribute("role", "status");
+  const addButton = (label, title, fn) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = title; button.setAttribute("aria-label", title); button.onclick = fn; actions.append(button); return button; };
+  for (const output of outs) {
+    const row = document.createElement("div"); row.textContent = output.source ? `${output.source} → ${output.title || output.path}` : (output.title || output.path); box.append(row);
+    const ext = String(output.path || "").split(".").pop().toLowerCase();
+    if (extracting || ["txt", "md", "html", "csv", "tsv"].includes(ext)) {
+      try {
+        const result = await core.call("task_read_result", {id:t.id,path:output.path});
+        if (!document.body.contains($("cap"))) return;
+        const preview = document.createElement("pre"); preview.textContent = result.text || "Текст не распознан."; box.append(preview);
+        if (result.truncated) { const clipped = document.createElement("div"); clipped.textContent = "Показана первая часть. Полный текст — в файле результата."; box.append(clipped); }
+        addButton("Скопировать текст", "Скопировать показанный текст в буфер обмена", async () => {
+          try { await navigator.clipboard.writeText(result.text || ""); status.textContent = "Текст скопирован."; }
+          catch (_) { status.textContent = "Не удалось записать в буфер обмена. Выделите текст выше и скопируйте вручную."; }
+        });
+      } catch (error) { const note = document.createElement("div"); note.textContent = `Не удалось показать текст: ${error.message}`; box.append(note); }
+    }
+    addButton("Открыть файл", `Открыть результат ${output.title || output.path}`, async () => {
+      try { await core.call("task_open_result", {id:t.id,path:output.path}); status.textContent = `Открыт файл «${output.title || output.path}».`; }
+      catch (error) { status.textContent = error.message || String(error); }
+    });
+    addButton("Сохранить копию", `Сохранить файл ${output.title || output.path} в Загрузки`, async () => {
+      try { const saved = await core.call("task_export", {id:t.id,path:output.path,fmt:"file",reveal:true}); status.textContent = `Сохранено: ${saved.name}`; }
+      catch (error) { status.textContent = error.message || String(error); }
+    });
+  }
+  box.append(actions, status); $("bot").append(box);
+  requestAnimationFrame(fitCap);
+}
 function renderTask_() {
   const all = Object.values(tasks);
   const busy = all.filter(t => ['running','waiting','sleeping'].includes(t.status));
@@ -2033,7 +2084,8 @@ function renderTask_() {
   const act = Object.values(tasks).filter(t => ["running", "waiting"].includes(t.status));
   let t = act.find(x => x.status === "waiting") || act[0];
   const el = $("task");
-  const fresh = Object.values(tasks).filter(x => x.status === "done" && doneAt[x.id] && Date.now() - doneAt[x.id] < 30 * 60e3 && !dismissed.has(x.id))
+  if (t && isNativeTask(t)) t = act.find(x => !isNativeTask(x)) || null;
+  const fresh = Object.values(tasks).filter(x => x.status === "done" && !isNativeTask(x) && doneAt[x.id] && Date.now() - doneAt[x.id] < 30 * 60e3 && !dismissed.has(x.id))
     .sort((a, b) => doneAt[b.id] - doneAt[a.id])[0];
   el.classList.toggle("on", !!(t || fresh));
   el.classList.toggle("done", !t && !!fresh);
@@ -2051,6 +2103,7 @@ core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTas
       const prev = tasks[e.task.id];
       if (e.task.status === "done" && (!prev || prev.status !== "done")) doneAt[e.task.id] = Date.now();
       tasks[e.task.id] = e.task; renderTask();
+      if (isNativeTask(e.task) && ["done", "failed"].includes(e.task.status)) showNativeTaskResult(e.task);
     })
     .on("update", e => showUpd(e.update));
 $("task").onclick = () => { const a = api(); if (a) a.open_settings("tasks"); };
@@ -2255,7 +2308,16 @@ $("b-type").onclick = () => {
 };
 /* вложения: плюс, перетащить на виджет, Ctrl+V (картинка или файл), снимок экрана одной кнопкой */
 let atts = [];                                   // {kind: "image"|"file", name, url | b64, size}
-const IMG = /^image\//, MAXF = 11e6;
+const IMG = /^image\//, MAXF = 10 * 1024 * 1024;
+const CONVERT_TARGETS = {
+  doc: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"], docx: ["TXT", "MD", "HTML", "XLSX", "CSV", "PDF"], odt: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"], rtf: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"],
+  ppt: ["TXT", "HTML", "PDF"], pptx: ["TXT", "HTML", "PDF"], odp: ["TXT", "HTML", "PDF"], xls: ["TXT", "HTML", "XLSX", "CSV", "PDF"], ods: ["TXT", "HTML", "XLSX", "CSV", "PDF"], json: ["TXT", "MD", "HTML", "DOCX", "XLSX", "CSV", "PDF"], xml: ["TXT", "MD", "HTML", "DOCX", "XLSX", "CSV", "PDF"],
+  txt: ["MD", "HTML", "DOCX", "XLSX", "PDF", "CSV"], text: ["MD", "HTML", "DOCX", "XLSX", "PDF"], md: ["TXT", "HTML", "DOCX", "XLSX", "PDF", "CSV"], markdown: ["TXT", "HTML", "DOCX", "XLSX", "PDF"], html: ["TXT", "MD", "DOCX", "XLSX", "PDF", "CSV"], htm: ["TXT", "MD", "DOCX", "XLSX", "PDF"],
+  csv: ["XLSX", "TSV", "TXT", "MD", "HTML", "DOCX", "PDF"], tsv: ["XLSX", "CSV", "TXT", "MD", "HTML", "DOCX", "PDF"], xlsx: ["CSV", "TSV", "TXT", "MD", "HTML", "PDF"], ods: ["CSV", "XLSX", "HTML", "PDF"],
+  png: ["JPG", "GIF", "WEBP", "BMP", "TIFF", "PDF"], jpg: ["PNG", "GIF", "WEBP", "BMP", "TIFF", "PDF"], jpeg: ["PNG", "GIF", "WEBP", "BMP", "TIFF", "PDF"], gif: ["PNG", "JPG", "WEBP", "BMP", "TIFF", "PDF"], webp: ["PNG", "JPG", "GIF", "BMP", "TIFF", "PDF"], bmp: ["PNG", "JPG", "GIF", "WEBP", "TIFF", "PDF"], tif: ["PNG", "JPG", "GIF", "WEBP", "PDF"], tiff: ["PNG", "JPG", "GIF", "WEBP", "PDF"],
+  wav: ["MP3", "MPEG", "M4A", "AAC", "FLAC", "OGG", "OPUS"], mp3: ["WAV", "MPEG", "M4A", "AAC", "FLAC", "OGG", "OPUS"], mpeg: ["WAV", "MP3", "M4A", "AAC", "FLAC", "OGG", "OPUS"], m4a: ["WAV", "MP3", "MPEG", "AAC", "FLAC", "OGG", "OPUS"], aac: ["WAV", "MP3", "MPEG", "M4A", "FLAC", "OGG", "OPUS"], flac: ["WAV", "MP3", "MPEG", "M4A", "AAC", "OGG", "OPUS"], ogg: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC", "OPUS"], opus: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC", "OGG"],
+  mp4: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC"], mov: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC"], mkv: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC"], avi: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC"], webm: ["WAV", "MP3", "M4A", "AAC", "OPUS"], m4v: ["WAV", "MP3", "MPEG", "M4A", "AAC", "FLAC"], pdf: ["TXT", "MD", "HTML"]
+};
 function shrink(file) {
   return new Promise((ok, bad) => {
     const img = new Image(); img.onerror = () => bad(new Error("это не картинка"));
@@ -2272,30 +2334,92 @@ function renderAtts() {
   const box = $("atts"); box.innerHTML = "";
   atts.forEach((a, i) => {
     const d = document.createElement("div"); d.className = "att";
+    d.style.position = "relative";
     const ext = (a.name.split(".").pop() || "").slice(0, 4).toUpperCase();
-    d.innerHTML = a.kind === "image" ? `<img alt=""><span></span><button title="Убрать">×</button>` : `<i class="ic"></i><span></span><button title="Убрать">×</button>`;
+    const actions = `<button class="att-convert" type="button" title="Выбрать формат и преобразовать это вложение локально; результат появится сверху и сохранится в задаче" aria-label="Выбрать формат преобразования для этого файла" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M5 4h8l4 4v4M13 4v4h4M7 13h8m-3-3 3 3-3 3M6 20h12"/></svg></button><button class="att-remove" title="Убрать это вложение из сообщения" aria-label="Убрать вложение">×</button>`;
+    d.innerHTML = a.kind === "image" ? `<img alt=""><span></span>${actions}` : `<i class="ic"></i><span></span>${actions}`;
     if (a.kind === "image") d.querySelector("img").src = a.url; else d.querySelector(".ic").textContent = ext || "ФАЙЛ";
     d.querySelector("span").textContent = a.name;
-    d.querySelector("button").onclick = (ev) => { ev.stopPropagation(); atts.splice(i, 1); renderAtts(); };
+    d.querySelector(".att-remove").onclick = (ev) => { ev.stopPropagation(); atts.splice(i, 1); renderAtts(); };
+    const convertButton = d.querySelector(".att-convert"), picker = document.createElement("div");
+    picker.className = "att-format-picker"; picker.hidden = true;
+    const extKey = (a.name.split(".").pop() || "").toLowerCase(), formats = CONVERT_TARGETS[extKey] || [];
+    if (!formats.length) { const hint = document.createElement("span"); hint.textContent = "Формат не поддерживается"; picker.append(hint); }
+    else formats.forEach(fmt => { const b = document.createElement("button"); b.type = "button"; b.textContent = "В " + fmt; b.title = `Преобразовать «${a.name}» в ${fmt} локально; готовый файл появится сверху`;
+      b.onclick = ev => { ev.stopPropagation(); picker.hidden = true; convertButton.setAttribute("aria-expanded", "false"); convertAttachment(i, fmt.toLowerCase()); }; picker.append(b); });
+    convertButton.onclick = ev => { ev.stopPropagation(); const show = picker.hidden;
+      document.querySelectorAll(".att-format-picker").forEach(x => { x.hidden = true; x.parentElement?.querySelector(".att-convert")?.setAttribute("aria-expanded", "false"); });
+      picker.hidden = !show; convertButton.setAttribute("aria-expanded", String(show)); };
+    d.append(picker);
     if (a.kind === "image") {
-      const ocr = document.createElement("button"); ocr.type = "button"; ocr.className = "image-ocr-action";
-      ocr.textContent = "Извлечь текст"; ocr.title = "Распознать текст картинки локально (OCR)";
-      ocr.onclick = ev => { ev.stopPropagation(); window.extractImageText(a, text => {
-        const input = $("askin"); input.value = [input.value.trimEnd(), text].filter(Boolean).join("\n\n");
-        input.dispatchEvent(new Event("input", {bubbles:true})); openAsk(); input.focus();
-      }); };
-      d.insertBefore(ocr, d.querySelector("button"));
+      const taskOcr = document.createElement("button"); taskOcr.type = "button"; taskOcr.className = "image-extract-task";
+      taskOcr.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM7 8h10M7 11h7M7 14h10M7 17h6"/><path d="M17 15v4m-2-2h4"/></svg>`;
+      taskOcr.title = "Распознать текст на оригинале картинки локальным OCR и показать результат сверху"; taskOcr.setAttribute("aria-label", taskOcr.title);
+      taskOcr.onclick = async ev => { ev.stopPropagation();
+        const data = a.ocrData || a.b64;
+        if (!data) { showErr(new Error("Для фонового OCR нужен оригинал картинки размером до 10 МБ.")); return; }
+        try {
+          const task = await core.call("text_extract", {files:[{name:a.name,b64:data}]});
+          const current = tasks[task.id] || task;
+          if (current.status === "done" || current.status === "failed") showNativeTaskResult(current);
+          else showCap("", `Распознаю текст из «${a.name}» локально. Результат появится здесь, в верхней карточке.`);
+        } catch (err) { showErr(err); }
+      };
+      d.querySelector(".att-remove").before(taskOcr);
     }
     box.appendChild(d);
   });
   $("askbox").classList.toggle("has", !!$("askin").value.trim() || atts.length > 0);
 }
+async function convertAttachment(index, target) {
+  const a = atts[index]; if (!a) return;
+  const b64 = a.kind === "image" ? a.ocrData : a.b64;
+  try {
+    showCap("", `Преобразую «${a.name}» → ${target.toUpperCase()}. Результат появится здесь сверху.`);
+    let task;
+    if (b64) task = await core.call("file_convert", { files: [{ name: a.name, b64 }], target });
+    else if (a.sourceFile) task = await uploadConversionFile(a.sourceFile, target);
+    else throw new Error(`Оригинал «${a.name}» недоступен для конвертации.`);
+    const current = tasks[task.id] || task;
+    if (current.status === "done" || current.status === "failed") showNativeTaskResult(current);
+    else showCap("", `Преобразую «${a.name}» → ${target.toUpperCase()}. Готовый результат появится здесь, в верхней карточке.`);
+  } catch (err) { showErr(err); }
+}
+async function uploadConversionFile(file, target, goal = "") {
+  let upload;
+  try {
+    upload = await core.call("file_convert_begin", { name: file.name, size: file.size, target });
+    const step = upload.chunk_bytes || 2 * 1024 * 1024;
+    for (let offset = 0; offset < file.size; offset += step) {
+      const data = await b64of(file.slice(offset, Math.min(file.size, offset + step)));
+      await core.call("file_convert_chunk", { upload_id: upload.upload_id, b64: data });
+      if (offset === 0 || offset + step >= file.size || Math.floor(offset / step) % 4 === 0)
+        showCap(`Загружаю ${file.name}: ${Math.min(file.size, offset + step)} из ${file.size} байт`, WAIT);
+    }
+    return await core.call("file_convert_finish", { upload_id: upload.upload_id, goal });
+  } catch (err) {
+    if (upload?.upload_id) core.call("file_convert_abort", { upload_id: upload.upload_id }).catch(() => {});
+    throw err;
+  }
+}
+function uiConversionTarget(text) {
+  const s = String(text || "").toLowerCase().replace(/ё/g, "е");
+  const formats = [["docx", /(?:в\s+)?(?:word|ворд|docx)/], ["xlsx", /(?:в\s+)?(?:excel|эксель|xlsx)/], ["md", /(?:в\s+)?(?:markdown|маркдаун|md)/],
+    ["txt", /(?:в\s+)?(?:txt|text|текст)/], ["html", /(?:в\s+)?(?:html|htm)/], ["pdf", /(?:в\s+)?(?:pdf|пдф)/], ["csv", /(?:в\s+)?(?:csv|цсв)/], ["tsv", /(?:в\s+)?tsv/],
+    ["png", /(?:в\s+)?(?:png|пнг)/], ["gif", /(?:в\s+)?(?:gif|гиф)/], ["jpg", /(?:в\s+)?(?:jpg|jpeg|джипег)/], ["webp", /(?:в\s+)?webp/], ["bmp", /(?:в\s+)?bmp/], ["tiff", /(?:в\s+)?(?:tiff|tif)/],
+    ["wav", /(?:в\s+)?(?:wav|вэйв)/], ["mp3", /(?:в\s+)?(?:mp3|мп3|mpeg|мпег)/], ["m4a", /(?:в\s+)?m4a/], ["aac", /(?:в\s+)?aac/], ["flac", /(?:в\s+)?flac/], ["ogg", /(?:в\s+)?ogg/], ["opus", /(?:в\s+)?opus/]];
+  const suffix = s.replace(/[.!?,;:]+$/g, "").match(/\bв\s+(word|ворд|docx|excel|эксель|xlsx|markdown|маркдаун|md|txt|text|текст|html|htm|pdf|пдф|csv|цсв|tsv|png|пнг|gif|гиф|jpg|jpeg|джипег|webp|bmp|tiff|tif|wav|вэйв|mp3|мп3|mpeg|мпег|m4a|aac|flac|ogg|opus)$/i);
+  if (suffix) { const wanted = suffix[1]; for (const [format, rx] of formats) if (rx.test(wanted)) return format; }
+  let found = null;
+  for (const [format, rx] of formats) { const match = [...s.matchAll(new RegExp(rx.source, "gi"))].pop(); if (match && (!found || match.index > found.index)) found = { format, index: match.index }; }
+  return found?.format || "";
+}
 async function addFiles(list) {
   for (const f of list) {
     try {
-      if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f), ocrData: f.size <= 10 * 1024 * 1024 ? await b64of(f) : null });
-      else if (f.size > MAXF) showErr(`«${f.name}» больше 11 МБ — положите его в папку ассистента`);
-      else atts.push({ kind: "file", name: f.name, b64: await b64of(f), size: f.size });
+      if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f), ocrData: f.size <= MAXF ? await b64of(f) : null, sourceFile: f, size: f.size });
+      else if (f.size > 2 * 1024 * 1024 * 1024) showErr(`«${f.name}» больше предела 2 ГБ`);
+      else atts.push({ kind: "file", name: f.name, b64: f.size <= MAXF ? await b64of(f) : null, sourceFile: f, size: f.size });
     } catch (err) { showErr(err); }
   }
   renderAtts(); openAsk();
@@ -2460,8 +2584,21 @@ function sendAsk() {
   }
   const q = $("askin").value.trim();
   if (!q && !atts.length) return;
-  const images = atts.filter(a => a.kind === "image").map(a => a.url);
-  const files = atts.filter(a => a.kind === "file").map(a => ({ name: a.name, b64: a.b64 }));
+  const converting = /(?:конвертир\w*|преобраз\w*)/i.test(q);
+  const target = converting ? uiConversionTarget(q) : "";
+  if (!converting && atts.some(a => !a.b64)) { showErr(new Error("Этот файл больше 10 МБ. Для локального преобразования нажмите значок рядом с вложением; отправка крупных файлов в обычный чат пока недоступна.")); return; }
+  if (converting && target && atts.some(a => !(a.kind === "image" ? a.ocrData : a.b64))) {
+    const selected = atts.slice(), goal = q;
+    tlReset(q || selected.map(a => a.name).join(", "));
+    $("askin").value = ""; atts = []; renderAtts(); fitAsk();
+    Promise.all(selected.map(a => {
+      const data = a.kind === "image" ? a.ocrData : a.b64;
+      return data ? core.call("file_convert", { files: [{ name: a.name, b64: data }], target, goal }) : uploadConversionFile(a.sourceFile, target, goal);
+    })).then(tasks => showCap("", `Преобразую ${tasks.length} файл(а). Покажу готовые результаты здесь, в верхней карточке.`)).catch(err => showErr(err));
+    return;
+  }
+  const images = converting ? [] : atts.filter(a => a.kind === "image").map(a => a.url);
+  const files = atts.filter(a => converting ? !!target : a.kind === "file").map(a => ({ name: a.name, b64: a.kind === "image" ? a.ocrData : a.b64 }));
   const label = q || atts.map(a => a.name).join(", ");
   tlReset(label);
   const kept = atts;
