@@ -150,7 +150,9 @@ def _read_lines(text_dir, stem):
     try:
         data = json.loads(raw.read_text(encoding="utf-8"))
         rows = data.get("lines") if isinstance(data, dict) else data
-        out = [{"who": str(x.get("who") or ""), "text": str(x.get("text") or ""), "t": float(x.get("t") or 0)}
+        out = [{"who": str(x.get("who") or ""), "text": str(x.get("text") or ""), "t": float(x.get("t") or 0),
+                **({"speaker": str(x["speaker"]), "source_speaker": str(x.get("speaker0") or x["speaker"]), "label": str(x.get("label") or "")} if x.get("speaker") else
+                   ({"label": str(x["label"])} if x.get("label") else {}))}
                for x in rows or [] if isinstance(x, dict) and x.get("who") != "screen" and str(x.get("text") or "").strip()]
         if out:
             return sorted(out, key=lambda x: x["t"])
@@ -161,8 +163,11 @@ def _read_lines(text_dir, stem):
         for ln in (text_dir / f"{stem}.txt").read_text(encoding="utf-8").splitlines():
             m = LINE_RX.match(ln.strip())
             if m and WHO.get(m.group(3).strip()) != "screen":
-                out.append({"who": WHO.get(m.group(3).strip(), "them"), "text": m.group(4).strip(),
-                            "t": int(m.group(1)) * 60 + int(m.group(2))})
+                who = m.group(3).strip()
+                row = {"who": WHO.get(who, "them"), "text": m.group(4).strip(), "t": int(m.group(1)) * 60 + int(m.group(2))}
+                if who not in WHO:
+                    row["label"] = who                     # «Участник 2», «Иван», «Речь»
+                out.append(row)
     except OSError:
         pass
     return out
@@ -220,6 +225,15 @@ def player_data(meetings_root, summary_rel, media):
         p = audio_dir / stem / fname
         if p.is_file() and p.stat().st_size > 44:
             tracks.append({"key": key, "label": label, "url": media.url(to_rel(p)), "seconds": _wav_seconds(p)})
+    try:                                                   # аудио участников (после «Аудио участников»)
+        meta = json.loads((audio_dir / stem / "Участники" / "участники.json").read_text(encoding="utf-8"))
+        for x in meta.get("files") or []:
+            p = audio_dir / stem / "Участники" / Path(str(x.get("file") or "")).name
+            if p.is_file() and p.stat().st_size > 44:
+                tracks.append({"key": "p:" + str(x.get("id") or p.stem), "label": str(x.get("label") or p.stem),
+                               "url": media.url(to_rel(p)), "seconds": _wav_seconds(p), "participant": True})
+    except (OSError, ValueError, AttributeError):
+        pass
 
     video = ""
     if (session / "Видео").is_dir():
@@ -230,5 +244,12 @@ def player_data(meetings_root, summary_rel, media):
               for x in _read_frames(text_dir, session)]
     lines = _read_lines(text_dir, stem)
     duration = max([x["seconds"] for x in tracks] + [x["t"] for x in frames] + [x["t"] for x in lines] + [0.0])
+    speakers = []
+    try:
+        raw = json.loads((text_dir / f"{stem}.lines.json").read_text(encoding="utf-8"))
+        speakers = [{"id": str(s.get("id")), "label": str(s.get("display") or s.get("label") or s.get("id")),
+                     "speech_sec": s.get("speech_sec")} for s in (raw.get("speakers") or []) if isinstance(s, dict)]
+    except (OSError, ValueError, AttributeError):
+        pass
     return {"name": stem, "tracks": tracks, "video": video, "frames": frames, "lines": lines,
-            "duration": round(duration, 2)}
+            "duration": round(duration, 2), "speakers": speakers}

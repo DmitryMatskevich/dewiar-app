@@ -96,7 +96,7 @@ def qwen_transcribe(audio, progress, windows=None, model_repo='Qwen/Qwen3-ASR-0.
     return {'model': model_repo.split('/')[-1], 'input': 'mixture', 'phrases': phrases}
 
 
-def whisper_transcribe(audio, run_id, start_ms=0, end_ms=None):
+def whisper_transcribe(audio, run_id, start_ms=0, end_ms=None, word_timestamps=False):
     import mlx_whisper
     import librosa
     from songs.consensus import phrases_from_words
@@ -107,12 +107,15 @@ def whisper_transcribe(audio, run_id, start_ms=0, end_ms=None):
         # Singing attention timestamps can erase complete decoded segments.
         # Decode text first; the separate align stage may add word times,
         # but must never decide whether the decoded words exist.
-        word_timestamps=False, condition_on_previous_text=False,
+        word_timestamps=word_timestamps, condition_on_previous_text=False,
         hallucination_silence_threshold=None, verbose=None)
     phrases = phrases_from_words(result.get('segments', []), run_id)
     for phrase in phrases:
         phrase['start_ms'] += start_ms
         phrase['end_ms'] += start_ms
+        for word in phrase.get('words', []):
+            word['start_ms'] += start_ms
+            word['end_ms'] += start_ms
     return {'model': 'Whisper-large-v2-MLX', 'input': 'mixture', 'phrases': phrases,
             'decoded_segments': result.get('segments', []),
             'decoded_text': result.get('text', ''), 'text_first': True}
@@ -229,6 +232,11 @@ def _alignment_windows(phrases, context):
         supported = []
         for hypothesis in context:
             for candidate in hypothesis.get('phrases') or []:
+                # Qwen chunk boundaries locate a decoding window, not this
+                # lyric's entrance. A matching line inside a 25-second chunk
+                # must not pull the next phrase back across an instrumental.
+                if candidate.get('timing_quality') == 'chunk':
+                    continue
                 if _token_coverage(phrase.get('text'), candidate.get('text')) < 0.6:
                     continue
                 a, b = candidate.get('start_ms'), candidate.get('end_ms')
@@ -286,6 +294,7 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None, voca
         return None
     vocal_audio = load_vocals(vocal_path)
     tried_vocal_factory = False
+    intro_recovered = False
     bounds = [(a/1000, b/1000) for a, b in _alignment_windows(phrases, context)]
     for i, phrase in enumerate(phrases):
         progress(f'Сверяем времена слов: {i+1}/{len(phrases)}')
@@ -316,6 +325,41 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None, voca
                                              round(end*1000), vocal_audio)
         if onset_check:
             phrase['onset_check'] = onset_check
+            if onset_check.get('applied') and onset_check.get('reason') == 'short_token_after_instrumental_lead':
+                phrase['start_ms'] = words[0]['start_ms']
+                phrase['intro_alignment_check'] = {
+                    'source': 'HTDemucs vocal stem + forced-aligner first-word anomaly',
+                    'applied': True, 'start_ms': words[0]['start_ms'],
+                    'end_ms': words[-1]['end_ms'],
+                    'reason': 'Первое короткое слово было растянуто через инструментальное вступление'}
+        if i == 0 and bounds[i][0] <= .25 and (
+                len(words) < len(matches) or suspicious_onset(words, vocal_audio)):
+            from songs.intro_alignment import recover_intro
+            progress('Перепроверяем вступление: оригинал, вокал и времена первых слов')
+            def decode_opening(block, rate):
+                import librosa
+                import mlx_whisper
+                mono = librosa.resample(block, orig_sr=rate, target_sr=16000) if rate != 16000 else block
+                return mlx_whisper.transcribe(mono,
+                    path_or_hf_repo=snapshot('mlx-community/whisper-large-v2-mlx'),
+                    language='ru', word_timestamps=True, condition_on_previous_text=False,
+                    verbose=None)
+            try:
+                recovered, check = recover_intro(model, samples, sr, vocal_audio, phrase,
+                    phrases[1]['start_ms'] if len(phrases)>1 else None, decode_opening)
+                phrase['intro_alignment_check'] = check
+                if recovered:
+                    words = recovered
+                    intro_recovered = True
+                    bounds[i] = (words[0]['start_ms']/1000, words[-1]['end_ms']/1000)
+                    if len(bounds)>1:
+                        # A broad contextual chunk may overlap the now-confirmed
+                        # opening. It cannot pull the next crop back into it.
+                        bounds[1] = (max(bounds[1][0], bounds[i][1]), bounds[1][1])
+            except Exception as exc:
+                # A failed optional retry must not erase the available transcript.
+                phrase['intro_alignment_check'] = {'applied':False, 'reason':'retry_failed',
+                                                    'error':str(exc)[:300]}
         if words:
             # A contextual crop can start before the coarse ASR segment.
             # Retain every measured word inside its parent phrase, including
@@ -354,10 +398,10 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None, voca
             if words:
                 phrase.update(words=words,alignment_stale=False,
                     timing_quality='word_estimated' if len(words)==len(re.findall(r'\S+',text)) else 'word_partial')
-                if words[0]['char_start']==0:
-                    phrase['start_ms']=words[0]['start_ms']
-                if words[-1]['char_end']==len(text):
-                    phrase['end_ms']=words[-1]['end_ms']
+                from songs.intro_alignment import bounds_with_words
+                phrase['start_ms'], phrase['end_ms'] = bounds_with_words(phrase, words)
+                if combined.get('intro_alignment_check'):
+                    phrase['intro_alignment_check']=copy.deepcopy(combined['intro_alignment_check'])
                 if combined.get('onset_check'):
                     phrase['onset_check']=copy.deepcopy(combined['onset_check'])
                 if combined.get('vocal_alignment_check'):
@@ -378,6 +422,31 @@ def align_phrases(audio, hypothesis, progress, context=(), vocal_path=None, voca
                                'phrases_total':len(hypothesis['phrases']),'review_required':True}
     del model
     gc.collect()
+    if intro_recovered:
+        repair_retimed_opening(audio, hypothesis, progress)
+
+
+def repair_retimed_opening(audio, hypothesis, progress):
+    """Recheck a newly located opening before calling missing lyrics a break.
+
+    Earlier consensus used the bad zero-second window and could not compare
+    these words. Only fresh, independently agreed insertions are accepted.
+    """
+    from songs.intro_alignment import repair_opening_insertions
+    rows = hypothesis.get('phrases') or []
+    if len(rows) < 2:
+        return
+    start = max(0, rows[0]['start_ms']-2000)
+    end = min(start+30000, rows[1]['end_ms']+1200)
+    progress('Проверяем, не потерялись ли слова после уточнённого вступления')
+    try:
+        whisper = whisper_transcribe(audio, 'opening-recheck', start, end, word_timestamps=True)
+        qwen = qwen_transcribe(audio, progress, [(start,end)], model_repo='Qwen/Qwen3-ASR-1.7B')
+        updated, report = repair_opening_insertions(rows, whisper, qwen)
+        hypothesis['phrases'] = updated
+        hypothesis['opening_text_check'] = report
+    except Exception as exc:
+        hypothesis['opening_text_check'] = {'applied':False, 'error':str(exc)[:300]}
 
 
 def _separate_vocals_for_intro(audio, output, progress):
@@ -503,23 +572,88 @@ def verify_reference_candidate(audio, phrase, proposal, hypotheses, progress):
     from songs.reference_text import tokens
     if not {'whisper','qwen'} <= {family(h.get('model','')) for h in hypotheses}:
         return {'confirmed':False,'reason':'Для проверки нужны выбранные Whisper и Qwen'}
-    start,end=phrase.get('start_ms',0),phrase.get('end_ms',0)
+    cur=proposal['current'];ts=tokens(phrase['text'])
+    left_tokens=[t for t in ts if t['end']<=cur['char_start']][-2:]
+    right_tokens=[t for t in ts if t['start']>=cur['char_end']][:2]
+    left=[t['norm'] for t in left_tokens];right=[t['norm'] for t in right_tokens]
+    alternative=[t['norm'] for t in tokens(proposal['alternative']['text'])]
+    current=[t['norm'] for t in tokens(cur.get('text',phrase['text'][cur['char_start']:cur['char_end']]))]
+    needle=left+alternative+right
+    if len(left)+len(right)<2 or not alternative:
+        return {'confirmed':False,'reason':'Недостаточно контекста'}
+    # Use local word times where available, with context across ASR chunk
+    # boundaries. A phrase may contain a twelve-second instrumental lead-in.
+    a=left_tokens[0]['start'] if left_tokens else cur['char_start']
+    b=right_tokens[-1]['end'] if right_tokens else cur['char_end']
+    words=[w for w in phrase.get('words',[]) if w.get('char_start',-1)<b and
+           w.get('char_end',-1)>a and w.get('end_ms',0)>w.get('start_ms',0)]
+    covers=(words and min(w['char_start'] for w in words)<=cur['char_start'] and
+            max(w['char_end'] for w in words)>=cur['char_end'])
+    start=max(0,(min(w['start_ms'] for w in words) if covers else phrase.get('start_ms',0))-2000)
+    end=(max(w['end_ms'] for w in words) if covers else phrase.get('end_ms',0))+2000
     if not 0<end-start<=30000:
         return {'confirmed':False,'reason':'Фраза требует ручной проверки границ'}
-    cur=proposal['current'];ts=tokens(phrase['text'])
-    left=[t['norm'] for t in ts if t['end']<=cur['char_start']][-2:]
-    right=[t['norm'] for t in ts if t['start']>=cur['char_end']][:2]
-    needle=left+[t['norm'] for t in tokens(proposal['alternative']['text'])]+right
-    if len(left)<2 or len(right)<2:return {'confirmed':False,'reason':'Недостаточно контекста'}
     repo='Qwen/Qwen3-ASR-1.7B' if any(h.get('model')=='Qwen3-ASR-1.7B' for h in hypotheses) else 'Qwen/Qwen3-ASR-0.6B'
-    decoded=[whisper_transcribe(audio,'reference-check',start,end),
-             qwen_transcribe(audio,progress,[(start,end)],model_repo=repo)]
-    evidence=[]
-    for hyp in decoded:
-        text=' '.join(p['text'] for p in hyp.get('phrases',[]));words=[t['norm'] for t in tokens(text)]
-        match=any(words[i:i+len(needle)]==needle for i in range(len(words)-len(needle)+1))
-        evidence.append({'model':hyp['model'],'text':text,'matches':match})
-    return {'confirmed':all(h['matches'] for h in evidence),'hypotheses':evidence,'start_ms':start,'end_ms':end}
+    attempts=[]
+    for a,b in [(start,end),(max(0,start-2000),end+5000)]:
+        if b-a>30000:break
+        decoded=[whisper_transcribe(audio,'reference-check',a,b),
+                 qwen_transcribe(audio,progress,[(a,b)],model_repo=repo)]
+        evidence=[]
+        for hyp in decoded:
+            text=' '.join(p['text'] for p in hyp.get('phrases',[]));words=[t['norm'] for t in tokens(text)]
+            match=any(words[i:i+len(needle)]==needle for i in range(len(words)-len(needle)+1))
+            old=left+current+right
+            matches_current=any(words[i:i+len(old)]==old for i in range(len(words)-len(old)+1))
+            evidence.append({'model':hyp['model'],'text':text,'matches':match,'matches_current':matches_current,
+                             **reference_boundary_reading(words,left,right,alternative)})
+        decision=reference_audio_decision(proposal,current,alternative,evidence,a,b)
+        attempts.append(decision)
+        # A crop boundary can split a sung syllable. Retry with neighbouring
+        # audio, never with source lyrics as a prompt or as another model vote.
+        if decision['confirmed'] or not any(h['matches'] for h in evidence):break
+    chosen=next((a for a in attempts if a['confirmed']),attempts[0])
+    return {**chosen,'attempts':attempts}
+
+
+def reference_boundary_reading(words, left, right, alternative):
+    """Measure only a small reading between the same lexical context anchors."""
+    from difflib import SequenceMatcher
+    best={'boundary_similarity':0.0,'boundary_reading':[]}
+    for i in range(len(words)):
+        if left and (i<len(left) or words[i-len(left):i]!=left):continue
+        for size in range(1,5):
+            reading=words[i:i+size]
+            if len(reading)!=size or (right and words[i+size:i+size+len(right)]!=right):continue
+            if len(reading)==len(alternative):continue
+            ratio=SequenceMatcher(None,''.join(reading),''.join(alternative),autojunk=False).ratio()
+            if ratio>best['boundary_similarity']:
+                best={'boundary_similarity':ratio,'boundary_reading':reading}
+    return best
+
+
+def reference_audio_decision(proposal, current, alternative, evidence, start, end):
+    """A verified publication can break a close word-boundary ASR tie.
+
+    This is deliberately distinct from agreement of two recognizers: retain
+    both readings and the decision basis. Semantic disagreements stay pending.
+    """
+    from difflib import SequenceMatcher
+    from songs.reconciliation import family
+    families={family(h['model']) for h in evidence}
+    both=len(evidence)==2 and {'whisper','qwen'}<=families and all(h['matches'] for h in evidence)
+    similarity=SequenceMatcher(None,''.join(current),''.join(alternative),autojunk=False).ratio()
+    supported=(len(evidence)==2 and {'whisper','qwen'}<=families and
+               sum(bool(h['matches']) for h in evidence)==1 and
+               all(h['matches'] or h.get('matches_current') or h.get('boundary_similarity',0)>=.9
+                   for h in evidence))
+    boundary_tie=(supported and proposal.get('source_confirmed') and
+                  len(current)!=len(alternative) and max(len(current),len(alternative))<=4 and
+                  min(len(''.join(current)),len(''.join(alternative)))>=8 and similarity>=.85)
+    return {'confirmed':bool(both or boundary_tie),'basis':'two_models' if both else
+            'source_and_audio' if boundary_tie else 'unresolved',
+            'reason':'' if both or boundary_tie else 'Распознаватели не подтвердили исправление совместно',
+            'hypotheses':evidence,'character_similarity':round(similarity,3),'start_ms':start,'end_ms':end}
 
 
 def main():

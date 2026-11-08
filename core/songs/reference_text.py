@@ -154,4 +154,49 @@ def reference_candidates(phrases, references):
             seen.add(key)
             out.append(dict(current=one, alternative=two, status='needs_target_audio_check',
                             character_similarity=round(similarity, 3), auto_apply=False))
-    return out
+    # A global sequence alignment consumes each published chorus once. Match
+    # local lines independently as well, so extra sung repeats retain evidence.
+    # These are suggestions only: a matching publication is not an audio vote.
+    for ref in references:
+        lines=[line.strip() for line in ref.get('plain_lyrics','').splitlines() if line.strip()]
+        contexts=list(dict.fromkeys(lines+['\n'.join(lines[i:i+2]) for i in range(len(lines)-1)]))
+        for line in contexts:
+            pub=tokens(line)
+            if not 4<=len(pub)<=18:continue
+            pn=[t['norm'] for t in pub]
+            for i in range(len(current)):
+                if current[i]['norm']!=pn[0] and (len(pn[0])<4 or difflib.SequenceMatcher(None,current[i]['norm'],pn[0]).ratio()<.8):continue
+                best=None
+                for size in range(max(3,len(pub)-3),min(len(current)-i,len(pub)+3)+1):
+                    target=current[i:i+size];tn=[t['norm'] for t in target]
+                    matcher=difflib.SequenceMatcher(None,tn,pn,autojunk=False)
+                    equal=sum(b.size for b in matcher.get_matching_blocks())
+                    ratio=difflib.SequenceMatcher(None,''.join(tn),''.join(pn),autojunk=False).ratio()
+                    if equal<2 or ratio<.8:continue
+                    score=ratio+equal/max(len(tn),len(pn))*.1
+                    if best is None or score>best[0]:best=(score,target,matcher)
+                if best is None:continue
+                _,target,matcher=best
+                for tag,a,b,c,d in matcher.get_opcodes():
+                    if tag!='replace' or max(b-a,d-c)>8:continue
+                    part=target[a:b]
+                    if any(t['phrase'] is not part[0]['phrase'] for t in part):continue
+                    similarity=difflib.SequenceMatcher(None,''.join(t['norm'] for t in part),''.join(pn[c:d]),autojunk=False).ratio()
+                    if similarity<.65:continue
+                    one=_fragment(part[0]['phrase'],part)
+                    two=_fragment(dict(text=line,origin='publication',url=ref.get('url')),pub[c:d])
+                    key=(one['phrase_id'],one['char_start'],one['char_end'],tuple(pn[c:d]))
+                    if key in seen:continue
+                    seen.add(key)
+                    out.append(dict(current=one,alternative=two,status='needs_target_audio_check',
+                                    character_similarity=round(similarity,3),auto_apply=False,match_method='repeated_line'))
+    # Larger anchored replacements can subsume a one-word proposal from the
+    # same page. Present one actionable edit, not mutually overlapping boxes.
+    result=[]
+    for item in sorted(out,key=lambda c:-(c['current']['char_end']-c['current']['char_start'])):
+        c=item['current']
+        if any(c['phrase_id']==r['current']['phrase_id'] and item['alternative'].get('url')==r['alternative'].get('url')
+               and c['char_start']<r['current']['char_end'] and c['char_end']>r['current']['char_start'] for r in result):continue
+        result.append(item)
+    order={p.get('phrase_id'):i for i,p in enumerate(phrases)}
+    return sorted(result,key=lambda c:(order.get(c['current']['phrase_id'],0),c['current']['char_start']))

@@ -19,7 +19,7 @@ class Cancelled(Exception):
 _locks_guard = threading.Lock()
 _locks = {}
 FILES = ('transcript.txt', 'transcript-timed.txt', 'transcript.srt', 'segments.json', 'metadata.json', 'errors.log',
-         'transcript.clean.md','transcript.review.md','cleanup.json','transcript.summary.md','summary.json')
+         'transcript.clean.md','transcript.review.md','cleanup.json','transcript.summary.md','transcript.topics.md','summary.json')
 
 
 def source_key(source):
@@ -120,6 +120,7 @@ def _cached_batch(sources, output, resolve, recognize, cancel, language, force, 
                 entry['markdown'] = (dst/'transcript.clean.md').relative_to(output.parent).as_posix()
                 entry['review'] = (dst/'transcript.review.md').relative_to(output.parent).as_posix()
                 entry['summary'] = (dst/'transcript.summary.md').relative_to(output.parent).as_posix()
+                entry['topics'] = (dst/'transcript.topics.md').relative_to(output.parent).as_posix()
                 if entry.get('cached'):
                     notify(f'{i}/{len(sources)} — использую готовый текст, повторная загрузка не нужна')
             _json(dst/'metadata.json', entry)
@@ -255,6 +256,7 @@ def run_batch(sources, output, resolve, recognize, cancel=None, language='ru', f
                                 for n in ('transcript.txt', 'transcript.srt', 'transcript-timed.txt','segments.json'))):
                     old['cleanup'] = ensure_clean(directory,old.get('title'),source,notify)
                     old['summary_info'] = ensure_summary(directory,old.get('title'),source,summarize,notify)
+                    old['topics'] = (directory/'transcript.topics.md').relative_to(output.parent).as_posix()
                     _check(cancel)
                     old['status']='ok'
                     old.pop('error',None)
@@ -309,13 +311,16 @@ def run_batch(sources, output, resolve, recognize, cancel=None, language='ru', f
                 segs, method, model = recognize(local, language)
                 entry.update(method=method, model=model)
             _check(cancel)
-            segs = [(float(a), float(b), str(text).strip()) for a, b, text in segs if str(text).strip()]
+            # Preserve optional word timings for speaker attribution. The text and
+            # subtitle exports below intentionally use only the first three fields.
+            segs = [(float(x[0]), float(x[1]), str(x[2]).strip(), x[3] if len(x) > 3 else None)
+                    for x in segs if len(x) >= 3 and str(x[2]).strip()]
             if not segs:
                 raise ValueError('Не получен текст речи; успешный результат не создан')
-            text = '\n'.join(text for _, _, text in segs) + '\n'
+            text = '\n'.join(x[2] for x in segs) + '\n'
             (directory / 'transcript.txt').write_text(text, encoding='utf-8')
-            (directory / 'transcript-timed.txt').write_text('\n'.join(f'[{_ts(a).split(",")[0]}] {text}' for a, _, text in segs) + '\n', encoding='utf-8')
-            (directory / 'transcript.srt').write_text('\n'.join(f'{i}\n{_ts(a)} --> {_ts(b)}\n{text}\n' for i, (a, b, text) in enumerate(segs, 1)), encoding='utf-8')
+            (directory / 'transcript-timed.txt').write_text('\n'.join(f'[{_ts(x[0]).split(",")[0]}] {x[2]}' for x in segs) + '\n', encoding='utf-8')
+            (directory / 'transcript.srt').write_text('\n'.join(f'{i}\n{_ts(x[0])} --> {_ts(x[1])}\n{x[2]}\n' for i, x in enumerate(segs, 1)), encoding='utf-8')
             _json(directory / 'segments.json', segs)
             entry.update(status='raw_ready',extraction_complete=True,characters=len(text.strip()),segments=len(segs),
                          text=(directory/'transcript.txt').relative_to(output.parent).as_posix(),
@@ -324,6 +329,7 @@ def run_batch(sources, output, resolve, recognize, cancel=None, language='ru', f
             _check(cancel)
             entry['cleanup'] = ensure_clean(directory,entry.get('title'),source,notify)
             entry['summary_info'] = ensure_summary(directory,entry.get('title'),source,summarize,notify)
+            entry['topics'] = (directory/'transcript.topics.md').relative_to(output.parent).as_posix()
             _check(cancel)
             entry.update(status='ok', characters=len(text.strip()), segments=len(segs),
                          text=(directory / 'transcript.txt').relative_to(output.parent).as_posix(),

@@ -2,36 +2,79 @@
    Правки сохраняются с контролем ревизий; рабочие настройки не изменяются. */
 (function () {
   "use strict";
-  const state = { rows: [], query: "", status: "", current: null, transcribeSongId: "" };
+  const state = { rows: [], query: "", lyricsQuery: "", status: "", tag: "", current: null, transcribeSongId: "" };
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const processingSongs = new Set();
   const stoppingCaptures = new Set();
+  function liveCapture(row) {
+    const capture=row.processing?.capture||{};
+    const waiting=capture.phase==='waiting'||(!capture.phase&&String(row.stage_label||'').startsWith('Ожидаем'));
+    const seconds=Math.floor((capture.duration_ms||0)/1000);
+    return `<div class="song-capture-live" role="status"><b>${waiting?'Ожидаем звук — включите песню':`● Запись идёт · ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`}</b><p>${esc(capture.draft_status||'Черновой текст появится после начала пения')}</p>${capture.draft?`<p class="song-capture-draft">${esc(capture.draft)}</p><small>Черновик. После остановки записи начнётся полный разбор.</small>`:''}</div>`;
+  }
+  const restartBatchButton=row=>row.processing?.can_restart?`<button type="button" class="btn song-icon-btn" aria-label="Перезапустить пакетную обработку" data-song-restart-batch="${esc(row.song_id)}" title="Заново выполнить пакетный разбор сохранённого аудио. Прежние результаты и ручные правки сохраняются; новая запись не требуется." ${processingSongs.has(row.song_id)?'disabled':''}>${SongSheet.icon('refresh')}</button>`:'';
   const stopCaptureButton = (id) => `<button type="button" class="btn primary song-record-stop" data-song-stop-capture="${esc(id)}" title="Остановить запись, сохранить звук и запустить пакетную обработку" ${stoppingCaptures.has(id)?'disabled aria-busy="true"':''}>${SongSheet.icon('stop')}${stoppingCaptures.has(id)?'Сохраняем запись…':'Остановить запись'}</button>`;
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
+  const TAG_OPTIONS = ["Компания", "Италия", "Мужская", "Любовь", "Шансон", "Бард", "Запад", "Грусть", "Юмор", "Военные", "Дворовые", "Народные", "Из фильмов", "Советские", "Детские"];
+  function tagEditor(row) {
+    const selected = new Set(row.tags || []);
+    return `<fieldset class="song-tags-editor"><legend>Теги песни</legend><div class="song-tag-options">${TAG_OPTIONS.map(tag => `<label class="song-tag-option"><input type="checkbox" data-song-tag-edit="${esc(tag)}" ${selected.has(tag) ? "checked" : ""}><span>${esc(tag)}</span></label>`).join("")}</div><p class="hint">Теги можно использовать в фильтре списка песен.</p></fieldset>`;
+  }
   const allStages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознавание слов с аудио"], ["text_reference", "Сверка с источником текста"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["karaoke", "Минусовка"], ["review", "Проверяем"]];
   const stagesFor=()=>allStages;
   function textReferenceStatus(row) {
     const report=row.text_reference;
     if(row.stage==='text_reference'&&row.status==='running')return row.stage_label||'Выполняется';
     return {insufficient_consensus:'Недостаточно согласованных фраз',not_found:'Источник не найден',search_error:'Поиск нужно повторить',
-      compared:`Подтверждено источников: ${report?.references?.length||0}`}[report?.state]||'Ещё не выполнялась';
+      needs_confirmation:'Выберите источник текста',source_unavailable:'Нужно добавить текст страницы',compared:`Исправлено: ${report?.applied||0}; осталось проверить: ${(report?.candidates||[]).filter(c=>!c.auto_apply&&c.status!=='user_applied').length}`}[report?.state]||'Ещё не выполнялась';
   }
   function confirmedSources(row) {
     const groups=[['lyrics','Источник текста',row.text_reference?.references||[]],['chords','Источник аккордов',row.text_reference?.chord_sources||[]]];
-    return `<div class="song-confirmed-sources">${groups.map(([kind,label,refs])=>`<div class="song-source" data-confirmed-source="${kind}"><h4>${label}</h4>${refs.length?refs.map(ref=>`<p><a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title||label)}</a><br><span class="hint">Подтверждено по ${(ref.text_confirmation?.hits||[]).length} фразам · страница проверена</span></p>`).join(''):`<p class="hint">${row.text_reference?'Подтверждённая страница пока не найдена.':'Запустите пятый этап «Сверка с источником текста».'}</p>`}</div>`).join('')}</div>`;
+    return `<div class="song-confirmed-sources">${groups.map(([kind,label,refs])=>`<div class="song-source" data-confirmed-source="${kind}"><h4>${label}</h4>${refs.length?refs.map(ref=>`<p><a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title||label)}</a><br><span class="hint">${ref.user_confirmed?'Источник подтверждён вами':`Подтверждено по ${(ref.text_confirmation?.hits||[]).length} фразам`}</span></p>`).join(''):`<p class="hint">${row.text_reference?'Подтверждённая страница пока не найдена.':'Запустите пятый этап «Сверка с источником текста».'}</p>`}</div>`).join('')}</div>`;
+  }
+  function textCandidatePreview(row, candidate) {
+    const current = candidate.current || {}, phrase = (row.phrases || []).find(item => item.phrase_id === current.phrase_id);
+    const source = phrase?.text || current.text || "";
+    const start = Math.max(0, Math.min(source.length, Number(current.char_start) || 0));
+    const end = Math.max(start, Math.min(source.length, Number(current.char_end) || start));
+    const replacement = candidate.alternative?.text || "";
+    const original = `${esc(source.slice(0, start))}<mark>${esc(source.slice(start, end))}</mark>${esc(source.slice(end))}`;
+    const corrected = `${esc(source.slice(0, start))}<mark>${esc(replacement)}</mark>${esc(source.slice(end))}`;
+    return `<div class="song-reference-candidate"><div class="song-reference-line"><span class="hint">Исходная фраза</span><p>${original}</p></div><div class="song-reference-line song-reference-line--alternative"><span class="hint">Фраза после подтверждения</span><p>${corrected}</p></div></div>`;
   }
   function textReferencePanel(row) {
     const report=row.text_reference, refs=report?.references||[];
     if(!report&&!row.phrases?.length&&row.stage!=='text_reference')return '';
     const busy=row.status==='running'||row.processing?.busy;
-    const messages={insufficient_consensus:'Пока нет трёх разных фраз с полным согласием распознавателей.',not_found:'Источник с тремя совпадающими фразами не найден.',search_error:'Поиск источника не завершён: можно повторить.',compared:`Источников подтверждено: ${refs.length}. Исправлений, подтверждённых записью: ${report?.applied||0}.`};
-    const status=row.stage==='text_reference'&&busy?row.stage_label:messages[report?.state]||'Можно найти текст по согласованным фразам и сверить спорные места.';
-    return `<section class="song-text-reference" aria-label="Сверка с источником текста"><div class="song-stage-head"><div><h3>Источники текста</h3><p class="hint" role="status">${esc(status)}</p></div>${row.audio?.path?`<button class="btn small" data-song-rerun-step="text_reference" ${busy?'disabled':''} title="Найти стихотворение или текст песни по согласованным фразам, подтвердить по трём совпадениям и сверить с записью">${report?'Повторить сверку':'Найти и сверить текст'}</button>`:''}</div>
-      ${refs.map(ref=>`<details class="song-reference-diff"><summary>${esc(ref.title)} · подтверждено по ${ref.text_confirmation?.hits?.length||0} фразам</summary><a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a><ul>${(ref.text_confirmation?.hits||[]).map(hit=>`<li>${esc(hit.anchor)}</li>`).join('')}</ul></details>`).join('')}
-      ${(report?.candidates||[]).filter(c=>!c.auto_apply).length?`<details><summary>Спорные места для проверки: ${(report.candidates||[]).filter(c=>!c.auto_apply).length}</summary>${report.candidates.filter(c=>!c.auto_apply).map(c=>`<p><b>${((c.current.start_ms||0)/1000).toFixed(3)} с</b> · ${esc(c.current.text)} → ${esc(c.alternative.text)} <a href="${esc(c.alternative.url)}" target="_blank" rel="noopener noreferrer">Источник</a></p>`).join('')}</details>`:''}
+    const messages={needs_confirmation:'Текст получен. Проверьте публикацию и подтвердите источник для сверки.',source_unavailable:'Страница не отдала текст. Можно открыть её и вставить текст ниже.',insufficient_consensus:'Пока нет трёх разных фраз с полным согласием распознавателей.',not_found:'Источник с тремя совпадающими фразами не найден.',search_error:'Поиск источника не завершён: можно повторить.',compared:`Источников подтверждено: ${refs.length}. Исправлений сохранено: ${report?.applied||0}. Из них по источнику и одному распознавателю при близком разделении слов: ${(report?.candidates||[]).filter(c=>c.status==='confirmed_by_source_and_audio').length}. Осталось проверить: ${(report?.candidates||[]).filter(c=>!c.auto_apply&&c.status!=='user_applied').length}.`};
+    const status=row.stage==='text_reference'&&busy?row.stage_label:report?.user_applied?'Выбранные исправления сохранены. Времена фраз сохранены; изменённые слова требуют проверки по записи.':messages[report?.state]||'Можно найти текст по согласованным фразам и сверить спорные места.';
+    const pending = (report?.candidates || []).some(candidate => !candidate.auto_apply && candidate.status !== 'user_applied');
+    return `<section class="song-text-reference" aria-label="Сверка с источником текста"><div class="song-stage-head"><div><h3>Источники текста</h3><p class="hint" role="status">${esc(status)}</p></div><div class="actions">${row.audio?.path?`<button class="btn small" data-song-rerun-step="text_reference" ${busy?'disabled':''} title="Найти стихотворение или текст песни по согласованным фразам, подтвердить по трём совпадениям и сверить с записью">${report?'Сверить текст':'Найти и сверить текст'}</button>`:''}${pending?`<button class="btn small primary" data-text-apply-all ${busy?'disabled':''} title="Подтвердить и применить все найденные исправления текста">Подтвердить всё</button>`:''}</div></div>
+      ${(report?.errors||[]).length?`<details class="song-search-diagnostics"><summary>Почему поиск не завершён</summary><ul>${[...new Set(report.errors.map(e=>e.error).filter(Boolean))].map(message=>`<li>${esc(message)}</li>`).join('')}</ul></details>`:''}
+      <div class="song-text-source-form"><label class="f">Ссылка на источник текста<input id="song-text-source-url" type="url" value="${esc(report?.state==='source_unavailable'?report.suggested_sources?.at(-1)?.url:'')}" maxlength="2048" placeholder="https://genius.com/…"></label><details><summary>Вставить текст песни вручную</summary><label class="f">Текст источника<textarea id="song-text-source-lyrics" rows="6" maxlength="50000"></textarea></label></details><button type="button" class="btn" id="song-text-source-add" ${busy?'disabled':''}>Загрузить текст и сверить</button><p id="song-text-source-result" class="hint" role="status"></p></div>
+      ${refs.map(ref=>`<details class="song-reference-diff"><summary>${esc(ref.title)} · ${ref.user_confirmed?'подтверждено вами':`подтверждено по ${ref.text_confirmation?.hits?.length||0} фразам`}</summary>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}<ul>${(ref.text_confirmation?.hits||[]).map(hit=>`<li>${esc(hit.anchor)}</li>`).join('')}</ul><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre><button class="btn small" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Сверить с этим источником</button></details>`).join('')}
+      ${(report?.suggested_sources||[]).filter(ref=>!refs.some(r=>r.candidate_id===ref.candidate_id)).map(ref=>`<div class="song-reference-diff"><h4>${esc(ref.title)}</h4>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}${ref.plain_lyrics?`<details><summary>Посмотреть полученный текст · совпадений: ${ref.text_confirmation?.hits?.length||0}</summary><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre></details><button class="btn" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Подтвердить источник и сверить</button>`:`<p class="hint">${esc(ref.source_check?.error||'Не удалось извлечь текст. Вставьте его вручную.')}</p>`}</div>`).join('')}
+      ${(report?.candidates||[]).some(c=>!c.auto_apply&&c.status!=='user_applied')?`<details id="song-text-corrections" open><summary>Исправления по источнику — выберите подходящие</summary><div class="actions song-reference-bulk"><button type="button" class="btn small" data-text-select-all>Выбрать все</button><span class="hint">Выделенный фрагмент показан в исходной и подтверждаемой фразе. Любую правку можно изменить в любой момент.</span></div>${report.candidates.map((c,i)=>c.auto_apply||c.status==='user_applied'?'':`<div class="song-reference-candidate-choice"><label><input type="checkbox" data-text-correction="${i}"><span>Применить это исправление</span></label>${textCandidatePreview(row,c)}</div>`).join('')}<button class="btn primary" id="song-text-source-apply" ${busy?'disabled':''}>Применить выбранные исправления</button><p class="hint">Повторы и времена фраз сохраняются. Различия исполнения проверяйте по записи.</p></details>`:''}
       ${(report?.chord_sources||[]).length?`<p>Источники аккордов: ${report.chord_sources.map(ref=>`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title)}</a>`).join(' · ')}</p>`:''}</section>`;
   }
   const esc = (v) => escH(v == null ? "" : v);
+  function safeSourceUrl(value) {
+    const raw = String(value || '').trim();
+    if (!/^(https?:\/\/|yandexmusic:\/\/)/i.test(raw)) return '';
+    try {
+      const parsed = new URL(raw);
+      return ['http:', 'https:', 'yandexmusic:'].includes(parsed.protocol) ? parsed.href : '';
+    } catch (_) {
+      return '';
+    }
+  }
+  function sourceTitleMarkup(candidate) {
+    const title = esc(candidate.title || 'Источник записи');
+    const href = safeSourceUrl(candidate.url);
+    return href
+      ? `<a class="song-source-title-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Открыть источник, посмотреть и прослушать запись">${title}</a>`
+      : `<b>${title}</b>`;
+  }
   const call = (name, args) => core.call(name, args || {});
   const $s = (id) => document.getElementById(id);
   const captureButton = (id, glyph, title) => `<button type="button" class="btn song-icon-btn song-capture-btn" id="${id}" title="${title}" aria-label="${title}">${SongSheet.icon(glyph)}</button>`;
@@ -98,13 +141,16 @@
     const ks = row.karaoke?.state;
     const canProcessSelected=!!row.processing?.can_resume;
     const processing=processingSongs.has(row.song_id);
+    const tags=(row.tags||[]).map(tag=>`<span class="song-tag" title="Автоматическая оценка темы: ${Math.round(Number(row.tag_scores?.[tag] || 1) * 100)}%">${esc(tag)}</span>`).join("");
     const karaokeBadge = ["queued", "preparing", "separating", "checking"].includes(ks) ? '<span class="song-karaoke-status" data-state="busy">Минусовка готовится</span>' : ks === "failed" || ks === "interrupted" ? '<span class="song-karaoke-status" data-state="failed">Минусовка: повторить</span>' : "";
     return `<article class="song-card" data-song-id="${esc(row.song_id)}">
       <div class="song-card-main" data-song-open="${esc(row.song_id)}" tabindex="0" role="button" aria-label="Открыть ${esc(row.title)}">
         <div class="song-title">${esc(row.title)}</div>${artist}
-        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${karaokeBadge}${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>
+        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span><span>${esc(row.stage_label || "Готово к запуску")}</span>${karaokeBadge}${row.updated_at ? `<span>${esc(formatDate(row.updated_at))}</span>` : ""}</div>${tags ? `<div class="song-tags" aria-label="Теги песни">${tags}</div>` : ""}
       </div>
+      ${row.status==='recording'?liveCapture(row):''}
       <div class="song-card-actions">
+        ${restartBatchButton(row)}
         ${row.status === 'recording' ? stopCaptureButton(row.song_id) : ''}
         ${canProcessSelected?`<button class="btn primary song-card-process" data-song-process-selected="${esc(row.song_id)}" title="Продолжить пакетный разбор сохранённой или выбранной записи. Пользовательские правки сохраняются; готовый новый вариант доступен для проверки" aria-label="${esc(row.processing?.label || 'Обработать пакетно')}: ${esc(row.title)}" ${processing?'disabled aria-busy="true"':''}>${processing?'Запускаем…':esc(row.processing?.label || 'Обработать пакетно')}</button>`:`<button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть песню «${esc(row.title)}»" aria-label="Проиграть ${esc(row.title)}" ${row.capabilities?.audio ? '' : 'disabled'}>${SongSheet.icon('play')}</button>`}
         ${canProcessSelected&&row.capabilities?.audio?`<button class="btn song-icon-btn" data-song-play="${esc(row.song_id)}" title="Проиграть сохранённую запись" aria-label="Проиграть ${esc(row.title)}">${SongSheet.icon('play')}</button>`:''}
@@ -121,6 +167,7 @@
     list.innerHTML = state.rows.map(card).join("");
     updateCardPlayback();
     bindCaptureStops(list);
+    bindBatchRestarts(list);
     empty.hidden = state.rows.length > 0;
     list.hidden = state.rows.length === 0;
     list.querySelectorAll("[data-song-open]").forEach((el) => {
@@ -153,6 +200,16 @@
         toast(saved.status === 'running' ? 'Запись сохранена · пакетная обработка запущена.' : saved.stage_label || 'Запись завершена.');
       } catch (error) { toast(error.message || 'Не удалось завершить запись', 5000, 'bad'); }
       finally { stoppingCaptures.delete(id); await load(); }
+    }));
+  }
+  function bindBatchRestarts(container) {
+    container.querySelectorAll('[data-song-restart-batch]').forEach(button=>button.addEventListener('click',async event=>{
+      event.stopPropagation();const id=button.dataset.songRestartBatch;
+      if(processingSongs.has(id))return;
+      processingSongs.add(id);button.disabled=true;
+      try { await call('song_restart_batch',{song_id:id}); processingSongs.delete(id); await load(); toast('Пакетный разбор запущен заново. Предыдущие результаты и ваши правки сохранены.'); }
+      catch(error) { toast(error.message||'Не удалось перезапустить обработку',5000,'bad'); }
+      finally { processingSongs.delete(id);button.disabled=false; }
     }));
   }
   function guitarHtml(row) { return SongSheet.sheetHTML(row); }
@@ -192,7 +249,7 @@
     const sourceOptions=(row.source_candidates||[]).filter(c=>c.kind==='youtube')
       .sort((a,b)=>Number(String(b.candidate_id).startsWith('reference:'))-Number(String(a.candidate_id).startsWith('reference:'))||(b.match_score||0)-(a.match_score||0))
       .filter((c,i,all)=>{const key=videoKey(c);return !key||all.findIndex(x=>videoKey(x)===key)===i;});
-    const sourceStage=(row.stage==='sources'||row.status==='needs_input')&&!row.audio?.path ? `<section class="song-source-stage" aria-label="Выбор записи"><div class="song-source-stage-head"><div><h3>${row.status==='running'?'Ищем запись':'Выберите исполнение'}</h3><p class="hint">${row.status==='running'?'Поиск или загрузка уже запущены. По завершении начнётся пакетный разбор.':'У каждой найденной записи есть отдельный выбор. Нажмите «Обработать пакетно» у нужного исполнения: загрузка и разбор начнутся автоматически.'}</p></div><div class="actions">${row.status==='running'?'<button class="btn" id="song-cancel-source">Отменить обработку</button>':''}<button class="btn" id="song-retry-source" ${row.status==='running'?'disabled':''}>Искать ещё раз</button></div></div>${sourceOptions.length?`<div class="song-source-options">${sourceOptions.map(c=>`<article class="song-source-option"><div><b>${esc(c.title)}</b><p>${esc(c.artist||'Исполнитель не указан')}${c.duration?` · ${Math.round(c.duration)} с`:''}</p></div><div class="actions"><button class="btn small" data-song-source-select="${esc(c.candidate_id)}" ${row.status==='running'?'disabled':''}>${c.candidate_id===row.selected_source_id?'Выбрано':'Выбрать'}</button><button class="btn primary small" data-song-source="${esc(c.candidate_id)}" ${row.status==='running'?'disabled':''}>Обработать пакетно</button></div></article>`).join('')}</div>`:row.status==='running'?'<p class="hint" role="status">Поиск запущен. Результаты появятся здесь.</p>':'<p class="hint">Подходящие записи пока не найдены. Запустите поиск ещё раз или добавьте ссылку ниже.</p>'}</section>`:'';
+    const sourceStage=(row.stage==='sources'||row.status==='needs_input')&&!row.audio?.path ? `<section class="song-source-stage" aria-label="Выбор записи"><div class="song-source-stage-head"><div><h3>${row.status==='running'?'Ищем запись':'Выберите исполнение'}</h3><p class="hint">${row.status==='running'?'Поиск или загрузка уже запущены. По завершении начнётся пакетный разбор.':'У каждой найденной записи есть отдельный выбор. Нажмите «Обработать пакетно» у нужного исполнения: загрузка и разбор начнутся автоматически.'}</p></div><div class="actions">${row.status==='running'?'<button class="btn" id="song-cancel-source">Отменить обработку</button>':''}<button class="btn" id="song-retry-source" ${row.status==='running'?'disabled':''}>Искать ещё раз</button></div></div>${sourceOptions.length?`<div class="song-source-options">${sourceOptions.map(c=>`<article class="song-source-option"><div><div class="song-source-title">${sourceTitleMarkup(c)}</div><p>${esc(c.artist||'Исполнитель не указан')}${c.duration?` · ${Math.round(c.duration)} с`:''}</p></div><div class="actions"><button class="btn small" data-song-source-select="${esc(c.candidate_id)}" ${row.status==='running'?'disabled':''}>${c.candidate_id===row.selected_source_id?'Выбрано':'Выбрать'}</button><button class="btn primary small" data-song-source="${esc(c.candidate_id)}" ${row.status==='running'?'disabled':''}>Обработать пакетно</button></div></article>`).join('')}</div>`:row.status==='running'?'<p class="hint" role="status">Поиск запущен. Результаты появятся здесь.</p>':'<p class="hint">Подходящие записи пока не найдены. Запустите поиск ещё раз или добавьте ссылку ниже.</p>'}</section>`:'';
     const sources = (row.source_candidates || []).filter(c => c.source_check?.status !== 'unavailable' && !String(c.candidate_id||'').startsWith('text-reference:') && !String(c.candidate_id||'').startsWith('chord-reference:')).map(c => {
       const yandex=/^yandexmusic:\/\//i.test(c.url||'')||/^https?:\/\/music\.yandex\./i.test(c.url||'');
       const search=c.kind==='search'||String(c.candidate_id||'').startsWith('web-search:');
@@ -205,15 +262,16 @@
       const check=c.source_check||{};
       const selectedRecording=c.kind==='youtube'&&c.url===row.source_ref&&row.audio?.path;
       const currentRecording=!!(row.audio?.path||row.phrases?.length);
-      const selectAction=(direct||c.kind==='youtube')?`<button class="btn small" data-song-source-select="${esc(c.candidate_id)}" ${['running','recording'].includes(row.status)?'disabled':''}>${selected?(direct||currentRecording?'Выбран для сверки':'Запись выбрана'):(direct||currentRecording?'Выбрать для сверки':'Выбрать запись')}</button>`:'';
+      const selectAction=direct?`<button class="btn small" data-text-source-existing="${esc(c.candidate_id)}" ${['running','recording'].includes(row.status)?'disabled':''}>Сверить текст</button>`:c.kind==='youtube'?`<button class="btn small" data-song-source-select="${esc(c.candidate_id)}" ${['running','recording'].includes(row.status)?'disabled':''}>${selected?(direct||currentRecording?'Выбран для сверки':'Запись выбрана'):(direct||currentRecording?'Выбрать для сверки':'Выбрать запись')}</button>`:'';
       const checkAction=direct?`${check.status==='available'?`<span class="song-source-verified" role="status">Страница открывается${check.chords_extractable?` · аккорды считываются (${(check.chord_names||[]).slice(0,8).map(esc).join(', ')})`:''}</span>`:check.status==='checking'?`<span class="song-note" role="status">Проверяем страницу…</span>`:`<button class="btn small" data-song-source-check="${esc(c.candidate_id)}">Проверить страницу</button>`}${selectAction}`:selectAction;
       const text=c.plain_lyrics||c.synced_lyrics?`<details><summary>Текст для сверки</summary><p class="song-source-text">${esc(c.plain_lyrics||c.synced_lyrics)}</p></details>`:'';
       const note=search?c.note||'Поисковая выдача: выберите конкретную страницу, затем проверьте её доступность и содержание.':c.note;
-      return `<div class="song-source"><b>${esc(c.title)}</b><p>${esc(c.artist||'')}${c.duration?` · ${Math.round(c.duration)} с`:''}</p>${selectedRecording?'<span class="song-source-verified">Исполнение, по которому сделан разбор</span>':''}${link}${processAction}${checkAction}${yandexAction}${note?`<p class="song-note">${esc(note)}</p>`:''}${text}</div>`;
+      return `<div class="song-source"><div class="song-source-title">${sourceTitleMarkup(c)}</div><p>${esc(c.artist||'')}${c.duration?` · ${Math.round(c.duration)} с`:''}</p>${selectedRecording?'<span class="song-source-verified">Исполнение, по которому сделан разбор</span>':''}${link}${processAction}${checkAction}${yandexAction}${note?`<p class="song-note">${esc(note)}</p>`:''}${text}</div>`;
     }).join('');
     const errors = (row.analysis_errors || []).map(e => `<p class="song-errors">${esc(e.step)}: ${esc(e.error)}</p>`).join('');
     detail.innerHTML = `<div class="songs-detail-head"><div><h2>${esc(row.title)}</h2><p class="hint">${esc(row.artist || "Исполнитель определяется по источникам")} · ${esc(currentStatus(row))}</p></div><button class="btn songs-detail-close" id="songs-detail-close">Закрыть</button></div>
-      ${row.status === 'recording' ? `<div class="song-recording-banner" role="status"><span>Идёт запись${row.audio?.capture_source==='microphone'?' с микрофона. Автостоп после 5 секунд тишины.':' системного звука.'}</span>${stopCaptureButton(row.song_id)}</div>` : ''}
+      ${row.status === 'recording' ? `<div class="song-recording-banner">${liveCapture(row)}<span>${row.audio?.capture_source==='microphone'?'Автостоп после 5 секунд тишины, когда запись уже началась.':'Записывается системный звук.'}</span>${stopCaptureButton(row.song_id)}</div>` : ''}
+      <div class="actions">${restartBatchButton(row)}</div>
       <div class="song-steps" aria-label="Этапы разбора">${stages.map((s, i) => `<div ${s[0]==="text_reference"?'data-song-reference-stage role="button" tabindex="0" aria-label="Запустить сверку с источником текста"':''} class="song-step ${i < active && (s[0]!=="text_reference" || row.text_reference?.references?.length) ? "done" : ""} ${s[0]==="text_reference" && !row.text_reference?.references?.length && row.stage!=="text_reference" ? "song-step-unused" : ""} ${i === active ? "on" : ""}"><div><b>${i + 1}. ${esc(s[1])}</b>${s[0] === "text_reference" ? esc(textReferenceStatus(row)) : i < active ? "" : i === active ? esc(row.stage_label || "Выполняется") : "Ожидает"}</div>${stageRestart(row, s[0])}</div>`).join("")}</div>
       ${row.processing?.can_resume?`<div class="actions"><button class="btn primary" id="song-resume" data-song-process-selected="${esc(row.song_id)}" title="Продолжить пакетный разбор записи; сохранить пользовательские правки">${esc(row.processing.label)}</button></div>`:''}
       ${row.processing?.busy&&row.status!=='recording'?'<div class="actions"><button class="btn" id="song-stop-processing" title="Отменить текущий разбор. После остановки можно продолжить обработку; запись и пользовательские правки сохранятся">Остановить обработку</button></div>':''}
@@ -221,8 +279,43 @@
       ${textReferencePanel(row)}
       ${instrumentalPanel(row, instrumentalState)}
       <div class="song-detail-grid"><div class="song-preview">${guitar ? `<h3>Текст с аккордами</h3>${SongSheet.toolbar(row)}<div id="song-guitar-content">${guitar}</div>` : ""}<details><summary>Проверить и исправить распознавание</summary>${SongReview.html(row)}</details></div>
-      <details class="song-properties" ${row.status === 'needs_input' ? 'open' : ''}><summary>Источники, свойства и правка аккордов</summary>${row.recording_version ? `<p class="song-note"><b>Выбранная запись:</b> ${esc(row.recording_version)}</p>` : ""}${errors}<label class="f">Название<input id="song-edit-title" value="${esc(row.title)}"></label><label class="f">Исполнитель<input id="song-edit-artist" value="${esc(row.artist || "")}"></label><p class="hint">Источник: ${esc(row.source || "поиск")}. Правки сохраняются отдельной ревизией.</p><div class="actions"><button class="btn" id="song-save-meta">Сохранить название</button><button class="btn" id="song-refresh">Обновить карточку</button><button class="btn" id="song-find-sources" ${row.status === "running" || row.status === "recording" ? "disabled" : ""}>Найти записи и текст</button>${captureButton("song-attach-audio", "upload", "Добавить аудиофайл")}${captureAction}</div><input id="song-audio-input" type="file" accept="audio/*,video/*" hidden><p class="hint" id="song-audio-hint">${row.audio?.path ? `Файл: ${esc(row.audio.original_name || row.audio.format || "аудио")}${row.audio.duration_ms ? ` · ${Math.round(row.audio.duration_ms / 1000)} с` : ""}` : "Можно импортировать локальную запись, если системный захват недоступен."}</p><h3>Добавить свой источник</h3><label class="f">Ссылка на запись или публикацию<input id="song-manual-url" type="url" maxlength="2048" placeholder="https://…"></label><label class="f">Текст песни для сверки (необязательно)<textarea id="song-manual-lyrics" maxlength="100000" rows="4"></textarea></label><p class="hint">Прямая ссылка YouTube запускает загрузку и пакетный разбор автоматически. Ссылки Яндекс Музыки можно открыть и записать системный звук. Остальные ссылки сохраняются как справочные источники.</p><button class="btn" id="song-add-manual-source" ${row.status === 'running' || row.status === 'recording' ? 'disabled' : ''}>Добавить источник</button><p class="hint" id="song-manual-source-result" role="status"></p>${SongSheet.html(row)}<h3>Источники</h3>${confirmedSources(row)}${sources ? `<h4>Другие записи и поиск</h4>${sources}` : ""}</details></div>`;
+      <details class="song-properties" ${row.status === 'needs_input' ? 'open' : ''}><summary>Источники, свойства и правка аккордов</summary>${row.recording_version ? `<p class="song-note"><b>Выбранная запись:</b> ${esc(row.recording_version)}</p>` : ""}${errors}<label class="f">Название песни<input id="song-edit-title" value="${esc(row.title)}"></label><label class="f">Поисковый запрос<input id="song-edit-search-query" value="${esc(row.search_query || (row.source === 'query' ? row.title : ''))}" placeholder="Название и исполнитель для поиска"></label><label class="f">Исполнитель<input id="song-edit-artist" value="${esc(row.artist || "")}"></label><p class="hint">Поисковый запрос хранится отдельно: его можно уточнить, не меняя название песни. Источник: ${esc(row.source || "поиск")}.</p><div class="actions"><button class="btn" id="song-save-meta">Сохранить название</button><button class="btn" id="song-refresh">Обновить карточку</button><button class="btn" id="song-find-sources" ${row.status === "running" || row.status === "recording" ? "disabled" : ""}>Найти записи и текст</button>${captureButton("song-attach-audio", "upload", "Добавить аудиофайл")}${captureAction}</div><input id="song-audio-input" type="file" accept="audio/*,video/*" hidden><p class="hint" id="song-audio-hint">${row.audio?.path ? `Файл: ${esc(row.audio.original_name || row.audio.format || "аудио")}${row.audio.duration_ms ? ` · ${Math.round(row.audio.duration_ms / 1000)} с` : ""}` : "Можно импортировать локальную запись, если системный захват недоступен."}</p><h3>Добавить свой источник</h3><label class="f">Ссылка на запись или публикацию<input id="song-manual-url" type="url" maxlength="2048" placeholder="https://…"></label><label class="f">Текст песни для сверки (необязательно)<textarea id="song-manual-lyrics" maxlength="100000" rows="4"></textarea></label><p class="hint">Прямая ссылка YouTube запускает загрузку и пакетный разбор автоматически. Ссылки Яндекс Музыки можно открыть и записать системный звук. Остальные ссылки сохраняются как справочные источники.</p><button class="btn" id="song-add-manual-source" ${row.status === 'running' || row.status === 'recording' ? 'disabled' : ''}>Добавить источник</button><p class="hint" id="song-manual-source-result" role="status"></p>${SongSheet.html(row)}<h3>Источники</h3>${confirmedSources(row)}${sources ? `<h4>Другие записи и поиск</h4>${sources}` : ""}</details></div>`;
     bindCaptureStops(detail);
+    bindBatchRestarts(detail);
+    const artistField = detail.querySelector('#song-edit-artist');
+    artistField?.parentElement?.insertAdjacentHTML('afterend', tagEditor(row));
+    async function textSourceAction(button,action,args) {
+      button.disabled=true;
+      const message=$s('song-text-source-result');
+      if(message)message.textContent=action==='add'?'Читаем страницу и сравниваем текст…':'Сохраняем…';
+      try {
+        const saved=await call('song_text_source_'+action,{song_id:row.song_id,base_revision:state.current.revision,...args});
+        renderDetail(saved);await load();
+        if(action==='confirm' || action==='add') {
+          const corrections=$s('song-text-corrections');
+          if(corrections) { corrections.open=true; corrections.scrollIntoView({block:'nearest'}); }
+        }
+        if(action==='apply')toast('Выбранные исправления сохранены');
+        if(action==='apply_all')toast('Все найденные исправления сохранены');
+      } catch(error) {if(message)message.textContent=error.message||'Не удалось выполнить сверку';button.disabled=false;}
+    }
+    $s('song-text-source-add')?.addEventListener('click',event=>textSourceAction(event.currentTarget,'add',{
+      url:$s('song-text-source-url').value,lyrics:$s('song-text-source-lyrics').value}));
+    detail.querySelectorAll('[data-text-source-existing]').forEach(button=>button.addEventListener('click',()=>{
+      const ref=row.source_candidates.find(c=>c.candidate_id===button.dataset.textSourceExisting);
+      if(ref)textSourceAction(button,'add',{url:ref.url,lyrics:ref.plain_lyrics||''});
+    }));
+    detail.querySelectorAll('[data-text-source-confirm]').forEach(button=>button.addEventListener('click',()=>
+      textSourceAction(button,'confirm',{candidate_id:button.dataset.textSourceConfirm})));
+    detail.querySelectorAll('[data-text-apply-all]').forEach(button=>button.addEventListener('click',()=>
+      textSourceAction(button,'apply_all',{})));
+    detail.querySelectorAll('[data-text-select-all]').forEach(button=>button.addEventListener('click',()=>{
+      const boxes=[...detail.querySelectorAll('[data-text-correction]:not(:disabled)')], select=boxes.some(box=>!box.checked);
+      boxes.forEach(box=>{box.checked=select;});
+      button.textContent=select?'Снять выделение':'Выбрать все';
+    }));
+    $s('song-text-source-apply')?.addEventListener('click',event=>textSourceAction(event.currentTarget,'apply',{
+      indexes:[...detail.querySelectorAll('[data-text-correction]:checked')].map(el=>Number(el.dataset.textCorrection))}));
     const referenceStage=detail.querySelector('[data-song-reference-stage]');
     if(referenceStage) {
       const button=referenceStage.querySelector('button');
@@ -357,15 +450,15 @@
     });
     $s("songs-detail-close").onclick = closeDetail;
     $s("song-save-meta").onclick = async () => {
-      try { const saved = await call("song_patch", { song_id: row.song_id, base_revision: state.current.revision, changes: { title: $s("song-edit-title").value, artist: $s("song-edit-artist").value } }); state.current = saved; await load(); renderDetail(saved); toast("Карточка сохранена"); }
+      try { const tags = [...detail.querySelectorAll('[data-song-tag-edit]:checked')].map(input => input.dataset.songTagEdit); const saved = await call("song_patch", { song_id: row.song_id, base_revision: state.current.revision, changes: { title: $s("song-edit-title").value, search_query: $s("song-edit-search-query").value, artist: $s("song-edit-artist").value, tags } }); state.current = saved; await load(); renderDetail(saved); toast("Карточка сохранена"); }
       catch (error) { toast(error.message || "Не удалось сохранить", 4000, "bad"); }
     };
     $s("song-start-system-capture")?.addEventListener("click", async () => {
-      try { await call("song_capture", { song_id: row.song_id, action: "start", source: "system", target: "all", backend: "auto" }); await load(); toast("Запись системного звука началась."); }
+      try { await call("song_capture", { song_id: row.song_id, action: "start", source: "system", target: "all", backend: "auto" }); await load(); toast("Ожидаем звук компьютера. Включите песню."); }
       catch (error) { toast(error.message || "Не удалось начать запись", 5000, "bad"); }
     });
     $s("song-start-mic-capture")?.addEventListener("click", async () => {
-      try { await call("song_capture", { song_id: row.song_id, action: "start", source: "microphone" }); await load(); toast("Запись началась. Голосовой ввод ассистента выключен."); }
+      try { await call("song_capture", { song_id: row.song_id, action: "start", source: "microphone" }); await load(); toast("Микрофон подключён. Запись начнётся, когда появится звук."); }
       catch (error) { toast(error.message || "Не удалось начать запись", 5000, "bad"); }
     });
     $s("song-start-transcribe")?.addEventListener("click", async () => {
@@ -472,7 +565,7 @@
     } catch(error) { if(request===openRequest)toast(error.message || 'Песня не найдена',4000,'bad');return false; }
   }
   function closeDetail() { stopCard(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
-  async function load() { try { state.rows = await call("songs_list", { q: state.query, status: state.status, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
+  async function load() { try { state.rows = await call("songs_list", { q: state.query, lyrics_q: state.lyricsQuery, status: state.status, tag: state.tag, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
   async function create(source, title, artist) { try { const row = await call("song_create", { source, title, artist }); await load(); renderDetail(row); if (source === "query") renderDetail(await call("song_find_sources", {song_id: row.song_id})); } catch (error) { toast(error.message || "Не удалось создать карточку", 4000, "bad"); } }
   async function createMicSong() {
     const title=`Запись с микрофона · ${new Date().toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`;
@@ -480,7 +573,7 @@
       const row=await call('song_create',{source:'current',title,artist:''});
       await call('song_capture',{song_id:row.song_id,action:'start',source:'microphone'});
       await load();renderDetail(await call('song_get',{song_id:row.song_id}));
-      toast('Запись с микрофона началась. После остановки начнётся распознавание текста.');
+      toast('Микрофон подключён — ожидаем звук. После остановки начнётся распознавание текста.');
     } catch(error) { toast(error.message||'Не удалось начать запись песни',5000,'bad'); }
   }
   let createSource = "query", createFocus = null;
@@ -571,11 +664,15 @@
     });
     $s("song-create-input")?.addEventListener("keydown", (event) => { if (event.key === "Enter") $s("song-create-submit")?.click(); if (event.key === "Escape") closeCreateDialog(); });
     $s("songs-query")?.addEventListener("input", (event) => { state.query = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
+    $s("songs-lyrics-query")?.addEventListener("input", (event) => { state.lyricsQuery = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
     document.querySelectorAll("[data-song-status]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-status]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.status = el.dataset.songStatus; load(); }));
+    document.querySelectorAll("[data-song-tag]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-tag]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.tag = el.dataset.songTag; load(); }));
     function taskTab(songs) {
       $s('p-songs').hidden = !songs; $s('tasks-work-content').hidden = songs;
       $s('tasks-songs-tab').setAttribute('aria-pressed', String(songs));
       $s('tasks-work-tab').setAttribute('aria-pressed', String(!songs));
+      $s('tasks-articles-tab')?.setAttribute('aria-pressed','false'); $s('tasks-video-tab')?.setAttribute('aria-pressed','false');
+      $s('p-articles') && ($s('p-articles').hidden=true); $s('p-video') && ($s('p-video').hidden=true);
       if (songs) load(); else SongReview.stop();
     }
     $s('tasks-songs-tab')?.addEventListener('click', () => taskTab(true));

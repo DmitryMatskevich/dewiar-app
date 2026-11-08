@@ -1990,9 +1990,13 @@ function renderDone(el, t) {
       || latest.find(o => /(?:^|\/)transcript\.txt$/.test(o.path || ''))
       || latest.find(o => /\.(?:md|txt|srt)$/.test(o.path || ''));
     const summary = result && /transcript\.summary\.md$/.test(result.path);
+    const statusText = summary
+      ? `Пакетная транскрибация завершена. Полный пакет из ${outs.length} файлов — в задаче.`
+      : result ? 'Готовый текст сохранён: ' + esc(result.title || result.path)
+      : 'Обработка завершена. Проверьте итог и журнал задачи.';
     el.innerHTML = `<div class="tl">✅ <b>${esc(t.title)}</b><button class="tx" title="Скрыть готовый результат">×</button></div>`
-      + `<div class="tsub">${result ? 'Готовый текст сохранён: ' + esc(result.title || result.path) : 'Обработка завершена. Проверьте итог и журнал задачи.'}</div>`
-      + `<div class="tbtn">${result ? `<button data-a="ready" title="Открыть сохранённый текст результата. Видео повторно не скачивается.">${summary ? 'Открыть резюме' : 'Открыть расшифровку'}</button>` : ''}<button data-a="results" title="Открыть задачу со всеми сохранёнными файлами, журналом и итогом">${result ? 'Все файлы' : 'Открыть задачу'}</button></div>`;
+      + `<div class="tsub">${statusText}</div>`
+      + `<div class="tbtn">${summary ? `<button data-a="results" title="Открыть задачу с ходом обработки, итогом и всеми файлами">Вся обработка и файлы</button><button data-a="ready" title="Открыть краткое резюме">Открыть резюме</button>` : `${result ? `<button data-a="ready" title="Открыть сохранённый текст результата. Видео повторно не скачивается.">${'Открыть расшифровку'}</button>` : ''}<button data-a="results" title="Открыть задачу со всеми сохранёнными файлами, журналом и итогом">${result ? 'Все файлы' : 'Открыть задачу'}</button>`}</div>`;
     el.querySelector('.tx').onclick = e => { e.stopPropagation(); dismissed.add(t.id); renderTask(); };
     el.querySelectorAll('.tbtn button').forEach(b => b.onclick = async e => {
       e.stopPropagation(); b.disabled = true;

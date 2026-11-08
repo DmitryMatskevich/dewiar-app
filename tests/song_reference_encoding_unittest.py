@@ -2,14 +2,30 @@
 from pathlib import Path
 import sys
 import unittest
+import json
 from unittest.mock import patch
 from io import BytesIO
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'core'))
-from songs.sources import _decode_reference_html, check_reference
+from songs.sources import _decode_reference_html, check_reference, _embedded_lyrics
 
 
 class ReferenceEncodingTests(unittest.TestCase):
+    def test_musixmatch_public_hydration_contains_lyrics_without_visible_html(self):
+        lyrics='Тестовая строка о вечернем поезде\nТестовая строка о тихом ветре'
+        data={'props':{'pageProps':{'data':{'trackInfo':{'data':{'lyrics':{'body':lyrics}}}}}}}
+        source='<title>Тест</title><script id="__NEXT_DATA__" type="application/json">'+json.dumps(data)+'</script>'
+        self.assertEqual(_embedded_lyrics(source,'https://www.musixmatch.com/lyrics/test/song'),lyrics)
+        self.assertEqual(_embedded_lyrics(source,'https://example.org/lyrics/test/song'),'')
+        self.assertEqual(_embedded_lyrics('<script id="__NEXT_DATA__" type="application/json">bad</script>','https://www.musixmatch.com/lyrics/test/song'),'')
+        response=BytesIO(source.encode());response.headers={'Content-Type':'text/html'};response.status=200
+        response.geturl=lambda:'https://www.musixmatch.com/lyrics/test/song'
+        with patch('songs.sources._public_http_url'),patch('songs.sources.build_opener') as opener:
+            opener.return_value.open.return_value=response
+            result=check_reference(response.geturl())
+        self.assertEqual(result['extracted_text'],lyrics)
+        self.assertEqual(result['text_extraction'],'musixmatch_public_json')
+
     def test_windows_1251_http_header_preserves_poetry(self):
         original='<title>Стихи</title><p>Дело было ночью, целовались и балдели.</p>'
         text,encoding=_decode_reference_html(original.encode('cp1251'),'text/html; charset=windows-1251')

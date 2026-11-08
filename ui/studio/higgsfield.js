@@ -1,0 +1,10 @@
+(function(){
+  'use strict';const root=document.getElementById('video-app');if(!root)return;
+  const panel=document.createElement('details');panel.className='vd-higgsfield';
+  panel.innerHTML='<summary>Генерация сцен · Higgsfield MCP</summary><p>Подключение к официальному MCP проверяется отдельно от генерации. Аккаунты подключаются в разделе ниже.</p><p><code>https://mcp.higgsfield.ai/mcp</code></p><div class="vd-actions"><button class="btn" type="button" id="hf-check">Проверить доступность Higgsfield</button><button class="btn" type="button" id="hf-refresh">Обновить диагностику</button></div><p id="hf-status" role="status" aria-live="polite">Подключение ещё не проверялось.</p><p id="hf-detail"></p>';
+  root.append(panel);const $=id=>document.getElementById('hf-'+id);let busy=false,timer=null;
+  async function refresh(){const result=await core.call('content_higgsfield_diagnostic',{});$('status').textContent=result.message;$('status').classList.toggle('vd-error',['failed','unavailable','interrupted'].includes(result.state));$('detail').textContent=[result.issuer?'Сервер входа: '+result.issuer:'',result.pkce?'PKCE: '+result.pkce:'',result.tools?.length?'Обнаружено инструментов: '+result.tools.length:'',result.checked_at?'Проверено: '+new Date(result.checked_at).toLocaleString():''].filter(Boolean).join(' · ');$('check').disabled=result.state==='running';clearTimeout(timer);if(result.state==='running')timer=setTimeout(()=>refresh().catch(e=>{$('status').textContent=e.message;$('check').disabled=false;}),1000);}
+  async function act(fn){if(busy)return;busy=true;$('check').disabled=true;$('refresh').disabled=true;try{await fn();}catch(e){$('status').textContent=e.message;$('status').classList.add('vd-error');$('check').disabled=false;}finally{busy=false;$('refresh').disabled=false;}}
+  $('check').onclick=()=>act(async()=>{await core.call('content_higgsfield_diagnose',{});await refresh();});$('refresh').onclick=()=>act(refresh);
+  panel.addEventListener('toggle',()=>{if(panel.open)act(refresh);});
+})();

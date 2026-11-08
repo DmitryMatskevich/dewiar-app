@@ -10,6 +10,8 @@
   const hide=()=>{panel.hidden=true;button.setAttribute('aria-pressed','false');};
   document.getElementById('tasks-work-tab')?.addEventListener('click',hide);
   document.getElementById('tasks-songs-tab')?.addEventListener('click',hide);
+  document.getElementById('tasks-articles-tab')?.addEventListener('click',hide);
+  document.getElementById('tasks-video-tab')?.addEventListener('click',hide);
   button.onclick=async()=>{
     document.getElementById('tasks-work-tab')?.click();
     document.getElementById('tasks-work-content').hidden=true;

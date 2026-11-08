@@ -88,14 +88,15 @@ window.SongSheet = (() => {
       if(source[i].text) { result.push(...wrapLine(source[i],width)); i++; continue; }
       const first=i, group=[];
       while(i<source.length && !source[i].text) group.push(source[i++]);
-      const events=group.flatMap(line=>line.unplaced_chords||[]);
-      if(!events.length) continue;
+      const events=group.flatMap(line=>line.unplaced_chords||[]).filter(event=>event.name && event.name!=='N');
+      if(!events.length && !group.some(line=>line.instrumental)) continue;
       const previous=[...source.slice(0,first)].reverse().find(line=>line.text);
       const next=source.slice(i).find(line=>line.text);
       const eventStart=Math.min(...events.map(event=>Number(event.start_ms)||0));
       const eventEnd=Math.max(...events.map(event=>Number(event.end_ms)||Number(event.start_ms)||0));
-      let start=previous ? vocalBounds(previous).end : 0;
-      let end=next ? vocalBounds(next).start : duration;
+      const explicit=group.every(line=>line.instrumental && Number.isFinite(line.start_ms) && line.end_ms>line.start_ms);
+      let start=explicit ? Math.min(...group.map(line=>line.start_ms)) : previous ? vocalBounds(previous).end : 0;
+      let end=explicit ? Math.max(...group.map(line=>line.end_ms)) : next ? vocalBounds(next).start : duration;
       if(!Number.isFinite(start)) start=eventStart;
       if(!Number.isFinite(end)||end<=start) { start=eventStart; end=Math.max(eventEnd,eventStart+1000); }
       const phraseId=next?.source_phrase_ids?.[0]||next?.phrase_id;
@@ -105,10 +106,51 @@ window.SongSheet = (() => {
     }
     return result;
   }
+  function sourceStanzaHints(row) {
+    // A verified lyrics page often preserves stanza boundaries as blank lines.
+    // Keep those boundaries as a formatting hint for the copied sheet; the
+    // audio/phrase timeline remains authoritative for words and timestamps.
+    const refs=[...(row.text_reference?.references||[]), ...(row.text_reference?.suggested_sources||[])];
+    const text=refs.find(ref=>ref?.plain_lyrics)?.plain_lyrics || '';
+    if(!text) return [];
+    const normalize=value=>String(value||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]+/gi,' ').trim();
+    return text.split(/\n\s*\n+/).map(paragraph=>paragraph.split(/\n+/).map(normalize).filter(Boolean))
+      .filter(lines=>lines.length).map(lines=>({lines,words:normalize(lines.join(' ')).split(/\s+/).filter(Boolean)}));
+  }
+  function sourceStanzaBreak(row, lineText, state) {
+    const hints=state.hints;
+    if(!hints.length || !lineText) return false;
+    const normalize=value=>String(value||'').toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]+/gi,' ').trim();
+    const words=normalize(lineText).split(/\s+/).filter(Boolean);
+    if(!words.length) return false;
+    let paragraph=hints[state.index];
+    if(!paragraph) return false;
+    if(state.line>=paragraph.lines.length && hints[state.index+1]) {
+      state.index++; state.line=0; state.used=0; paragraph=hints[state.index];
+      return true;
+    }
+    const overlap=(a,b)=>a.filter(word=>b.includes(word)).length/Math.max(1,a.length);
+    const currentWords=paragraph.lines[state.line] ? paragraph.lines[state.line].split(/\s+/).filter(Boolean) : [];
+    const currentScore=overlap(words,currentWords);
+    const nextParagraph=hints[state.index+1];
+    const nextScore=nextParagraph ? overlap(words,nextParagraph.words) : 0;
+    // A source line may differ slightly from the audio transcription, so use
+    // token overlap rather than exact equality. We only advance on a clear
+    // match; otherwise keep the normal four-line fallback.
+    if(nextParagraph && currentScore<0.25 && nextScore>currentScore+0.15) {
+      state.index++; state.line=0; state.used=0; paragraph=hints[state.index];
+    }
+    if(currentScore>=0.25 || state.line===0 && !state.used) {
+      state.line++;
+      state.used++;
+    }
+    return false;
+  }
   function sheetRows(row) {
     const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
     const lines = [], width=columns(row), seenParts=new Set();
     let stanzaLines = 0, hasLyrics = false;
+    const sourceState={hints:sourceStanzaHints(row),index:0,line:0,used:0};
     for (const line of presentationLines(row,width)) {
       const newPart=parts.has(line.phrase_id) && !seenParts.has(line.phrase_id);
       seenParts.add(line.phrase_id);
@@ -123,9 +165,13 @@ window.SongSheet = (() => {
         start_ms:c.start_ms,end_ms:c.end_ms,
         voicing_fingering:c.voicing_fingering||c.fingering||c.voicing?.fingering,
         voicing_probability:c.voicing_probability??c.fingering_probability??c.voicing?.probability}))});
-      if(line.text) { lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
-        display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true; }
-      else if(text) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
+      if(line.text) {
+        const sourceBreak=sourceStanzaBreak(row,line.text,sourceState);
+        if(sourceBreak && lines.length && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
+        lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
+          display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true;
+      }
+      else if(text || line.instrumental) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
         phrase_id:line.phrase_id,start_ms:line.start_ms,end_ms:line.end_ms,next_section_label:line.next_section_label});lines.push({kind:'space',text:''}); }
     }
     return lines;
@@ -165,7 +211,8 @@ window.SongSheet = (() => {
       parts.forEach(part=>part.classList.remove('countdown-lit'));
       const cue=countdownState(ms,start,end);
       if(marker===activeInstrumental&&cue) {
-        parts.find(part=>Number(part.dataset.cueStep)===cue.count)?.classList.add('countdown-lit');
+        if(cue.single) parts.forEach(part=>part.classList.add('countdown-lit'));
+        else parts.find(part=>Number(part.dataset.cueStep)===cue.count)?.classList.add('countdown-lit');
       }
     }
     const chordSpans=[...paper.querySelectorAll('.song-chord-tip[data-start-ms]')];
@@ -198,7 +245,8 @@ window.SongSheet = (() => {
   function countdownState(ms,start,end) {
     const duration=end-start;
     if(!Number.isFinite(ms)||!Number.isFinite(start)||!Number.isFinite(end)||duration<=0||ms<start||ms>=end) return null;
-    const windowMs=Math.min(3000,duration), remaining=end-ms;
+    if(duration<3000) return {count:1,lit:3,single:true};
+    const windowMs=3000, remaining=end-ms;
     if(remaining>windowMs)return null;
     const count=Math.max(1,Math.min(3,Math.ceil(remaining/(windowMs/3))));
     return {count,lit:4-count};
@@ -257,8 +305,36 @@ window.SongSheet = (() => {
     });
     sheetObserver.observe(container);
   }
+  function copyBody(row) {
+    const rows=sheetRows(row), out=[];
+    for(let i=0;i<rows.length;i++) {
+      const current=rows[i];
+      if(current.kind==='space') {
+        if(out.length && out.at(-1)!=='') out.push('');
+        continue;
+      }
+      if(current.kind==='instrumental') {
+        let next=i+1, chordLines=[];
+        while(next<rows.length && rows[next].kind!=='lyrics') {
+          if(rows[next].kind==='chords' && rows[next].text) chordLines.push(rows[next].text.trim());
+          next++;
+        }
+        if(rows[next]?.kind==='lyrics') {
+          // Keep the preceding chord row and the break's chord row separate
+          // from the lyric.  Labels such as "Проигрыш" are presentation-only:
+          // the copied notation should contain only chords and words.
+          if(chordLines.length) out.push(chordLines.join(' '));
+          out.push(rows[next].text);
+          i=next;
+        } else if(chordLines.length) out.push(chordLines.join(' '));
+        continue;
+      }
+      out.push(current.text);
+    }
+    return out.join('\n').replace(/^\n+|\n+$/g, '');
+  }
   function plainText(row) {
-    const body=sheetRows(row).map(r=>r.text).join('\n').replace(/^\n+|\n+$/g, '');
+    const body=copyBody(row);
     const names=[...new Set(sheetRows(row).filter(r=>r.kind==='chords')
       .flatMap(r=>r.text.trim().split(/\s+/)).filter(Boolean))];
     const evidenceFor=name=>[...(row.chords||[]),...(row.guitar_sheet||[]).flatMap(line=>line.chords||[])]
@@ -269,10 +345,15 @@ window.SongSheet = (() => {
       return `${name} — ${shape || 'позиция не определена'}${pinned?' (закреплено)':''}`;
     });
     const sources=sourceLinks(row).map(source=>`${source.title} — ${source.url}`);
+    const header=[];
+    if(String(row.title||'').trim()) header.push(String(row.title).trim());
+    if(String(row.search_query||'').trim()) header.push(`Поисковый запрос: ${String(row.search_query).trim()}`);
     const extras=[];
     if(fingerings.length) extras.push(`Аппликатуры (струны 1→6):\n${fingerings.join('\n')}`);
     if(sources.length) extras.push(`Источники:\n${sources.join('\n')}`);
-    return [body,...extras].filter(Boolean).join('\n\n');
+    const tags=[...(row.tags||[])].filter(Boolean);
+    if(tags.length) extras.push(`Теги: ${tags.join(', ')}`);
+    return [...header,body,...extras].filter(Boolean).join('\n\n');
   }
   const NOTE_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11,H:11};
   const STRING_PC=[4,11,7,2,9,4]; // standard tuning, first (thinnest) string to sixth
@@ -455,13 +536,14 @@ window.SongSheet = (() => {
     const fretLabels=Array.from({length:4},(_,column)=>base+column);
     const rows=labels.map((label,row)=>{
       const value=values[row]??'x', fret=Number(value);
+      const muted=String(value).toLowerCase()==='x';
       const cells=fretLabels.map(number=>{
         const title=`${fretNote(row,number)} · струна ${row+1}, лад ${number}`;
         return `<button type="button" class="song-chord-fret ${fret===number?'filled':''}" data-chord-fret="${number}" data-chord-string="${row}" title="${title}" aria-label="${title}" aria-pressed="${fret===number}"></button>`;
       }).join('');
-      const title=value==='x'?`Струна ${row+1} выключена. Открыть: ${fretNote(row,0)}`
+      const title=muted?`Струна ${row+1} выключена. Открыть: ${fretNote(row,0)}`
         :`${fretNote(row,fret)} · струна ${row+1}, ${fret===0?'открытая':'лад '+fret}. ${fret===0?'Выключить':'Отпустить'} струну`;
-      return `<div class="song-chord-row"><span class="song-chord-string">${label}</span><span class="song-chord-grid">${cells}</span><button type="button" class="song-chord-value" data-chord-string-toggle="${row}" title="${title}" aria-label="${title}">${esc(value)}</button></div>`;
+      return `<div class="song-chord-row"><span class="song-chord-string">${label}</span><span class="song-chord-grid${muted?' is-muted':''}"${muted?' aria-label="Струна выключена; ни один лад не играется"':''}>${cells}</span><button type="button" class="song-chord-value" data-chord-string-toggle="${row}" title="${title}" aria-label="${title}">${esc(value)}</button></div>`;
     }).join('');
     return `<div class="song-chord-fret-head"><span></span>${fretLabels.map(number=>`<b>${number}</b>`).join('')}<span></span></div><div class="song-chord-diagram">${rows}</div><div class="song-chord-variants"><button type="button" class="song-chord-nav" data-chord-prev title="Предыдущая аппликатура" aria-label="Предыдущая аппликатура">‹</button><span>${index+1}/${total}</span><button type="button" class="song-chord-nav" data-chord-next title="Следующая аппликатура" aria-label="Следующая аппликатура">›</button></div>`;
   }
@@ -646,7 +728,7 @@ window.SongSheet = (() => {
       const r=rows[i];
       if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
       const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
-      const lyric=r.kind==='lyrics' ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
+      const lyric=['lyrics','instrumental'].includes(r.kind) ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
       let lyricHTMLContent='';
       if(lyric?.kind==='lyrics') lyricHTMLContent=lyricHTML(lyric);
       else if(lyric?.kind==='instrumental') {
@@ -661,6 +743,7 @@ window.SongSheet = (() => {
   }
   function icon(name) {
     const paths = {
+      refresh:'<path d="M20 7a8 8 0 0 0-14-2L3 8m0-5v5h5M4 17a8 8 0 0 0 14 2l3-3m0 5v-5h-5"/>',
       edit:'<path d="m15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z"/>',
       trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6m4-6v6"/>',
       down:'<path d="M12 4v16m-6-6 6 6 6-6"/>',
@@ -675,6 +758,8 @@ window.SongSheet = (() => {
       karaoke:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5"/>',
       pause:'<path d="M8 4v16M16 4v16"/>',
       stop:'<rect x="5" y="5" width="14" height="14" rx="1"/>',
+      speedDown:'<path d="M4 8h12m-4-4 4 4-4 4M20 16H8m4-4-4 4 4 4"/>',
+      speedUp:'<path d="M4 16h12m-4-4 4 4-4 4M20 8H8m4-4-4 4 4 4"/>',
       pin:'<path d="m14 4 6 6-3 3-2-2-4 4v4l-2 2-1-5-5-1 2-2h4l4-4-2-2Z"/>',
       check:'<path d="m5 12 4 4L19 6"/>',
       mic:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/>',
@@ -688,17 +773,21 @@ window.SongSheet = (() => {
     const button = (id, glyph, title, extra='') => `<button type="button" class="btn song-icon-btn" id="${id}" title="${title}" aria-label="${title}" ${extra}>${icon(glyph)}</button>`;
     return `<div class="song-sheet-tools" role="group" aria-label="Тональность, копирование и прослушивание">
       <div class="song-tool-group">
-        ${button('song-key-down','down','Понизить аккорды на один полутон; звук записи не меняется')}
+        ${button('song-key-down','down','Понизить аккорды и тональность воспроизведения на один полутон')}
         <span id="song-key-label" role="status" title="Сдвиг аккордов относительно исходной тональности, в полутонах" aria-label="Сдвиг аккордов: ${shiftLabel(row)} полутонов">${shiftLabel(row)}</span>
-        ${button('song-key-up','up','Повысить аккорды на один полутон; звук записи не меняется')}
+        ${button('song-key-up','up','Повысить аккорды и тональность воспроизведения на один полутон')}
       </div>
       <div class="song-tool-group song-copy-group" role="group" aria-label="Текст и копирование">
         ${button('song-show-text','text','Показать текст с аккордами для копирования в выбранной тональности','aria-controls="song-copy-panel" aria-expanded="false"')}
         ${button('song-copy-sheet','copy','Скопировать текст с аккордами, аппликатурами и ссылками на источники')}
       </div>
       <div class="song-tool-group" role="group" aria-label="Прослушивание песни">
+        ${button('song-speed-down','speedDown','Замедлить воспроизведение на 10 процентов; тональность не меняется')}
+        <span id="song-speed-label" role="status" title="Скорость воспроизведения записи и минусовки" aria-label="Скорость воспроизведения">×1.00</span>
+        ${button('song-speed-up','speedUp','Ускорить воспроизведение на 10 процентов; тональность не меняется')}
         ${button('song-sheet-previous','previous','Перейти к началу предыдущей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-play','play',row.capabilities?.audio ? 'Проиграть всю песню в исходной тональности записи' : 'Для прослушивания добавьте аудиозапись',row.capabilities?.audio ? '' : 'disabled')}
+        ${button('song-sheet-play-instrumental','karaoke',row.karaoke?.state === 'ready' ? 'Проиграть всю песню с минусовкой' : 'Минусовка ещё не готова',row.karaoke?.state === 'ready' ? '' : 'disabled')}
         ${button('song-sheet-next','next','Перейти к началу следующей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-stop','stop','Остановить воспроизведение и вернуться к началу песни','disabled')}
       </div>
@@ -707,11 +796,12 @@ window.SongSheet = (() => {
       <section class="song-live-editor" id="song-live-editor" aria-label="Правка текущей фразы и аккордов" hidden>
         <audio id="song-live-edit-audio" preload="auto" aria-label="Прослушивание текущей фразы"></audio>
         <div class="song-live-editor-head"><div><b>Правка во время прослушивания</b><p class="hint" id="song-live-edit-target"></p></div><div class="actions">
-          <button type="button" class="btn song-icon-btn" id="song-live-edit-play" title="Проиграть текущую фразу, не выходя из редактора" aria-label="Проиграть текущую фразу, не выходя из редактора">${icon('play')}</button>
           <button type="button" class="btn song-icon-btn" id="song-live-edit-previous" title="Сохранить изменения и перейти к предыдущей фразе в редакторе" aria-label="Предыдущая фраза">${icon('previous')}</button>
+          <button type="button" class="btn song-icon-btn" id="song-live-edit-play" title="Проиграть текущую фразу, не выходя из редактора" aria-label="Проиграть текущую фразу, не выходя из редактора">${icon('play')}</button>
           <button type="button" class="btn song-icon-btn" id="song-live-edit-next" title="Сохранить изменения и перейти к следующей фразе в редакторе" aria-label="Следующая фраза">${icon('next')}</button>
           <button type="button" class="btn primary small" id="song-live-edit-save" title="Сохранить текст и аккорды, оставаясь в редакторе фразы">Сохранить</button>
-          <button type="button" class="btn small" id="song-live-edit-close" title="Закрыть редактор фразы и вернуться к тексту песни">Закрыть</button>
+          <button type="button" class="btn song-icon-btn" id="song-live-edit-play-original" title="Проиграть оригинальную запись, не закрывая редактор" aria-label="Проиграть оригинальную запись" ${row.capabilities?.audio ? '' : 'disabled'}>${icon('play')}</button>
+          <button type="button" class="btn small" id="song-live-edit-close" title="Закрыть редактор и продолжить песню с начала текущей фразы">Закрыть</button>
         </div></div>
         <div class="song-live-preview" id="song-live-preview"><b>Фраза после правки</b><div class="song-live-preview-chords" id="song-live-edit-preview-chords" aria-hidden="true"></div><p id="song-live-edit-preview" aria-live="polite"></p></div>
         <p class="song-save-status" id="song-live-edit-status" role="status">После сохранения песня останется на паузе.</p>
@@ -728,6 +818,10 @@ window.SongSheet = (() => {
     bindResponsive(row,render);
     function change(delta) {
       shifts.set(row.song_id,offset(row)+delta); render();
+      // Keep the audible track in the same key as the displayed chords.
+      // SongReview stores the value until playback starts, so changing the
+      // key before pressing play is also supported.
+      window.SongReview?.setPitch?.(row.song_id, offset(row));
       const label = document.getElementById('song-key-label');
       label.textContent = shiftLabel(row);
       label.setAttribute('aria-label', `Сдвиг аккордов: ${shiftLabel(row)} полутонов`);

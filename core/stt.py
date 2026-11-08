@@ -42,6 +42,38 @@ class VoskSTT:
         return json.loads(rec.FinalResult()).get("text", "")
 
 
+def tokens_to_words(tokens, stamps, offset=0.0, tail=0.3):
+    """Токены onnx-asr (with_timestamps) -> слова {"t", "s", "e"} в секундах (+offset — начало куска).
+
+    Новое слово — токен с пробелом в начале (▁ словаря onnx-asr заменяет пробелом); знаки препинания и части слова
+    дописываются к текущему. Начало слова — время его первого токена из декодера (шаг GigaAM — 40 мс), конец —
+    не позже начала следующего слова. Это время декодера, а не распределение фразы по буквам."""
+    words, new = [], True
+    for tok, ts in zip(tokens or [], stamps or []):
+        tok = str(tok).replace("\u2581", " ")
+        piece = tok.strip()
+        if tok[:1].isspace():
+            new = True
+        if not piece:
+            continue
+        t = float(offset) + float(ts)
+        if new or not words:
+            words.append({"t": piece, "s": round(t, 2), "e": round(t + tail, 2), "_last": t})
+            new = False
+        else:
+            words[-1]["t"] += piece
+            # Знак препинания модель с пунктуацией выдаёт перед СЛЕДУЮЩЕЙ речью (через паузу) — он не продлевает
+            # слово; запоздалый кусок слова (> 0,6 с от прошлого токена) — тоже.
+            if any(ch.isalnum() for ch in piece) and t - words[-1]["_last"] <= 0.6:
+                words[-1]["e"] = round(t + tail, 2)
+                words[-1]["_last"] = t
+    for w, nxt in zip(words, words[1:]):
+        w["e"] = max(w["s"], min(w["e"], nxt["s"]))
+    for w in words:
+        w.pop("_last", None)
+    return words
+
+
 def _heavy():
     """Замок тяжёлых загрузок (ortcfg.HEAVY): слух и голоса грузятся по очереди, а не вместе."""
     try:
@@ -235,6 +267,19 @@ class GigaAMSTT:
         a = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         res = self.model.recognize(a, sample_rate=16000)
         return res if isinstance(res, str) else getattr(res, "text", str(res))
+
+    def transcribe_words(self, pcm: bytes):
+        """Тот же проход модели, что transcribe(), но со временем слов (onnx-asr with_timestamps).
+        -> (текст, [{"t", "s", "e"}]) — секунды от начала pcm. Нет времени у модели — слова пустые."""
+        if self.model is None:
+            return self.transcribe(pcm), []              # transcribe() объяснит, что модель не готова
+        with_ts = getattr(self.model, "with_timestamps", None)
+        if not callable(with_ts):
+            return self.transcribe(pcm), []
+        a = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        res = with_ts().recognize(a, sample_rate=16000)
+        text = str(getattr(res, "text", res) or "").strip()
+        return text, tokens_to_words(getattr(res, "tokens", None), getattr(res, "timestamps", None))
 
 
 class RemoteSTT:

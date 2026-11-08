@@ -681,13 +681,15 @@ async function prPlayer(meeting, title, opener, mode) {
       <div class="pr-seg" role="group" aria-label="Дорожка">${d.tracks.map(t => `<button data-track="${t.key}" title="${t.key === "mix" ? "Обе стороны вместе" : "Только " + escH(t.label.toLowerCase())}">${escH(t.label)}</button>`).join("")}</div>
       ${d.video ? `<div class="pr-seg" role="group" aria-label="Изображение"><button data-mode="frames" title="Кадры экрана по времени записи">Кадры</button><button data-mode="video" title="Собранное видео встречи">Видео</button></div>` : ""}
       <button class="pr-gal-x" title="Закрыть (Esc)" aria-label="Закрыть проигрыватель">✕</button></div>
+    <div class="pr-pl-spk" aria-label="Участники"></div>
     <div class="pr-pl-body">
       <figure class="pr-pl-stage"><img alt=""><video playsinline hidden></video><figcaption></figcaption></figure>
-      <ol class="pr-pl-lines" aria-label="Расшифровка">${d.lines.map((l, k) => `<li data-k="${k}" data-t="${l.t}" class="w-${escH(l.who)}" tabindex="0"><time>${fmt(l.t)}</time><b>${escH(who[l.who] || l.who)}</b> ${escH(l.text)}</li>`).join("") || '<li class="pr-pl-empty">Расшифровки нет</li>'}</ol>
+      <ol class="pr-pl-lines" aria-label="Расшифровка">${d.lines.map((l, k) => `<li data-k="${k}" data-t="${l.t}" class="w-${escH(l.who)}${l.speaker ? " s-" + escH(l.speaker) : ""}" tabindex="0" title="${(d.speakers || []).length > 1 ? "Правая кнопка — кто сказал" : ""}"><time>${fmt(l.t)}</time><b>${escH(l.label || who[l.who] || l.who)}</b> ${escH(l.text)}</li>`).join("") || '<li class="pr-pl-empty">Расшифровки нет</li>'}</ol>
     </div>
     <div class="pr-pl-bar"><div class="pr-pl-marks" title="Кадры экрана: щелчок — перейти">${d.frames.map((f, k) => `<i data-k="${k}" style="left:${d.duration ? (100 * f.t / d.duration).toFixed(3) : 0}%" title="Кадр ${k + 1} — ${fmt(f.t)}"></i>`).join("")}</div>
       <audio controls preload="metadata"></audio></div>`;
   document.body.appendChild(box);
+  prSpeakers(box, meeting, title, opener, mode, d);
   const audio = box.querySelector("audio"), video = box.querySelector("video"), img = box.querySelector("img");
   const cap = box.querySelector("figcaption"), list = box.querySelector(".pr-pl-lines");
   const items = [...list.querySelectorAll("li[data-t]")];
@@ -758,6 +760,80 @@ async function prPlayer(meeting, title, opener, mode) {
   setMode(mode);
   sync();
   box.querySelector(".pr-gal-x").focus();
+}
+
+/* Участники по голосу (core/diarization): разбить / пересчитать, переименовать, объединить, переназначить реплику,
+   аудио каждого участника. Правки хранятся отдельно (.speakers.json) и переживают пересчёт. */
+async function prSpeakers(box, meeting, title, opener, mode, d) {
+  const panel = box.querySelector(".pr-pl-spk"); if (!panel) return;
+  const reopen = () => { box.querySelector(".pr-gal-x").click(); prPlayer(meeting, title, opener, mode); };
+  let v;
+  try { v = await core.call("prompter_meeting_speakers", { path: meeting.path }); }
+  catch (e) { panel.textContent = ""; return; }
+  const sp = (v.speakers || []).map(s => ({ id: s.id, label: s.display || s.label || s.id, sec: s.speech_sec }));
+  const busy = v.job && v.job.busy;
+  const stage = { diarize: "голоса", transcribe: "расшифровка", align: "сборка" };
+  const opt = (sel) => [0, 1, 2, 3, 4, 5, 6, 8, 10].map(n => `<option value="${n}"${n === sel ? " selected" : ""}>${n ? n : "авто"}</option>`).join("");
+  panel.innerHTML = `<div class="pr-spk-row">
+      ${sp.length ? sp.map((s, k) => `<span class="pr-spk c${k % 6}" data-id="${escH(s.id)}"><b tabindex="0" title="Переименовать">${escH(s.label)}</b>${s.sec ? `<small>${Math.round(s.sec / 60) || "<1"} мин</small>` : ""}${s.id !== "ME" && sp.length > 2 ? `<select title="Объединить с другим участником (один и тот же человек)"><option value="">≡</option>${sp.filter(x => x.id !== s.id).map(x => `<option value="${escH(x.id)}">→ ${escH(x.label)}</option>`).join("")}</select>` : ""}</span>`).join("")
+        : `<span class="pr-spk-none">${v.can_diarize ? "Разбиение по участникам не выполнялось" : "Нет аудиозаписи — разбить по участникам нельзя"}</span>`}
+      ${v.can_diarize ? `<span class="pr-spk-act"><select class="pr-spk-n" title="Собеседников без вас">${opt(0)}</select>
+        <button class="pr-spk-run" ${busy ? "disabled" : ""} title="Разделить реплики по голосам; правки участников сохраняются">${busy ? `Идёт: ${stage[v.job.stage] || ""} ${Math.round(100 * (v.job.progress || 0))}%` : (sp.length ? "Пересчитать участников" : "Разбить по участникам")}</button>
+        ${sp.length ? `<button class="pr-spk-audio" title="WAV каждого участника (по времени встречи)">Аудио участников</button>` : ""}</span>` : ""}
+    </div>${v.job && v.job.error ? `<div class="pr-spk-err">${escH(v.job.error)}</div>` : ""}${(v.not_transferred || []).length ? `<div class="pr-spk-err">Не перенесено после пересчёта: ${(v.not_transferred || []).filter(x => x.kind === "name").map(x => "«" + escH(x.value) + "»").join(", ") || "часть правок"} — назначьте заново</div>` : ""}`;
+  const txtNote = (t) => { if (t && t.alt) toast("Текст расшифровки правили вручную — он не изменён. Новая разметка — рядом, в «.участники.txt»", 6000);
+    else if (t && t.manual) toast("Ваши правки текста сохранены — изменены только подписи", 4000); };
+  const edit = async (args) => {
+    try { const r = await core.call("prompter_meeting_speakers_edit", Object.assign({ path: meeting.path }, args)); txtNote(r && r.txt); reopen(); }
+    catch (e) { toast(e.message, 4000); }
+  };
+  panel.querySelectorAll(".pr-spk b").forEach(b => {
+    const go = () => {
+      const id = b.closest(".pr-spk").dataset.id, inp = document.createElement("input");
+      inp.value = b.textContent; inp.className = "pr-spk-in"; inp.setAttribute("aria-label", "Имя участника");
+      b.replaceWith(inp); inp.focus(); inp.select();
+      let done = false;
+      const save = (ok) => { if (done) return; done = true; if (ok && inp.value.trim() !== b.textContent) edit({ action: "rename", id, name: inp.value }); else inp.replaceWith(b); };
+      inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") save(true); else if (e.key === "Escape") save(false); };
+      inp.onblur = () => save(true);
+    };
+    b.onclick = go; b.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+  });
+  panel.querySelectorAll(".pr-spk select").forEach(s => s.onchange = () => s.value && edit({ action: "merge", id: s.closest(".pr-spk").dataset.id, to: s.value }));
+  const run = panel.querySelector(".pr-spk-run");
+  if (run) run.onclick = async () => {
+    run.disabled = true;
+    try { await core.call("prompter_meeting_speakers_diarize", { path: meeting.path, expected_speakers: Number(panel.querySelector(".pr-spk-n").value || 0) || null }); }
+    catch (e) { toast(e.message, 4000); run.disabled = false; return; }
+    poll();
+  };
+  const audioBtn = panel.querySelector(".pr-spk-audio");
+  if (audioBtn) audioBtn.onclick = async () => {
+    audioBtn.disabled = true;
+    try { const r = await core.call("prompter_meeting_speakers_audio", { path: meeting.path }); toast(`Аудио участников: ${r.files.length} файл(ов) — дорожки в проигрывателе`); reopen(); }
+    catch (e) { toast(e.message, 4000); audioBtn.disabled = false; }
+  };
+  function poll() {
+    setTimeout(async () => {
+      if (!document.body.contains(box)) return;
+      let s; try { s = await core.call("prompter_meeting_speakers", { path: meeting.path }); } catch (_) { return; }
+      const j = s.job || {};
+      if (j.busy) { const b = panel.querySelector(".pr-spk-run"); if (b) b.textContent = `Идёт: ${stage[j.stage] || ""} ${Math.round(100 * (j.progress || 0))}%`; poll(); }
+      else if (j.error) { toast(j.error, 5000); prSpeakers(box, meeting, title, opener, mode, d); }
+      else { txtNote(j.result && j.result.txt); reopen(); }
+    }, 1500);
+  }
+  if (busy) poll();
+  // переназначить реплику: правая кнопка мыши по строке расшифровки
+  if (sp.length > 1) box.querySelectorAll(".pr-pl-lines li[data-t]").forEach(li => li.oncontextmenu = (e) => {
+    e.preventDefault();
+    box.querySelectorAll(".pr-spk-menu").forEach(m => m.remove());
+    const m = document.createElement("div"); m.className = "pr-spk-menu"; m.setAttribute("role", "menu");
+    m.innerHTML = `<small>Сказал(а):</small>` + sp.map(s => `<button role="menuitem" data-id="${escH(s.id)}">${escH(s.label)}</button>`).join("");
+    m.style.left = e.clientX + "px"; m.style.top = e.clientY + "px"; box.appendChild(m);
+    m.querySelectorAll("button").forEach(b => b.onclick = () => { m.remove(); edit({ action: "reassign", t: +li.dataset.t, end: +li.dataset.t, source: d.lines[+li.dataset.k]?.source_speaker, to: b.dataset.id }); });
+    setTimeout(() => document.addEventListener("click", () => m.remove(), { once: true }), 0);
+  });
 }
 // Итог и видео создаются в фоне после остановки. Обновляем список без
 // повторного открытия раздела, чтобы кнопка ▶ появилась сразу.

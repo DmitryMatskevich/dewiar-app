@@ -3,7 +3,8 @@
    конфликт ревизий показан рядом с полем и не перезаписывает введённый текст. */
 window.SongReview = (() => {
   const drafts = new Map(), timers = new Map();
-  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null;
+  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null, setPitchPlayback = null;
+  const speedBySong = new Map(), pitchBySong = new Map();
   window.addEventListener('beforeunload', event => {
     if (drafts.size) { event.preventDefault(); event.returnValue = ''; }
   });
@@ -79,6 +80,10 @@ window.SongReview = (() => {
     const player = document.getElementById('song-review-audio');
     if (!player) return;
     const play = document.getElementById('song-sheet-play');
+    const instrumentalPlay = document.getElementById('song-sheet-play-instrumental');
+    const speedDown = document.getElementById('song-speed-down');
+    const speedUp = document.getElementById('song-speed-up');
+    const speedLabel = document.getElementById('song-speed-label');
     const stopButton = document.getElementById('song-sheet-stop');
     const previousButton = document.getElementById('song-sheet-previous');
     const nextButton = document.getElementById('song-sheet-next');
@@ -87,16 +92,45 @@ window.SongReview = (() => {
     const sheetStatus = document.getElementById('song-sheet-play-status');
     let fullData = new Map(), followSheet = true, variant = 'original';
     let livePlay = null, livePhraseId = '', liveAudio = null, liveSaving = false;
+    let liveLoopTimer = null, liveLoopEnabled = false;
+    let speed = speedBySong.get(row.song_id) || 1;
+    let pitch = pitchBySong.has(row.song_id) ? pitchBySong.get(row.song_id) : (SongSheet.offset(row) || 0);
+    pitchBySong.set(row.song_id, pitch);
+    const speedSteps = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
+    const speedText = value => `×${Number(value).toFixed(2)}`;
+    function applyAudioSettings() {
+      for (const audio of [player, liveAudio]) {
+        if (!audio) continue;
+        audio.playbackRate = speed;
+        if ('preservesPitch' in audio) audio.preservesPitch = true;
+        if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+      }
+      if (speedLabel) {
+        speedLabel.textContent = speedText(speed);
+        speedLabel.setAttribute('aria-label', `Скорость воспроизведения: ${speedText(speed)}`);
+      }
+      if (speedDown) speedDown.disabled = speed <= speedSteps[0];
+      if (speedUp) speedUp.disabled = speed >= speedSteps.at(-1);
+    }
     const message = text => { status.textContent = text; if (sheetStatus) sheetStatus.textContent = text; };
     function sync() {
       if (!player.isConnected) return;
       const loading = !!player.dataset.loading, playing = !player.paused && !player.ended;
       if (play) {
-        const title = loading ? 'Подготавливаем запись для прослушивания' : !row.capabilities?.audio ? 'Для прослушивания добавьте аудиозапись' : playing ? 'Приостановить воспроизведение; продолжить можно с этого места' : player.dataset.session && !player.dataset.phraseId ? 'Продолжить воспроизведение песни с места паузы' : 'Проиграть всю песню в исходной тональности записи';
-        play.innerHTML = SongSheet.icon(playing ? 'pause' : 'play');
+        const originalPlaying = playing && variant === 'original';
+        const title = loading ? 'Подготавливаем запись для прослушивания' : !row.capabilities?.audio ? 'Для прослушивания добавьте аудиозапись' : originalPlaying ? 'Приостановить воспроизведение оригинальной записи' : player.dataset.session && !player.dataset.phraseId && variant === 'original' ? 'Продолжить воспроизведение оригинальной записи с места паузы' : 'Проиграть всю песню в исходной тональности записи';
+        play.innerHTML = SongSheet.icon(originalPlaying ? 'pause' : 'play');
         play.title = title; play.setAttribute('aria-label',title);
         play.setAttribute('aria-busy',String(loading));
         play.disabled = loading || !row.capabilities?.audio;
+      }
+      if (instrumentalPlay) {
+        const instrumentalPlaying = playing && variant === 'instrumental';
+        const title = loading && variant === 'instrumental' ? 'Подготавливаем минусовку' : row.karaoke?.state !== 'ready' ? 'Минусовка ещё не готова' : instrumentalPlaying ? 'Приостановить воспроизведение минусовки' : 'Проиграть всю песню с минусовкой';
+        instrumentalPlay.innerHTML = SongSheet.icon(instrumentalPlaying ? 'pause' : 'karaoke');
+        instrumentalPlay.title = title; instrumentalPlay.setAttribute('aria-label', title);
+        instrumentalPlay.setAttribute('aria-busy',String(loading && variant === 'instrumental'));
+        instrumentalPlay.disabled = loading || row.karaoke?.state !== 'ready';
       }
       if (livePlay) {
         const livePlaying = !!livePhraseId && liveAudio && !liveAudio.paused && !liveAudio.ended;
@@ -113,6 +147,7 @@ window.SongReview = (() => {
       }
       full.disabled = loading || !row.capabilities?.audio;
       window.onSongPlayback?.(row.song_id,{loading,playing,variant,active:loading || !!player.dataset.session || playing || player.currentTime>0});
+      applyAudioSettings();
     }
     function clearHighlights() {
       document.querySelectorAll('.song-phrase.playing, .song-word.current-word').forEach(el => el.classList.remove('playing','current-word'));
@@ -127,6 +162,9 @@ window.SongReview = (() => {
       if (liveAudio) {
         liveAudio.pause();
         liveAudio.currentTime = 0;
+        if (liveLoopTimer) clearTimeout(liveLoopTimer);
+        liveLoopTimer = null;
+        liveLoopEnabled = false;
         delete liveAudio.dataset.loading;
         delete liveAudio.dataset.phraseId;
       }
@@ -149,13 +187,14 @@ window.SongReview = (() => {
       player.pause(); player.dataset.loading = '1'; sync();
       message(fullData ? '' : 'Подготавливаем запись…');
       try {
-        if (!fullData.has(variant)) {
-          const clip = await core.call('song_full_audio',{song_id:row.song_id,variant});
+        const audioKey = `${variant}:${pitch}`;
+        if (!fullData.has(audioKey)) {
+          const clip = await core.call('song_full_audio',{song_id:row.song_id,variant,pitch_steps:pitch});
           if (request !== audioRequest || !player.isConnected) return;
-          fullData.set(variant, clip.data);
+          fullData.set(audioKey, clip.data);
         }
         if (request !== audioRequest || !player.isConnected) return;
-        const source = fullData.get(variant);
+        const source = fullData.get(audioKey);
         if (player.src !== source) {
           player.src = source;
           if (typeof player.load === 'function') await new Promise((resolve,reject) => {
@@ -166,9 +205,10 @@ window.SongReview = (() => {
           if (request !== audioRequest || !player.isConnected) return;
         }
         if (seekTo !== null && Number.isFinite(seekTo)) player.currentTime=Math.min(seekTo,Math.max(0,(player.duration||seekTo)-0.05));
-        if (restart || player.ended) player.currentTime = 0;
+        if (restart || (player.ended && seekTo === null)) player.currentTime = 0;
         player.dataset.clipStart = '0'; delete player.dataset.phraseId;
         delete player.dataset.livePhraseId; livePhraseId = '';
+        applyAudioSettings();
         player.loop = false; document.getElementById('song-review-loop').checked = false;
         player.ontimeupdate = () => {
           const position = player.currentTime*1000;
@@ -185,7 +225,12 @@ window.SongReview = (() => {
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
     }
-    full.onclick = () => { followSheet=true; return playFull(true); };
+    full.onclick = () => { variant='original'; if (variantSelect) variantSelect.value='original'; followSheet=true; return playFull(true); };
+    if (instrumentalPlay) instrumentalPlay.onclick = () => {
+      if (row.karaoke?.state !== 'ready') return;
+      variant='instrumental'; if (variantSelect) variantSelect.value='instrumental';
+      followSheet=true; return playFull(true);
+    };
     const variantSelect = document.getElementById('song-play-variant');
     setPlaybackVariant = value => {
       if (!variantSelect || (value === 'instrumental' && row.karaoke?.state !== 'ready')) return false;
@@ -212,6 +257,23 @@ window.SongReview = (() => {
     togglePlayback = (follow=true) => { followSheet=follow; if (!player.paused && !player.ended) { player.pause(); return; } return playFull(); };
     if (play) play.onclick = () => togglePlayback(true);
     if (stopButton) stopButton.onclick = stop;
+    const changeSpeed = delta => {
+      const index = speedSteps.findIndex(value => Math.abs(value-speed)<0.001);
+      speed = speedSteps[Math.max(0,Math.min(speedSteps.length-1,index + delta))];
+      speedBySong.set(row.song_id,speed); applyAudioSettings();
+    };
+    speedDown?.addEventListener('click',()=>changeSpeed(-1));
+    speedUp?.addEventListener('click',()=>changeSpeed(1));
+    applyAudioSettings();
+    setPitchPlayback = (songId, value) => {
+      if (songId !== row.song_id) return;
+      pitch = Math.max(-12,Math.min(12,Number(value)||0));
+      pitchBySong.set(songId,pitch);
+      if (player.dataset.session && !player.dataset.phraseId) {
+        const position=player.currentTime;
+        playFull(false,!player.paused,position);
+      }
+    };
     function seekLine(direction) {
       if(player.dataset.loading || !player.dataset.session || player.dataset.phraseId) return;
       const target=SongSheet.lineTarget(SongSheet.lineStarts(row.song_id),player.currentTime*1000,direction);
@@ -234,6 +296,7 @@ window.SongReview = (() => {
     const livePrevious=document.getElementById('song-live-edit-previous');
     const liveNext=document.getElementById('song-live-edit-next');
     const liveClose=document.getElementById('song-live-edit-close');
+    const liveOriginal=document.getElementById('song-live-edit-play-original');
     let liveTarget=null, livePhraseText='', liveChordDraft=[], liveSavedSnapshot='';
     function liveSnapshot() {
       return JSON.stringify({text:liveText?.value,reviewed:document.getElementById('song-live-reviewed')?.checked,
@@ -283,7 +346,17 @@ window.SongReview = (() => {
     async function playLivePhrase() {
       if (!liveTarget || !liveAudio) return;
       if (livePhraseId && liveAudio.dataset.phraseId===livePhraseId && !liveAudio.paused && !liveAudio.ended) {
+        liveLoopEnabled = false;
         liveAudio.pause();
+        return;
+      }
+      if (liveLoopTimer) {
+        clearTimeout(liveLoopTimer);
+        liveLoopTimer = null;
+        liveLoopEnabled = true;
+        liveAudio.currentTime = 0;
+        await liveAudio.play().catch(()=>{});
+        if (liveStatus) liveStatus.textContent='Фраза воспроизводится по кругу…';
         return;
       }
       const request=++audioRequest, phraseId=liveTarget.phraseIds?.[0]||liveTarget.phraseId;
@@ -293,19 +366,34 @@ window.SongReview = (() => {
       sync();
       if (liveStatus) liveStatus.textContent='Готовим фразу…';
       try {
-        const clip=await core.call('song_phrase_audio',{song_id:row.song_id,phrase_id:phraseId});
+        const clip=await core.call('song_phrase_audio',{song_id:row.song_id,phrase_id:phraseId,pitch_steps:pitch});
         if(request!==audioRequest || !liveAudio.isConnected) return;
         liveAudio.src=clip.data; liveAudio.currentTime=0;
+        applyAudioSettings();
         liveAudio.dataset.clipStart=clip.start_ms; liveAudio.dataset.phraseId=liveTarget.phraseId;
         livePhraseId=liveTarget.phraseId;
+        liveLoopEnabled = true;
         liveAudio.ontimeupdate=()=>{
           const position=Number(clip.start_ms)+liveAudio.currentTime*1000;
           updateLivePhraseWords(position); sync();
         };
         liveAudio.onended=()=>{
-          clearLiveHighlights(); delete liveAudio.dataset.phraseId; livePhraseId='';
-          if (liveStatus) liveStatus.textContent='Фраза закончилась. Можно запустить её снова.';
+          clearLiveHighlights();
+          if (!liveLoopEnabled || request !== audioRequest || !liveAudio.isConnected) {
+            delete liveAudio.dataset.phraseId; livePhraseId='';
+            if (liveStatus) liveStatus.textContent='Фраза закончилась. Можно запустить её снова.';
+            sync();
+            return;
+          }
+          if (liveStatus) liveStatus.textContent='Пауза 1 секунда — повтор фразы…';
           sync();
+          liveLoopTimer=setTimeout(async()=>{
+            liveLoopTimer=null;
+            if (!liveLoopEnabled || request !== audioRequest || !liveAudio.isConnected) return;
+            liveAudio.currentTime=0;
+            try { await liveAudio.play(); }
+            catch(error) { liveLoopEnabled=false; if (liveStatus) liveStatus.textContent=error.message||'Не удалось повторить фразу'; sync(); }
+          },1000);
         };
         liveAudio.onpause=()=>sync();
         await liveAudio.play();
@@ -478,16 +566,34 @@ window.SongReview = (() => {
         method:'manual',verified:true});renderLiveChords();
     });
     livePlay?.addEventListener('click',event=>{ event.preventDefault(); event.stopPropagation(); playLivePhrase(); });
+    const playEditorVariant = async (value, button) => {
+      if(liveSaving || !row.capabilities?.audio || (value==='instrumental' && row.karaoke?.state!=='ready')) return;
+      button.disabled=true;
+      try {
+        await selectPlaybackVariant(value);
+        if(liveStatus) liveStatus.textContent=value==='instrumental'
+          ? 'Проигрывается минусовка. Редактор остаётся открыт.'
+          : 'Проигрывается оригинальная запись. Редактор остаётся открыт.';
+      } catch(error) {
+        if(liveStatus) liveStatus.textContent=error.message||'Не удалось запустить дорожку';
+      } finally { button.disabled=false; sync(); }
+    };
+    liveOriginal?.addEventListener('click',event=>{ event.preventDefault(); event.stopPropagation(); playEditorVariant('original',liveOriginal); });
     for(const [button,direction] of [[livePrevious,-1],[liveNext,1]]) {
       button?.addEventListener('click',()=>{
         const target=adjacentPhrase(direction);
         if(target)switchPhrase(target.phrase_id,liveMode.value==='chords'?'chords':'phrase');
       });
     }
-    liveClose?.addEventListener('click',()=>{
+    liveClose?.addEventListener('click',async()=>{
       if(liveSaving)return;
       if(liveSnapshot()!==liveSavedSnapshot&&!window.confirm('Закрыть редактор без сохранения последних изменений?'))return;
+      const startMs=Number(liveTarget?.startMs);
       stopLivePhrase();liveEditor.hidden=true;
+      if(row.capabilities?.audio && Number.isFinite(startMs)) {
+        followSheet=true;
+        await playFull(false,true,Math.max(0,Math.ceil(startMs))/1000);
+      }
     });
     async function saveLiveEdit(){
       if(liveSaving)return false;
@@ -629,9 +735,10 @@ window.SongReview = (() => {
         delete player.dataset.phraseId;
         button.disabled = true; playStatus.textContent = 'Готовим фрагмент…';
         try {
-          const clip = await core.call('song_phrase_audio', {song_id: row.song_id, phrase_id: pid});
+          const clip = await core.call('song_phrase_audio', {song_id: row.song_id, phrase_id: pid, pitch_steps: pitch});
           if (request !== audioRequest || !player.isConnected) return;
           player.src = clip.data;
+          applyAudioSettings();
           // A phrase is a new media timeline.  Safari may retain the old
           // currentTime after changing src; without an explicit reset the
           // clip starts in the middle (or immediately ends) after a full-song
@@ -678,5 +785,5 @@ window.SongReview = (() => {
     const status=state==='ready' ? `Минусовка готова${row.karaoke.quality_status==='acceptable'?' и проверена на слух':row.karaoke.quality_status==='defects'?' · есть замечания':' · ожидает оценки качества'}` : state==='failed' ? `Ошибка подготовки: ${row.karaoke.error||'см. состояние этапа'}` : busy ? 'Идёт отдельный этап подготовки минусовки…' : 'Минусовка ещё не подготовлена';
     return `<section class="song-instrumental-stage" aria-label="Воспроизведение и минусовка"><h3>Воспроизведение</h3><div class="song-player"><audio id="song-review-audio" controls preload="none" aria-label="Прослушивание песни"></audio><div class="song-player-actions"><label>Дорожка <select id="song-play-variant"><option value="original">Оригинал</option><option value="instrumental" ${state==='ready'?'':'disabled'}>Минусовка</option></select></label><button class="btn small" id="song-play-full">Слушать всю песню</button><label><input id="song-review-loop" type="checkbox"> Повторять фрагмент</label></div><span id="song-play-status" role="status">${esc(status)}</span></div></section>`;
   }
-  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:value=>selectPlaybackVariant?.(value), setVariant:value=>setPlaybackVariant?.(value)};
+  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:value=>selectPlaybackVariant?.(value), setVariant:value=>setPlaybackVariant?.(value), setPitch:(songId,value)=>setPitchPlayback?.(songId,value)};
 })();

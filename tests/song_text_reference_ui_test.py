@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-reference-ui-') as tmp, sync_pla
         assert page.locator('.song-step').count()==9
         assert '5. Сверка с источником текста' in page.locator('.song-step').nth(4).inner_text()
         panel=page.locator('.song-text-reference')
-        panel.locator('summary').first.click()
+        panel.locator('.song-reference-diff > summary').first.click()
         assert panel.locator('li').count()==3
         assert panel.get_by_role('link',name='Открыть источник текста').get_attribute('href')==ref['url']
         page.locator('.song-properties > summary').click()
@@ -63,6 +63,12 @@ with tempfile.TemporaryDirectory(prefix='dewiar-reference-ui-') as tmp, sync_pla
         assert page.locator('.song-step').count()==9
         assert page.locator('[data-song-reference-stage]').get_attribute('aria-disabled')=='false'
         assert 'не найден' in page.locator('.song-text-reference').inner_text()
+        store.patch(sid,{'text_reference':{'state':'search_error','references':[],
+            'errors':[{'error':'yandex: требуется проверка в браузере'}]}})
+        page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
+        panel=page.locator('.song-text-reference')
+        panel.get_by_text('Почему поиск не завершён',exact=True).click()
+        assert panel.get_by_text('yandex: требуется проверка в браузере',exact=True).is_visible()
         assert not errors,errors
         print('OK: permanent dimmed fifth stage, click/ retry, confirmed source groups and narrow screen')
     finally:

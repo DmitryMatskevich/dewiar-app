@@ -12,6 +12,9 @@ runpy.run_path(str(root / 'tools/check_hud_scripts.py'))['check_hud_scripts'](ro
 datas = [(str(root / name), name) for name in ("core", "ui", "data", "icons")]
 datas += [(str(root / name), "tools") for name in
           ("tools/subscription_ui_smoke.js", "tools/song_separation_probe.py")]
+# The official MCP SDK runs in an optional venv; bundle only helper source and pins.
+datas += [(str(root / "tools/content_mcp_runtime"), "tools/content_mcp_runtime"),
+          (str(root / "requirements-content-mcp.txt"), ".")]
 binaries = []
 hidden = [p.stem for p in (root / "core").glob("*.py")] + ["macshell", "Vision", "ScreenCaptureKit", "webview.platforms.cocoa", "logging.handlers"]
 for package in ("onnxruntime", "onnx_asr", "huggingface_hub", "vosk", "piper", "imageio_ffmpeg"):
@@ -21,6 +24,15 @@ for package in ("onnxruntime", "onnx_asr", "huggingface_hub", "vosk", "piper", "
     hidden += imports
 for distribution in ("onnx-asr", "huggingface-hub"):
     datas += copy_metadata(distribution)
+# Разбиение встречи по участникам: sherpa-onnx импортируется только в процессе «Dewiar --diarize-worker».
+hidden += ["diarization"] + ["diarization." + p.stem for p in (root / "core/diarization").glob("*.py") if p.stem != "__init__"]
+try:
+    data, binary, imports = collect_all("sherpa_onnx")
+    datas += data
+    binaries += binary
+    hidden += imports
+except Exception as exc:  # noqa: BLE001
+    print(f"WARNING: sherpa-onnx не найден ({exc}) — разбиение по участникам в сборке будет недоступно")
 # Звук приложений для записи встреч без BlackHole (Core Audio Process Tap, macOS 14.2+).
 # Собирается заранее: tools/build_audio_tap.sh; если бинарника нет — встречи пишутся через BlackHole.
 audio_tap = root / "native/macos/bin/dewiar-audio-tap"

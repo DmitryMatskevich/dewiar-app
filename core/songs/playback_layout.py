@@ -16,7 +16,8 @@ def display_words(phrase):
                 if (a is not None and b is not None and previous_end <= a < b <= end
                         and word.get('char_start', -1) == token.start()
                         and word.get('char_end', -1) == token.end()):
-                    quality = 'estimated_manual' if word.get('method') == 'manual_word_edit_estimated' else 'aligned'
+                    quality = ('estimated_reference' if word.get('method') == 'reference_edit_estimated' else
+                               'estimated_manual' if word.get('method') == 'manual_word_edit_estimated' else 'aligned')
                     cues[i] = dict(start_ms=a, end_ms=b, quality=quality)
                     previous_end = b
                     break

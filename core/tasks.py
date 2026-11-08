@@ -114,7 +114,7 @@ WORK_TOOLS = {
              S({"path": {"type": "string"}, "title": {"type": "string"}}, ["path"])),
     "transcribe": ("Получить полный текст видео: сначала готовые субтитры, иначе скачать звук и распознать. "
                    "path — файл или ссылка; urls — пакет ссылок; urls_file — список в файле задачи. "
-                   "Русская речь (language=ru по умолчанию) — GigaAM v3 Dewiar. Сохраняет TXT, SRT, чистовой Markdown и общее резюме (тема, выступающие, идеи, вывод) в outputs/transcripts/. "
+                   "Русская речь (language=ru по умолчанию) — GigaAM v3 Dewiar. Сохраняет TXT, SRT, чистовой Markdown, краткое резюме и подробный тематический конспект без выступающих в outputs/transcripts/. Для тематического анализа используй отдельную очередь моделей «Аналитика»; если она не настроена — очередь «Планирование». "
                    "Ошибки отдельных роликов не прерывают пакет; force=true повторяет готовые результаты.",
                    S({"path": {"type": "string"}, "urls": {"type": "array", "items": {"type": "string"}},
                       "urls_file": {"type": "string"}, "language": {"type": "string"}, "force": {"type": "boolean"}})),
@@ -810,7 +810,7 @@ class TaskManager:
             postprocess=t.data.pop('media_postprocess',False)
             t.data.update(steps=int(t.data.get('steps') or 0)+1, finished=False,
                           activity='Готовлю постобработку из сохранённой расшифровки…' if postprocess else 'Этап 1/4 — получаю исходную расшифровку…')
-            plan=['Получить исходные расшифровки и сохранить TXT/SRT','Подготовить связный чистовой Markdown по правилам очистки','Сохранить отчёт изменений и места для сверки по аудио','Сделать общее резюме: тема, выступающие, идеи и вывод']
+            plan=['Получить исходные расшифровки и сохранить TXT/SRT','Подготовить связный чистовой Markdown по правилам очистки','Сохранить отчёт изменений и места для сверки по аудио','Разметить реплики по выступающим алгоритмом встреч','Создать краткое резюме и подробный тематический конспект отдельной моделью анализа']
             (t.dir/'план.md').write_text('\n'.join('- [ ] '+line for line in plan)+'\n',encoding='utf-8')
             self._emit(t)
             result = self._work(t, 'transcribe', {'urls':t.data['media_sources'], 'language':t.data.get('media_language','ru')})
@@ -830,7 +830,7 @@ class TaskManager:
                     (t.dir/'план.md').write_text('- [x] '+plan[0]+'\n'+'\n'.join('- [ ] '+line for line in plan[1:])+'\n',encoding='utf-8')
                 review_count=sum(r.get('cleanup',{}).get('review_count',0) for r in report)
                 t.data['media_review_count']=review_count
-                message='готова. Чистовой Markdown и итоговое резюме — в результатах задачи.'
+                message='готова. Краткое резюме и подробный тематический конспект — в результатах задачи.'
                 if review_count:
                     message+=f' Мест для сверки по аудио: {review_count}.'
                 self.host.announce('Задача «'+t.title+'» '+(message if success else 'завершилась с ошибками. Подробности — в журнале задачи.'))
@@ -1987,7 +1987,8 @@ class TaskManager:
                     t.data['activity'] = prefix + f'Распознано {int(done)//60}:{int(done)%60:02d} из {int(total)//60}:{int(total)%60:02d}'
                     self._beat(t, 'transcribe')
                     self._emit(t)
-                segs = self.host.transcribe_file(path, cancel=t.cancel, stt=stt, allow_fallback=False, on_progress=progress)
+                segs = self.host.transcribe_file(path, cancel=t.cancel, stt=stt, allow_fallback=False,
+                                                 on_progress=progress, words=True)
                 return segs, 'gigaam', model
 
             def notify(message):
@@ -1999,43 +2000,149 @@ class TaskManager:
                 self._emit(t)
                 t.journal(message)
 
-            # Резюме — отдельный этап после очистки. Если языковая модель недоступна,
-            # media_transcription создаст честный локальный резерв без выдуманных фактов.
+            # Long transcripts use a specialist queue, separate from chat.
+            analysis_profile, analysis_role, analysis_routes = None, '', []
+            try:
+                import modelrouter
+                llm_cfg = self.host.s.get('llm') or {}
+                analysis_routes = modelrouter.candidates(llm_cfg, role='analytics')
+                if analysis_routes:
+                    analysis_role = 'analytics'
+                    analysis_routes = [self.host.s.apply_llm_role_limit(
+                        dict(x, timeout=max(600, int(x.get('timeout') or 60))), 'analytics')
+                        for x in analysis_routes]
+                    analysis_profile = dict(analysis_routes[0], _route_candidates=analysis_routes)
+                else:
+                    # Existing installations may not have assigned a model to Analytics yet.
+                    # Use the dedicated planning model as a specialist fallback, never chat routing.
+                    analysis_role = 'planning'
+                    analysis_profile = self.host.s.active_llm('planning')
+                    if analysis_profile:
+                        analysis_routes = [dict(x, timeout=max(600, int(x.get('timeout') or 60)))
+                                           for x in (analysis_profile.get('_route_candidates') or [analysis_profile])]
+                        analysis_profile = dict(analysis_profile, timeout=max(600, int(analysis_profile.get('timeout') or 60)),
+                                                _route_candidates=analysis_routes)
+            except (AttributeError, TypeError, KeyError):
+                analysis_profile = None
+            analysis_profile = analysis_profile or self.host.llm_profile()
+            analysis_routes = analysis_profile.get('_route_candidates') or [analysis_profile] if analysis_profile else []
+
             def summarize(prompt):
-                profile = self.host.llm_profile()
-                if not profile:
+                if not analysis_profile:
                     return ''
-                p = dict(profile, max_tokens=min(2600, int(profile.get('max_tokens') or 2600)),
-                         temperature=0.2)
-                chunks = []
-                stream = stream_chat(p, 'Ты аккуратный редактор резюме русскоязычных видеозаписей. Не выдумывай факты.',
-                                      [{'role': 'user', 'content': prompt}], cancel=t.cancel)
-                try:
-                    for chunk in stream:
-                        if t.cancel.is_set():
-                            raise RuntimeError('Задачу остановили')
-                        chunks.append(chunk)
-                        self._beat(t, 'transcribe')
-                finally:
-                    stream.close()
-                return ''.join(chunks)
+                routes = analysis_routes or [analysis_profile]
+                # If the verifier rejected a model's previous draft, give the next
+                # configured analyst a chance before asking the first model again.
+                if 'ПЕРВАЯ ВЕРСИЯ' in prompt and len(routes) > 1:
+                    routes = routes[1:] + routes[:1]
+                failures = []
+                for profile in routes:
+                    p = dict(profile, max_tokens=max(1024, min(32768, int(profile.get('max_tokens') or 32768))),
+                             temperature=0.15)
+                    # Long-form analysis uses the model's native Ollama API so
+                    # think=false is honored instead of spending the answer cap
+                    # on hidden reasoning in its OpenAI-compatible endpoint.
+                    if p.get('kind') == 'ollama':
+                        p['think'] = 'off'
+                    chunks = []
+                    stream = None
+                    try:
+                        stream = stream_chat(p, 'Ты аналитик длинных расшифровок. Точно сохраняй темы, детали и выводы; не выдумывай факты.',
+                                             [{'role': 'user', 'content': prompt}], cancel=t.cancel)
+                        for chunk in stream:
+                            if t.cancel.is_set():
+                                raise RuntimeError('Задачу остановили')
+                            chunks.append(chunk)
+                            self._beat(t, 'transcribe')
+                        result = ''.join(chunks).strip()
+                        if not result:
+                            raise RuntimeError('модель анализа вернула пустой ответ')
+                        try:
+                            import modelrouter
+                            modelrouter.succeeded(profile)
+                        except Exception:
+                            pass
+                        info = getattr(summarize, 'model_info', {})
+                        model = profile.get('model')
+                        if model and model not in info.setdefault('used_models', []):
+                            info['used_models'].append(model)
+                        info['last_model'] = model
+                        if not info.get('selected_model'):
+                            info['selected_model'] = model
+                            info['selected_profile'] = profile.get('_profile_id') or profile.get('id')
+                        return result
+                    except Exception as error:
+                        if t.cancel.is_set() or 'остановили' in str(error).lower():
+                            raise
+                        failures.append(f"{profile.get('model')}: {str(error)[:180]}")
+                        try:
+                            import modelrouter
+                            modelrouter.failed(profile, error)
+                        except Exception:
+                            pass
+                        if stream is not None:
+                            stream.close()
+                        if len(routes) > 1:
+                            notify(f"Модель анализа {profile.get('model')} недоступна; переключаюсь на следующую в аналитической очереди.")
+                    finally:
+                        if stream is not None:
+                            stream.close()
+                raise RuntimeError('Все модели аналитической очереди недоступны: ' + '; '.join(failures))
+
+            if analysis_profile:
+                summarize.model_info = {
+                    'role': analysis_role or analysis_profile.get('_llm_role') or 'specialist',
+                    'selected_profile': '',
+                    'selected_model': '',
+                    'routes': [x.get('model') for x in analysis_routes if x.get('model')],
+                    'max_tokens': analysis_profile.get('max_tokens'),
+                    'used_models': [],
+                }
 
             results = run_batch(sources, t.dir / 'outputs/transcripts', resolve, recognize,
                                 t.cancel, str(args.get('language') or 'ru'), bool(args.get('force')), notify,
                                 cache=self.host.workspace.root/'.media-cache', summarize=summarize)
+            # Speaker attribution uses the same diarization service as recorded meetings.
+            # Keep it a separate artifact so subtitle-first transcripts remain intact.
+            from media_transcription import source_key
+            from media_speakers import attribute
+            for r in results:
+                if r.get('status') != 'ok' or t.cancel.is_set():
+                    continue
+                folder = t.dir / 'outputs/transcripts' / source_key(r['source'])
+                try:
+                    segments = json.loads((folder / 'segments.json').read_text(encoding='utf-8'))
+                    speaker_file = attribute(r['source'], segments, folder, resolve, t.cancel,
+                                             self.host.prompter, notify,
+                                             audio_cache=self.host.workspace.root / '.media-cache' / source_key(r['source']))
+                    r['speakers'] = speaker_file.relative_to(t.dir / 'outputs').as_posix()
+                except Exception as exc:
+                    if t.cancel.is_set():
+                        raise
+                    r['speaker_error'] = str(exc)[:300]
+                    notify(f"{r.get('title') or r['source']} — расшифровка готова, разметка выступающих не выполнена: {r['speaker_error']}")
+            (t.dir / 'outputs/transcripts/batch-results.json').write_text(
+                json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             good = [r for r in results if r['status'] == 'ok']
             summary = [f"Обработано: {len(good)} из {len(results)}. Отчёт: outputs/transcripts/batch-results.json."]
             if t.data.get('workflow') in ('media-transcription', 'video-translation'):
                 t.data['outputs']=[]  # refresh result links after cache-key/editor migrations; source files stay intact
             for r in results:
                 if r['status'] == 'ok':
-                    summary.append(f"{r['source']}: {r['method']} ({r.get('language')}); чистовой MD: outputs/{r['markdown']}; общее резюме: outputs/{r['summary']}; исходник: outputs/{r['text']}, outputs/{r['srt']}")
+                    summary.append(f"{r['source']}: {r['method']} ({r.get('language')}); чистовой MD: outputs/{r['markdown']}; краткое резюме: outputs/{r['summary']}; подробный тематический конспект: outputs/{r.get('topics', '')}; исходник: outputs/{r['text']}, outputs/{r['srt']}")
                     files=[('text','исходная расшифровка'),('srt','субтитры')]
                     if r.get('cleanup',{}).get('review_count'):
                         files.append(('review','места для сверки по аудио'))
                         summary.append(f"Сверка по аудио требуется: {r['cleanup']['review_count']} мест; они сохранены в чистовом тексте и перечислены отдельно.")
                     files.append(('markdown','чистовой Markdown'))
                     files.append(('summary','общее резюме'))
+                    if r.get('topics'):
+                        files.append(('topics', 'подробный тематический конспект'))
+                    if r.get('speakers'):
+                        files.append(('speakers', 'расшифровка по выступающим'))
+                        summary.append(f"Расшифровка по голосам: outputs/{r['speakers']}")
+                    elif r.get('speaker_error'):
+                        summary.append(f"Разметка выступающих не выполнена: {r['speaker_error']}")
                     for field, suffix in files:
                         self._work(t, 'show', {'path': 'outputs/' + r[field], 'title': f"{r.get('title') or r['source']} — {suffix}"})
                 else:

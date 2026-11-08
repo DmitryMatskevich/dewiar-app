@@ -1027,6 +1027,25 @@ html.framed:not(.max) #fedge { display: block; position: fixed; inset: 0; border
 .pr-pl-lines time { display: inline-block; min-width: 46px; color: rgba(242,243,248,.55); font-variant-numeric: tabular-nums; font-size: 12px; }
 .pr-pl-lines li.w-me b { color: #7FD8B6; } .pr-pl-lines li.w-them b { color: #A9AAFB; }
 .pr-pl-lines .pr-pl-empty { cursor: default; color: rgba(242,243,248,.55); }
+/* Участники по голосу в проигрывателе */
+.pr-pl-spk { padding: 0 18px 8px; }
+.pr-spk-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.pr-spk { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 13px; }
+.pr-spk b { cursor: text; font-weight: 600; }
+.pr-spk small { color: rgba(242,243,248,.55); }
+.pr-spk select, .pr-spk-n { background: transparent; color: rgba(242,243,248,.8); border: 0; font-size: 12px; }
+.pr-spk.c0 b { color: #7FD8B6; } .pr-spk.c1 b { color: #A9AAFB; } .pr-spk.c2 b { color: #F6C177; }
+.pr-spk.c3 b { color: #F28FAD; } .pr-spk.c4 b { color: #89DCEB; } .pr-spk.c5 b { color: #CBA6F7; }
+.pr-spk-in { width: 160px; font: inherit; border-radius: 6px; border: 1px solid #8B8CF7; background: rgba(0,0,0,.25); color: #fff; padding: 1px 6px; }
+.pr-spk-act { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; }
+.pr-spk-act button { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(139,140,247,.25); color: #fff; }
+.pr-spk-act button:disabled { opacity: .6; }
+.pr-spk-none { font-size: 13px; color: rgba(242,243,248,.6); }
+.pr-spk-err { margin-top: 6px; font-size: 12px; color: #F6C177; }
+.pr-spk-menu { position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 10px; background: #26273a; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.pr-spk-menu small { padding: 2px 8px; color: rgba(242,243,248,.55); }
+.pr-spk-menu button { text-align: left; padding: 5px 10px; border-radius: 6px; color: #fff; }
+.pr-spk-menu button:hover { background: rgba(139,140,247,.3); }
 .pr-pl-bar { padding: 4px 18px 18px; }
 .pr-pl-bar.video audio { display: none; }
 .pr-pl-bar audio { width: 100%; }

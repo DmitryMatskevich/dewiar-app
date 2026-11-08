@@ -451,6 +451,10 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
 
     def shutdown(self):
         self.stopping.set()
+        if getattr(self,'_content_oauth_service',None):self._content_oauth_service.close()
+        if getattr(self,'_content_archives',None):
+            from content.archives import close as close_content_archives
+            close_content_archives(self)
         if hasattr(self,'strata'):self.strata.stop()
         self.telegram.stop()
         self.max.stop()

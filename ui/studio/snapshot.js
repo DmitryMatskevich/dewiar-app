@@ -30,6 +30,7 @@ function snHas(x) {
   if (s.reminders) out.push(snPl(s.reminders, "дело", "дела", "дел"));
   if (s.personas) out.push(snPl(s.personas, "персонаж", "персонажа", "персонажей"));
   if (x.vault) out.push("сейф: " + x.vault);
+  if (s.content) out.push('каталог статей и видео'+(s.content.omitted_media?' · медиа вне архива: '+s.content.omitted_media:''));
   return out;
 }
 async function snLoad() {
@@ -69,6 +70,7 @@ function snPop() {
          <small>Без пароля слепок не открыть — запишите его в надёжное место.</small></label>`)
       : `<p class="sn-note">Паролей, ключей и сейфа в открытом слепке нет — они только в закрытом.</p>`}
     <button class="btn primary sn-go" id="sn-go">Сделать слепок</button>
+    <p class="sn-note">Каталог статей и видео сохраняется согласованно. Медиа крупнее 100 МиБ не входят в этот слепок. Для них создайте полный архив в разделе «Статьи и новости» → «Резервная копия статей и видео». После восстановления подключения потребуют нового входа, отправки будут остановлены.</p>
     <p class="res" id="sn-res" aria-live="polite"></p>
     <div class="sn-sep"></div>
     <div class="sn-row"><button class="btn" id="sn-rest">Восстановить…</button><button class="btn" id="sn-dir">Папка со слепками</button></div>
@@ -136,6 +138,7 @@ function snShow(x) {
     <div class="sn-file big"><i class="sn-ic${x.encrypted ? "" : " op"}">${x.format === "zip" ? SN_I.open : SN_I.arch}</i><span><b>${snEsc(x.name)}</b>
       <small>${snEsc(snWhen(x.time))}${x.host ? ` · компьютер «${snEsc(x.host)}»` : ""}${x.version ? " · Dewiar " + snEsc(x.version) : ""} · ${x.format === "zip" ? "открытый" : x.encrypted ? "закрытый" : "без пароля"}</small></span></div>
     <div class="sn-has">${snHas(x).map(t => `<span>${snEsc(t)}</span>`).join("")}</div>
+    ${x.stats?.content?'<p class="sn-note">При добавлении в существующую рабочую папку каталог контента сохранится в отдельной рабочей папке рядом. При замене восстановится каталог из слепка. Автоматические отправки останутся остановленными; потребуется проверка аккаунтов и медиа.</p>':''}
     ${x.encrypted ? (needPw ? `<label class="sn-pw"><input type="password" id="sn-rpw" placeholder="пароль этого слепка" aria-label="Пароль слепка"></label>`
       : `<p class="sn-note">${SN_I.lock} Откроется запомненным паролем. Если слепок с другим паролем — <button class="sn-link" id="sn-askpw">ввести пароль</button></p>`) : ""}
     <div class="sn-way" role="radiogroup" aria-label="Как восстановить">
@@ -167,7 +170,8 @@ async function snDo(x) {
     const bits = y.mode === "merge"
       ? [y.files ? "добавлено файлов: " + y.files : "", y.merged ? "дополнено записей в данных: " + y.merged : "", y.beside ? "рядом копией: " + y.beside : "", y.vault ? "сейф: " + y.vault : ""].filter(Boolean)
       : ["восстановлено файлов: " + y.files, y.vault ? "сейф: " + y.vault : ""].filter(Boolean);
-    r.className = "res ok"; r.textContent = (bits.length ? bits.join(" · ") : "всё уже было на месте") + ". Ассистент перезапускается…";
+    const content=y.content?(' '+y.content.message+(y.content.mode==='separate_workspace'?' Отдельная рабочая папка: '+y.content.workspace+'. Выберите её в настройках рабочей папки.':'')+(y.content.omitted_media?' В архив не вошло медиафайлов: '+y.content.omitted_media+'. Проверьте оригиналы.':'')):'';
+    r.className = "res ok"; r.textContent = (bits.length ? bits.join(" · ") : "всё уже было на месте") + '.'+content+' Ассистент перезапускается…';
     b.textContent = "Готово";
   } catch (e) { r.className = "res bad"; r.textContent = e.message; b.disabled = false; }
 }

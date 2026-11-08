@@ -22,6 +22,7 @@ from pathlib import Path
 
 STAGES = ("identify", "sources", "record", "lyrics", "text_reference", "structure", "chords", "karaoke", "review")
 STATUS = {"queued", "recording", "running", "needs_input", "review", "ready", "partial", "failed", "cancelled", "interrupted"}
+TAG_OPTIONS = ("Компания", "Италия", "Мужская", "Любовь", "Шансон", "Бард", "Запад", "Грусть", "Юмор", "Военные", "Дворовые", "Народные", "Из фильмов", "Советские", "Детские")
 
 
 def _now() -> str:
@@ -30,6 +31,13 @@ def _now() -> str:
 
 def _clean(value: object, limit: int = 240) -> str:
     return re.sub(r"\s+", " ", str(value or "").strip())[:limit]
+
+
+def clean_tags(value: object) -> list[str]:
+    """Keep only the controlled vocabulary used by the Songs filters."""
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return list(dict.fromkeys(tag for tag in (_clean(item, 40) for item in value) if tag in TAG_OPTIONS))
 
 
 class SongStore:
@@ -100,7 +108,7 @@ class SongStore:
         if not row:
             self._card_cache.pop(song_id, None)
             return None
-        fields = {'song_id', 'title', 'artist', 'status', 'stage', 'stage_label',
+        fields = {'song_id', 'title', 'search_query', 'artist', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
                   'capabilities', 'audio', 'phrases', 'analysis_state',
                   'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
                   'revision', 'source', 'source_ref', 'recording_version'}
@@ -108,16 +116,45 @@ class SongStore:
         self._card_cache[song_id] = (signature, card)
         return card
 
-    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False) -> list[dict]:
+    @staticmethod
+    def _lyrics_haystack(row: dict) -> str:
+        """Text-only index for searching phrases without model hypotheses."""
+        chunks = []
+        for phrase in row.get("phrases") or []:
+            if not isinstance(phrase, dict):
+                continue
+            for key in ("text", "display_text", "raw_text"):
+                value = phrase.get(key)
+                if isinstance(value, str):
+                    chunks.append(value)
+            for word in phrase.get("words") or []:
+                if isinstance(word, dict):
+                    value = word.get("text") or word.get("word")
+                    if isinstance(value, str):
+                        chunks.append(value)
+        for word in row.get("words") or []:
+            if isinstance(word, dict):
+                value = word.get("text") or word.get("word")
+                if isinstance(value, str):
+                    chunks.append(value)
+        return " ".join(chunks).casefold()
+
+    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False, tag: str = "", lyrics_query: str = "") -> list[dict]:
         query = _clean(query, 120).casefold()
+        tag = _clean(tag, 40)
+        lyrics_query = _clean(lyrics_query, 240).casefold()
         with self._lock:
             rows = []
             for song_id in reversed(self._read_index()):
-                row = self._card(song_id) if compact else self._read(song_id)
+                # A lyrics query may need the legacy top-level ``words`` field,
+                # which is intentionally omitted from compact cards.
+                row = self._read(song_id) if (not compact or lyrics_query) else self._card(song_id)
                 if not row:
                     continue
-                haystack = f"{row.get('title', '')} {row.get('artist', '')}".casefold()
+                haystack = f"{row.get('title', '')} {row.get('artist', '')} {' '.join(row.get('tags') or [])}".casefold()
                 if query and query not in haystack:
+                    continue
+                if lyrics_query and lyrics_query not in self._lyrics_haystack(row):
                     continue
                 selected_statuses = {
                     "running": {"queued", "recording", "running"},
@@ -132,11 +169,13 @@ class SongStore:
                 }.get(status, {status})
                 if status and row.get("status") not in selected_statuses:
                     continue
+                if tag and tag not in (row.get("tags") or []):
+                    continue
                 if compact:
                     # The songs list only needs card/progress metadata. Avoid
                     # copying hypotheses, words and guitar sheets while an
                     # analysis worker is writing large song records.
-                    fields = {'song_id', 'title', 'artist', 'status', 'stage', 'stage_label',
+                    fields = {'song_id', 'title', 'search_query', 'artist', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
                               'capabilities', 'audio', 'phrases', 'analysis_state',
                               'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
                               'revision', 'source', 'source_ref', 'recording_version'}
@@ -163,7 +202,12 @@ class SongStore:
             "schema_version": self.schema_version,
             "revision": 1,
             "title": title,
+            # Keep the exact query separately from the editable display title.
+            # Existing cards without this field continue to fall back to title.
+            "search_query": title if source == "query" else "",
             "artist": artist,
+            "tags": [],
+            "tag_scores": {},
             "recording_version": "",
             "source": source if source in {"current", "file", "url", "query", "batch"} else "query",
             "source_ref": _clean(source_ref, 2000),
@@ -205,7 +249,7 @@ class SongStore:
             current_revision = int(row.get("revision") or 1)
             if base_revision is not None and int(base_revision) != current_revision:
                 raise ValueError("Песня уже изменилась — обновите карточку и повторите правку")
-            allowed = {"title", "artist", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
+            allowed = {"title", "search_query", "artist", "tags", "tag_scores", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
                        "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference"}
@@ -215,7 +259,14 @@ class SongStore:
                 raise ValueError("Неизвестное состояние песни")
             for key, value in changes.items():
                 if key in allowed:
-                    row[key] = _clean(value) if key in {"title", "artist"} else copy.deepcopy(value)
+                    if key in {"title", "search_query", "artist"}:
+                        row[key] = _clean(value)
+                    elif key == "tags":
+                        row[key] = clean_tags(value)
+                    elif key == "tag_scores":
+                        row[key] = {tag: float(score) for tag, score in (value or {}).items() if tag in TAG_OPTIONS and isinstance(score, (int, float))}
+                    else:
+                        row[key] = copy.deepcopy(value)
             row.setdefault("edits", []).append({"at": _now(), "changes": copy.deepcopy(changes)})
             row["revision"] = current_revision + 1
             row["updated_at"] = _now()
@@ -232,6 +283,7 @@ class SongStore:
     def save_analysis(self, song_id, run_id, phrases, model):
         """Сохраняет сырую гипотезу; новый запуск не заменяет проверенный текст."""
         from .structure import infer_sections
+        from .tags import infer_tags
         with self._lock:
             row = self.get(song_id)
             if not row or row.get("active_run_id") != run_id or row.get("status") != "running":
@@ -252,12 +304,15 @@ class SongStore:
             if not keep:
                 changes.update(phrases=selected, words=[], timing_quality="phrase", selected_run_id=run_id,
                                sections=infer_sections(selected), guitar_sheet=[])
+            tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))
+            changes.update(tags=tags, tag_scores=tag_scores)
             return self.patch(song_id, changes)
 
     def save_full_analysis(self, song_id, run_id, basic, model, result):
         from .consensus import consensus, choose_spine, recover_omissions
         from .chord_layout import build_guitar_sheet
         from .structure import infer_sections
+        from .tags import infer_tags
         with self._lock:
             row = self.get(song_id)
             if not row or row.get('active_run_id') != run_id or row.get('status') != 'running':
@@ -299,6 +354,8 @@ class SongStore:
                                guitar_sheet=build_guitar_sheet(selected, chords),
                                capabilities={**row.get('capabilities', {}), 'lyrics': bool(selected),
                                              'structure': bool(selected), 'chords': has_chords})
+            tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))
+            changes.update(tags=tags, tag_scores=tag_scores)
             return self.patch(song_id, changes)
 
     def edit_phrase(self, song_id, phrase_id, text, note, reviewed, base_revision, action="edit", word_start=None,

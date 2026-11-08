@@ -25,3 +25,5 @@ pyobjc-framework-ApplicationServices>=12.2.2
 pyobjc-framework-Contacts>=12.2.2
 pyobjc-framework-Vision>=12.2.2
 pyobjc-framework-ScreenCaptureKit>=12.2.2
+# Разбиение встречи по участникам: импортируется только процессом --diarize-worker.
+sherpa-onnx>=2.0

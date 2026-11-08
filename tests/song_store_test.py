@@ -42,6 +42,17 @@ def test_song_store_processing_filters_include_active_and_stopped_jobs(tmp_path)
     assert {row["title"] for row in store.list(status="stopped")} == {"Остановилась"}
 
 
+def test_song_store_searches_inside_lyrics(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    first = store.create("Первая песня", "Автор")
+    second = store.create("Вторая песня", "Автор")
+    store.patch(first["song_id"], {"phrases": [{"text": "Я молчу и улыбаюсь"}]}, first["revision"])
+    store.patch(second["song_id"], {"phrases": [{"text": "День за днём одинокий груз"}]}, second["revision"])
+
+    assert [row["title"] for row in store.list(lyrics_query="улыбаюсь")] == ["Первая песня"]
+    assert store.list(lyrics_query="несуществующая фраза") == []
+
+
 def test_song_store_delete_removes_owned_song_folder(tmp_path):
     store = SongStore(tmp_path / "songs")
     song = store.create("Удаляемая", "Исполнитель")

@@ -85,6 +85,27 @@ class SongStepRestartTests(unittest.TestCase):
         self.assertEqual(row['audio'],before['audio'])
         self.assertEqual(row['phrases'][0]['text'],self.phrase['text'])
 
+    def test_chord_history_does_not_block_text_source_correction(self):
+        self.store.patch(self.sid,{'phrase_history':{'_chords':{'versions':[],'cursor':0}}})
+        corrected={**self.phrase,'text':'Исправленный текст тестовой фразы'}
+        def analyze(*args,**kwargs):
+            return {'selected':{'phrases':[corrected]},'text_reference':{'state':'compared','references':[]},'errors':[]}
+        before=self.store.get(self.sid)
+        with patch('songs.runtime.analyze',side_effect=analyze):
+            self.analyzer.rerun_step(self.sid,'text_reference');self.assertTrue(self.done.wait(3))
+        after=self.store.get(self.sid)
+        self.assertEqual(after['phrases'][0]['text'],corrected['text'])
+        self.assertEqual(after['chords'],before['chords'])
+        self.assertEqual(after['phrase_history'],before['phrase_history'])
+
+    def test_user_edited_phrase_is_still_protected(self):
+        self.store.patch(self.sid,{'phrase_history':{self.phrase['phrase_id']:{'versions':[self.phrase],'cursor':0}}})
+        def analyze(*args,**kwargs):
+            return {'selected':{'phrases':[{**self.phrase,'text':'Не заменять ручную правку'}]},'text_reference':{'state':'compared','references':[]},'errors':[]}
+        with patch('songs.runtime.analyze',side_effect=analyze):
+            self.analyzer.rerun_step(self.sid,'text_reference');self.assertTrue(self.done.wait(3))
+        self.assertEqual(self.store.get(self.sid)['phrases'][0]['text'],self.phrase['text'])
+
 
 if __name__ == "__main__":
     unittest.main()

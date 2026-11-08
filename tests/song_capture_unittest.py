@@ -27,7 +27,7 @@ class FakeCapture:
     def read_native(self):
         if not self.sent.is_set():
             self.sent.set()
-            return b'\x00\x00' * self.rate * self.channels
+            return b'\x00\x10' * self.rate * self.channels
         self.closed.wait(.01)
         return b''
 

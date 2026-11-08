@@ -62,6 +62,23 @@ class ResumeTests(unittest.TestCase):
         self.store.patch(self.sid, {'capabilities': {'lyrics': True, 'chords': True, 'audio': True}})
         with self.assertRaises(ValueError): self.service.resume(self.sid)
 
+    def test_explicit_restart_ready_song_uses_saved_audio_without_erasing_edits(self):
+        self.audio('ready')
+        row=self.store.patch(self.sid,{'capabilities':{'lyrics':True,'chords':True,'audio':True},
+            'phrase_history':{'p':{'cursor':0,'versions':[{'text':'Ручная правка'}]}}})
+        self.assertTrue(self.service.describe(row)['can_restart'])
+        with patch.object(self.analyzer,'start',return_value=row) as start:
+            self.service.restart(self.sid);start.assert_called_once_with(self.sid,full=True)
+        self.assertEqual(self.store.get(self.sid)['phrase_history'],row['phrase_history'])
+
+    def test_restart_unavailable_during_capture(self):
+        row=self.audio('recording')
+        self.capture.state.return_value={'running':True,'phase':'waiting','duration_ms':0,'draft':''}
+        info=self.service.describe(row);self.assertFalse(info['can_restart'])
+        self.assertEqual(info['capture']['phase'],'waiting')
+        with patch.object(self.analyzer,'start') as start:
+            self.service.restart(self.sid);start.assert_not_called()
+
     def test_busy_repeat_does_not_create_duplicate(self):
         self.audio('running')
         self.analyzer._running.add(self.sid)

@@ -77,14 +77,17 @@ SHEET_SYSTEM = (
     "собеседника, и короткий ответ на каждый — по материалам и цели. Строго парами строк:\n"
     "В: вопрос собеседника\nО: что ответить, до 25 слов\nЦифры — только из материалов. Без вступлений и заключений.")
 SUMMARY_SYSTEM = (
-    "Ты пишешь итог деловой встречи по расшифровке (реплики «Собеседник» и «Вы»). Markdown, без вступлений. "
+    "Ты пишешь итог деловой встречи по расшифровке (реплики подписаны «Вы», «Собеседник», «Участник N» или именами; "
+    "разные подписи — разные люди, «Речь» — без разметки говорящих). Markdown, без вступлений. "
     "Если в расшифровке человек обращается к собеседнику по имени или участник прямо представляется, добавь "
     "## Участники — список только явно названных имён; не угадывай имена по контексту.\n"
-    "## Коротко — 2–3 предложения.\n## Договорились — пункты.\n## Кто что делает — пункты (сроки, если звучали).\n"
+    "## Коротко — 2–3 предложения.\n## Договорились — пункты.\n## Кто что делает — пункты с подписью говорящего "
+    "из расшифровки (сроки, если звучали).\n"
     "## Открытые вопросы — пункты.\nТолько то, что было сказано. Раздела нет по сути — напиши «нет».")
 
 NOTES_SYSTEM = (
-    "Это часть расшифровки длинной деловой встречи (реплики с таймкодами «Собеседник», «Вы», «Экран»). "
+    "Это часть расшифровки длинной деловой встречи (реплики с таймкодами; подписи «Вы», «Собеседник», «Участник N» "
+    "или имена — разные люди; «Экран» — текст с экрана). "
     "Выпиши кратко, без вступлений, только сказанное в ЭТОЙ части: темы; договорённости; задачи (кто, что, срок); "
     "цифры, цены и сроки; открытые вопросы; явно названные имена участников. Указывай таймкод [мм:сс] у договорённостей "
     "и задач. Нет пункта — не пиши его.")
@@ -949,7 +952,13 @@ class Prompter:
         if m.get("ended"):
             ended = local_datetime(m["ended"])
             rows.insert(2, f"# Завершение: {ended:%d.%m.%Y %H:%M}")
-        if m.get("dual"):
+        mode = m.get("speaker_mode") or "owner"
+        if getattr(self, "_speakers", None):
+            from diarization.service import SIGNATURE
+            rows.append(f"# Подписи: {SIGNATURE}")
+        elif mode == "none":
+            rows.append("# Подписи: без разметки говорящих («Речь»)")
+        elif m.get("dual"):
             rows.append("# Подписи: «Вы» — ваш микрофон, «Собеседник» — звук компьютера (все остальные участники)")
         elif m.get("place") == "live":
             rows.append("# Подписи: «Вы» и «Собеседник» различаются по голосу")
@@ -992,7 +1001,8 @@ class Prompter:
         if path is None:
             return
         try:
-            who = {"them": "Собеседник", "me": "Вы", "screen": "Экран"}.get(line.get("who"), line.get("who", ""))
+            from diarization.labels import label as speaker_label
+            who = speaker_label(line)
             seconds = max(0, int(float(line.get("t") or 0)))
             stamp = f"{seconds // 60:02d}:{seconds % 60:02d}"
             text = str(line.get("text") or "").strip()
@@ -1192,7 +1202,7 @@ class Prompter:
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
               auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
               capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None,
-              schedule_id=None, record_me=None, continue_group=False):
+              schedule_id=None, record_me=None, continue_group=False, speaker_mode=None, expected_speakers=None):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
         if self.on:
@@ -1275,10 +1285,20 @@ class Prompter:
             self._capture_source = "screen"
         self._capture_region = dict(capture_region or {})
         self._capture_application = str(capture_application or "")[:160]
-        record = bool(record) and not live and bool(them)
+        # Очная встреча тоже пишется (микрофон в WAV): после встречи её можно разбить по участникам.
+        record = bool(record) and (live or bool(them))
         record_source = str((cfg.get("audio_source") if record_source is None else record_source) or "system").lower()
         if record_source not in ("system", "microphone"):
             record_source = "system"
+        if live and record:
+            record_source = "microphone"
+        from diarization import normal_mode
+        speaker_mode = normal_mode(speaker_mode if speaker_mode is not None else cfg.get("speaker_mode"))
+        try:
+            expected_speakers = max(0, min(20, int(expected_speakers if expected_speakers is not None
+                                                   else cfg.get("expected_speakers") or 0)))
+        except (TypeError, ValueError):
+            expected_speakers = 0
         # Онлайн-встреча с записью звука компьютера: собеседник — BlackHole,
         # вы — микрофон. Раньше микрофон в этом режиме выключался совсем, и в
         # WAV/протоколе были только реплики собеседника. Теперь обе дорожки
@@ -1299,13 +1319,15 @@ class Prompter:
                             "participants": self._meta_list(participants), "topics": self._meta_list(topics),
                             "record": record, "deferred": bool(deferred) if record else False,
                             "audio_source": record_source, "dual": dual,
-                            "source": (source or "system")[:40], "auto_frames": bool(auto_frames), "started": time.time()}
+                            "source": (source or "system")[:40], "auto_frames": bool(auto_frames), "started": time.time(),
+                            "speaker_mode": speaker_mode, "expected_speakers": expected_speakers}
             if scheduled_end:
                 self.meeting["scheduled_end"] = float(scheduled_end)
             if schedule_id:
                 self.meeting["schedule_id"] = str(schedule_id)
             self.lines, self.hints, self.sheet, self.summary, self.paused = [], [], [], "", False
             self._summary_path = ""
+            self._speakers, self._speakers_machine, self._diarization, self._speaker_note = [], [], {}, ""
             self._summary_busy = False
             self._summary_progress = {}
             self._completed_job = None
@@ -1348,7 +1370,7 @@ class Prompter:
         q = queue.Queue(maxsize=200)
         self._q = q
         self._capture_done.set()
-        if not live and self.meeting["them"]:
+        if (not live and self.meeting["them"]) or (live and record):
             self._capture_done.clear()
         self._stt_thread = threading.Thread(target=self._stt_loop, args=(stop_ev, q, session), name="prompter-stt", daemon=True)
         self._stt_thread.start()
@@ -1360,7 +1382,12 @@ class Prompter:
             # Модель записи (GigaAM) грузится заранее: иначе первые фразы
             # ждали загрузки в очереди и могли потеряться.
             threading.Thread(target=self._preload_stt, name="prompter-stt-load", daemon=True).start()
-        if live:
+        if live and record:
+            # Микрофон очной встречи пишет поток встречи (как звук компьютера в онлайн-записи): WAV + фразы.
+            self._loop_thread = threading.Thread(target=self._them_loop, args=(stop_ev, q, session),
+                                                 name="prompter-them", daemon=True)
+            self._loop_thread.start()
+        elif live:
             self.status = "слушаю микрофон — вас и собеседника различаю по голосу"
         elif self.meeting["them"]:
             self._loop_thread = threading.Thread(target=self._them_loop, args=(stop_ev, q, session),
@@ -1458,7 +1485,8 @@ class Prompter:
             frame_quality=self._frame_quality, frame_video=self._video_enabled,
             auto_first_frame=False, capture_source=self._capture_source, capture_region=self._capture_region,
             capture_application=self._capture_application, record_source=m.get("audio_source"),
-            record_me=bool(m.get("dual")), continue_group=True)
+            record_me=bool(m.get("dual")), continue_group=True,
+            speaker_mode=m.get("speaker_mode"), expected_speakers=m.get("expected_speakers"))
 
     def finalize_meeting_group(self):
         """Combine all completed blocks into a shared result in the background."""
@@ -1871,7 +1899,7 @@ class Prompter:
                     # моменту распознавания: очередь STT не сдвигает реплики во времени.
                     t_start = max(0.0, n * FRAME_S - len(pcm) / 32000.0 - 0.3)
                     try:
-                        q.put_nowait(("them", pcm, session, t_start))
+                        q.put_nowait(("mic" if self.meeting.get("place") == "live" else "them", pcm, session, t_start))
                     except Exception:  # noqa: BLE001
                         log.warning("🎬 Очередь распознавания полна — фраза собеседника пропущена")
                 if seg_me is not None:
@@ -1887,7 +1915,7 @@ class Prompter:
                             log.warning("🎬 Очередь распознавания полна — ваша фраза пропущена")
         finally:
             if not deferred and not self.paused and session == self._session and q is not None:
-                for who, segment in (("them", seg), ("me", seg_me)):
+                for who, segment in (("mic" if self.meeting.get("place") == "live" else "them", seg), ("me", seg_me)):
                     pcm = segment.flush() if segment is not None else None
                     if pcm:
                         try:
@@ -1926,16 +1954,118 @@ class Prompter:
             return self.eng.transcribe_file(path, stt=self._meeting_stt())
         return self.eng.transcribe_file(path)  # компактные тестовые/внешние движки используют старую сигнатуру
 
+    def _prompter_cfg(self):
+        cfg = self.eng.s.get("prompter") if hasattr(self.eng.s, "get") else {}
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _transcribe_segments(self, path):
+        """Куски файла (начало, конец, текст, слова|None): время слов — если распознаватель умеет (GigaAM)."""
+        try:
+            if hasattr(self.eng, "current_stt"):
+                rows = self.eng.transcribe_file(path, stt=self._meeting_stt(), words=True)
+            else:
+                rows = self.eng.transcribe_file(path, words=True)
+        except TypeError:                                # внешний/тестовый движок без параметра words
+            rows = self._transcribe_wav(path)
+        return [(float(r[0]), float(r[1]), str(r[2] or ""), (r[3] if len(r) > 3 else None)) for r in rows]
+
+    def _owner_who(self, path):
+        """Очная встреча после записи, режим «Вы и собеседники»: кусок — ваш или нет (по профилю голоса)."""
+        if self.speaker.owner is None:
+            return lambda _s, _e: "them"
+        diar = self.speaker.diarizer()
+
+        def who(start, end):
+            try:
+                with wave.open(str(path), "rb") as w:
+                    w.setpos(max(0, int(start * 16000)))
+                    pcm = w.readframes(max(0, int((end - start) * 16000)))
+                return diar.who(pcm)[0]
+            except Exception as e:  # noqa: BLE001 — модель голоса недоступна: как во время встречи
+                log.info("🎬 Голос куска не определён: %s", e)
+                return "them"
+        return who
+
+    def _diarization_files(self, path):
+        from diarization.service import MeetingFiles
+        return MeetingFiles.explicit(path, self._transcript_path or Path(path).with_suffix(".txt"),
+                                     them=self._track_paths.get("them"), me=self._track_paths.get("me"))
+
+    def _start_diarization(self, path):
+        """Модели (при первом разе — скачать ~7 МБ) и отдельный процесс; идёт параллельно с распознаванием."""
+        from diarization import service
+        files = self._diarization_files(path)
+        cfg = self._prompter_cfg()
+        if service.wav_seconds(files.source()) < service.config(cfg)["min_duration_sec"]:
+            self._speaker_note = "запись слишком короткая — по участникам не разбивал"
+            return None, files
+        mirror = None
+        try:
+            if hasattr(self.eng, "_mirror"):
+                mirror = self.eng._mirror("diarization_seg")
+                if self.speaker.mirror is None:
+                    self.speaker.mirror = self.eng._mirror("speaker")
+        except Exception:  # noqa: BLE001 — без зеркала качаем с GitHub
+            mirror = None
+        try:
+            self._emit("summary", summary="", busy=True, phase="diarize", progress=0.0)
+            job = service.start_job(files, self.meeting, cfg, mirror=mirror, speaker=self.speaker,
+                                    on_progress=lambda v: self._emit("summary", summary="", busy=True,
+                                                                     phase="diarize", progress=round(v, 3)))
+        except Exception as e:  # noqa: BLE001 — расшифровка продолжается без участников
+            self._speaker_note = f"участники не определены: {e}"[:300]
+            log.warning("🎬 Разбиение по участникам: %s", e)
+            return None, files
+        if job.proc is None:
+            self._speaker_note = f"участники не определены: {job.error}"[:300]
+            return None, files
+        return job, files
+
+    def _finish_diarization(self, job, files, segs, lines):
+        """Дождаться процесса и собрать реплики по участникам; сбой — прежние реплики и причина в итоге."""
+        from diarization import service, storage
+        cfg = self._prompter_cfg()
+        seconds = service.wav_seconds(files.source())
+        result = job.wait(seconds * service.config(cfg)["timeout_factor"] + 120)
+        if not result:
+            self._speaker_note = f"участники не определены: {job.error}"[:300]
+            self._diarization = {"status": "failed", "error": job.error}
+            log.warning("🎬 Разбиение по участникам: %s", job.error)
+            return lines
+        try:
+            new_lines, speakers, _turns, machine = service.assemble(files, result, segs, self.meeting, cfg,
+                                                                    speaker=self.speaker, is_echo=self._is_echo)
+        except Exception as e:  # noqa: BLE001
+            self._speaker_note = f"участники не определены: {e}"[:300]
+            self._diarization = {"status": "failed", "error": str(e)[:300]}
+            log.exception("🎬 Сборка реплик по участникам")
+            return lines
+        self._speakers, self._speakers_machine = speakers, machine
+        self._diarization = service.meta(result, {"words": storage.has_words(segs)})
+        others = [s for s in speakers if s["id"] != "ME"]
+        self._speaker_note = (f"голосов собеседников: {len(others)}" if others else "") + (
+            "; время слов недоступно — реплики размечены целиком" if not storage.has_words(segs) else "")
+        return new_lines
+
     def _post_transcribe(self):
-        """После встречи: закрытая запись -> транскрипция (по дорожкам, если они есть) -> итоговый протокол."""
+        """После встречи: закрытая запись -> транскрипция (по дорожкам, если они есть) -> итоговый протокол.
+        Режим «По участникам» — параллельно разбиение по голосам в отдельном процессе (diarization/)."""
         path = self._record_path
         self._emit("summary", summary="", busy=True, phase="transcribe", recording=Path(path).name if path else "")
+        from diarization import normal_mode
+        mode = normal_mode(self.meeting.get("speaker_mode"))
+        self._speakers, self._speakers_machine, self._diarization = [], [], {}
+        self._speaker_note = ""
+        job, files, segs = None, None, {}
         try:
             if not path or not Path(path).is_file() or Path(path).stat().st_size <= 44:
                 raise RuntimeError(self._record_error or "аудиофайл пустой — проверьте источник записи и разрешение микрофона/звука")
             tracks = {k: v for k, v in self._track_paths.items() if Path(v).is_file() and Path(v).stat().st_size > 44}
             notes = []
             lines = []
+            silent_them = bool(tracks.get("them")) and self._wav_is_silent(tracks["them"])
+            if mode == "participants" and not silent_them:
+                job, files = self._start_diarization(path)
             if tracks:
                 for who in ("them", "me"):
                     p = tracks.get(who)
@@ -1945,8 +2075,9 @@ class Prompter:
                         notes.append("звук собеседника не записан (тишина): " + self._silence_hint() if who == "them" else
                                      "ваш микрофон записал тишину — проверьте разрешение «Микрофон» для Dewiar")
                         continue
-                    lines += [{"who": who, "text": text, "t": round(float(start), 1)}
-                              for start, _end, text in self._transcribe_wav(p) if str(text or "").strip()]
+                    segs[who] = self._transcribe_segments(p)
+                    lines += [{"who": who, "text": text.strip(), "t": round(float(start), 1)}
+                              for start, _end, text, _w in segs[who] if text.strip()]
                 # Без наушников микрофон слышит собеседника из колонок: такие
                 # «ваши» реплики повторяют дорожку собеседника — убираем эхо.
                 them_lines = [x for x in lines if x["who"] == "them"]
@@ -1956,8 +2087,28 @@ class Prompter:
                 if self.meeting.get("audio_source") == "system" and self._wav_is_silent(path):
                     notes.append("звук собеседника не записан (тишина): " + self._silence_hint())
                 else:
-                    lines = [{"who": "them", "text": text, "t": round(float(start), 1)}
-                             for start, _end, text in self._transcribe_wav(path) if str(text or "").strip()]
+                    segs["mix"] = self._transcribe_segments(path)
+                    if self.meeting.get("place") == "live" and mode != "none":
+                        from diarization.pipeline import owner_split
+                        lines = owner_split(segs["mix"], self._owner_who(path))
+                    else:
+                        lines = [{"who": "them", "text": text.strip(), "t": round(float(start), 1)}
+                                 for start, _end, text, _w in segs["mix"] if text.strip()]
+            if job is not None:
+                if tracks and "them" not in segs:
+                    job.cancel()
+                else:
+                    lines = self._finish_diarization(job, files, segs, lines)
+                job = None
+            if mode == "none":
+                for x in lines:
+                    x["label"] = "Речь"
+            if any(w for rows in segs.values() for *_x, w in rows):
+                try:
+                    from diarization.storage import words_path, write_words
+                    write_words(words_path(self._transcript_path), segs)   # слова с временем — для пересчёта
+                except (OSError, TypeError, ValueError) as exc:
+                    log.info("🎬 Слова с временем не сохранены: %s", exc)
             if notes:
                 self._record_error = "; ".join(filter(None, [self._record_error] + notes))[:600]
             with self._lock:
@@ -1978,6 +2129,9 @@ class Prompter:
         except Exception as e:  # noqa: BLE001 — протокол всё равно будет создан с сообщением об ошибке
             self.status = "расшифровка не получилась: " + str(e)[:180]
             log.warning("🎬 Расшифровка записи: %s", e)
+        finally:
+            if job is not None:
+                job.cancel()                             # распознавание упало — процесс разбиения не нужен
         self._summarize()
 
     def _stt_loop(self, stop_ev=None, q=None, session=None):
@@ -2016,7 +2170,9 @@ class Prompter:
     def _whose(self, pcm):
         """Фраза микрофона: чья? Очная встреча — по голосу; онлайн — ваша, а явно чужой голос (собеседник из колонок
         в микрофоне) — None: его слышно по звуку компьютера (а если звук компьютера выключен — это собеседник).
-        Голос не запомнен — всегда ваша."""
+        Голос не запомнен — всегда ваша. Режим «без разметки» голос не сравнивает."""
+        if self.meeting.get("place") == "live" and self.meeting.get("speaker_mode") == "none":
+            return "them"
         if self._diar is None:
             return "me"
         try:
@@ -2142,7 +2298,8 @@ class Prompter:
     def _transcript(self, n=14):
         with self._lock:
             ls = self.lines[-n:]
-        return "\n".join(("Собеседник: " if x["who"] == "them" else "Вы: ") + x["text"] for x in ls)
+        from diarization.labels import label as speaker_label
+        return "\n".join(f"{speaker_label(x)}: " + x["text"] for x in ls)
 
     def _sheet_match(self, q):
         """Готовый ответ из шпаргалки, если вопрос похож. Основы сравниваем по началу («стои» и «сто» — одно слово):
@@ -2636,7 +2793,8 @@ class Prompter:
         out = []
         for x in lines:
             sec = max(0, int(float(x.get("t") or 0)))
-            who = "Собеседник" if x["who"] == "them" else "Вы" if x["who"] == "me" else "Экран (OCR)"
+            from diarization.labels import LLM_BASE, label as speaker_label
+            who = speaker_label(x, LLM_BASE)
             out.append(f"[{sec // 60:02d}:{sec % 60:02d}] {who}: {x['text']}")
         return out
 
@@ -2743,15 +2901,24 @@ class Prompter:
             p = Path(self._transcript_path).with_suffix(".lines.json")
             meta = {k: self.meeting.get(k) for k in ("title", "goal", "participants", "topics", "started", "ended",
                                                       "audio_source", "dual", "place")}
-            p.write_text(json.dumps({"version": 1, "meeting": meta, "tracks": dict(self._track_paths),
-                                     "system_audio": self._system_kind, "lines": lines},
-                                    ensure_ascii=False, indent=1), encoding="utf-8")
+            meta["speaker_mode"] = self.meeting.get("speaker_mode") or "owner"
+            meta["expected_speakers"] = self.meeting.get("expected_speakers") or 0
+            data = {"version": 1, "meeting": meta, "tracks": dict(self._track_paths),
+                    "system_audio": self._system_kind, "lines": lines}
+            if getattr(self, "_speakers", None):
+                data.update({"version": 2, "speaker_mode": "participants", "speakers": self._speakers,
+                             "speakers_machine": getattr(self, "_speakers_machine", []) or self._speakers,
+                             "diarization": getattr(self, "_diarization", {}) or {}})
+            elif getattr(self, "_diarization", None):
+                data["diarization"] = self._diarization
+            p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
             return str(p)
         except (OSError, TypeError, ValueError) as exc:
             log.info("🎬 Сырые реплики не сохранены: %s", exc)
             return ""
 
     def _summarize(self):
+        from diarization.labels import label as speaker_label  # noqa: F401 — подписи реплик в Markdown ниже
         m = dict(self.meeting)
         record_path = self._record_path
         with self._lock:
@@ -2829,12 +2996,13 @@ class Prompter:
                 + (f"**Аудиозапись:** {record_link}\n\n" if record_link else "")
                 + (f"**Дорожки:** {track_links}\n\n" if track_links else "")
                 + (f"**Статус аудиозаписи:** {self._record_error}\n\n" if self._record_error else "")
+                + (f"**Участники по голосу:** {self._speaker_note}\n\n" if getattr(self, "_speaker_note", "") else "")
                 + (f"**Микрофон:** {self._mic_error}\n\n" if self._mic_error else "")
                 + (f"**Текст записи встречи (все участники):** {transcript_link}\n\n" if transcript_link else "")
                 + (text or "_Итог не получился — модель не ответила._")
                 + ("\n\n## Материалы\n" + "\n".join(f"- {f['name']}" for f in self.files) if self.files else "")
                 + ("\n\n## Расшифровка\n" + "\n".join(
-                    ("**Собеседник:** " if x["who"] == "them" else "**Вы:** " if x["who"] == "me" else "**Экран:** ") + x["text"]
+                    f"**{speaker_label(x)}:** " + x["text"]
                     for x in lines)
                    if m.get("keep_text") else ""))
         if self._screenshots:

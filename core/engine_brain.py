@@ -768,10 +768,12 @@ class BrainMixin:
                 return self.vosk_stt.transcribe(r.stdout).strip()
             raise
 
-    def transcribe_file(self, path, cancel=None, chunk=22.0, stt=None, allow_fallback=True, on_progress=None):
+    def transcribe_file(self, path, cancel=None, chunk=22.0, stt=None, allow_fallback=True, on_progress=None, words=False):
         """Аудио или видео любой длины -> [(начало_с, конец_с, текст)]: режем по тихим местам на куски до chunk секунд
         (~22 с уверенно слышит GigaAM) и распознаём тем же слухом, что дома; не вышло — запасным Vosk.
-        Работает долго (на чтение файла ffmpeg даётся до 30 мин); cancel прерывает между кусками."""
+        Работает долго (на чтение файла ffmpeg даётся до 30 мин); cancel прерывает между кусками.
+        words=True — четвёрки (начало, конец, текст, слова): слова [{"t", "s", "e"}] от начала файла, если
+        распознаватель умеет время слов (GigaAM через onnx-asr), иначе None. Без words — прежние тройки."""
         import numpy as np
         from eyes import ffmpeg_path
         exe = ffmpeg_path()
@@ -813,15 +815,26 @@ class BrainMixin:
                     end = lo + int(np.argmin(seg))
             pcm = a[start:end]
             if len(pcm) > sr // 4 and float(np.abs(pcm).max()) > 300:      # тишину и обрывки короче 0,25 с не распознаём
+                ws = None
                 try:
-                    txt = stt.transcribe(pcm.tobytes()).strip()
+                    if words and callable(getattr(stt, "transcribe_words", None)):
+                        try:
+                            txt, ws = stt.transcribe_words(pcm.tobytes())
+                            txt = (txt or "").strip()
+                            ws = [dict(w, s=round(w["s"] + start / sr, 2), e=round(w["e"] + start / sr, 2))
+                                  for w in ws or []] or None
+                        except Exception as e:  # noqa: BLE001 — время слов не вышло: текст тем же слухом
+                            log.info("Время слов не получено: %s", e)
+                            txt, ws = stt.transcribe(pcm.tobytes()).strip(), None
+                    else:
+                        txt = stt.transcribe(pcm.tobytes()).strip()
                 except Exception as e:  # noqa: BLE001
                     if allow_fallback and getattr(self, "vosk_stt", None) and stt is not self.vosk_stt:
-                        txt = self.vosk_stt.transcribe(pcm.tobytes()).strip()
+                        txt, ws = self.vosk_stt.transcribe(pcm.tobytes()).strip(), None
                     else:
                         raise RuntimeError(f"распознавание: {e}") from e
                 if txt:
-                    out.append((start / sr, end / sr, txt))
+                    out.append((start / sr, end / sr, txt, ws) if words else (start / sr, end / sr, txt))
             start = end
             if on_progress:
                 on_progress(end / sr, n / sr)

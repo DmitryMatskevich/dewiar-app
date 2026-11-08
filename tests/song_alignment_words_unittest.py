@@ -40,6 +40,11 @@ class AlignmentWordsTests(unittest.TestCase):
         context=[{'phrases':[dict(phrase,start_ms=100000,end_ms=110000)]}]
         self.assertEqual(_alignment_windows([phrase],context),[(10000,15000)])
 
+    def test_matching_text_in_coarse_chunk_cannot_pull_vocals_into_intro(self):
+        phrase=dict(text='Улыбнулся прохожему на улице',start_ms=30000,end_ms=35000)
+        context=[{'phrases':[dict(phrase,start_ms=25000,end_ms=50000,timing_quality='chunk')]}]
+        self.assertEqual(_alignment_windows([phrase],context),[(30000,35000)])
+
     def test_partial_alignment_keeps_unmeasured_first_and_last_words(self):
         phrase=dict(text='мы идём домой',start_ms=0,end_ms=3000,timing_quality='word_partial',
                     words=[dict(text='идём',char_start=3,char_end=7,start_ms=1000,end_ms=1800)])

@@ -15,6 +15,9 @@ if "--ocr-worker" in sys.argv:
     from ocr import worker_main
     worker_main(sys.argv[sys.argv.index("--ocr-worker") + 1:])
     raise SystemExit(0)
+if "--diarize-worker" in sys.argv:              # разбиение встречи по участникам: sherpa-onnx только здесь
+    from diarization.worker import worker_main
+    raise SystemExit(worker_main(sys.argv[sys.argv.index("--diarize-worker") + 1:]))
 if "--download-gigaam" in sys.argv:
     from model_download import worker_main
     raise SystemExit(worker_main(sys.argv[sys.argv.index("--download-gigaam") + 1:]))

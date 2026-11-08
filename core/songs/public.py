@@ -6,7 +6,7 @@
 import copy
 from functools import wraps
 
-CARD_KEYS = ('song_id','revision','title','artist','recording_version','source','source_ref',
+CARD_KEYS = ('song_id','revision','title','search_query','artist','tags','tag_scores','recording_version','source','source_ref',
              'status','stage','stage_label','updated_at','created_at','capabilities','karaoke','processing')
 
 
@@ -21,7 +21,7 @@ def public_song(row, summary=False):
                               for r in row.get('analysis_runs',[]) if r['run_id']==row.get('candidate_run_id')]
     result['phrase_history'] = {pid:{'cursor':h['cursor'],'version_count':len(h['versions'])}
         for pid,h in row.get('phrase_history',{}).items() if isinstance(h,dict) and 'versions' in h}
-    keys = ('phrase_id','source_phrase_ids','source_spans','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words')
+    keys = ('phrase_id','source_phrase_ids','source_spans','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words','instrumental')
     from .chord_layout import build_guitar_sheet
     from .sheet_lines import readable_sheet
     from .phrase_timeline import ordered_phrases
@@ -52,7 +52,7 @@ def public_song(row, summary=False):
     for i,event in enumerate(events):
         if event.get('end_ms') is None:
             event['end_ms'] = events[i+1]['start_ms'] if i+1<len(events) else max(duration,event['start_ms']+1000)
-    sheet = readable_sheet(build_guitar_sheet(phrases,events), section_starts=starts)
+    sheet = readable_sheet(build_guitar_sheet(phrases,events,duration), section_starts=starts)
     result['guitar_sheet'] = [{k:copy.deepcopy(line[k]) for k in keys if k in line} for line in sheet]
     from .evidence import review_evidence
     result['review_evidence'] = review_evidence(row)

@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import numpy as np
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'core'))
-from songs.onset_check import retry_stem_alignment
+from songs.onset_check import retry_stem_alignment, retry_long_onset
 
 
 class VocalAlignmentTests(unittest.TestCase):
@@ -48,6 +48,17 @@ class VocalAlignmentTests(unittest.TestCase):
         self.assertEqual(result,original)
         self.assertIsNone(report)
         model.align.assert_not_called()
+
+    def test_short_first_word_is_moved_after_confirmed_instrumental_lead(self):
+        words = [dict(text='То', char_start=0, char_end=2, start_ms=0, end_ms=12720),
+                 dict(text='ли', char_start=3, char_end=5, start_ms=16160, end_ms=16320),
+                 dict(text='дернул', char_start=6, char_end=12, start_ms=16320, end_ms=16800)]
+        stem = np.zeros(30000)
+        stem[16000:22000] = 1.0
+        result, report = retry_long_onset(Mock(), np.zeros(30000), 1000, 'То ли дернул', words, 25000, (stem, 1000))
+        self.assertTrue(report['applied'])
+        self.assertEqual((result[0]['start_ms'], result[0]['end_ms']), (15950, 16160))
+        self.assertEqual((result[1]['start_ms'], result[1]['end_ms']), (16160, 16320))
 
 
 if __name__=='__main__':unittest.main()

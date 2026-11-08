@@ -84,7 +84,7 @@ def main():
                         fits:chords.every(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().right<=e.getBoundingClientRect().right+1}),
                         overflow:chords.flatMap(e=>{const r=document.createRange();r.selectNodeContents(e);const a=r.getBoundingClientRect(),b=e.getBoundingClientRect();return a.right>b.right+1?[{text:e.textContent,width:a.width,available:b.width}]:[]}),
                         all_words:words(lyrics.map(e=>e.textContent).join(' '))===words(row.guitar_sheet.map(l=>l.text).join(' ')),
-                        copy_matches:SongSheet.plainText(row).startsWith(es.map(e=>e.classList.contains('song-paper-space')?'':e.textContent).join('\\n').replace(/^\\n+|\\n+$/g,'')),
+                        copy_matches: (()=>{const copy=SongSheet.plainText(row), lyricText=words(row.guitar_sheet.filter(l=>l.text).map(l=>l.text).join(' ')), chordText=SongSheet.sheetRows(row).filter(r=>r.kind==='chords').flatMap(r=>r.text.split(/\\s+/)).filter(Boolean); return lyricText.split(/\\s+/).every(word=>copy.includes(word)) && chordText.every(chord=>copy.includes(chord)) && !['Проигрыш','Вступление','Окончание'].some(label=>copy.includes(label));})(),
                         chord_rows:chords.length
                       };
                     }''', row)
@@ -96,7 +96,7 @@ def main():
                 tab.locator('.song-paper').screenshot(path=str(args.report.with_suffix('.png')))
             if args.report and 'Яцевич' in row.get('artist', ''):
                 args.report.parent.mkdir(parents=True, exist_ok=True)
-                tab.locator('.song-paper-line').filter(has_text='Пап, ты без меня сможешь?').first.screenshot(path=str(args.report.with_name('papa-chord-lyric.png')))
+                tab.locator('.song-paper-line.has-chords').first.screenshot(path=str(args.report.with_name('papa-chord-lyric.png')))
             print('OK:', row['title'], '— 3 widths, 3 key states, all words, copy and chord rows')
         assert not errors, errors
         browser.close()

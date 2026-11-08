@@ -53,9 +53,32 @@ class TimelineTests(unittest.TestCase):
             dict(text='так',char_start=4,char_end=7,start_ms=130400,end_ms=130800)])
         events=[dict(name='G',start_ms=115000,end_ms=120000),dict(name='Bm',start_ms=120000,end_ms=135000)]
         rows=build_guitar_sheet([p],events)
-        self.assertEqual(rows[-1]['text'],'Вот так')
-        self.assertEqual(rows[-1]['start_ms'],130000)
-        self.assertTrue(all(not r['text'] for r in rows[:-1]))
+        lyric=next(r for r in rows if r['text'])
+        self.assertEqual(lyric['text'],'Вот так')
+        self.assertEqual(lyric['start_ms'],130000)
+        self.assertEqual([(r['start_ms'],r['end_ms']) for r in rows if not r['text']],
+                         [(0,130000),(130800,135000)])
+
+    def test_subsecond_intro_and_break_with_held_chord(self):
+        phrases=[phrase('a','Первая',200,1000),phrase('b','Вторая',1250,2100)]
+        rows=build_guitar_sheet(phrases,[dict(name='Am',start_ms=0,end_ms=2200)],2200)
+        gaps=[r for r in rows if r.get('instrumental')]
+        self.assertEqual([(r['start_ms'],r['end_ms']) for r in gaps],[(0,200),(1000,1250),(2100,2200)])
+        self.assertTrue(all([c['name'] for c in r['unplaced_chords']]==['Am'] for r in gaps))
+
+    def test_unknown_chords_do_not_hide_timed_break(self):
+        rows=readable_sheet(build_guitar_sheet([phrase('a','До',0,1000),phrase('b','После',1200,2000)],[]))
+        gap=next(r for r in rows if r.get('instrumental'))
+        self.assertEqual((gap['start_ms'],gap['end_ms'],gap['unplaced_chords']),(1000,1200,[]))
+
+    def test_short_internal_phrase_break_but_not_interword_breath(self):
+        p=phrase('a','Первая строка Вторая строка',0,2400,words=[
+            dict(char_start=0,char_end=6,start_ms=0,end_ms=400),
+            dict(char_start=7,char_end=13,start_ms=480,end_ms=1000),
+            dict(char_start=14,char_end=20,start_ms=1200,end_ms=1800),
+            dict(char_start=21,char_end=27,start_ms=1800,end_ms=2400)])
+        rows=build_guitar_sheet([p],[dict(name='Am',start_ms=0,end_ms=2400)])
+        self.assertEqual([(r['start_ms'],r['end_ms']) for r in rows if r.get('instrumental')],[(1000,1200)])
 
     def test_measured_internal_pause_keeps_source_offsets_for_editing(self):
         p=phrase('p','Первые слова После паузы',1000,11000,words=[

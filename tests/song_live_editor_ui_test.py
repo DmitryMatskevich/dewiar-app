@@ -23,7 +23,7 @@ with wave.open(audio_buffer, 'wb') as wav:
     wav.setnchannels(1)
     wav.setsampwidth(2)
     wav.setframerate(8000)
-    wav.writeframes(b'\x00\x00' * 8000 * 8)
+    wav.writeframes(b'\x00\x00' * 8000 * 12)
 audio = 'data:audio/wav;base64,' + base64.b64encode(audio_buffer.getvalue()).decode()
 
 phrase_text = 'Я молчу и улыбаюсь.'
@@ -136,7 +136,7 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
     assert page.locator('#song-live-edit-close').is_visible()
     assert page.locator('#song-live-edit-previous').is_disabled()
     assert page.locator('#song-live-edit-next').is_enabled()
-    controls=['play','previous','next','save','close']
+    controls=['previous','play','next','save','close']
     boxes=[page.locator('#song-live-edit-'+name).bounding_box() for name in controls]
     assert all(a['x']+a['width']<=b['x'] for a,b in zip(boxes,boxes[1:])),boxes
     live_play = page.locator('#song-live-edit-play')
@@ -246,6 +246,8 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
     page.locator('#song-live-edit-close').click()
     assert page.locator('#song-live-editor').is_hidden()
     assert page.locator('#song-live-edit-audio').evaluate('(a)=>a.paused')
+    page.wait_for_function("!document.querySelector('#song-review-audio').paused")
+    assert 8 <= page.locator('#song-review-audio').evaluate('(a)=>a.currentTime') < 9
 
     page.locator('.song-paper-edit-lyrics[data-song-edit-line="phrase-1"]').click()
     page.evaluate('window.deferClip=true')

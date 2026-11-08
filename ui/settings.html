@@ -64,6 +64,7 @@
   <div class="brand agent-sleeping" id="agent-toggle" role="button" tabindex="0" aria-pressed="false" title="Загрузить помощника и показать его окно"><canvas id="brand" aria-hidden="true"></canvas><b id="bname">Помощник</b></div>
   <button class="cchip" id="nav-cloud" style="display:none" title="ИИ-баланс: на сколько хватит моделей Dewiar. Нажмите — подробности и пополнение"><span>ИИ-баланс</span><em></em><i><b></b></i></button>
   <button data-p="tasks">Задачи</button>
+  <button data-p="social">Соцсети</button>
   <button data-p="home" class="cur" title="Сегодня и все приложения Dewiar" hidden>Главная</button>
   <div class="ng">Каждый день</div>
   <button data-p="chat" title="Вся переписка с персонажами — голосом и текстом">Чат</button>
@@ -400,6 +401,17 @@
         <label class="f">Звук приложения<select data-k="prompter.tap_target" id="pr-tap-target" title="При Core Audio записывать весь звук или только выбранное приложение. Выбор относится к звуку, а не к кадрам экрана."><option value="all">Весь системный звук</option></select></label>
       </div>
       <div class="actions" style="margin-top:8px"><button class="btn small" id="pr-audio-apps-refresh" title="Обновить приложения, подключённые к системному звуку. Эта проверка не начинает запись.">Обновить приложения со звуком</button><span class="res" id="pr-audio-apps-result" role="status"></span></div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Разметка говорящих<select data-k="prompter.speaker_mode" id="pr-speaker-mode" title="Как подписывать реплики после встречи. «По участникам» — разные голоса получают «Участник 1», «Участник 2»…; модель разбиения (~7 МБ) скачается при первом использовании.">
+          <option value="none">Без разметки — быстрее</option><option value="owner">Вы и собеседники (как раньше)</option><option value="participants">По участникам — дольше</option>
+        </select><span class="hint">Можно изменить в окне встречи. Прошлую встречу можно разбить по участникам в проигрывателе.</span></label>
+        <label class="f">Число участников<select data-k="prompter.expected_speakers" id="pr-expected-speakers" title="Сколько собеседников обычно на встрече (без вас); «авто» — по голосам и списку участников">
+          <option value="0">авто</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="8">8</option><option value="10">10</option>
+        </select></label>
+        <label class="f">Аудио участников<select data-k="prompter.participant_audio_format" id="pr-participant-audio" title="Формат WAV каждого участника">
+          <option value="timeline">длина встречи, вне реплик — тишина</option><option value="speech_only">только речь участника</option>
+        </select></label>
+      </div>
       <div class="switch" style="margin-top:8px"><div>Записывать и мой микрофон<span>Для системного звука сохраняются «Вы», «Собеседник» и общий WAV. Выключите, если ваш голос уже включён в общий микс.</span></div><label class="tg"><input type="checkbox" data-k="prompter.record_me" title="Добавить отдельную дорожку выбранного микрофона при записи звука приложений"><i></i></label></div>
       <div class="actions" style="margin-top:10px"><button class="btn small" id="pr-stt-download">Скачать выбранную модель</button><span class="res" id="pr-stt-result"></span></div>
       <div class="row" style="margin-top:14px">
@@ -451,9 +463,12 @@
     <div id="pr-list" class="pr-list"></div>
   </section>
 
+  <section id="p-social" class="wide"><div id="social-app"></div></section>
+
   <section id="p-tasks" class="wide">
     <h1>Задачи</h1>
-<div class="actions" role="group" aria-label="Раздел задач"><button class="btn" id="tasks-work-tab" aria-pressed="true">Общие задачи</button><button class="btn" id="tasks-songs-tab" aria-pressed="false">Песни</button><button class="btn" id="tasks-sites-tab" aria-pressed="false">Сайты</button></div><div id="tasks-work-content">
+<div class="actions" role="group" aria-label="Раздел задач"><button class="btn" id="tasks-work-tab" aria-pressed="true">Общие задачи</button><button class="btn" id="tasks-songs-tab" aria-pressed="false">Песни</button><button class="btn" id="tasks-sites-tab" aria-pressed="false">Сайты</button><button class="btn" id="tasks-articles-tab" data-p="articles" aria-pressed="false">Статьи</button><button class="btn" id="tasks-video-tab" data-p="video" aria-pressed="false">Видео</button></div>
+<section id="p-articles" class="wide" hidden><div id="content-app"></div></section><section id="p-video" class="wide" hidden><div id="video-app"></div></section><div id="tasks-work-content">
     <p class="lead">Большая работа в фоне: ассистент сам составляет план, выполняет шаги, пишет журнал и сообщает голосом, когда готово.
       Скажите «Агент, разберись…», «исправь в проекте…» — или поставьте задачу здесь. Для задач по коду он работает в копии проекта:
       изменения вы смотрите и принимаете сами.</p>
@@ -491,10 +506,12 @@
       <div class="actions songs-actions"><button class="btn primary" id="songs-new-current">Разобрать текущую песню</button><button class="btn" id="songs-new-query">Найти песню</button><button type="button" class="btn song-icon-btn" id="songs-new-create" title="Создать новую песню: открыть форму названия и исполнителя" aria-label="Создать новую песню"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 4v8m-3-5h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><button type="button" class="btn song-icon-btn" id="songs-instrumental-all" title="Караоке: запустить пакетную подготовку минусовок для всех песен с аудиозаписью" aria-label="Караоке: подготовить минусовки для всех песен"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
     </div>
     <div class="songs-toolbar">
-      <label class="f songs-search"><span class="sr-only">Поиск песен</span><input id="songs-query" type="search" placeholder="Название или исполнитель" autocomplete="off"></label>
+      <label class="f songs-search"><span class="sr-only">Поиск по названию или исполнителю</span><input id="songs-query" type="search" placeholder="Название или исполнитель" autocomplete="off"></label>
+      <label class="f songs-search songs-lyrics-search"><span class="sr-only">Поиск по тексту песни</span><input id="songs-lyrics-query" type="search" placeholder="Поиск по тексту песни" autocomplete="off"></label>
       <div class="songs-filters" role="group" aria-label="Фильтр песен">
         <button class="chip on" aria-pressed="true" data-song-status="">Все</button><button class="chip" aria-pressed="false" data-song-status="running">В работе</button><button class="chip" aria-pressed="false" data-song-status="batch">Пакетная обработка</button><button class="chip" aria-pressed="false" data-song-status="stopped">Остановились</button><button class="chip" aria-pressed="false" data-song-status="review">Проверить</button><button class="chip" aria-pressed="false" data-song-status="ready">Готовы</button>
       </div>
+      <div class="songs-tag-filters" role="group" aria-label="Фильтр по тегам"><span class="songs-filter-label">Теги:</span><button class="chip on" aria-pressed="true" data-song-tag="">Все</button><button class="chip" aria-pressed="false" data-song-tag="Компания">Компания</button><button class="chip" aria-pressed="false" data-song-tag="Италия">Италия</button><button class="chip" aria-pressed="false" data-song-tag="Мужская">Мужская</button><button class="chip" aria-pressed="false" data-song-tag="Любовь">Любовь</button><button class="chip" aria-pressed="false" data-song-tag="Шансон">Шансон</button><button class="chip" aria-pressed="false" data-song-tag="Бард">Бард</button><button class="chip" aria-pressed="false" data-song-tag="Запад">Запад</button><button class="chip" aria-pressed="false" data-song-tag="Грусть">Грусть</button><button class="chip" aria-pressed="false" data-song-tag="Юмор">Юмор</button><button class="chip" aria-pressed="false" data-song-tag="Военные">Военные</button><button class="chip" aria-pressed="false" data-song-tag="Дворовые">Дворовые</button><button class="chip" aria-pressed="false" data-song-tag="Народные">Народные</button><button class="chip" aria-pressed="false" data-song-tag="Из фильмов">Из фильмов</button><button class="chip" aria-pressed="false" data-song-tag="Советские">Советские</button><button class="chip" aria-pressed="false" data-song-tag="Детские">Детские</button></div>
     </div>
     <div id="songs-empty" class="prof on songs-empty"><h2>Начните с песни</h2><p class="hint">Можно взять то, что сейчас играет в Яндекс Музыке, найти песню по названию или записать исполнение через микрофон.</p><div class="actions"><button class="btn primary" id="songs-empty-current">Разобрать текущую песню</button><button class="btn" id="songs-empty-query">Найти по названию</button><button type="button" class="btn song-icon-btn" id="songs-empty-mic" title="Создать песню и начать запись исполнения с микрофона" aria-label="Записать песню с микрофона"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 16v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
     <div id="songs-list" class="songs-list" aria-live="polite"></div>
@@ -2019,6 +2036,26 @@
 <script src="studio/song_sheet.js"></script>
 <script src="studio/song_review.js"></script>
 <script src="studio/songs.js"></script>
+<link rel="stylesheet" href="studio/content.css">
+<script src="studio/content.js"></script>
+<script src="studio/content_archives.js"></script>
+<script src="studio/content_sources.js"></script>
+<script src="studio/content_sites.js"></script>
+<script src="studio/distribution.js"></script>
+<link rel="stylesheet" href="studio/social.css">
+<script src="studio/social.js"></script>
+<link rel="stylesheet" href="studio/video.css">
+<script src="studio/video.js"></script>
+<script src="studio/video_exchange.js"></script>
+<script src="studio/higgsfield.js"></script>
+<script src="studio/oauth.js"></script>
+<script src="studio/captions.js"></script>
+<script src="studio/video_review.js"></script>
+<script src="studio/video_distribution.js"></script>
+<link rel="stylesheet" href="studio/authors.css">
+<script src="studio/authors.js"></script>
+<script src="studio/sites.js"></script>
+<script src="studio/tasks_content_tabs.js"></script>
 <script src="studio/day.js"></script>
 <script src="studio/welcome.js"></script>
 <script src="studio/icons.js"></script>
@@ -2071,6 +2108,5 @@
 <script src="assets/translate-panel.js"></script>
 <script src="assets/canvas-launch.js"></script>
 <script src="assets/canvas-attention.js"></script>
-<script src="studio/sites.js"></script>
 </body>
 </html>

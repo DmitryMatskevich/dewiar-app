@@ -117,7 +117,7 @@ async function bkRestore(path, enc, when) {
   if (!await ask(`Восстановить из копии${when ? " от " + bkDate(when) : ""}?\n\nФайлы из копии заменят одноимённые; ничего не удаляется. Текущее состояние сначала сохранится отдельной копией. Ассистент перезапустится.`)) return;
   r.className = "res"; r.textContent = "восстанавливаю…";
   try { const x = await core.call("backup_restore", { path, password });
-        r.className = "res ok"; r.textContent = `Восстановлено: ${x.files} файлов${x.vault ? ", сейф — " + x.vault : ""}. Ассистент перезапускается…`; }
+        r.className = "res ok"; r.textContent = `Восстановлено: ${x.files} файлов${x.vault ? ", сейф — " + x.vault : ""}. ${x.content?x.content.message+' ':''}${x.content?.omitted_media?'Медиа вне архива: '+x.content.omitted_media+'. ':''}Ассистент перезапускается…`; }
   catch (e) { r.className = "res bad"; r.textContent = e.message; }
 }
 $("#bk-make").onclick = async (ev) => {

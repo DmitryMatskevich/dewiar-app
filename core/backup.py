@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 
@@ -45,11 +46,17 @@ README = """Слепок знаний Dewiar — открытый формат (
   manifest.json — что это за слепок
 
 Паролей, ключей и сейфа паролей здесь нет — они только в закрытом слепке (.dwr) под паролем.
+Доступ OAuth контента и отдельные программные окружения не переносятся даже в закрытом слепке.
+После восстановления установите модуль подключения и выполните вход в аккаунты заново.
+Каталог статей и видео сохранён в SQLite. Медиа крупнее 100 МиБ не входят в общий слепок;
+опись пропущенных файлов — Контент/content-backup.json. Для полного архива сохранённых видеорезультатов
+откройте «Статьи и новости» → «Резервная копия статей и видео». Внешние оригиналы храните отдельно.
 Восстановить: Dewiar → «Главная» → «Слепок знаний» → «Восстановить…» и выберите этот файл.
 """
 STATE_FILES = ["reminders.json", "reminders-log.json", "knowledge.json", "radio.json"]
 STATE_DIRS = ["voiceprints"]
 CONFIG_SKIP = {"token", "vault.key", "vault.bin", "snapshot.pw"}   # не копируем и не восстанавливаем: сейф идёт отдельно (vault.json)
+CONFIG_LOCAL_DIRS = {"content-oauth-vault", "runtimes"}  # device-bound OAuth and reproducible optional environments
 WS_SKIP_DIRS = {"рабочая копия", "_run", "_guard", ".git", "__pycache__", "node_modules", ".venv", "venv", ".trash", ".obsidian"}
 BIG = 100 << 20                     # файлы больше 100 МБ (видео в задачах) не копируем
 SECRET_DIRS = ("ssh/",)             # ключи серверов — только в копию с паролем
@@ -82,6 +89,12 @@ def keep_secrets(new, old):
     if isinstance(new, list) and isinstance(old, list) and len(new) == len(old):
         return [keep_secrets(a, b) for a, b in zip(new, old)]
     return new
+
+
+def config_local(rel):
+    """Ignore local-only data also in old/imported archives, in both restore modes."""
+    parts = [p for p in rel.replace("\\", "/").split("/") if p and p != "."]
+    return bool(parts) and ("/".join(parts) in CONFIG_SKIP or parts[0] in CONFIG_LOCAL_DIRS)
 
 
 class BackupError(Exception):
@@ -173,7 +186,7 @@ class Backup:
         counts = {"config": 0, "state": 0, "workspace": 0}
         size = 0
         stats = {"notes": 0}
-        config_skip = {"logs", "backups"}
+        config_skip = {"logs", "backups"} | CONFIG_LOCAL_DIRS
         try:
             nested = self.state.resolve().relative_to(self.cfg.resolve())
             if nested.parts:
@@ -182,7 +195,7 @@ class Backup:
             pass
         for p in _walk(self.cfg, config_skip):
             rel = p.relative_to(self.cfg).as_posix()
-            if rel in CONFIG_SKIP or rel.startswith(("models/", "voices/")):
+            if config_local(rel) or rel.startswith(("models/", "voices/")):
                 continue
             data = p.read_bytes()
             if not password:                       # без пароля — никаких ключей, токенов и паролей в открытом виде
@@ -221,15 +234,29 @@ class Backup:
             for p in _walk(self.state / d):
                 z.write(p, "state/" + p.relative_to(self.state).as_posix())
                 counts["state"] += 1
-        for p in _walk(self.ws, WS_SKIP_DIRS):
-            rel = p.relative_to(self.ws).as_posix()
-            if "/downloads/" in "/" + rel and p.stat().st_size > (20 << 20):
-                continue                           # скачанное в задачах можно скачать снова — крупное не берём
-            z.write(p, "workspace/" + rel)
-            counts["workspace"] += 1
-            size += p.stat().st_size
-            if rel.lower().endswith(".md"):
-                stats["notes"] += 1
+        from content import snapshots
+        content_db = self.ws / 'Контент/content.db'
+        context = snapshots.snapshot(content_db) if content_db.exists() else nullcontext(None)
+        with context as content:
+            if content:
+                database, report = content
+                z.write(database, snapshots.DATABASE)
+                included = snapshots.write_media(z, content_db.parent, report['media'])
+                report['omitted_media'] = sorted(set(report['media']) - set(included))
+                z.writestr(snapshots.MANIFEST, json.dumps(report, ensure_ascii=False))
+                counts['workspace'] += 2 + len(included)
+                size += database.stat().st_size + sum(report['media'][rel]['bytes'] for rel in included)
+                stats['content'] = {'consistent':True,'schema':report['schema_version'],'omitted_media':len(report['omitted_media'])}
+            for p in _walk(self.ws, WS_SKIP_DIRS):
+                rel = p.relative_to(self.ws).as_posix()
+                if content and snapshots.related('workspace/'+rel):continue  # DB/WAL/assets handled above, builds are reproducible
+                if "/downloads/" in "/" + rel and p.stat().st_size > (20 << 20):
+                    continue                           # скачанное в задачах можно скачать снова — крупное не берём
+                z.write(p, "workspace/" + rel)
+                counts["workspace"] += 1
+                size += p.stat().st_size
+                if rel.lower().endswith(".md"):
+                    stats["notes"] += 1
         vault_n = 0
         # сейф — открытым текстом внутри зашифрованного zip; в копию без пароля не попадает
         if password and self.vault is not None and self.vault.count():
@@ -370,19 +397,43 @@ class Backup:
         return Path(base) / rel
 
     def restore(self, path, password="", mode="replace"):
+        from content import snapshots
+        from content.db_lock import gate
+        import sqlite3
+        man, archive = self.open(path, password)
+        try:
+            with archive, snapshots.stage(archive) as content:
+                if mode not in ('merge','replace'):raise ValueError('Неизвестный способ восстановления')
+                for info in archive.infolist():
+                    top,_,rel=info.filename.partition('/')
+                    base={'config':self.cfg,'state':self.state,'workspace':self.ws}.get(top)
+                    if base is not None and rel:self._safe(base,rel)
+                # All app DB transactions share this gate. A network send may
+                # outlive its transaction, so refuse while that lease is live.
+                with (gate(self.ws/'Контент') if content else nullcontext()):
+                    if content:
+                        snapshots.preflight(content,self.ws/'Контент')
+                        if mode!='merge':snapshots.ensure_idle(self.ws/'Контент/content.db')
+                    return self._restore_open(path,password,mode,man,archive,content)
+        except (ValueError,sqlite3.Error,OSError,zipfile.BadZipFile) as exc:
+            raise BackupError('Не удалось восстановить копию: '+str(exc)) from exc
+
+    def _restore_open(self,path,password,mode,man,z,content):
         """-> {"files": n, "vault": n, "before": путь копии «до», "time"}. Файлов не удаляет, одноимённые заменяет;
         сейф из копии с паролем сливается со здешним по названиям (Vault.import_plain). Копия «до» делается с тем же
         паролем, что у восстанавливаемой: только так в неё попадает сейф, и к нему потом можно вернуться."""
-        man, z = self.open(path, password)
+        from content import snapshots
         before = None
         try:
             before = self.make(Path(path).parent, password=password if man.get("encrypted") else "",
                                auto=False, label="до восстановления")["path"]
         except Exception as e:  # noqa: BLE001
+            if content:raise BackupError('Копия до восстановления не создана; каталог не заменён') from e
             log.warning("копия «до восстановления» не сделана: %s", e)
         if mode == "merge":
-            return self._merge(path, man, z, before)
-        n = 0
+            return self._merge(path, man, z, before,content)
+        content_result=snapshots.apply(content,z,self.ws/'Контент') if content else None
+        n = content_result['files'] if content_result else 0
         try:                                           # то, что относится к этому компьютеру, а не к человеку (см. _fix_paths)
             here = json.loads((self.cfg / "settings.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -391,7 +442,7 @@ class Backup:
         if not man.get("secrets"):
             for info in z.infolist():
                 top, _, rel = info.filename.partition("/")
-                if top == "config" and rel.endswith(".json"):
+                if top == "config" and rel.endswith(".json") and not config_local(rel):
                     try:
                         olds[rel] = json.loads(self._safe(self.cfg, rel).read_text(encoding="utf-8"))
                     except (OSError, ValueError, BackupError):
@@ -401,6 +452,7 @@ class Backup:
             if info.is_dir():
                 continue
             name = info.filename
+            if content and snapshots.related(name):continue
             if name == "vault.json":
                 if self.vault is not None:
                     vault_n = self.vault.import_plain(z.read(info))
@@ -409,7 +461,7 @@ class Backup:
             base = {"config": self.cfg, "state": self.state, "workspace": self.ws}.get(top)
             if base is None or not rel:
                 continue
-            if top == "config" and rel in CONFIG_SKIP:
+            if top == "config" and config_local(rel):
                 continue
             dst = self._safe(base, rel)
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -431,31 +483,47 @@ class Backup:
                 pass
         self._fix_paths(other=man.get("host") != self.host, here=here)
         log.info("♻ Восстановлено из копии %s: %d файлов, сейф %d", Path(path).name, n, vault_n)
-        return {"files": n, "vault": vault_n, "before": before, "time": man.get("time", "")}
+        return {"files": n, "vault": vault_n, "before": before, "time": man.get("time", ""),"content":content_result}
 
     # «Добавить недостающее»: своё не трогаем. Настройки и служебное (индекс поиска) — не из слепка вовсе.
     MERGE_KEEP = {"config/settings.json", "state/knowledge.json", "state/radio.json"}
 
-    def _merge(self, path, man, z, before):
+    def _merge(self, path, man, z, before,content=None):
         """-> {"files": добавлено, "merged": дополнено JSON, "beside": рядом копией, "kept": оставлено своё, "vault",
         "before", "time", "mode"}. Ничего своего не удаляет и не заменяет."""
+        from content import snapshots
         try:
             day = datetime.fromisoformat(man.get("time", "")).strftime("%d.%m")
         except ValueError:
             day = "слепка"
         got = {"files": 0, "merged": 0, "beside": 0, "kept": 0}
+        content_result=None
+        if content:
+            target=self.ws
+            if (self.ws/'Контент/content.db').exists():
+                import uuid
+                target=self.ws.with_name(self.ws.name+' — контент из копии '+uuid.uuid4().hex[:8])
+                target.mkdir(mode=0o700)
+            content_result=snapshots.apply(content,z,target/'Контент')
+            content_result.update(mode='separate_workspace' if target!=self.ws else 'added',workspace=str(target))
+            got['files']+=content_result['files']
+            if target!=self.ws:
+                note=self.ws/('Восстановление контента '+target.name[-8:]+'.md')
+                self._put(note,('Каталог из слепка восстановлен в отдельную рабочую папку:\n\n'+str(target)+'\n\nВыберите её в настройках рабочей папки Dewiar. Текущий каталог не изменён.\n\n'+content_result['message']+'\nМедиафайлов вне архива: '+str(content_result['omitted_media'])+'\n').encode('utf-8'))
+                content_result['report_path']=str(note)
         vault_n = 0
         for info in z.infolist():
             if info.is_dir():
                 continue
             name = info.filename
+            if content and snapshots.related(name):continue
             if name == "vault.json":
                 if self.vault is not None:
                     vault_n = self.vault.import_plain(z.read(info), only_new=True)
                 continue
             top, _, rel = name.partition("/")
             base = {"config": self.cfg, "state": self.state, "workspace": self.ws}.get(top)
-            if base is None or not rel or (top == "config" and rel in CONFIG_SKIP):
+            if base is None or not rel or (top == "config" and config_local(rel)):
                 continue
             dst = self._safe(base, rel)
             data = z.read(info)
@@ -495,7 +563,7 @@ class Backup:
                 continue
             got["kept"] += 1                            # фото персонажей и прочее своё — оставляем
         log.info("♻ Из слепка %s добавлено: %s, сейф %d", Path(path).name, got, vault_n)
-        return dict(got, vault=vault_n, before=before, time=man.get("time", ""), mode="merge")
+        return dict(got, vault=vault_n, before=before, time=man.get("time", ""), mode="merge",content=content_result)
 
     @staticmethod
     def _put(dst, data):

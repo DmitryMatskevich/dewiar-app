@@ -176,6 +176,13 @@ DEFAULTS = {
         "frame_interval": 1.0,
         "frame_quality": 85,
         "frame_video": False,
+        # Разметка говорящих в расшифровке: none — без подписей, owner — «Вы / Собеседник» (как раньше),
+        # participants — «Вы» + «Участник N» по голосу после встречи (diarization/, модель ~7 МБ при первом разе).
+        "speaker_mode": "owner",
+        "expected_speakers": 0,            # 0 — авто; участников без вас
+        "participant_audio_format": "timeline",   # timeline (длина встречи) | speech_only (только речь)
+        "diarization": {"threshold": 0.4, "merge_threshold": 0.80, "num_threads": 2,
+                        "min_duration_sec": 20, "timeout_factor": 0.5},
     },
     "tts": {
         "engine": "vosk",           # vosk | piper | remote | elevenlabs | espeak | off

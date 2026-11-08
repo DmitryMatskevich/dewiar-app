@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -196,6 +197,9 @@ def reveal(path):
     try:
         if WIN:
             subprocess.Popen(["explorer", "/select,", str(p)], creationflags=0x08000000)
+        elif sys.platform == "darwin":
+            from macsys import open_target
+            open_target(p, reveal=True)
         else:
             subprocess.Popen(["xdg-open", str(p.parent)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as e:
@@ -208,6 +212,9 @@ def open_file(path):
     try:
         if WIN:
             os.startfile(str(p))  # noqa: S606
+        elif sys.platform == "darwin":
+            from macsys import open_target
+            open_target(p)
         else:
             subprocess.Popen(["xdg-open", str(p)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError as e:

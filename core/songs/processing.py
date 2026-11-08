@@ -9,8 +9,9 @@ class SongProcessing:
 
     def describe(self, row):
         sid = row['song_id']
+        capture = self.capture.state(sid)
         busy = (self.analyzer.running(sid) or self.sources.running(sid)
-                or self.capture.state(sid).get('running', False))
+                or capture.get('running', False))
         audio = row.get('audio') or {}
         path = (self.store.root / str(audio.get('path') or '')).resolve()
         has_audio = self.store.root.resolve() in path.parents and path.is_file()
@@ -23,7 +24,18 @@ class SongProcessing:
                       or not row.get('capabilities', {}).get('chords'))
         can_resume = not busy and incomplete and (has_audio or bool(selected) and not audio.get('path') and not row.get('phrases'))
         return {'busy': bool(busy), 'can_resume': bool(can_resume),
+                'can_restart':bool(has_audio and not busy and row.get('status')!='recording'),
+                'capture':capture if capture.get('running') else None,
                 'label': 'Продолжить обработку' if has_audio or row.get('status') in {'failed', 'interrupted', 'cancelled'} else 'Обработать пакетно'}
+
+    def restart(self, song_id):
+        with self._lock:
+            row=self.store.get(song_id)
+            if not row:raise ValueError('Песня не найдена')
+            info=self.describe(row)
+            if info['busy']:return row
+            if not info['can_restart']:raise ValueError('Сначала сохраните аудиозапись песни')
+            return self.analyzer.start(song_id,full=True)
 
     def resume(self, song_id):
         with self._lock:

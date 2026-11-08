@@ -62,6 +62,8 @@ pywebview==6.2.1
 PyYAML==6.0.3
 requests==2.34.2
 setuptools==84.2.1
+sherpa-onnx==2.0.1
+sherpa-onnx-core==2.0.1
 socksio==1.0.0
 sounddevice==0.5.6
 srt==3.5.3

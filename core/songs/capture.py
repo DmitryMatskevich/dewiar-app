@@ -19,12 +19,18 @@ class SongCaptureManager:
     silence_seconds = 5.0
     no_data_seconds = 5.0
     max_seconds = 600.0
+    onset_seconds = .12
+    preroll_seconds = .3
     # PCM energy, not speech VAD: instrumental passages must keep recording.
     silence_rms = 100  # approximately -50 dBFS for signed 16-bit PCM
 
-    def __init__(self, root: Path, store, emit, on_complete=None):
+    def __init__(self, root: Path, store, emit, on_complete=None, preview_factory=None):
         self.root, self.store, self.emit = Path(root), store, emit
         self.on_complete = on_complete
+        if preview_factory is None:
+            from .capture_preview import CapturePreview
+            preview_factory = CapturePreview
+        self.preview_factory = preview_factory
         self._lock = threading.RLock()
         self._active: dict[str, dict] = {}
         self._closing = False
@@ -34,7 +40,8 @@ class SongCaptureManager:
         def public(h):
             return {"song_id": h["song_id"], "running": True,
                     "closing": h["stop"].is_set(), "duration_ms": int(h["frames"] * 1000 / h["rate"]),
-                    "source": str(h["source"]), "microphone": h["microphone"], "error": h["error"]}
+                    "source": str(h["source"]), "microphone": h["microphone"], "error": h["error"],
+                    "phase": h["phase"], "draft": h["draft"], "draft_status": h["draft_status"]}
         with self._lock:
             if song_id:
                 h = self._active.get(song_id)
@@ -66,9 +73,10 @@ class SongCaptureManager:
                      "stop": threading.Event(), "done": threading.Event(), "closed": threading.Event(),
                      "source": human_source, "microphone": mode == "microphone", "frames": 0,
                      "rate": rate, "channels": channels, "error": "", "reason": "manual", "audible": False,
+                     "phase": "waiting", "draft": "", "draft_status": "Ожидаем звук",
                      "queue": queue.Queue(maxsize=64)}
                 self.store.patch(song_id, {"status": "recording", "analysis_state": "capturing", "stage": "record",
-                    "stage_label": "Запись с микрофона · автостоп после 5 секунд тишины" if h["microphone"] else "Записываем звук компьютера",
+                    "stage_label": "Ожидаем звук с микрофона" if h["microphone"] else "Ожидаем звук компьютера — включите песню",
                     "audio": {"path": str(path.relative_to(self.root)), "format": "wav", "sample_rate": rate,
                               "channels": channels, "owned": True, "duration_ms": 0, "capture_source": mode},
                     "capabilities": {**(song.get("capabilities") or {}), "audio": False}})
@@ -138,6 +146,9 @@ class SongCaptureManager:
         reader = threading.Thread(target=self._read, args=(h,), name="song-input-reader", daemon=True)
         began = last_data = last_update = time.monotonic()
         silence = 0
+        onset = 0
+        preroll = b''
+        preview = None
         frame_bytes = self.sample_width * h["channels"]
         reader.start()
         try:
@@ -160,18 +171,36 @@ class SongCaptureManager:
                     chunk = chunk[:len(chunk) // frame_bytes * frame_bytes]
                     if not chunk:
                         continue
+                    frames = len(chunk) // frame_bytes
+                    audible = self._audible(chunk)
+                    if h['phase'] == 'waiting':
+                        onset = onset + frames / h['rate'] if audible else 0
+                        buffered = preroll + chunk
+                        if onset < self.onset_seconds:
+                            preroll = buffered[-int(self.preroll_seconds*h['rate'])*frame_bytes:]
+                            if last_data-began >= self.max_seconds:
+                                h['reason']='waiting_timeout';h['stop'].set()
+                            continue
+                        chunk = buffered
+                        frames = len(chunk) // frame_bytes
+                        h['phase']='recording'
+                        self.store.patch(h['song_id'],{'stage_label':'Запись идёт · черновой текст распознаётся'})
+                        def publish(text, status):
+                            h['draft'],h['draft_status']=text,status
+                        try:preview=self.preview_factory(self.root.parent/'models',h['rate'],h['channels'],publish)
+                        except Exception as exc:h['draft_status']='Быстрый текст недоступен: '+str(exc)[:140]
+                        self.emit('song_capture',song_id=h['song_id'],running=True,phase='recording')
                     # Keep a valid header after every chunk, including abrupt exits.
                     out.writeframes(chunk)
-                    frames = len(chunk) // frame_bytes
                     h["frames"] += frames
-                    audible = self._audible(chunk)
+                    if preview:preview.offer(chunk)
                     h["audible"] |= audible
                     silence = 0 if audible else silence + frames / h["rate"]
                     if h["microphone"] and silence >= self.silence_seconds:
                         h["reason"] = "silence"
                         h["stop"].set()
                         break
-                    if h["frames"] / h["rate"] >= self.max_seconds or last_data - began >= self.max_seconds:
+                    if h["frames"] / h["rate"] >= self.max_seconds:
                         h["reason"] = "limit"
                         h["stop"].set()
                         break
@@ -183,6 +212,7 @@ class SongCaptureManager:
             h["reason"] = "write_error"
         finally:
             h["stop"].set()
+            if preview:preview.close()
             threading.Thread(target=self._close_input, args=(h,), name="song-input-close", daemon=True).start()
             # The UI never waits inside an audio driver. Retain ownership until
             # close actually returns so a second capture cannot race the old one.
@@ -198,7 +228,7 @@ class SongCaptureManager:
     def _finish(self, h):
         song_id = h["song_id"]
         duration = int(h["frames"] * 1000 / h["rate"])
-        usable = duration >= 1000 and (h["audible"] or not h["microphone"]) and h["reason"] != "write_error"
+        usable = duration >= 1000 and h["audible"] and h["reason"] != "write_error"
         row = self.store.get(song_id) or {}
         label = "Запись сохранена — запускаем обработку" if usable else "Звук не записан. Проверьте микрофон и начните запись снова" if not h["audible"] else "Запись слишком короткая — запишите песню снова"
         updated = self.store.patch(song_id, {"status": "queued" if usable else "needs_input",

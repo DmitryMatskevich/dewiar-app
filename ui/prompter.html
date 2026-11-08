@@ -312,6 +312,14 @@
       <div class="vt" id="vtext"></div>
       <button class="mini go2" id="v-rec">Запомнить мой голос</button>
     </div>
+    <div class="opts" id="o-speakers">
+      <label class="opt"><div>Разметка говорящих<small id="m-speaker-hint">«Вы» и «Собеседник» — как раньше</small></div><span><select id="m-speaker-mode" title="Как подписывать реплики в расшифровке. «По участникам» — после встречи разные голоса получают «Участник 1», «Участник 2»…; нужна запись звука, обработка дольше.">
+        <option value="none">Без разметки — быстрее</option><option value="owner" selected>Вы и собеседники</option><option value="participants">По участникам — дольше</option></select></span></label>
+      <label class="opt hidden" id="m-expected-wrap"><div>Число участников<small>без вас; «авто» — по голосам и списку участников</small></div><span><select id="m-expected" title="Сколько собеседников было на встрече (без вас). Точное число уменьшает ошибки разбиения.">
+        <option value="0" selected>авто</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="10">10</option></select></span></label>
+      <label class="opt hidden" id="m-live-record-wrap"><div>Записать звук встречи<small>микрофон в WAV на Mac; после встречи — расшифровка и разбиение по участникам</small></div><span class="sw"><input type="checkbox" id="m-live-record" title="Записать микрофон очной встречи в WAV"><i></i></span></label>
+      <label class="opt hidden" id="m-live-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-live-consent" checked title="Без согласия участников запись не начнётся"><i></i></span></label>
+    </div>
     <div class="f">Когда подсказывать
       <div class="seg blk" id="m-mode"><button data-v="auto" class="on">На вопросы и возражения</button><button data-v="manual">Только по кнопке</button></div>
     </div>
@@ -412,7 +420,9 @@ function renderPlace() {
     : `Нужен ваш голос — один раз<small>четыре фразы вслух, меньше минуты</small>`;
   $("#v-rec").textContent = v.has ? "Записать заново" : "Запомнить мой голос";
   $("#v-rec").classList.toggle("go2", !v.has);
-  const needsVoice = live && !v.has, needsConsent = !live && $("#m-record").checked && !$("#m-consent").checked;
+  renderSpeakers();                                  // может включить запись — согласие проверяется после
+  const needsVoice = live && !v.has, needsConsent = live ? ($("#m-live-record").checked && !$("#m-live-consent").checked)
+    : ($("#m-record").checked && !$("#m-consent").checked);
   $("#start").disabled = needsVoice || needsConsent;
   $("#start").title = needsVoice ? "Сначала запомните свой голос" : (needsConsent ? "Подтвердите согласие участников на запись" : "");
 }
@@ -428,7 +438,22 @@ function renderRecord() {
   $("#m-record-source-wrap").classList.toggle("hidden", !on);
   $("#start").disabled = on && !$("#m-consent").checked;
 }
-$("#m-record").onchange = renderRecord;
+$("#m-record").onchange = () => { renderRecord(); renderSpeakers(); };
+/* Разметка говорящих: «По участникам» работает по записи — включаем её, согласие подтверждает человек. */
+const SPEAKER_HINTS = { none: "одна подпись «Речь» — расшифровка быстрее",
+  owner: "«Вы» и «Собеседник» — как раньше", participants: "после встречи: «Вы», «Участник 1», «Участник 2»…" };
+function renderSpeakers() {
+  const live = place === "live", m = $("#m-speaker-mode").value;
+  $("#m-speaker-hint").textContent = SPEAKER_HINTS[m] || "";
+  const rec = live ? $("#m-live-record") : $("#m-record");
+  if (m === "participants" && !rec.checked) { rec.checked = true; if (!live) renderRecord(); }
+  $("#m-expected-wrap").classList.toggle("hidden", m !== "participants");
+  $("#m-live-record-wrap").classList.toggle("hidden", !live);
+  $("#m-live-consent-wrap").classList.toggle("hidden", !live || !$("#m-live-record").checked);
+}
+$("#m-speaker-mode").onchange = () => renderPlace();
+$("#m-live-record").onchange = () => { if (!$("#m-live-record").checked && $("#m-speaker-mode").value === "participants") $("#m-speaker-mode").value = "owner"; renderPlace(); };
+$("#m-live-consent").onchange = () => renderPlace();
 function renderFrameHelp() {
   $("#m-frame-settings").classList.toggle("hidden", !$("#m-auto-shot").checked);
   $("#m-frame-help").classList.toggle("hidden", !$("#m-auto-shot").checked && !$("#m-first-shot").checked);
@@ -576,8 +601,11 @@ $("#start").onclick = async () => {
   try {
     st = await core.call("prompter_start", { title: $("#m-title").value, goal: $("#m-goal").value, mode, them: $("#m-them").checked,
       me: $("#m-me").checked, knowledge: $("#m-kn").checked, keep_text: $("#m-keep").checked || $("#m-record").checked, place, nudge: $("#m-nudge").checked,
-      participants: $("#m-participants").value, topics: $("#m-topics").value, record: $("#m-record").checked,
-      deferred: $("#m-deferred").checked, source: "system", consent: $("#m-consent").checked,
+      participants: $("#m-participants").value, topics: $("#m-topics").value,
+      record: place === "live" ? $("#m-live-record").checked : $("#m-record").checked,
+      deferred: place === "live" ? true : $("#m-deferred").checked, source: "system",
+      consent: place === "live" ? $("#m-live-consent").checked : $("#m-consent").checked,
+      speaker_mode: $("#m-speaker-mode").value, expected_speakers: Number($("#m-expected").value || 0),
       auto_frames: $("#m-auto-shot").checked, auto_interval: Number($("#m-frame-interval").value),
       frame_quality: Number($("#m-frame-quality").value), frame_video: true,
       auto_first_frame: $("#m-first-shot").checked, record_source: $("#m-record-source").value });
@@ -786,7 +814,7 @@ async function createMeetingVideo() {
 function renderSum(e) {
   show("sum"); $("#title").textContent = st?.meeting_group_finalized ? "Общий итог встречи" : st?.meeting_group ? "Итог блока встречи" : "Итог встречи";
   meetingSummaryPath = e.path || e.summary_path || meetingSummaryPath || "";
-  const progress = e.phase === "stopping" ? "Сохраняю запись…" : e.phase === "queued" ? "Расшифровка ожидает обработки…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : e.phase === "group" ? "Собираю общий итог блоков встречи…" : "Подвожу итог встречи…";
+  const progress = e.phase === "stopping" ? "Сохраняю запись…" : e.phase === "queued" ? "Расшифровка ожидает обработки…" : e.phase === "transcribe" ? "Расшифровываю запись разговора…" : e.phase === "diarize" ? `Расшифровываю и разделяю голоса участников${e.progress != null ? ` — ${Math.round(100 * Number(e.progress))}%` : ""}…` : e.phase === "summary_part" ? `Обрабатываю часть ${Number(e.part)} из ${Number(e.parts)}…` : e.phase === "group" ? "Собираю общий итог блоков встречи…" : "Подвожу итог встречи…";
   const icon = path => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${path}"/></svg>`;
   const play = icon("M8 5v14l11-7z"), trash = icon("M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7");
   const busy = !!(st?.processing || st?.summary_busy || st?.recording?.export_busy);
@@ -901,7 +929,10 @@ core.on("hello", (e) => {
   const cfg = e?.settings?.prompter || {};
   if ($("#m-record-source") && cfg.audio_source) $("#m-record-source").value = cfg.audio_source;
   if ($("#m-record") && cfg.record_audio_default != null) $("#m-record").checked = !!cfg.record_audio_default;
+  if (cfg.speaker_mode && $("#m-speaker-mode")) $("#m-speaker-mode").value = cfg.speaker_mode;
+  if (cfg.expected_speakers != null && $("#m-expected")) $("#m-expected").value = String(cfg.expected_speakers || 0);
   renderRecord();
+  renderPlace();
   core.call("prompter_state").then(s => { st = s; render(); }).catch(() => {});
 });
 core.on("settings", (e) => { prompterHotkey = e?.settings?.prompter?.capture_hotkey || prompterHotkey; });
@@ -936,7 +967,7 @@ core.on("prompter", (e) => {
   } else if (e.kind === "sheet") { st.sheet = e.sheet; renderSheet(); }
   else if (e.kind === "summary") {
     st.on = false; st.summary = e.summary; st.summary_path = e.path || st.summary_path;
-    st.summary_busy = !!e.busy; st.summary_progress = {phase:e.phase,part:e.part,parts:e.parts};
+    st.summary_busy = !!e.busy; st.summary_progress = {phase:e.phase,part:e.part,parts:e.parts,progress:e.progress};
     if (e.group_finalized) st.meeting_group_finalized = true;
     if (dismissedSummary !== (st.meeting?.id || "")) renderSum(e);
   }

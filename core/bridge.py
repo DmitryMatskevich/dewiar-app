@@ -131,12 +131,17 @@ class Bridge:
         finally:
             self.clients.discard(ws)
 
-    async def _call(self, cmd, args):
+    async def _call(self, cmd, args, trusted_interface=False):
         """Выполнить команду в пуле потоков, отмечая её в inflight на время выполнения."""
         key = object()
         self.inflight[key] = (cmd, time.monotonic())
         try:
-            return await self.loop.run_in_executor(self.pool, self.handler, cmd, args)
+            def invoke():
+                if trusted_interface:
+                    from interface_origin import authenticated_interface
+                    with authenticated_interface():return self.handler(cmd,args)
+                return self.handler(cmd,args)
+            return await self.loop.run_in_executor(self.pool, invoke)
         finally:
             self.inflight.pop(key, None)
 
@@ -150,7 +155,7 @@ class Bridge:
     async def _reply(self, ws, msg):
         mid = msg.get("id")
         try:
-            data = self.busy() if msg.get("cmd") == "ping" else await self._call(msg.get("cmd"), msg.get("args") or {})
+            data = self.busy() if msg.get("cmd") == "ping" else await self._call(msg.get("cmd"), msg.get("args") or {}, trusted_interface=ws in self.clients)
             out = {"type": "reply", "id": mid, "ok": True, "data": data}
         except Exception as e:  # noqa: BLE001
             if isinstance(e, (AttributeError, TypeError, KeyError, IndexError, NameError, ZeroDivisionError, AssertionError)):

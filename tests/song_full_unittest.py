@@ -15,7 +15,7 @@ from songs.store import SongStore
 from songs.consensus import consensus, phrases_from_words
 from songs.arrangement import edit_structure, edit_chords
 from songs.import_audio import AudioImporter
-from songs.review import review_command
+from songs.review import review_command, _pitch_filter
 from songs.analysis import SongAnalyzer
 from songs.public import public_song, public_song_commands
 from songs.chordino import parse_chords
@@ -45,6 +45,13 @@ class FullSongTests(unittest.TestCase):
         self.assertEqual(len(self.phrases),2)
         self.assertEqual(self.phrases[1]['start_ms'],4000)
         self.assertEqual(self.phrases[0]['words'][1]['char_start'],6)
+
+    def test_pitch_preview_filter_preserves_duration_chain_and_bounds_steps(self):
+        self.assertIsNone(_pitch_filter(44100, 0))
+        chain = _pitch_filter(44100, 12)
+        self.assertIn('asetrate=', chain)
+        self.assertIn('atempo=', chain)
+        self.assertEqual(chain.count('aresample='), 2)
 
     def test_votes_do_not_invent_missing_words_or_timing(self):
         before = copy.deepcopy(self.phrases)

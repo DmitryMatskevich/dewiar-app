@@ -44,9 +44,9 @@ def page(token):
     section = '>' + source.split('<div id="p-songs" hidden>', 1)[1].split('</section>', 1)[0].rsplit('</div>', 1)[0]
     return ('''<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ТЕСТ — Песни — отдельные данные</title><link rel="stylesheet" href="/studio/studio.css"><link rel="stylesheet" href="/studio/songs.css">
-<style>body{display:block;overflow:auto;height:auto}main{max-width:1280px;margin:auto;padding:24px;overflow:visible}section{display:block!important}#test-banner{position:sticky;top:0;z-index:50;padding:14px 24px;background:#593b00;color:#fff3cb;font-weight:700}#test-message{padding:8px 24px} @media(max-width:600px){main{padding:12px}}</style>
+<style>body{display:block;overflow:auto;height:auto}main{max-width:1280px;margin:auto;padding:24px;overflow:visible}#p-songs{display:block}#test-banner{position:sticky;top:0;z-index:50;padding:14px 24px;background:#593b00;color:#fff3cb;font-weight:700}#test-message{padding:8px 24px} @media(max-width:600px){main{padding:12px}}</style>
 <div id="test-banner" role="note">ТЕСТ — отдельные временные данные. Рабочие настройки и голоса не подключены.</div>
-<div id="test-message" role="status"></div><main><section id="p-songs"''' + section + '''</section></main>
+<div id="test-message" role="status"></div><main id="p-tasks" class="cur"><section id="p-songs"''' + section + '''</section></main>
 <script>
 const S={features:{songs:true}};
 function escH(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -55,7 +55,7 @@ const core={on(){},async call(cmd,args){const r=await fetch('/api',{method:'POST
 </script><script src="/studio/song_sheet.js"></script><script src="/studio/song_review.js"></script><script src="/studio/songs.js"></script><script>loadSongs();</script></html>''').encode()
 
 
-def make_server(store):
+def make_server(store, capture=None, processing=None):
     token = secrets.token_urlsafe(32)
     importer = AudioImporter(store)
     assets = {f'/studio/{name}': ROOT/'ui/studio'/name for name in ('studio.css','songs.css','song_review.js','song_sheet.js','songs.js')}
@@ -83,6 +83,14 @@ def make_server(store):
                 elif cmd in {'song_upload_begin','song_upload_chunk','song_upload_finish','song_upload_cancel'}: result = importer.command(cmd,a)
                 elif cmd == 'songs_list': result = store.list(a.get('q',''),a.get('status',''))
                 elif cmd == 'song_get': result = store.get(a['song_id'])
+                elif cmd == 'song_capture' and capture:
+                    result = capture.start(a['song_id'],source=a.get('source','microphone')) if a.get('action')=='start' else capture.stop(a['song_id'])
+                elif cmd == 'song_restart_batch' and processing:
+                    result = processing.restart(a['song_id'])
+                elif cmd in {'song_text_source_add','song_text_source_confirm','song_text_source_apply'}:
+                    from songs.text_sources import command
+                    if a.get('url'):raise ValueError('В тестовом стенде разрешён только вставленный текст')
+                    result = command(store,cmd.removeprefix('song_text_source_'),a)
                 elif cmd == 'song_create': result = store.create(a.get('title',''),a.get('artist',''))
                 elif cmd == 'song_source_add':
                     from songs.manual_sources import add_manual_source
@@ -93,6 +101,11 @@ def make_server(store):
                     result = store.patch(a['song_id'],changes,a['base_revision'])
                 elif cmd == 'song_delete': result = store.delete(a['song_id'])
                 else: raise ValueError('На тестовом стенде запись и модели отключены. Здесь проверяется редактор.')
+                if processing:
+                    if cmd=='songs_list':
+                        for row in result:row['processing']=processing.describe(row)
+                    elif isinstance(result,dict) and result.get('song_id') and 'revision' in result:
+                        result['processing']=processing.describe(result)
                 result = [public_song(r,summary=True) for r in result] if cmd == 'songs_list' else public_song(result)
                 self.reply(200,json.dumps({'result':result},ensure_ascii=False).encode())
             except (ValueError,KeyError,TypeError) as exc:

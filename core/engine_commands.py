@@ -12,6 +12,60 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 class CommandsMixin:
     # ---------- команды из интерфейса ----------
 
+
+    def _meeting_speakers_cmd(self, cmd, a):
+        """Студия → проигрыватель встречи: участники по голосу.
+        prompter_meeting_speakers — состояние; _diarize — разбить/пересчитать в фоне (статус — опросом);
+        _edit — rename | merge | reassign; _audio — WAV каждого участника."""
+        from diarization import service
+        root = self.workspace.ensure() / "Встречи"
+        rel = str(a.get("path") or "")
+        jobs = self.__dict__.setdefault("_speaker_jobs", {})
+        if cmd == "prompter_meeting_speakers":
+            view = service.speakers_view(root, rel)
+            view["job"] = jobs.get(rel)
+            return view
+        if cmd == "prompter_meeting_speakers_edit":
+            return service.edit(root, rel, str(a.get("action") or ""), id=a.get("id"), name=a.get("name"),
+                                to=a.get("to"), t=a.get("t"), end=a.get("end"), source=a.get("source"))
+        if cmd == "prompter_meeting_speakers_audio":
+            cfg = self.s.get("prompter") if hasattr(self.s, "get") else {}
+            mode = a.get("mode") or (cfg or {}).get("participant_audio_format") or "timeline"
+            return service.export_audio(root, rel, mode)
+        if cmd == "prompter_meeting_speakers_diarize":
+            cur = jobs.get(rel)
+            if cur and cur.get("busy"):
+                return {"started": False, "job": cur}
+            pr = self.prompter
+            cfg = dict(self.s.get("prompter") or {}) if hasattr(self.s, "get") else {}
+            if a.get("expected_speakers") is not None:
+                cfg["expected_speakers_override"] = a.get("expected_speakers")
+            state = {"busy": True, "stage": "diarize", "progress": 0.0, "error": "", "done": False}
+            jobs[rel] = state
+
+            def transcribe(path):
+                return [tuple(x) for x in self.transcribe_file(path, stt=pr._meeting_stt(), words=True)]
+
+            def progress(stage, value):
+                state.update(stage=stage, progress=round(float(value or 0), 3))
+
+            def run():
+                try:
+                    mirror = self._mirror("diarization_seg") if hasattr(self, "_mirror") else None
+                    if pr.speaker.mirror is None and hasattr(self, "_mirror"):
+                        pr.speaker.mirror = self._mirror("speaker")
+                    out = service.rebuild(root, rel, cfg, speaker=pr.speaker, mirror=mirror, transcribe=transcribe,
+                                          is_echo=pr._is_echo, on_progress=progress)
+                    state.update(done=True, result={"speakers": out["speakers"], "lines": out["lines"], "txt": out.get("txt") or {}})
+                except Exception as e:  # noqa: BLE001 — причина видна в проигрывателе
+                    log.warning("🎬 Разбиение прошлой встречи: %s", e)
+                    state["error"] = str(e)[:300]
+                finally:
+                    state["busy"] = False
+            threading.Thread(target=run, name="meeting-diarize", daemon=True).start()
+            return {"started": True, "job": state}
+        raise ValueError("неизвестная команда участников встречи")
+
     def _song_capture_finished(self, saved, *, microphone=False, shutting_down=False):
         """One completion path for manual stop, silence, device error and exit."""
         if microphone and self.song_mic_capture_active:
@@ -328,6 +382,9 @@ class CommandsMixin:
         return CommandsMixin._command(self, cmd, a)
 
     def _command(self, cmd, a):
+        if isinstance(cmd, str) and cmd.startswith("content_"):
+            from content.commands import command
+            return command(self, cmd, a)
         if cmd == "image_ocr":
             from image_ocr import extract
             return extract(a.get("image"))
@@ -485,7 +542,8 @@ class CommandsMixin:
                                 a.get("auto_interval", 0.5), a.get("frame_quality", 85), a.get("frame_video", False),
                                 a.get("auto_first_frame", True), a.get("capture_source", "screen"),
                                 a.get("capture_region"), a.get("capture_application", ""), a.get("scheduled_end"),
-                                a.get("record_source"), record_me=a.get("record_me"))
+                                a.get("record_source"), record_me=a.get("record_me"),
+                                speaker_mode=a.get("speaker_mode"), expected_speakers=a.get("expected_speakers"))
             if cmd == "prompter_audio_apps":
                 from audio_io import audio_tap_supported, list_audio_apps
                 return {"supported": audio_tap_supported(), "apps": list_audio_apps()}
@@ -611,6 +669,8 @@ class CommandsMixin:
                 if getattr(self, "_meeting_media", None) is None:
                     self._meeting_media = MediaServer(lambda: self.workspace.ensure() / "Встречи")
                 return player_data(root, a.get("path", ""), self._meeting_media)
+            if cmd.startswith("prompter_meeting_speakers"):   # участники прошлой встречи: разбить, правка, аудио
+                return self._meeting_speakers_cmd(cmd, a)
             if cmd == "prompter_meeting_frame":            # «Прошлые встречи» → просмотр кадров
                 from prompter import meeting_frame_preview
                 return meeting_frame_preview(self.workspace.ensure(), a.get("path", ""))
@@ -1801,7 +1861,8 @@ class CommandsMixin:
         if cmd == "tasks_list":
             return self.tasks.list()
         if cmd == "songs_list":
-            songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True)
+            songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True,
+                                         tag=a.get("tag", ""), lyrics_query=a.get("lyrics_q", ""))
             for song in songs:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
                 song["processing"] = self.song_processing.describe(song)
@@ -1853,7 +1914,7 @@ class CommandsMixin:
             return _tools.media_track_info()
         if cmd == "song_patch":
             changes = a.get("changes") or {}
-            if not isinstance(changes, dict) or set(changes) - {"title", "artist", "recording_version"}:
+            if not isinstance(changes, dict) or set(changes) - {"title", "search_query", "artist", "tags", "recording_version"}:
                 raise ValueError("Эта команда меняет только название, исполнителя и версию записи")
             if a.get("base_revision") is None:
                 raise ValueError("Для сохранения нужна ревизия карточки")
@@ -1867,6 +1928,9 @@ class CommandsMixin:
         if cmd == "song_cancel":
             self.song_sources.cancel(str(a.get("song_id") or ""))
             return self.song_analyzer.cancel(str(a.get("song_id") or ""))
+        if cmd in {'song_text_source_add','song_text_source_confirm','song_text_source_apply','song_text_source_apply_all'}:
+            from songs.text_sources import command
+            return command(self.song_store, cmd.removeprefix('song_text_source_'), a)
         if cmd == 'song_source_check':
             return self.song_sources.check_candidate(str(a.get('song_id') or ''),str(a.get('candidate_id') or ''))
         if cmd == 'song_source_select':
@@ -1992,6 +2056,8 @@ class CommandsMixin:
             return self.song_importer.command(cmd,a)
         if cmd == "song_resume":
             return self.song_processing.resume(str(a.get("song_id") or ""))
+        if cmd == "song_restart_batch":
+            return self.song_processing.restart(str(a.get("song_id") or ""))
         if cmd == "song_transcribe":
             if self.song_sources.running(str(a.get('song_id') or '')):
                 raise ValueError('Дождитесь загрузки записи')

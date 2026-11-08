@@ -107,6 +107,64 @@ def suspicious_onset(words, vocals):
     return next_voice>1e-4 and energy(first['start_ms'],first['end_ms'])<next_voice*.2
 
 
+def _vocal_onset_from_array(vocals):
+    """Conservative onset estimate for an already loaded vocal stem."""
+    import numpy as np
+    samples, sr = vocals
+    if not len(samples):
+        return 0
+    hop = max(1, round(sr * .05))
+    frame = max(hop, round(sr * .10))
+    rms = []
+    for start in range(0, max(1, len(samples) - frame + 1), hop):
+        block = samples[start:start + frame]
+        rms.append(float(np.sqrt(np.mean(block * block) + 1e-12)))
+    if not rms:
+        return 0
+    noise = float(np.percentile(rms[:max(1, min(len(rms), round(1.0 * sr / hop)))], 70))
+    threshold = max(noise * 2.4, float(np.percentile(rms, 55)) * .75, 1e-4)
+    needed = max(2, round(.15 * sr / hop))
+    first = max(0, round(.25 * sr / hop))
+    for index in range(first, max(first + 1, len(rms) - needed + 1)):
+        if all(value >= threshold for value in rms[index:index + needed]):
+            return round(index * hop * 1000 / sr)
+    return 0
+
+
+def _repair_short_lead_word(words, vocals):
+    """Move a forced-aligner's tiny first token out of a long instrumental lead-in.
+
+    Qwen can stretch a short token such as «То» from file start to the next
+    aligned word.  We only repair this narrow case when the separated vocal
+    stem independently starts after that stretched token and before the next
+    word; long sung vowels and ordinary pauses remain untouched.
+    """
+    if vocals is None or len(words) < 2:
+        return words, None
+    first, second = words[0], words[1]
+    token = str(first.get('text') or '').strip()
+    if first.get('char_start') != 0 or len(token) > 3:
+        return words, None
+    old_start, old_end = int(first.get('start_ms') or 0), int(first.get('end_ms') or 0)
+    next_start = int(second.get('start_ms') or 0)
+    if old_end - old_start < 4000 or next_start <= old_start:
+        return words, None
+    onset = _vocal_onset_from_array(vocals)
+    if onset <= old_start + 1200 or onset < old_end + 500 or onset > next_start + 200:
+        return words, None
+    end = min(next_start, onset + 1000)
+    if end <= onset:
+        return words, None
+    import copy
+    repaired = copy.deepcopy(words)
+    repaired[0].update(start_ms=onset, end_ms=end,
+                        method='vocal_stem_onset_short_lead_word')
+    return repaired, {'reason': 'short_token_after_instrumental_lead',
+                      'status': 'stable_vocal_onset', 'applied': True,
+                      'original_start_ms': old_start, 'original_end_ms': old_end,
+                      'start_ms': onset, 'end_ms': end}
+
+
 def onset_supported(original, trials, vocals):
     """Two stable local alignments AND a preceding quiet vocal stem are required."""
     if len(original)<3 or len(trials)!=2 or any(len(w)<3 for w in trials) or vocals is None:
@@ -145,6 +203,9 @@ def onset_supported(original, trials, vocals):
 def retry_long_onset(model, samples, sr, text, words, end_ms, vocals):
     if not suspicious_onset(words,vocals):
         return words,None
+    repaired, lead_report = _repair_short_lead_word(words, vocals)
+    if lead_report:
+        return repaired, lead_report
     report={'reason':'long_or_unvoiced_first_word','original_start_ms':words[0]['start_ms'],'applied':False}
     if vocals is None:
         report['status']='needs_vocal_evidence'

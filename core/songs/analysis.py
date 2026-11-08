@@ -55,7 +55,7 @@ class SongAnalyzer:
 
     @staticmethod
     def _reference_context(folder, row, current=False):
-        data={k:copy.deepcopy(row.get(k)) for k in ('title','artist','source_candidates')}
+        data={k:copy.deepcopy(row.get(k)) for k in ('title','search_query','artist','source_candidates')}
         data['source_candidates']=data.get('source_candidates') or []
         data['protected_phrase_ids']=list(row.get('phrase_history') or {})
         if current:data['current_phrases']=copy.deepcopy(row.get('phrases') or [])
@@ -266,7 +266,17 @@ class SongAnalyzer:
                 # Timing is independent evidence, however: an improved vocal
                 # onset must still move a previously edited phrase away from
                 # the artificial 0 ms intro while preserving its text.
-                if not row.get("phrase_history"):
+                if logical == 'text_reference':
+                    # Editing a chord must not freeze the lyrics. Protect only
+                    # the particular phrases manually edited by the user, and
+                    # match by stable id rather than an index after splitting.
+                    history=row.get('phrase_history') or {}
+                    fresh_by_id={p['phrase_id']:p for p in selected_phrases}
+                    merged=[copy.deepcopy(p if p['phrase_id'] in history else fresh_by_id.get(p['phrase_id'],p))
+                            for p in row.get('phrases') or []]
+                    changes.update(phrases=merged,words=[w for p in merged for w in p.get('words',[])],
+                                   sections=infer_sections(merged))
+                elif not row.get("phrase_history"):
                     changes.update(
                         phrases=selected_phrases,
                         words=[word for phrase in selected_phrases for word in phrase.get("words", [])],

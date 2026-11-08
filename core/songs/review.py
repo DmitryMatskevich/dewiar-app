@@ -8,6 +8,36 @@ import shutil
 import subprocess
 
 
+def _pitch_steps(args):
+    """Return a bounded semitone shift for the preview transport.
+
+    The source file is never rewritten.  A bounded preview keeps the bridge
+    predictable and avoids extreme resampling artefacts.
+    """
+    try:
+        value = int(args.get("pitch_steps", 0))
+    except (TypeError, ValueError):
+        value = 0
+    return max(-12, min(12, value))
+
+
+def _pitch_filter(sample_rate, steps):
+    """Pitch-shift while preserving duration using FFmpeg's resample chain.
+
+    SoundTouch/Rubber Band are preferable when available, but the bundled
+    FFmpeg on macOS does not expose either filter.  This equivalent
+    ``asetrate → aresample → atempo`` chain changes pitch independently of
+    duration and is deterministic for both original and instrumental tracks.
+    """
+    if not steps:
+        return None
+    ratio = 2 ** (float(steps) / 12.0)
+    restore = 1.0 / ratio
+    rate = int(sample_rate)
+    return (f"aresample={rate},asetrate={rate * ratio:.8f},"
+            f"aresample={rate},atempo={restore:.8f}")
+
+
 def instrumental_audio_command(store, manager, args):
     """Return the selected owned instrumental through the existing bounded player transport."""
     song_id = str(args.get("song_id") or "")
@@ -17,10 +47,13 @@ def instrumental_audio_command(store, manager, args):
     path = manager.path_for(song_id)
     if not path:
         raise ValueError("Минусовка ещё не подготовлена")
+    pitch_steps = _pitch_steps(args)
+    pitch = _pitch_filter(44100, pitch_steps)
+    filters = ["-af", pitch] if pitch else []
     try:
         result = subprocess.run([_ffmpeg_path(), "-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe",
             "-i", str(path), "-t", "600", "-vn", "-ac", "2", "-ar", "44100",
-            "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"],
+            *filters, "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3", "pipe:1"],
             capture_output=True, timeout=30)
     except subprocess.TimeoutExpired as exc:
         raise ValueError("Не удалось подготовить минусовку к воспроизведению") from exc
@@ -31,7 +64,8 @@ def instrumental_audio_command(store, manager, args):
     return {"data": "data:audio/mpeg;base64," + base64.b64encode(result.stdout).decode(),
             "start_ms": 0, "end_ms": row.get("audio", {}).get("duration_ms") or 600_000,
             "phrase_start_ms": 0, "phrase_end_ms": row.get("audio", {}).get("duration_ms") or 600_000,
-            "variant": "instrumental", "instrumental_revision": manager.get(song_id).get("revision")}
+            "variant": "instrumental", "pitch_steps": pitch_steps,
+            "instrumental_revision": manager.get(song_id).get("revision")}
 
 
 def _ffmpeg_path():
@@ -87,6 +121,7 @@ def review_command(store, cmd, args):
     if not row:
         raise ValueError("Песня не найдена")
     full = cmd == 'song_full_audio'
+    pitch_steps = _pitch_steps(args)
     phrase = {'start_ms':0,'end_ms':row.get('audio',{}).get('duration_ms') or 600_000} if full else next((p for p in row.get("phrases", []) if p.get("phrase_id") == args.get("phrase_id")), None)
     if phrase is None:
         raise ValueError("Фраза не найдена")
@@ -109,8 +144,10 @@ def review_command(store, cmd, args):
         raise ValueError("Для длинной записи используйте прослушивание по фразам")
     # Ten minutes of PCM exceed the bridge's 16 MiB JSON frame limit.
     # CBR MP3 at 128 kbit/s keeps full playback below 13 MiB after base64.
-    encoding = (["-ac", "2", "-ar", "44100", "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]
-                if full else ["-ac", "1", "-ar", "16000", "-f", "wav"])
+    output_rate = 44100 if full else 16000
+    filters = ["-af", _pitch_filter(output_rate, pitch_steps)] if pitch_steps else []
+    encoding = (["-ac", "2", "-ar", str(output_rate), *filters, "-c:a", "libmp3lame", "-b:a", "128k", "-f", "mp3"]
+                if full else ["-ac", "1", "-ar", str(output_rate), *filters, "-f", "wav"])
     try:
         result = subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-protocol_whitelist", "file,pipe",
             "-ss", str(start / 1000), "-i", str(path), "-t", str((end - start) / 1000),
@@ -123,4 +160,5 @@ def review_command(store, cmd, args):
         raise ValueError("Запись слишком велика для плеера; используйте прослушивание по фразам")
     mime = 'audio/mpeg' if full else 'audio/wav'
     return {"data": f"data:{mime};base64," + base64.b64encode(result.stdout).decode(),
-            "start_ms": start, "end_ms": end, "phrase_start_ms": phrase["start_ms"], "phrase_end_ms": phrase["end_ms"]}
+            "start_ms": start, "end_ms": end, "phrase_start_ms": phrase["start_ms"], "phrase_end_ms": phrase["end_ms"],
+            "pitch_steps": pitch_steps}

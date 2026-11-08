@@ -10,17 +10,18 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qsl, urlencode, urlunsplit
 
-VERSION = 'ru-editor-3'
+VERSION = 'ru-editor-5'
 WORD = r'[A-Za-zА-Яа-яЁё0-9]+(?:[-‑][A-Za-zА-Яа-яЁё0-9]+)*'
 PHRASES = [
     'сразу хочу сказать','как я говорил','как я говорю','да то есть','вот то есть',
     'у нас сейчас','таким образом','соответственно','вообщем то','в общем-то','в общем то',
     'так сказать','это самое','в целом','в общем','в принципе','по сути','в смысле','как сказать',
     'как бы','то есть','допустим','короче',
-    'значит','кстати','скажем','у нас','вот','там','ну','да',
+    'значит','кстати','скажем','у нас','вот','там','ну','да','так',
 ]
 PHRASE_RX = re.compile(r'(?<![\w-])(?:' + '|'.join(re.escape(p).replace(r'\ ',r'\s+') for p in sorted(PHRASES,key=len,reverse=True)) + r')(?![\w-])', re.I)
-VOCAL_RX = re.compile(r'(?<![\w-])(?:э(?:[-–—]?э)*|эм|м{2,}|и{3,})(?![\w-])', re.I)
+VOCAL_RX = re.compile(r'(?<![\w-])(?:э(?:[-–—,\s]*э)+|э{2,}|а(?:[-–—,\s]*а)+|а{2,}|эм+|м(?:[-–—,\s]*м)+|и{3,}|хм+)(?![\w-])', re.I)
+REPEATED_FILLER_RX = re.compile(r'(?<![\w-])(?P<filler>то\s+есть|как\s+сказать|так)(?:\s*[,;:.!?…—–]+\s*|\s+)(?P=filler)+(?![\w-])', re.I)
 ABBREVIATIONS = {'г','гг','д','др','т','е','п','им','рис','стр','см','мм','м','кг','рт','ст','кв','ул','пр','проф','руб','коп','млн','млрд','тыс','квт','ква'}
 EMPHASIS = {'да','нет','очень','никогда','всегда','совсем','еле','чуть','долго','много','мало','снова'}
 
@@ -83,7 +84,13 @@ def _spacing(text):
 
 def edit(segments, title='Расшифровка'):
     chunks, locations, offset = [], [], 0
-    for a,b,raw in segments:
+    # ASR segments may include a fourth item with word-level timestamps.  Cleanup
+    # needs only the segment bounds and text; retain the full rows elsewhere for
+    # downstream speaker attribution.
+    for segment in segments:
+        if len(segment) < 3:
+            continue
+        a,b,raw = segment[:3]
         text = re.sub(r'\s+',' ',str(raw)).strip()
         if not text:
             continue
@@ -140,6 +147,19 @@ def edit(segments, title='Расшифровка'):
         else:
             drop(a,b,'Неречевой звук/заполнитель паузы','vocal')
 
+    for match in REPEATED_FILLER_RX.finditer(original):
+        left = original[:match.start()].rstrip()
+        right = original[match.end():].lstrip()
+        boundary_before = not left or left[-1] in ',.!?;:—–'
+        boundary_after = not right or right[0] in ',.!?;:—–'
+        if boundary_before or boundary_after:
+            filler = ' '.join(match.group('filler').lower().split())
+            remainder = match.group(0)[len(match.group('filler')):]
+            second = re.search(re.escape(match.group('filler')), remainder, re.I)
+            if second:
+                cut = match.start() + len(match.group('filler')) + second.start()
+                drop(match.start(), cut, f'Повтор вводного заполнителя «{filler}»; сохранено последнее произнесение', 'filler_repeat')
+
     for match in PHRASE_RX.finditer(original):
         a,b=match.span();value=' '.join(match[0].lower().split())
         if covered(a,b):
@@ -169,6 +189,11 @@ def edit(segments, title='Расшифровка'):
                 drop(a,b,'Вводное «короче» в начале предложения или после запятой')
             elif at_start or left.endswith(','):
                 check(a,b,'«Короче» может означать меньшую длину')
+        elif value=='так':
+            if isolated(a,b):
+                drop(a,b,'Отдельное вводное «так» на границе фразы')
+            else:
+                check(a,b,'«Так» может указывать на способ действия; содержательное употребление сохраняется')
         elif value=='вот' and re.match(r'(?:где|почему|как|что)\b',right,re.I):
             check(a,b,'«Вот» связывает смысловую конструкцию, а не только заполняет паузу')
         elif value=='как бы' and re.match(r'(?:не|ни|вы|ты|мы|нам|мне)\b',right,re.I):

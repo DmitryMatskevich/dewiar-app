@@ -100,24 +100,35 @@ def anchors(phrases, limit=3):
 
 
 def query_plan(selected, title='', artist='', limit=8):
-    """First attempts use text only. Metadata is an optional last fallback."""
+    """Diversify retrieval before retrying exact matches across verse boundaries.
+
+    Discovery needs one phrase, confirmation still needs three independent
+    trusted matches. Short complete fragments survive ASR punctuation and
+    publication line breaks better than long concatenated verses.
+    """
     out=[]
     def add(query, stage, anchor):
         query=re.sub(r'\s+', ' ', query).strip()
         if query and query not in {q['query'] for q in out} and len(out) < limit:
             out.append(dict(query=query, stage=stage, anchor=anchor))
-    for a in selected:
-        # Quotes in lyrics are punctuation, not query operators.
-        q=' '.join(t['text'] for t in tokens(a['text']))
-        add('"'+q+'"','exact_fragment',a)
-    for a in selected:
-        short=' '.join(t['text'] for t in tokens(a['text'])[:5])
-        add('"'+short+'"','short_fragment',a)
-    if selected:
-        plain=' '.join(t['text'] for t in tokens(selected[0]['text']))
-        add(plain+' стих текст','poem_or_song',selected[0])
+    def cost(a):
+        text=a['text']; count=len(tokens(text))
+        # Prefer a coherent short phrase, not a suffix of one line plus the
+        # start of the next. Confidence is already checked by anchors().
+        return (len(re.findall(r'[,;:—–\n]',text)), abs(count-6), -a.get('score',0))
+    chosen=sorted(selected,key=cost)[:3]
+    for a in chosen:
+        plain=' '.join(t['text'] for t in tokens(a['text']))
+        add('"'+plain+'"','exact_fragment',a)
+        add(plain+' стихи','poem_or_song',a)
+    if chosen:
+        a=chosen[0]
+        plain=' '.join(t['text'] for t in tokens(a['text']))
+        add(plain+' site:stihi.ru','poetry_site',a)
         if title or artist:
-            add(plain+' '+title+' '+artist,'metadata_fallback',selected[0])
+            add(plain+' '+title+' '+artist,'metadata_fallback',a)
+        else:
+            add(plain+' текст песни','song_text',a)
     elif title or artist:
         add(title+' '+artist+' текст','no_reliable_fragment',None)
     return out

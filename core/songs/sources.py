@@ -73,6 +73,75 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def _embedded_lyrics(document, url):
+    """Read Musixmatch's public hydration data, without running page scripts.
+
+    Its initial HTML can contain only a title; the same public JSON is used by
+    the browser to render the lyrics. Never treat arbitrary scripts, metadata,
+    search snippets or suggested tracks as the requested song's text.
+    """
+    host=(urlsplit(url).hostname or '').lower()
+    if host in {'stihi.ru', 'www.stihi.ru', 'proza.ru', 'www.proza.ru'}:
+        class Poem(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.depth=0; self.parts=[]
+            def handle_starttag(self, tag, attrs):
+                if tag=='div' and dict(attrs).get('class','').split()==['text'] and not self.depth:
+                    self.depth=1; return
+                if self.depth:
+                    if tag=='div': self.depth+=1
+                    if tag in {'br','p'}: self.parts.append('\n')
+            def handle_endtag(self, tag):
+                if self.depth and tag=='div': self.depth-=1
+            def handle_data(self, data):
+                if self.depth: self.parts.append(data)
+        parser=Poem(); parser.feed(document)
+        return re.sub(r'\n{3,}', '\n\n', ''.join(parser.parts)).strip()
+    if host in {'genius.com', 'www.genius.com'}:
+        class Lyrics(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.depth=0; self.hidden=0; self.parts=[]
+            def handle_starttag(self, tag, attrs):
+                if dict(attrs).get('data-lyrics-container') == 'true':
+                    self.depth=1; self.parts.append('\n'); return
+                if self.depth:
+                    if dict(attrs).get('data-exclude-from-selection')=='true':self.hidden=self.depth+1
+                    if tag == 'br': self.parts.append('\n')
+                    elif tag not in {'img','input','hr','wbr','meta','link'}: self.depth+=1
+            def handle_endtag(self, tag):
+                if self.depth and tag not in {'br','img','input','hr','wbr','meta','link'}:
+                    if self.depth==self.hidden:self.hidden=0
+                    self.depth-=1
+            def handle_data(self, data):
+                if self.depth and not self.hidden: self.parts.append(data)
+        parser=Lyrics(); parser.feed(document)
+        text=''.join(parser.parts).strip()
+        # Section headings are not sung words; retain the actual line breaks.
+        text=re.sub(r'^\s*\[[^\]\n]+\]\s*$', '', text, flags=re.M)
+        return re.sub(r'\n{3,}', '\n\n', text).strip()
+    if host not in {'musixmatch.com','www.musixmatch.com'}:
+        return ''
+    class Data(HTMLParser):
+        def __init__(self):
+            super().__init__();self.active=False;self.parts=[]
+        def handle_starttag(self,tag,attrs):
+            attrs=dict(attrs)
+            if tag=='script':self.active=attrs.get('id')=='__NEXT_DATA__' and attrs.get('type')=='application/json'
+        def handle_data(self,data):
+            if self.active:self.parts.append(data)
+        def handle_endtag(self,tag):
+            if tag=='script':self.active=False
+    parser=Data();parser.feed(document)
+    try:
+        data=json.loads(''.join(parser.parts))
+        info=data['props']['pageProps']['data']['trackInfo']['data']
+        lyrics=info['lyrics']['body']
+        if not isinstance(lyrics,str) or not 20<=len(lyrics)<=50000:return ''
+        return lyrics.strip()
+    except (KeyError,ValueError,TypeError):
+        return ''
+
+
 def _public_http_url(url):
     parsed = urlsplit(str(url or '').strip())
     host = (parsed.hostname or '').lower().rstrip('.')
@@ -147,6 +216,9 @@ def check_reference(url, candidate_kind='reference'):
         parser.feed(decoded)
         visible = re.sub(r'[ \t\xa0]+', ' ', ''.join(parser.parts))
         visible = re.sub(r'\n\s*\n+', '\n', visible).strip()
+        lyric_body = _embedded_lyrics(decoded, final_url)
+        if lyric_body:
+            visible = lyric_body
         if not visible:
             return {'status':'unavailable','http_status':status,'error':'На странице не удалось прочитать текст'}
         chord_pattern = re.compile(r'^[A-G](?:#|b)?(?:m7b5|m(?:aj)?\d*|maj\d*|dim\d*|aug\d*|sus\d*|add\d*|\d+)?(?:/[A-G](?:#|b)?)?$')
@@ -165,6 +237,8 @@ def check_reference(url, candidate_kind='reference'):
                 'text_encoding':encoding,
                 'page_title':page_title,'checked_at':__import__('time').time(),
                 'has_readable_text':True,'chord_names':chord_names,
+                'text_extraction':('poem_text_container' if (urlsplit(final_url).hostname or '').removeprefix('www.') in {'stihi.ru','proza.ru'} else 'genius_lyrics_container' if 'genius.com' in (urlsplit(final_url).hostname or '') else 'musixmatch_public_json') if lyric_body else 'html_visible',
+                'has_lyrics_text':bool(lyric_body),
                 'chords_extractable':len(chord_names)>=2,
                 'extracted_text':visible[:50000],
                 'note':'Доступность страницы проверена; соответствие исполнению всё ещё нужно сверить.'}
@@ -376,7 +450,7 @@ class SongSources:
                     'capabilities': {**row.get('capabilities', {}), 'audio': True}}
                 process_audio = process
             else:
-                search_query = ' '.join([row['title'], row.get('artist', '')]).strip()
+                search_query = ' '.join([row.get('search_query') or row['title'], row.get('artist', '')]).strip()
                 candidates, errors = discover(search_query,
                     [s.get('url') for s in row.get('sources', []) if s.get('kind') == 'reference' and s.get('url')],
                     title=row['title'], artist=row.get('artist', ''))

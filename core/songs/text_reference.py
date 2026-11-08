@@ -36,11 +36,34 @@ def fetch_source(url):
         return {'status':'available','extracted_text':str(data.get('plainLyrics') or ''),
                 'final_url':canonical,'page_title':str(data.get('trackName') or ''),
                 'checked_at':time.time(),'http_status':200}
-    return check_reference(url)
+    result=check_reference(url)
+    if parsed.hostname in {'genius.com','www.genius.com','musixmatch.com','www.musixmatch.com'} and not result.get('has_lyrics_text'):
+        from .browser_reference import fetch
+        rendered=fetch(url)
+        if rendered.get('status')=='available':return rendered
+        result['error']=rendered.get('error') or 'Текст страницы недоступен; можно вставить его вручную'
+        result['status']='unavailable'
+    return result
 
 
-def web_search(query):
+def web_search(query, *, blocked=None):
     """Public search, bounded timeout. Snippets never count as lyric evidence."""
+    from .browser_search import search as browser_search
+    browser_errors=[]
+    try:
+        engines=[e for e in ('yandex','google') if e not in (blocked or {})]
+        result=browser_search(query,engines=engines) if engines else {'hits':[],'engines':[]}
+        if blocked is not None:
+            result['engines']+=list(blocked.values())
+            for e in result.get('engines',[]):
+                if e.get('engine') and e.get('status')=='captcha':blocked[e['engine']]=e
+        web_search.last_engines=result.get('engines',[])
+        if result.get('hits'):return result['hits']
+        browser_errors=[str(e.get('engine','browser'))+': '+str(e.get('message',e['status']))
+                        for e in result.get('engines',[]) if e.get('status') in {'captcha','error','unavailable'}]
+    except Exception as exc:
+        browser_errors=[str(exc)[:150]]
+        web_search.last_engines=[{'status':'error','message':browser_errors[0]}]
     class Links(HTMLParser):
         def __init__(self):
             super().__init__(); self.links=[]; self.link=None
@@ -55,7 +78,7 @@ def web_search(query):
             if self.link is not None: self.link['title']+=data
         def handle_endtag(self, tag):
             if tag=='a': self.link=None
-    errors=[]
+    errors=browser_errors
     for provider in ('ddg','bing'):
         try:
             url=('https://html.duckduckgo.com/html/?'+urlencode({'q':query,'kl':'ru-ru'}) if provider=='ddg'
@@ -64,7 +87,10 @@ def web_search(query):
                 body=response.read(1_000_001)
             if len(body)>1_000_000: raise ValueError('Слишком большая поисковая выдача')
             if provider=='ddg':
-                parser=Links();parser.feed(body.decode('utf-8','replace')); rows=parser.links
+                decoded=body.decode('utf-8','replace')
+                if any(marker in decoded.lower() for marker in ('anomaly.js','challenge-form','bots use duckduckgo')):
+                    raise RuntimeError('DuckDuckGo: требуется проверка в браузере')
+                parser=Links();parser.feed(decoded); rows=parser.links
             else:
                 rows=[{'url':item.findtext('link'),'title':item.findtext('title'),'snippet':item.findtext('description')}
                       for item in ElementTree.fromstring(body).findall('./channel/item')]
@@ -90,10 +116,9 @@ def confirm_text(text, selected):
 
 
 def _protected(phrase, start, end):
-    if phrase.get('review_state')=='verified' or phrase.get('manual_edited'): return True
-    return any(a.get('char_start',-1)<end and a.get('char_end',-1)>start
-               and a.get('agree',0)>=2 and a.get('agree')==a.get('models')
-               for a in phrase.get('agreement',[]))
+    # ASR agreement is evidence, not a user edit. In particular an agreed
+    # neighbouring word must not freeze a disputed word-boundary replacement.
+    return phrase.get('review_state')=='verified' or bool(phrase.get('manual_edited'))
 
 
 def reconcile(phrases, references, verify=None):
@@ -113,11 +138,19 @@ def reconcile(phrases, references, verify=None):
             continue
         checked+=1
         try:
+            source=next((r for r in references if r.get('url')==item['alternative'].get('url')), {})
+            confirmation=source.get('text_confirmation') or {}
+            item['source_confirmed']=bool(source.get('user_confirmed') or
+                (source.get('text_confirmed') and confirmation.get('confirmed') and
+                 len(confirmation.get('hits',[]))>=3))
             evidence=verify(phrase,item)
             item['audio_evidence']=evidence
             if evidence.get('confirmed'):
-                item.update(status='confirmed_by_audio',auto_apply=True)
+                item.update(status=('confirmed_by_source_and_audio' if evidence.get('basis')=='source_and_audio'
+                                    else 'confirmed_by_audio'),auto_apply=True)
                 accepted.setdefault(phrase['phrase_id'],[]).append(item)
+            else:
+                item['status']='needs_target_audio_check'
         except Exception as exc:
             item['audio_error']=str(exc)[:300]
     for phrase in result:
@@ -127,42 +160,54 @@ def reconcile(phrases, references, verify=None):
             a,b=item['current']['char_start'],item['current']['char_end']
             if b>edge or phrase['text'][a:b]!=item['current']['text']:
                 item.update(status='overlapping_candidate',auto_apply=False);continue
-            phrase.setdefault('text_before_reference',phrase['text'])
-            phrase['text']=phrase['text'][:a]+item['alternative']['text']+phrase['text'][b:]
-            phrase.update(words=[],agreement=[],alignment_stale=True,timing_quality='phrase',review_state='needs_review')
+            # Keep measured times for unaffected words while the align stage
+            # refines the edited span. Never stretch lyrics over a lead-in.
+            from .text_sources import edit_span
+            edit_span(phrase,a,b,item['alternative']['text'])
+            phrase['alignment_stale']=True
             edge=a
     return result,proposals
 
 
 def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress=lambda _:None):
-    search=search or web_search; fetch=fetch or fetch_source; context=context or {}
+    # A CAPTCHA blocks a provider for this run; do not repeatedly relaunch it
+    # for every lyric query. Other providers and direct pages remain usable.
+    default_search=search is None or search is web_search
+    blocked={}
+    if default_search:search=lambda query:web_search(query,blocked=blocked)
+    fetch=fetch or fetch_source; context=context or {}
     selected_run=next((r for r in context.get('analysis_runs',[]) if r.get('run_id')==context.get('selected_run_id')), {})
     hypotheses=context.get('hypotheses') or selected_run.get('hypotheses')
     if hypotheses:phrases=refresh_agreement(phrases,hypotheses)
-    selected=anchors(phrases,limit=6)
+    selected=anchors(phrases,limit=12)
     report={'state':'searching','anchors':selected,'references':[],'chord_sources':[],
-            'queries':[],'checked_pages':[],'errors':[],'candidates':[],'applied':0,'checked_at':time.time()}
-    if len(selected)<3:
-        report['state']='insufficient_consensus';return copy.deepcopy(phrases),report
-    deadline=time.monotonic()+100;seen=set(); fingerprints=set(); checked=0
+            'queries':[],'checked_pages':[],'errors':[],'candidates':[],'suggested_sources':[],
+            'applied':0,'checked_at':time.time()}
+    deadline=time.monotonic()+180;seen=set(); fingerprints=set(); checked=0
     def inspect(candidate, want_chords=False):
         nonlocal checked
         url=urldefrag(str(candidate.get('url') or ''))[0]
-        if not url.startswith(('https://','http://')) or url in seen or checked>=(12 if want_chords else 8) or time.monotonic()>deadline:return
-        seen.add(url);checked+=1
+        key=url or candidate.get('candidate_id')
+        pasted=candidate.get('manual_source') and candidate.get('plain_lyrics')
+        if (not url.startswith(('https://','http://')) and not pasted) or key in seen or checked>=(20 if want_chords else 16) or time.monotonic()>deadline:return
+        seen.add(key);checked+=1
         try:
-            page=fetch(url)
+            page=({'status':'available','extracted_text':candidate['plain_lyrics'],'page_title':candidate.get('title'),'final_url':url} if pasted else fetch(url))
             if page.get('status')!='available':
                 report['checked_pages'].append({'url':url,'status':page.get('status'),'http_status':page.get('http_status')});return
             text=lyrics_only(page.get('extracted_text',''))
             match=confirm_text(text,selected)
             report['checked_pages'].append({'url':url,'status':match['status'],'exact_matches':len(match['hits'])})
-            if not match['confirmed']:return
             final=page.get('final_url') or url
-            ref={'candidate_id':'text-reference:'+hashlib.sha256(final.encode()).hexdigest()[:16],
+            ref={'candidate_id':'text-reference:'+hashlib.sha256((final or text).encode()).hexdigest()[:16],
                  'kind':'lyrics','url':final,'title':page.get('page_title') or candidate.get('title') or 'Текст песни / стихотворение',
-                 'plain_lyrics':text,'text_confirmed':True,'text_confirmation':match,
+                 'plain_lyrics':text,'text_confirmed':match['confirmed'] or bool(candidate.get('user_confirmed')),'text_confirmation':match,
                  'version_verified':False,'source_check':{k:v for k,v in page.items() if k!='extracted_text'}}
+            for field in ('user_confirmed','manual_source'):
+                if candidate.get(field):ref[field]=True
+            if not ref['text_confirmed']:
+                if len(text)>=40 and (page.get('has_lyrics_text') or match['hits']):report['suggested_sources'].append(ref)
+                return
             if page.get('chords_extractable'):
                 chord={**ref,'kind':'chords','candidate_id':ref['candidate_id'].replace('text-reference:','chord-reference:')}
                 if final not in {r['url'] for r in report['chord_sources']}:
@@ -172,23 +217,33 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
                 report['references'].append(ref);fingerprints.add(fingerprint)
         except Exception as exc:
             report['errors'].append({'url':url,'error':str(exc)[:300]})
-    for candidate in context.get('source_candidates',[]):
+    # The user's selected text source precedes cached catalogue references.
+    for candidate in (context.get('text_reference') or {}).get('references',[])+context.get('source_candidates',[]):
+        if checked>=4:break  # Reserve page slots for newly discovered publications.
         if candidate.get('kind') in {'lyrics','reference','chords'}: inspect(candidate)
-    plan=query_plan(selected[:3],context.get('title',''),context.get('artist',''),limit=8)
+    plan=query_plan(selected,context.get('title',''),context.get('artist',''),limit=8)
     # Search by recognized text for chord pages as well, not an assumed artist.
     plan += [{'query':'"'+a['text'].replace('"','')+'" аккорды','stage':'chords'} for a in selected[:2]]
     for query in plan:
-        if time.monotonic()>deadline or checked>=12:break
+        if time.monotonic()>deadline or checked>=20:
+            report['errors'].append({'error':'Достигнут лимит времени или страниц; поиск выполнен не полностью'})
+            break
         if query['stage']!='chords' and len(report['references'])>=2:continue
         progress('Сверка с источником текста: '+('ищем аккорды по фразам' if query['stage']=='chords' else 'ищем текст по согласованным фразам'))
         report['queries'].append({'query':query['query'],'stage':query['stage']})
         try:
-            for candidate in search(query['query']): inspect(candidate,query['stage']=='chords')
+            found=search(query['query'])
+            if default_search:
+                report.setdefault('search_engines',[]).append({'query':query['query'],'engines':web_search.last_engines})
+            for candidate in found[:3]: inspect(candidate,query['stage']=='chords')
         except Exception as exc:
             report['errors'].append({'query':query['query'],'error':str(exc)[:300]})
+            if default_search:
+                report.setdefault('search_engines',[]).append({'query':query['query'],'engines':getattr(web_search,'last_engines',[])})
     report['chord_sources']=report['chord_sources'][:3]
     if not report['references']:
-        report['state']='search_error' if report['errors'] else 'not_found'
+        report['state']=('needs_confirmation' if report['suggested_sources'] else 'search_error' if report['errors']
+                         else 'insufficient_consensus' if len(selected)<3 else 'not_found')
         return copy.deepcopy(phrases),report
     progress('Сверка с источником текста: сравниваем расхождения с записью')
     updated,report['candidates']=reconcile(phrases,report['references'],verify)
@@ -200,7 +255,7 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
 
 def result_patch(row, report):
     """Merge this stage's sources without changing the selected audio recording."""
-    refs=report.get('references',[])+report.get('chord_sources',[])
+    refs=report.get('references',[])+report.get('chord_sources',[])+report.get('suggested_sources',[])
     candidates=[copy.deepcopy(r) for r in row.get('source_candidates') or []
                 if not str(r.get('candidate_id','')).startswith(('text-reference:','chord-reference:'))]
     for ref in refs:

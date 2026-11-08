@@ -102,11 +102,30 @@ class LifecycleTest(unittest.TestCase):
 
     def test_silent_microphone_does_not_launch_asr_or_karaoke(self):
         h = self.start([pcm(5, 0)])
+        self.assertTrue(h['capture'].exhausted.wait(2))
+        self.assertEqual(self.manager.state(self.sid)['phase'],'waiting')
+        self.assertEqual(self.manager.state(self.sid)['duration_ms'],0)
+        self.manager.stop(self.sid)
         row = self.finished(h)
         self.assertEqual(row['status'], 'needs_input')
         self.assertFalse(row['capabilities']['audio'])
         self.assertFalse(row['audio']['path'])
         self.assertTrue((self.root / row['capture_result']['path']).exists())
+
+    def test_waiting_silence_is_not_saved_and_onset_is_not_clipped(self):
+        h=self.start([pcm(20,0),pcm(.06,900),pcm(.06,1000),pcm(1,1200)])
+        self.assertTrue(h['capture'].exhausted.wait(2))
+        self.manager.stop(self.sid);row=self.finished(h)
+        self.assertEqual(row['audio']['duration_ms'],1360)
+        with wave.open(str(self.root/row['audio']['path'])) as wav:data=wav.readframes(wav.getnframes())
+        self.assertEqual(data,pcm(.24,0)+pcm(.06,900)+pcm(.06,1000)+pcm(1,1200))
+
+    def test_short_click_does_not_start_and_preview_failure_does_not_lose_audio(self):
+        self.manager.preview_factory=lambda *args:(_ for _ in ()).throw(RuntimeError('test preview failure'))
+        h=self.start([pcm(.04),pcm(8,0),pcm(1)])
+        self.assertTrue(h['capture'].exhausted.wait(2));self.assertEqual(h['phase'],'recording')
+        self.assertIn('test preview failure',h['draft_status'])
+        self.manager.stop(self.sid);self.assertEqual(self.finished(h)['audio']['duration_ms'],1300)
 
     def test_missing_packets_stop_and_preserve_partial_audio(self):
         self.manager.no_data_seconds = .15

@@ -61,10 +61,10 @@ const elements=new Map();global.document={getElementById:id=>{if(!elements.has(i
 let copied;Object.defineProperty(global,'navigator',{value:{clipboard:{writeText:async text=>{copied=text}}},configurable:true});
 s.bindToolbar(fixture,()=>fixture,()=>{});
 document.getElementById('song-key-up').onclick();
-assert.ok(s.plainText(fixture).startsWith('C7/E     Gm\nOne two\n\nB\nОкончание'));
+assert.ok(s.plainText(fixture).startsWith('Must not copy\n\nC7/E     Gm\nOne two\n\nB'));
 assert.match(s.plainText(fixture),/Аппликатуры \(струны 1→6/);
 assert.equal(document.getElementById('song-copy-preview').value,s.plainText(fixture));
-(async()=>{await document.getElementById('song-copy-sheet').onclick();assert.equal(copied,s.plainText(fixture));document.getElementById('song-key-down').onclick();assert.ok(s.plainText(fixture).startsWith('B7/D#    F#m\nOne two\n\nBb\nОкончание'));assert.ok(!copied.includes('Must not copy'));assert.ok(!copied.includes('Verse'));assert.ok(!copied.includes('1234'));console.log('Clean preview, selected key, clipboard equality and reset: OK');})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await document.getElementById('song-copy-sheet').onclick();assert.equal(copied,s.plainText(fixture));document.getElementById('song-key-down').onclick();assert.ok(s.plainText(fixture).startsWith('Must not copy\n\nB7/D#    F#m\nOne two\n\nBb'));assert.ok(copied.includes('Must not copy'));assert.ok(!copied.includes('Verse'));assert.ok(!copied.includes('1234'));console.log('Clean preview, selected key, clipboard equality and reset: OK');})().catch(e=>{console.error(e);process.exitCode=1});
 
 assert.ok(s.plainText({guitar_sheet:[{text:'One two',cells:[{char_index:4,chords:['Am']}]}]}).startsWith('    Am\nOne two'));
 const refs=s.sourceLinks({source_ref:'https://audio.example/song',source_candidates:[{url:'javascript:bad',title:'аккорды'},{url:'https://chords.example/a#one',title:'Аккорды',source_check:{status:'available'}},{url:'https://chords.example/a#two',title:'Аккорды копия',source_check:{status:'available'}},{url:'https://lyrics.example/a',kind:'lyrics',title:'Текст',source_check:{status:'available'}},{url:'https://video.example/a',title:'Запись',source_check:{status:'available'}},{url:'https://extra.example/a',source_check:{status:'available'}}]});
@@ -73,17 +73,30 @@ const copiedWithSources=s.plainText({source_candidates:[{url:'https://chords.exa
 assert.ok(copiedWithSources.endsWith('Источники:\nАккорды — https://chords.example/a\nТекст — https://lyrics.example/a\nЗапись — https://video.example/a'));
 assert.ok(copiedWithSources.includes('Em — 0-0-0-2-2-0'));assert.ok(copiedWithSources.includes('Am — 0-1-2-2-0-x'));
 assert.ok(!copiedWithSources.includes('(оценка)'));
+const copyInstrumental={title:'Песня с проигрышем',search_query:'точный поисковый запрос',guitar_sheet:[
+ {text:'Первая строка',cells:[{char_index:0,chords:['Am']}]},
+ {text:'',instrumental:true,unplaced_chords:[{name:'Dm',start_ms:1000,end_ms:2000}]},
+ {text:'Вторая строка',cells:[{char_index:0,chords:['G']}]}
+]};
+const copiedInstrumental=s.plainText(copyInstrumental);
+assert.ok(copiedInstrumental.startsWith('Песня с проигрышем\n\n'));
+assert.ok(copiedInstrumental.includes('Поисковый запрос: точный поисковый запрос'));
+assert.ok(copiedInstrumental.includes('G\nВторая строка'));
+assert.ok(!copiedInstrumental.includes('Проигрыш'));
+console.log('Copied title, search query and inline instrumental cue: OK');
 const sheetExample={title:'Title',artist:'Artist',source_candidates:[{url:'https://chords.example/a',title:'Chords',source_check:{status:'available'}}],guitar_sheet:Array.from({length:5},(_,i)=>({text:'Line '+i,cells:[{char_index:0,chords:['Am']}]}))};
 assert.equal(s.sheetRows(sheetExample).filter(r=>r.kind==='space').length,1);
-assert.ok(s.plainText(sheetExample).startsWith(s.sheetRows(sheetExample).map(r=>r.text).join('\n')));
+assert.ok(s.plainText(sheetExample).includes(s.sheetRows(sheetExample).map(r=>r.text).join('\n')));
 assert.ok(s.sheetHTML(sheetExample).includes('song-paper-sources'));assert.ok(s.plainText(sheetExample).includes('Источники:\nChords — https://chords.example/a'));assert.ok(!s.plainText({guitar_sheet:[{text:'No source',cells:[]}]}).includes('https://'));console.log('Paper layout, chord fingerings and copied source links: OK');
 
 const toolbar=s.toolbar({...fixture,capabilities:{audio:true}});
-for(const id of ['song-key-down','song-key-up','song-show-text','song-copy-sheet','song-sheet-play','song-sheet-stop','song-sheet-previous','song-sheet-next']) {
+for(const id of ['song-key-down','song-key-up','song-show-text','song-copy-sheet','song-speed-down','song-speed-up','song-sheet-play','song-sheet-play-instrumental','song-sheet-stop','song-sheet-previous','song-sheet-next']) {
  const button=toolbar.match(new RegExp('<button[^>]*id="'+id+'"[^>]*>[\\s\\S]*?</button>'))?.[0];
  assert.ok(button && button.includes('title="') && button.includes('aria-label="') && button.includes('<svg'),id);
 }
 assert.ok(!toolbar.includes('song-key-reset'));assert.ok(!toolbar.includes('½ тона'));assert.ok(!toolbar.includes('Сдвиг:'));
+assert.match(toolbar,/id="song-live-edit-play-original"[^>]+title="Проиграть оригинальную запись/);
+assert.ok(!toolbar.includes('song-live-edit-play-instrumental'));
 assert.ok(!toolbar.includes('song-edit-current'));
 console.log('Compact named icon controls: OK');
 
@@ -187,7 +200,13 @@ assert.deepEqual(s.countdownState(7000,0,10000),{count:3,lit:1});
 assert.deepEqual(s.countdownState(8000,0,10000),{count:2,lit:2});
 assert.deepEqual(s.countdownState(9000,0,10000),{count:1,lit:3});
 assert.equal(s.countdownState(10000,0,10000),null);
-assert.deepEqual(s.countdownState(0,0,600),{count:3,lit:1});
-assert.deepEqual(s.countdownState(200,0,600),{count:2,lit:2});
-assert.deepEqual(s.countdownState(400,0,600),{count:1,lit:3});
+assert.deepEqual(s.countdownState(0,0,600),{count:1,lit:3,single:true});
+assert.deepEqual(s.countdownState(200,0,600),{count:1,lit:3,single:true});
+assert.deepEqual(s.countdownState(400,0,600),{count:1,lit:3,single:true});
 console.log('Instrumental cue, active three-letter countdown and transition timing: OK');
+
+const unknownGap={song_id:'short-gap',guitar_sheet:[{instrumental:true,text:'',start_ms:0,end_ms:100,unplaced_chords:[]},{text:'Word',start_ms:100,end_ms:900,chords:[]}]};
+assert.equal(s.sheetRows(unknownGap)[0].kind,'instrumental');
+assert.equal(s.sheetRows(unknownGap)[0].end_ms,100);
+assert.match(s.sheetHTML(unknownGap),/song-paper-instrumental/);
+console.log('Subsecond instrumental without a known chord remains visible: OK');

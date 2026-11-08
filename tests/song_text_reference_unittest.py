@@ -28,6 +28,58 @@ def page(text, chords=False):
     return dict(status='available',extracted_text=text,page_title='Публикация',chords_extractable=chords,chord_names=['Am','E7'] if chords else [])
 
 class TextReferenceTests(unittest.TestCase):
+    def test_machine_agreement_does_not_protect_disputed_span(self):
+        p=dict(phrase_id='tail',text='У меня для тебя есть секрет, мы греметки.',start_ms=100,end_ms=9000,
+               agreement=[dict(char_start=21,char_end=28,agree=2,models=2)])
+        refs=[dict(plain_lyrics='У меня для тебя есть секретные метки',url='https://example.org/text')]
+        with patch('songs.text_reference._protected',wraps=__import__('songs.text_reference',fromlist=['_protected'])._protected):
+            updated,items=reconcile([p],refs,lambda *args:{'confirmed':True})
+        self.assertEqual(updated[0]['text'],'У меня для тебя есть секретные метки.')
+        self.assertTrue(items[0]['auto_apply'])
+        p['review_state']='verified'
+        updated,items=reconcile([p],refs,lambda *args:self.fail('Human verification must survive'))
+        self.assertEqual(updated,[p])
+
+    def test_phrase_edge_and_local_audio_window(self):
+        p=dict(text='У меня для тебя есть секрет, мы греметки.',start_ms=109000,end_ms=126720,
+               words=[dict(char_start=11,char_end=15,start_ms=122800,end_ms=123200),
+                      dict(char_start=16,char_end=20,start_ms=123920,end_ms=124480),
+                      dict(char_start=21,char_end=28,start_ms=124480,end_ms=124960),
+                      dict(char_start=32,char_end=41,start_ms=125120,end_ms=126720)])
+        item=dict(current=dict(char_start=21,char_end=40,text='секрет, мы греметки'),
+                  alternative=dict(text='секретные метки'),source_confirmed=True)
+        hyp=lambda m,t:dict(model=m,phrases=[dict(text=t)])
+        hs=[hyp('Whisper-large-v2',p['text']),hyp('Qwen3-ASR-1.7B','У меня для тебя есть секретные метки')]
+        with patch('songs.worker.whisper_transcribe',return_value=hs[0]) as w,patch('songs.worker.qwen_transcribe',return_value=hs[1]) as q:
+            result=verify_reference_candidate('audio',p,item,hs,lambda _:None)
+            self.assertTrue(result['confirmed']);self.assertEqual(result['basis'],'source_and_audio')
+            self.assertEqual(w.call_args.args[2:],(120800,128720))
+            self.assertNotIn('prompt',q.call_args.kwargs)
+            item['source_confirmed']=False
+            self.assertFalse(verify_reference_candidate('audio',p,item,hs,lambda _:None)['confirmed'])
+
+    def test_source_tie_breaker_does_not_change_meaning_or_count_same_model_twice(self):
+        from songs.worker import reference_audio_decision
+        ev=[dict(model='Whisper-large-v2',matches=False,matches_current=True),
+            dict(model='Qwen3-ASR-1.7B',matches=True,matches_current=False)]
+        check=lambda a,b,e=ev:reference_audio_decision({'source_confirmed':True},a.split(),b.split(),e,0,9000)['confirmed']
+        self.assertTrue(check('секрет мы греметки','секретные метки'))
+        self.assertFalse(check('не вернется','нам вернется'))
+        self.assertFalse(check('секрет мы греметки','секретные метки',[ev[1],ev[1]]))
+        self.assertFalse(check('слова в старой версии','совсем другие слова'))
+
+    def test_new_boundary_reading_is_compared_between_the_same_context(self):
+        from songs.worker import reference_boundary_reading,reference_audio_decision
+        reading=reference_boundary_reading('для тебя есть секрет умные метки выдох вдох'.split(),
+                                          ['тебя','есть'],[],['секретные','метки'])
+        self.assertEqual(reading['boundary_reading'],['секрет','умные','метки'])
+        self.assertGreater(reading['boundary_similarity'],.9)
+        ev=[dict(model='Whisper-large-v2',matches=False,**reading),dict(model='Qwen3-ASR-1.7B',matches=True)]
+        result=reference_audio_decision({'source_confirmed':True},['секрет','мы','греметки'],['секретные','метки'],ev,0,9000)
+        self.assertEqual(result['basis'],'source_and_audio')
+        wrong=reference_boundary_reading('где-то в другой песне секрет умные метки'.split(),['тебя','есть'],[],['секретные','метки'])
+        self.assertEqual(wrong['boundary_similarity'],0)
+
     def test_legacy_empty_model_is_not_a_vote_and_display_text_is_not_a_model(self):
         ps=phrases()
         hypotheses=[{'model':'not-selected','phrases':[]},
@@ -96,11 +148,13 @@ class TextReferenceTests(unittest.TestCase):
         self.assertEqual(len(visited),len(set(visited)))
         self.assertTrue(all(len(r['text_confirmation']['hits'])>=3 for r in report['references']))
 
-    def test_no_consensus_skips_network_and_missing_source_never_changes_text(self):
+    def test_no_consensus_can_search_but_missing_source_never_changes_text(self):
         def forbidden(*a):raise AssertionError('Network must not run')
         p=phrases()[:2]
-        updated,report=run(p,search=forbidden)
+        queries=[]
+        updated,report=run(p,search=lambda q:queries.append(q) or [],fetch=forbidden)
         self.assertEqual(updated,p);self.assertEqual(report['state'],'insufficient_consensus')
+        self.assertTrue(queries)
         updated,report=run(phrases(),search=lambda q:[],fetch=forbidden)
         self.assertEqual(updated,phrases());self.assertEqual(report['state'],'not_found')
 
