@@ -63,7 +63,7 @@ def validate_provider(data):
     contacts = data.get('contacts', [])
     if not isinstance(contacts, list) or len(contacts) > 30:
         raise ValueError('Допустимо не более 30 каналов поддержки')
-    allowed = {'telegram', 'ticket', 'email', 'phone', 'chat', 'other'}
+    allowed = {'telegram', 'ticket', 'email', 'phone', 'chat', 'news', 'status', 'feedback', 'complaint', 'abuse', 'other'}
     d['contacts'] = []
     for item in contacts:
         if not isinstance(item, dict) or item.get('type') not in allowed:
@@ -147,6 +147,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS renewal_alerts(site TEXT NOT NULL, kind TEXT NOT NULL, deadline TEXT NOT NULL, threshold INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(site,kind,deadline,threshold));
             CREATE TABLE IF NOT EXISTS server_assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL UNIQUE, provider TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, rev INTEGER NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL, config TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS provider_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             PRAGMA user_version=1;
             ''')
         with self.db() as c:
@@ -159,7 +160,7 @@ class Store:
         """Seed verified provider directory once; subsequent launches preserve edits."""
         seed = [
             {'id':'beget','name':'Beget','website_url':'https://beget.com','panel_url':'https://cp.beget.com','panel_name':'Панель управления Beget','source_url':'https://beget.com/ru/contacts','contacts':[
-                {'type':'phone','label':'Россия, бесплатно','value':'8 (800) 700-06-08'}, {'type':'phone','label':'Москва','value':'+7 (495) 721-80-88'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 385-41-36'}, {'type':'email','label':'Техническая поддержка','value':'support@beget.com'}, {'type':'ticket','label':'Тикет в панели','value':'Открыть поддержку','url':'https://cp.beget.com/support'}, {'type':'telegram','label':'Telegram-бот Beget','value':'@begetbot','url':'https://t.me/begetbot'}]},
+                {'type':'phone','label':'Россия, бесплатно','value':'8 (800) 700-06-08'}, {'type':'phone','label':'Москва','value':'+7 (495) 721-80-88'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 385-41-36'}, {'type':'email','label':'Техническая поддержка','value':'support@beget.com'}, {'type':'ticket','label':'Тикет в панели','value':'Открыть поддержку','url':'https://cp.beget.com/support'}, {'type':'telegram','label':'Telegram-бот техподдержки','value':'@begetbot','url':'https://t.me/begetbot'}, {'type':'news','label':'Официальный новостной канал Beget','value':'@beget_official','url':'https://t.me/beget_official'}, {'type':'status','label':'Telegram-бот статуса Beget (ссылка указана пользователем)','value':'@BegetStatus_Bot','url':'https://t.me/BegetStatus_Bot'}, {'type':'feedback','label':'Отзывы о работе сотрудников / жалоба на оператора','value':'feedback@beget.com'}, {'type':'abuse','label':'Обработка жалоб на нарушения (abuse)','value':'abuse@beget.com'}, {'type':'complaint','label':'Претензии по услугам (e-mail для дублирования письменной претензии)','value':'abuse@beget.com'}]},
             {'id':'firstvds','name':'FirstVDS','website_url':'https://firstvds.ru','panel_url':'https://my.firstvds.ru','panel_name':'Личный кабинет FirstVDS · VMmanager','source_url':'https://firstvds.ru/company/contacts','contacts':[
                 {'type':'phone','label':'Россия, круглосуточно','value':'8 800 775-38-37'}, {'type':'phone','label':'Международный','value':'+7 495 663-73-72'}, {'type':'ticket','label':'Поддержка в личном кабинете','value':'Войти в кабинет','url':'https://my.firstvds.ru'}, {'type':'chat','label':'Онлайн-чат','value':'FirstVDS','url':'https://firstvds.ru'}]},
             {'id':'timeweb-cloud','name':'Timeweb Cloud','website_url':'https://timeweb.cloud','panel_url':'https://timeweb.cloud/my','panel_name':'Панель управления Timeweb Cloud','source_url':'https://timeweb.cloud/docs/account-management/contact-support','contacts':[
@@ -172,10 +173,26 @@ class Store:
         with self.db() as c:
             now = minute()
             for item in seed:
-                if c.execute('SELECT 1 FROM providers WHERE id=?', (item['id'],)).fetchone():
-                    continue
                 cfg = validate_provider(item)
-                c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
+                old = c.execute('SELECT * FROM providers WHERE id=?', (item['id'],)).fetchone()
+                if not old:
+                    c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
+            # One-time additive migration: add new official/user-supplied contact categories
+            # without overwriting the provider name, links, notes, or existing contact edits.
+            seeded = c.execute("SELECT value FROM provider_meta WHERE key='contact_categories_v2'").fetchone()
+            if not seeded:
+                for item in seed:
+                    old = c.execute('SELECT * FROM providers WHERE id=?', (item['id'],)).fetchone()
+                    if not old: continue
+                    current = json.loads(old['config'])
+                    contacts = current.setdefault('contacts', [])
+                    existing = {(x.get('type'), x.get('value')) for x in contacts}
+                    additions = [x for x in item['contacts'] if (x['type'], x['value']) not in existing]
+                    if additions:
+                        current['contacts'] = contacts + additions
+                        c.execute('UPDATE providers SET rev=?,updated=?,config=? WHERE id=?',
+                                  (old['rev'] + 1, now, json.dumps(current, ensure_ascii=False), old['id']))
+                c.execute("INSERT INTO provider_meta VALUES ('contact_categories_v2','1')")
             # Link earlier free-text entries to their matching directory records.
             aliases = {'beget':'beget', 'firstvds':'firstvds', 'timeweb':'timeweb', 'timeweb cloud':'timeweb-cloud'}
             for row in c.execute('SELECT id,config FROM sites').fetchall():

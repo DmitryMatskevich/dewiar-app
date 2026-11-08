@@ -97,6 +97,11 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(providers['beget']['panel_url'],'https://cp.beget.com')
         self.assertIn('support@beget.com',[c['value'] for c in providers['beget']['contacts']])
         self.assertIn('@begetbot',[c['value'] for c in providers['beget']['contacts']])
+        beget_contacts=providers['beget']['contacts']
+        self.assertIn(('@beget_official','news'),[(c['value'],c['type']) for c in beget_contacts])
+        self.assertIn(('@BegetStatus_Bot','status'),[(c['value'],c['type']) for c in beget_contacts])
+        self.assertIn(('feedback@beget.com','feedback'),[(c['value'],c['type']) for c in beget_contacts])
+        self.assertIn(('abuse@beget.com','abuse'),[(c['value'],c['type']) for c in beget_contacts])
         self.assertIn('support@sweb.ru',[c['value'] for c in providers['sweb']['contacts']])
         linked=self.store.save(dict(self.site,hosting_provider_id='timeweb'))
         self.assertEqual(linked['hoster'],'Timeweb')
