@@ -166,12 +166,14 @@ class Store:
                 {'type':'phone','label':'Россия, ежедневно 08:00–20:00 МСК','value':'8 800 700-32-92'}, {'type':'phone','label':'Санкт-Петербург, ежедневно 08:00–20:00 МСК','value':'8 812 470-71-92'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'info@timeweb.cloud'}, {'type':'ticket','label':'Тикет в панели, круглосуточно','value':'Поддержка → Центр поддержки','url':'https://timeweb.cloud/my'}, {'type':'chat','label':'Онлайн-чат, круглосуточно','value':'Чат Timeweb Cloud','url':'https://timeweb.cloud'}, {'type':'telegram','label':'Telegram сообщества','value':'@twcloud_chat','url':'https://t.me/twcloud_chat'}]},
             {'id':'timeweb','name':'Timeweb','website_url':'https://timeweb.com','panel_url':'https://hosting.timeweb.ru','panel_name':'Панель управления хостингом Timeweb','source_url':'https://timeweb.com/ru/contacts/','contacts':[
                 {'type':'phone','label':'Россия','value':'8 (800) 700-10-81'}, {'type':'email','label':'Поддержка клиентов','value':'info@timeweb.ru'}, {'type':'ticket','label':'Тикеты в панели','value':'Поддержка → Написать в поддержку','url':'https://hosting.timeweb.ru'}, {'type':'chat','label':'Онлайн-чат','value':'Чат Timeweb','url':'https://timeweb.com'}]}
+            ,{'id':'sweb','name':'Sweb','website_url':'https://sweb.ru','panel_url':'https://mcp.sweb.ru/main/auth/','panel_name':'Панель управления SpaceWeb','source_url':'https://sweb.ru/contactinfo/','contacts':[
+                {'type':'phone','label':'Россия, круглосуточно','value':'8 (800) 777-86-49'}, {'type':'phone','label':'Москва','value':'+7 (495) 109-41-49'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 209-41-49'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'support@sweb.ru'}, {'type':'ticket','label':'Заявка в панели → Поддержка','value':'Войти в панель','url':'https://mcp.sweb.ru/main/auth/'}]}
         ]
         with self.db() as c:
-            if c.execute('SELECT 1 FROM providers LIMIT 1').fetchone():
-                return
             now = minute()
             for item in seed:
+                if c.execute('SELECT 1 FROM providers WHERE id=?', (item['id'],)).fetchone():
+                    continue
                 cfg = validate_provider(item)
                 c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
             # Link earlier free-text entries to their matching directory records.

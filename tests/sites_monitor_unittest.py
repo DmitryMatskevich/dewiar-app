@@ -93,14 +93,24 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate(data)
     def test_provider_directory_seed_and_site_link(self):
         providers={p['id']:p for p in self.store.providers()}
-        self.assertEqual(set(providers),{'beget','firstvds','timeweb','timeweb-cloud'})
+        self.assertEqual(set(providers),{'beget','firstvds','timeweb','timeweb-cloud','sweb'})
         self.assertEqual(providers['beget']['panel_url'],'https://cp.beget.com')
         self.assertIn('support@beget.com',[c['value'] for c in providers['beget']['contacts']])
         self.assertIn('@begetbot',[c['value'] for c in providers['beget']['contacts']])
+        self.assertIn('support@sweb.ru',[c['value'] for c in providers['sweb']['contacts']])
         linked=self.store.save(dict(self.site,hosting_provider_id='timeweb'))
         self.assertEqual(linked['hoster'],'Timeweb')
         self.assertEqual(self.store.get(self.site['id'])['hosting_provider']['id'],'timeweb')
         with self.assertRaises(ValueError):self.store.save(dict(self.site,hosting_provider_id='missing'))
+    def test_provider_seed_migration_adds_missing_record_without_overwriting_edits(self):
+        original=self.store.provider('firstvds')
+        with self.store.db() as c:c.execute("UPDATE providers SET config=? WHERE id='firstvds'",(json.dumps(dict(original,notes='Existing edit')),))
+        with self.store.db() as c:c.execute("DELETE FROM providers WHERE id='sweb'")
+        migrated=Store(self.tmp.name)
+        self.assertEqual(migrated.provider('firstvds')['notes'],'Existing edit')
+        self.assertEqual(migrated.provider('sweb')['name'],'Sweb')
+    def test_bare_site_name_gets_https(self):
+        self.assertEqual(validate({'url':'example.org'})['url'],'https://example.org')
     def test_provider_edit_revision_and_validation(self):
         provider=self.store.provider('firstvds')
         changed=self.store.save_provider(dict(provider,name='FirstVDS Updated'))
@@ -202,7 +212,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request('/api/sites')['items'][0]['name'],'B')
     def test_provider_api_list_and_edit(self):
         providers=self.request('/api/providers')['items']
-        self.assertEqual({p['id'] for p in providers},{'beget','firstvds','timeweb','timeweb-cloud'})
+        self.assertEqual({p['id'] for p in providers},{'beget','firstvds','timeweb','timeweb-cloud','sweb'})
         p=next(p for p in providers if p['id']=='beget')
         saved=self.request('/api/providers',dict(p,notes='Synthetic note'))['item']
         self.assertEqual(saved['notes'],'Synthetic note')
