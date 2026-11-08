@@ -91,6 +91,22 @@ class StoreTests(unittest.TestCase):
     def test_validation(self):
         for data in [{'url':'file:///etc/passwd'},{'url':'https://name:pass@example.org'},{'url':'https://example.org','period':0}]:
             with self.assertRaises(ValueError):validate(data)
+    def test_provider_directory_seed_and_site_link(self):
+        providers={p['id']:p for p in self.store.providers()}
+        self.assertEqual(set(providers),{'beget','firstvds','timeweb','timeweb-cloud'})
+        self.assertEqual(providers['beget']['panel_url'],'https://cp.beget.com')
+        self.assertIn('support@beget.com',[c['value'] for c in providers['beget']['contacts']])
+        self.assertIn('@begetbot',[c['value'] for c in providers['beget']['contacts']])
+        linked=self.store.save(dict(self.site,hosting_provider_id='timeweb'))
+        self.assertEqual(linked['hoster'],'Timeweb')
+        self.assertEqual(self.store.get(self.site['id'])['hosting_provider']['id'],'timeweb')
+        with self.assertRaises(ValueError):self.store.save(dict(self.site,hosting_provider_id='missing'))
+    def test_provider_edit_revision_and_validation(self):
+        provider=self.store.provider('firstvds')
+        changed=self.store.save_provider(dict(provider,name='FirstVDS Updated'))
+        self.assertEqual(changed['rev'],provider['rev']+1)
+        with self.assertRaises(ValueError):self.store.save_provider(dict(provider,name='Stale edit'))
+        with self.assertRaises(ValueError):self.store.save_provider({'name':'Bad','contacts':[{'type':'email','value':'not-an-email'}]})
     def test_aggregate_overlap(self):
         spans=[dict(probe=p,start=0,end=10,state='DOWN') for p in ['a','b','c']]
         h=availability(spans,[],['a','b','c'],0,10);self.assertEqual(h['D'],10)
@@ -184,6 +200,12 @@ class ApiTests(unittest.TestCase):
         s=self.request('/api/sites',dict(name='A',url='https://example.org'))['item']
         self.request('/api/sites',dict(s,name='B'))
         self.assertEqual(self.request('/api/sites')['items'][0]['name'],'B')
+    def test_provider_api_list_and_edit(self):
+        providers=self.request('/api/providers')['items']
+        self.assertEqual({p['id'] for p in providers},{'beget','firstvds','timeweb','timeweb-cloud'})
+        p=next(p for p in providers if p['id']=='beget')
+        saved=self.request('/api/providers',dict(p,notes='Synthetic note'))['item']
+        self.assertEqual(saved['notes'],'Synthetic note')
     def test_poll_while_writing(self):
         for i in range(15):
             self.request('/api/sites',dict(name=str(i),url='https://example.org'))

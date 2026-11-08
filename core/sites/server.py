@@ -78,6 +78,8 @@ class App:
                     'items': [{k:s[k] for k in ('id','name','url','state','stats','hosting_expires','hosting_expires_in_days','domain_expires','domain_expires_in_days')} | {'last_checked':max((r['at'] for r in s['results']), default=None)} for s in items]}
         if path == '/api/sites':
             return {'items': self.summary(max(0,min(36500,int(query.get('days',['30'])[0]))))}
+        if path == '/api/providers':
+            return {'items': self.store.providers()}
         if path == '/api/status':
             return dict(self.runtime.status(), test=self.test, settings=self.store.settings())
         if path == '/api/access':
@@ -118,6 +120,8 @@ class App:
         if path == '/api/sites':
             saved = self.store.save(data)
             return {'item': saved}
+        if path == '/api/providers':
+            return {'item': self.store.save_provider(data)}
         if path == '/api/assets':
             return {'item':self.store.save_asset(data.get('name'),data.get('address'),data.get('provider',''))}
         if path == '/api/check':

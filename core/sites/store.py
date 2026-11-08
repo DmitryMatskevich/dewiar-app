@@ -50,8 +50,37 @@ def network_host(value, field):
         return host
 
 
+def validate_provider(data):
+    fields = ('name', 'website_url', 'panel_url', 'panel_name', 'source_url', 'notes')
+    d = {k: str(data.get(k) or '').strip() for k in fields}
+    if not d['name'] or len(d['name']) > 160:
+        raise ValueError('Укажите название провайдера (до 160 символов)')
+    for k in ('website_url', 'panel_url', 'source_url'):
+        if d[k]:
+            d[k] = web_url(d[k])
+    if len(d['panel_name']) > 160 or len(d['notes']) > 2000:
+        raise ValueError('Слишком длинное поле провайдера')
+    contacts = data.get('contacts', [])
+    if not isinstance(contacts, list) or len(contacts) > 30:
+        raise ValueError('Допустимо не более 30 каналов поддержки')
+    allowed = {'telegram', 'ticket', 'email', 'phone', 'chat', 'other'}
+    d['contacts'] = []
+    for item in contacts:
+        if not isinstance(item, dict) or item.get('type') not in allowed:
+            raise ValueError('Неверный тип контакта поддержки')
+        contact = {k: str(item.get(k) or '').strip() for k in ('type', 'label', 'value', 'url')}
+        if not contact['value'] or len(contact['value']) > 500 or len(contact['label']) > 120:
+            raise ValueError('Проверьте подпись и значение контакта')
+        if contact['url']:
+            contact['url'] = web_url(contact['url'])
+        if contact['type'] == 'email' and ('@' not in contact['value'] or len(contact['value']) > 254):
+            raise ValueError('Некорректный email поддержки')
+        d['contacts'].append(contact)
+    return d
+
+
 def validate(data):
-    d = {k: data.get(k, '') for k in ('name', 'url', 'hoster', 'hoster_url', 'panel_url', 'panel_name', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'network_operator', 'registrar', 'hosting_candidate', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'dns_host', 'mail_host', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'health_url', 'console_url', 'marker', 'ssh_host', 'hosting_expires', 'domain_expires')}
+    d = {k: data.get(k, '') for k in ('name', 'url', 'hoster', 'hoster_url', 'hosting_provider_id', 'panel_url', 'panel_name', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'network_operator', 'registrar', 'hosting_candidate', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'dns_host', 'mail_host', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'health_url', 'console_url', 'marker', 'ssh_host', 'hosting_expires', 'domain_expires')}
     for k, v in d.items():
         if not isinstance(v, str) or len(v) > (2000 if k == 'notes' else 2048):
             raise ValueError('Некорректное поле ' + k)
@@ -117,12 +146,43 @@ class Store:
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at INTEGER NOT NULL, action TEXT NOT NULL, site TEXT);
             CREATE TABLE IF NOT EXISTS renewal_alerts(site TEXT NOT NULL, kind TEXT NOT NULL, deadline TEXT NOT NULL, threshold INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(site,kind,deadline,threshold));
             CREATE TABLE IF NOT EXISTS server_assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL UNIQUE, provider TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, rev INTEGER NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL, config TEXT NOT NULL);
             PRAGMA user_version=1;
             ''')
         with self.db() as c:
             if 'target' not in [r['name'] for r in c.execute('PRAGMA table_info(outbox)')]:
                 c.execute("ALTER TABLE outbox ADD COLUMN target TEXT NOT NULL DEFAULT '{}'")
+        self._seed_providers()
         os.chmod(self.path, 0o600)
+
+    def _seed_providers(self):
+        """Seed verified provider directory once; subsequent launches preserve edits."""
+        seed = [
+            {'id':'beget','name':'Beget','website_url':'https://beget.com','panel_url':'https://cp.beget.com','panel_name':'Панель управления Beget','source_url':'https://beget.com/ru/contacts','contacts':[
+                {'type':'phone','label':'Россия, бесплатно','value':'8 (800) 700-06-08'}, {'type':'phone','label':'Москва','value':'+7 (495) 721-80-88'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 385-41-36'}, {'type':'email','label':'Техническая поддержка','value':'support@beget.com'}, {'type':'ticket','label':'Тикет в панели','value':'Открыть поддержку','url':'https://cp.beget.com/support'}, {'type':'telegram','label':'Telegram-бот Beget','value':'@begetbot','url':'https://t.me/begetbot'}]},
+            {'id':'firstvds','name':'FirstVDS','website_url':'https://firstvds.ru','panel_url':'https://my.firstvds.ru','panel_name':'Личный кабинет FirstVDS · VMmanager','source_url':'https://firstvds.ru/company/contacts','contacts':[
+                {'type':'phone','label':'Россия, круглосуточно','value':'8 800 775-38-37'}, {'type':'phone','label':'Международный','value':'+7 495 663-73-72'}, {'type':'ticket','label':'Поддержка в личном кабинете','value':'Войти в кабинет','url':'https://my.firstvds.ru'}, {'type':'chat','label':'Онлайн-чат','value':'FirstVDS','url':'https://firstvds.ru'}]},
+            {'id':'timeweb-cloud','name':'Timeweb Cloud','website_url':'https://timeweb.cloud','panel_url':'https://timeweb.cloud/my','panel_name':'Панель управления Timeweb Cloud','source_url':'https://timeweb.cloud/docs/account-management/contact-support','contacts':[
+                {'type':'phone','label':'Россия, ежедневно 08:00–20:00 МСК','value':'8 800 700-32-92'}, {'type':'phone','label':'Санкт-Петербург, ежедневно 08:00–20:00 МСК','value':'8 812 470-71-92'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'info@timeweb.cloud'}, {'type':'ticket','label':'Тикет в панели, круглосуточно','value':'Поддержка → Центр поддержки','url':'https://timeweb.cloud/my'}, {'type':'chat','label':'Онлайн-чат, круглосуточно','value':'Чат Timeweb Cloud','url':'https://timeweb.cloud'}, {'type':'telegram','label':'Telegram сообщества','value':'@twcloud_chat','url':'https://t.me/twcloud_chat'}]},
+            {'id':'timeweb','name':'Timeweb','website_url':'https://timeweb.com','panel_url':'https://hosting.timeweb.ru','panel_name':'Панель управления хостингом Timeweb','source_url':'https://timeweb.com/ru/contacts/','contacts':[
+                {'type':'phone','label':'Россия','value':'8 (800) 700-10-81'}, {'type':'email','label':'Поддержка клиентов','value':'info@timeweb.ru'}, {'type':'ticket','label':'Тикеты в панели','value':'Поддержка → Написать в поддержку','url':'https://hosting.timeweb.ru'}, {'type':'chat','label':'Онлайн-чат','value':'Чат Timeweb','url':'https://timeweb.com'}]}
+        ]
+        with self.db() as c:
+            if c.execute('SELECT 1 FROM providers LIMIT 1').fetchone():
+                return
+            now = minute()
+            for item in seed:
+                cfg = validate_provider(item)
+                c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
+            # Link earlier free-text entries to their matching directory records.
+            aliases = {'beget':'beget', 'firstvds':'firstvds', 'timeweb':'timeweb', 'timeweb cloud':'timeweb-cloud'}
+            for row in c.execute('SELECT id,config FROM sites').fetchall():
+                cfg = json.loads(row['config'])
+                if not cfg.get('hosting_provider_id'):
+                    key = str(cfg.get('hoster') or '').strip().casefold()
+                    if key in aliases:
+                        cfg['hosting_provider_id'] = aliases[key]
+                        c.execute('UPDATE sites SET config=? WHERE id=?', (json.dumps(cfg, ensure_ascii=False), row['id']))
 
     @contextmanager
     def db(self):
@@ -188,18 +248,56 @@ class Store:
                 config.setdefault('hosting_expires', '')
                 config.setdefault('domain_expires', '')
                 config.setdefault('hoster_url', '')
+                config.setdefault('hosting_provider_id', '')
                 for key in ('hosting_vault_id','dns_vault_id','dns_provider','dns_provider_url','dns_panel_url','server_name','server_ip','network_operator','registrar','mail_provider','asset_id'):
                     config.setdefault(key, '')
                 for key in ('panel_name','dns_panel_name','dns_nameservers','dns_mx_hosts','hosting_candidate','mail_imap_host','mail_smtp_host','mail_mx_host','mail_smtp_kind'):
                     config.setdefault(key, '')
+                provider = self.provider(config.get('hosting_provider_id')) if config.get('hosting_provider_id') else None
+                if provider:
+                    config['hoster'] = provider['name']
+                    config['hoster_url'] = provider['website_url']
+                    config['hosting_provider'] = provider
+                else:
+                    config.setdefault('hosting_provider', None)
                 items.append(dict(config, id=r['id'], rev=r['rev'], created=r['created'], due=r['due']))
             return items
+
+    def providers(self):
+        with self.db() as c:
+            return [dict(json.loads(r['config']), id=r['id'], rev=r['rev'], created=r['created'], updated=r['updated']) for r in c.execute('SELECT * FROM providers ORDER BY created,id')]
+
+    def provider(self, provider_id):
+        return next((x for x in self.providers() if x['id'] == provider_id), None)
+
+    def save_provider(self, data):
+        cfg = validate_provider(data)
+        pid = str(data.get('id') or uuid.uuid4().hex)
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', pid):
+            raise ValueError('Неверный идентификатор провайдера')
+        now = minute()
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            old = c.execute('SELECT * FROM providers WHERE id=?', (pid,)).fetchone()
+            if old and data.get('rev') != old['rev']:
+                raise ValueError('Карточка провайдера изменилась. Обновите список перед сохранением')
+            if c.execute('SELECT 1 FROM providers WHERE id<>? AND lower(json_extract(config, \'$.name\'))=lower(?)', (pid, cfg['name'])).fetchone():
+                raise ValueError('Провайдер с таким названием уже есть')
+            rev = old['rev'] + 1 if old else 1
+            if old:
+                c.execute('UPDATE providers SET rev=?,updated=?,config=? WHERE id=?', (rev, now, json.dumps(cfg, ensure_ascii=False), pid))
+            else:
+                c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (pid, rev, now, now, json.dumps(cfg, ensure_ascii=False)))
+            c.execute('INSERT INTO audit(at,action) VALUES (?,?)', (now, 'provider_saved'))
+        return self.provider(pid)
 
     def get(self, sid):
         return next((s for s in self.all() if s['id'] == sid), None)
 
     def save(self, data):
         cfg = validate(data)
+        if cfg.get('hosting_provider_id') and not self.provider(cfg['hosting_provider_id']):
+            raise ValueError('Выбранный хостинг-провайдер не найден')
         sid = str(data.get('id') or uuid.uuid4().hex)
         now = minute()
         with self.db() as c:
@@ -210,7 +308,7 @@ class Store:
             rev = old['rev'] + 1 if old else 1
             if old:
                 c.execute('UPDATE sites SET config=?,rev=?,due=? WHERE id=?', (json.dumps(cfg, ensure_ascii=False), rev, now, sid))
-                metadata = {'name', 'hoster', 'hoster_url', 'panel_name', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'registrar', 'network_operator', 'hosting_candidate', 'panel_url', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'hosting_expires', 'domain_expires'}
+                metadata = {'name', 'hoster', 'hoster_url', 'hosting_provider_id', 'panel_name', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'registrar', 'network_operator', 'hosting_candidate', 'panel_url', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'hosting_expires', 'domain_expires'}
                 previous = json.loads(old['config'])
                 changed = any(previous.get(k) != v for k,v in cfg.items() if k not in metadata)
                 if changed:
