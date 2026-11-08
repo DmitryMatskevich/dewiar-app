@@ -310,6 +310,9 @@ class CommandsMixin:
 
     @public_song_commands
     def command(self, cmd, a):
+        if cmd in ("sites_service", "sites_list", "sites_status", "sites_incidents"):
+            from sites.client import command
+            return command(cmd, a)
         # Bridge commands run concurrently. Starting a turn and switching its context
         # must be ordered, even when two windows send commands together.
         if cmd in ("say", "chat_select", "chat_manage", "chat_clear"):
