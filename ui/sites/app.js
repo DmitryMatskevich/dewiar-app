@@ -12,6 +12,8 @@ const when=m=>m ? new Date(m*60000).toLocaleString('ru-RU',{day:'2-digit',month:
 function until(iso,days,label){if(!iso)return '';const [y,m,d]=iso.split('-').map(Number),dateText=[String(d).padStart(2,'0'),String(m).padStart(2,'0'),y].join('.'),word=days<0?`истёк ${Math.abs(days)} дн. назад`:days===0?'истекает сегодня':`через ${days} дн.`,cls=days<0||days<=7?'renewal-bad':days<=30?'renewal-soon':'renewal-good';return `<span class="${cls}">${label}: ${word} (${dateText})</span>`;}
 const percent=n=>n==null?'Нет данных':Number(n).toLocaleString('ru-RU',{maximumFractionDigits:2})+'%';
 const badge=s=>`<span class="badge ${esc(s)}">${esc(labels[s]||s)}</span>`;
+function setTheme(theme){const dark=theme==='dark';document.body.classList.toggle('theme-dark',dark);const b=$('#theme-toggle');if(b){const label=dark?'Включить светлую тему':'Включить тёмную тему';b.setAttribute('aria-label',label);b.title=label;}localStorage.setItem('sites-theme',dark?'dark':'light');}
+setTheme(localStorage.getItem('sites-theme')==='dark'?'dark':'light');
 async function api(path,data) {
  const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{Authorization:'Bearer '+(sessionStorage.getItem('sites-token')||''),'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
  const v=await r.json(); if(!r.ok) throw Error(v.error||'Ошибка запроса'); return v;
@@ -28,17 +30,20 @@ function render(){
   const dates=[until(s.hosting_expires,s.hosting_expires_in_days,'Хостинг'),until(s.domain_expires,s.domain_expires_in_days,'Домен')].filter(Boolean);
   const health=s.state==='UP'?'good':s.state==='DOWN'?'bad':s.state==='PENDING'?'pending':'unknown';
   return `<article class="site-row">
+   <div class="site-topline">
    <div class="site-actions">
     <button class="row-icon refresh ${health}" data-check="${esc(s.id)}" title="Проверить сайт" aria-label="Проверить ${esc(s.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg></button>
     <button class="row-icon edit" data-edit="${esc(s.id)}" title="Изменить сайт" aria-label="Изменить ${esc(s.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l4.4-.9L19.3 8.2a2.1 2.1 0 0 0-3-3L5.4 16.1 4 20z"/></svg></button>
    </div>
-   <div class="site-main"><a class="site-title" href="${esc(s.url)}" title="${esc(s.name)}">${esc(new URL(s.url).hostname)}</a>
+   <a class="site-title" href="${esc(s.url)}" title="${esc(s.name)}">${esc(new URL(s.url).hostname)}</a>
+   <div class="hosting-provider"><span class="muted small">Хостинг-провайдер</span>${s.hoster?(s.hoster_url?`<a href="${esc(s.hoster_url)}">${esc(s.hoster)}</a>`:`<strong>${esc(s.hoster)}</strong>`):'<span class="site-sub">Не указан</span>'}${s.dns_provider?`<span class="muted small">DNS: ${esc(s.dns_provider)}</span>`:''}</div>
+   <div class="row-uptime ${health}" title="${esc(s.state)}"><strong>${percent(s.stats.uptime)}</strong><span>${badge(s.state)}</span></div>
+   </div>
+   <div class="site-details">
     <div class="service-icons" aria-label="Состояние сервисов">${serviceDefs.map(d=>{const state=serviceState(s,d);const color=state==='+'?'good':state==='-'?'bad':'unset';const text=state==='+'?'всё в порядке':state==='-'?'есть проблема':'не настроено';return `<button class="service-icon ${color}" data-service="${d[0]}" data-site="${esc(s.id)}" title="${esc(d[1]+': '+text+' · нажмите для настройки')}" aria-label="${esc(d[1]+': '+state+' — '+text+'; открыть настройку')}"><span>${state}</span><small>${d[1]}</small></button>`}).join('')}</div>
     ${s.health_url?`<div class="health-link">HTML: <a href="${esc(s.health_url)}" aria-label="Открыть тестовую HTML-страницу ${esc(s.name)}">${esc(new URL(s.health_url).pathname||'/')}</a></div>`:''}
     ${dates.length?`<div class="renewal-info">${dates.join('<br>')}</div>`:''}
    </div>
-   <div class="hosting-provider"><span class="muted small">Хостинг-провайдер</span>${s.hoster?(s.hoster_url?`<a href="${esc(s.hoster_url)}">${esc(s.hoster)}</a>`:`<strong>${esc(s.hoster)}</strong>`):'<span class="site-sub">Не указан</span>'}${s.dns_provider?`<span class="muted small">DNS: ${esc(s.dns_provider)}</span>`:''}</div>
-   <div class="row-uptime ${health}" title="${esc(s.state)}"><strong>${percent(s.stats.uptime)}</strong><span>${badge(s.state)}</span></div>
   </article>`
  }).join(''):'<div class="empty">Сайтов пока нет или поиск не дал результатов.<br>Добавьте сайт — для начала достаточно названия и URL.</div>';
 }
@@ -60,7 +65,7 @@ async function deliveries(){const r=await api('deliveries');$('#deliveries').inn
 async function tab(name){currentTab=name;for(const n of ['sites','processes','notifications']){$('#'+n+'-view').hidden=n!==name;document.querySelector(`[data-tab="${n}"]`).classList.toggle('selected',n===name);}if(name==='notifications'){await loadAccess();const f=$('#notify-form'),cfg=status.settings;for(const k of ['telegram','max','email','simulation'])f.elements[k].checked=cfg.channels.includes(k);f.elements.mail_account_id.value=cfg.mail_account_id;f.elements.email_to.value=cfg.email_to;await deliveries();}}
 $('#notify-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{const f=e.target;await api('settings',{channels:['telegram','max','email','simulation'].filter(k=>f.elements[k].checked),mail_account_id:f.elements.mail_account_id.value,email_to:f.elements.email_to.value});notice('Настройки уведомлений сохранены');await refresh();},e.submitter);});
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.close){$('#'+b.dataset.close).close();editing=false;$('#secret')?.replaceChildren();}if(b.dataset.service)action(()=>edit(b.dataset.site,b.dataset.service),b);if(b.dataset.edit)action(()=>edit(b.dataset.edit),b);if(b.dataset.detail)action(()=>detail(b.dataset.detail),b);if(b.dataset.tab)action(()=>tab(b.dataset.tab),b);if(b.dataset.check)action(async()=>{await api('check',{id:b.dataset.check});notice('Диагностика запущена. Результат — в фоновых процессах; статистику не изменяет.');await refresh();await tab('processes');},b);if(b.dataset.test)action(async()=>{await api('notify-test',{channel:b.dataset.test});notice('Тест добавлен в очередь');await deliveries();},b);});
-$('#add').onclick=()=>action(()=>edit());$('#refresh').onclick=e=>action(refresh,e.target);$('#search').oninput=render;$('#period').onchange=()=>action(refresh);$('#pause').onclick=e=>action(async()=>{await api('settings',{paused:!status.paused});await refresh();},e.target);$('#workers').onchange=e=>action(async()=>{await api('settings',{workers:Number(e.target.value)});await refresh();});
+$('#add').onclick=()=>action(()=>edit());$('#refresh').onclick=e=>action(refresh,e.target);$('#search').oninput=render;$('#theme-toggle').onclick=()=>setTheme(document.body.classList.contains('theme-dark')?'light':'dark');$('#period').onchange=()=>action(refresh);$('#pause').onclick=e=>action(async()=>{await api('settings',{paused:!status.paused});await refresh();},e.target);$('#workers').onchange=e=>action(async()=>{await api('settings',{workers:Number(e.target.value)});await refresh();});
 $('#editor').addEventListener('close',()=>editing=false);$('#detail').addEventListener('close',()=>$('#secret')?.replaceChildren());
 action(refresh);setInterval(()=>{if(!document.hidden&&!editing)refresh().catch(e=>{$('#connection').textContent='Нет связи с процессом';notice(e.message,true);});},10000);
 })();
