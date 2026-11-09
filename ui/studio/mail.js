@@ -90,21 +90,30 @@ function mlRemoveImportanceRule(id) {
 function mlSetView(view) {
   mlClearMessage();
   mlView = view; mlAccountFilter = "";
-  const names = { all: "Все входящие", unread: "Непрочитанные", important: "Важные", important_unread: "Важные непрочитанные", unanswered: "Без ответа", badge_custom: "На значке" };
-  document.querySelectorAll("[data-ml-view]").forEach(b => {
-    const selected = b.dataset.mlView === view;
-    b.classList.toggle("selected", selected); b.setAttribute("aria-pressed", String(selected));
-  });
-  $("#ml-view-title").textContent = names[view] || "Все входящие";
+  const presets = { all: { important: false, unread: false, unanswered: false },
+    unread: { important: false, unread: true, unanswered: false },
+    important: { important: true, unread: false, unanswered: false },
+    important_unread: { important: true, unread: true, unanswered: false },
+    unanswered: { important: false, unread: false, unanswered: true } };
+  if (presets[view]) {
+    mlBadgeFilters = { ...mlBadgeFilters, ...presets[view] };
+    document.querySelectorAll("[data-mail-badge-filter]").forEach(input => { input.checked = !!mlBadgeFilters[input.dataset.mailBadgeFilter]; });
+    core.call("settings_save", { patch: { ui: { mail_badge_filters: mlBadgeFilters } } }).then(result => { S = result; }).catch(() => {});
+  }
+  $("#ml-view-title").textContent = mlFilterTitle();
   $("#ml-view-subtitle").textContent = "Выберите письмо, чтобы прочитать его";
   mlRenderAccounts(); mlList();
+}
+function mlFilterTitle() {
+  const selected = [["important", "Важные"], ["unread", "Непрочитанные"], ["unanswered", "Без ответа"]]
+    .filter(([key]) => mlBadgeFilters[key]).map(([, label]) => label);
+  return selected.length ? selected.join(" · ") : "Все входящие";
 }
 function mlChooseAccount(id) {
   mlClearMessage();
   mlAccountFilter = id; mlView = "account";
   const a = mlAccounts.find(x => x.id === id);
-  document.querySelectorAll("[data-ml-view]").forEach(b => { b.classList.remove("selected"); b.setAttribute("aria-pressed", "false"); });
-  $("#ml-view-title").textContent = a ? a.label : "Входящие";
+  $("#ml-view-title").textContent = (a ? a.label + " · " : "") + mlFilterTitle();
   $("#ml-view-subtitle").textContent = a ? a.address : "";
   mlRenderAccounts(); mlSelect(id); mlList();
 }
@@ -148,7 +157,7 @@ async function mlLoad(selectAccountId = "") {
     ...((typeof S !== "undefined" && S && S.ui && S.ui.mail_badge_filters) || {}) };
   document.querySelectorAll("[data-mail-badge-filter]").forEach(input => {
     input.checked = !!mlBadgeFilters[input.dataset.mailBadgeFilter];
-    input.onchange = mlSaveBadgeFilters;
+    input.onchange = () => { mlView = "badge_custom"; $("#ml-view-title").textContent = mlFilterTitle(); mlSaveBadgeFilters(); };
   });
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
   const params = new URLSearchParams(location.search);
@@ -188,7 +197,8 @@ async function mlSaveBadgeFilters() {
   try {
     S = await core.call("settings_save", { patch: { ui: { mail_badge_filters: next } } });
     toast("Условия значка сохранены.");
-    if (mlView === "badge_custom") mlList();
+    $("#ml-view-title").textContent = (mlAccountFilter ? (mlAccounts.find(a => a.id === mlAccountFilter)?.label + " · ") : "") + mlFilterTitle();
+    await mlList();
   } catch (e) {
     mlBadgeFilters = previous;
     document.querySelectorAll("[data-mail-badge-filter]").forEach(input => { input.checked = !!previous[input.dataset.mailBadgeFilter]; });
@@ -197,12 +207,9 @@ async function mlSaveBadgeFilters() {
 }
 async function mlList() {
   try {
-    const important = mlView === "important" || mlView === "important_unread" || mlView === "unanswered" || (mlView === "badge_custom" && mlBadgeFilters.important);
-    const unanswered = mlView === "unanswered" || (mlView === "badge_custom" && mlBadgeFilters.unanswered);
-    const noBadgeFilters = mlView === "badge_custom" && !Object.values(mlBadgeFilters).some(Boolean);
-    const items = noBadgeFilters ? [] : await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
-      account_id: mlAccountFilter, important, unanswered, incoming_only: mlView === "badge_custom",
-      unread: mlView === "unread" || mlView === "important_unread" || (mlView === "badge_custom" && mlBadgeFilters.unread) });
+    const items = await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
+      account_id: mlAccountFilter, important: !!mlBadgeFilters.important, unanswered: !!mlBadgeFilters.unanswered,
+      incoming_only: true, unread: !!mlBadgeFilters.unread });
     mlScopeItems = items;
     const box = $("#ml-list"); box.replaceChildren();
     if (!items.length) {
@@ -381,7 +388,6 @@ $("#ml-refresh").onclick = async ev => { ev.target.disabled = true; $("#ml-sync-
   try { const r = await core.call("mail_sync"); await mlLoad(); const ok = r.accounts.filter(x => x.ok).length, bad = r.accounts.filter(x => !x.ok);
     $("#ml-sync-state").textContent = "Проверено ящиков: " + ok + "." + (bad.length ? " Ошибки: " + bad.map(x => x.account_id + ": " + x.error).join("; ") : " Ошибок нет.");
   } catch (e) { $("#ml-sync-state").textContent = e.message; } finally { ev.target.disabled = false; } };
-document.querySelectorAll("[data-ml-view]").forEach(b => b.onclick = () => mlSetView(b.dataset.mlView));
 $("#ml-query").oninput = () => mlList();
 $("#ml-reply-prepare").onclick = async ev => { if (!mlCurrentMessage) return; ev.target.disabled = true;
   try { await mlShowDraft(await core.call("mail_reply_prepare", { message_id: mlCurrentMessage.id, body: $("#ml-reply-body").value })); }

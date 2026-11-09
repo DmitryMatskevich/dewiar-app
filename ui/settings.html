@@ -548,20 +548,13 @@
     <p class="lead">Входящие по всем ящикам, важные письма и ответы всем. Подключения и правила важности настраиваются здесь же.</p>
     <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
       <div class="ml-mail-app">
-        <aside class="ml-sidebar" aria-label="Ящики и представления">
-          <h3 class="ml-nav-heading">Что посмотреть</h3>
-          <div class="ml-nav-group" role="group" aria-label="Представления писем">
-            <button type="button" class="ml-view-item selected" data-ml-view="all" aria-pressed="true"><span>Все входящие</span></button>
-            <button type="button" class="ml-view-item" data-ml-view="unread" aria-pressed="false"><span>Непрочитанные</span></button>
-            <button type="button" class="ml-view-item" data-ml-view="important" aria-pressed="false"><span>Важные</span></button>
-            <button type="button" class="ml-view-item" data-ml-view="unanswered" aria-pressed="false"><span>Без ответа</span></button>
-          </div>
-          <fieldset class="ml-badge-filters" aria-describedby="ml-badge-help">
-            <legend>Показывать на значке</legend>
+        <aside class="ml-sidebar" aria-label="Ящики и фильтры писем">
+          <fieldset class="ml-badge-filters ml-view-filters" aria-describedby="ml-badge-help">
+            <legend>Что посмотреть</legend>
             <label><input type="checkbox" data-mail-badge-filter="important"><span>Важные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unread"><span>Непрочитанные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unanswered"><span>Без ответа</span></label>
-            <p id="ml-badge-help">На значке будет число писем, которые подходят под все отмеченные условия.</p>
+            <p id="ml-badge-help">Отмеченные условия одновременно фильтруют список и задают число на значке. Если ничего не отмечено, показываются все входящие.</p>
           </fieldset>
           <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
           <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>

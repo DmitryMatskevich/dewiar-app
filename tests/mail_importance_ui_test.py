@@ -17,12 +17,13 @@ with sync_playwright() as pw:
       window.$=(selector,root=document)=>root.querySelector(selector);
       window.saved=[];
       window.savedBadgeFilters=null;
+      window.lastMailListArgs=null;
       window.core={connected:true,on(){return this},async call(cmd,args={}){
         if(cmd==='mail_accounts')return [];
         if(cmd==='mail_rules_get')return {rules:{schema_version:2,accounts:[],important_contacts:[],important_recipient_groups:[],importance_rules:[],website_forms:[],reply_preferences:{confirmed_self_addresses:[]}}};
         if(cmd==='mail_rules_save'){saved.push(args.rules);return {rules:args.rules};}
         if(cmd==='settings_save'){savedBadgeFilters=args.patch.ui.mail_badge_filters;return {ui:{mail_badge_filters:savedBadgeFilters}};}
-        if(cmd==='mail_list')return [];
+        if(cmd==='mail_list'){lastMailListArgs=args;return [];}
         return {};
       }};
       window.toast=()=>{};
@@ -32,6 +33,19 @@ with sync_playwright() as pw:
     page.wait_for_function("typeof mlRulesData==='object' && document.getElementById('ml-rules').value.length>0")
     page.locator('[data-mail-badge-filter="unread"]').check()
     page.wait_for_function("savedBadgeFilters.unread===true && savedBadgeFilters.important===true")
+    page.wait_for_function("lastMailListArgs.unread===true && lastMailListArgs.important===true && lastMailListArgs.incoming_only===true")
+    assert page.locator("[data-ml-view]").count() == 0
+    assert page.locator("#ml-view-title").inner_text() == "Важные · Непрочитанные · Без ответа"
+    page.locator('[data-mail-badge-filter="unanswered"]').uncheck()
+    page.wait_for_function("lastMailListArgs.unread===true && lastMailListArgs.unanswered===false")
+    assert page.locator("#ml-view-title").inner_text() == "Важные · Непрочитанные"
+    page.locator('[data-mail-badge-filter="important"]').uncheck()
+    page.wait_for_function("lastMailListArgs.important===false && lastMailListArgs.unread===true")
+    page.locator('[data-mail-badge-filter="unread"]').uncheck()
+    page.wait_for_function("lastMailListArgs.important===false && lastMailListArgs.unread===false && lastMailListArgs.unanswered===false")
+    page.locator('[data-mail-badge-filter="unanswered"]').check()
+    page.wait_for_function("lastMailListArgs.important===false && lastMailListArgs.unread===false && lastMailListArgs.unanswered===true")
+    assert page.locator("#ml-view-title").inner_text() == "Без ответа"
     page.locator("#p-mail details.ml-settings").nth(1).locator("summary").click()
     page.locator("#ml-ir-sender").fill("client@example.org")
     page.locator("#ml-ir-subject").fill("Оплата")

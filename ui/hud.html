@@ -2336,7 +2336,7 @@ function setMailBadgeCounts(counts) {
   const selected = mailBadgeCounts.filters || {};
   const criteria = [["important", "важные"], ["unread", "непрочитанные"], ["unanswered", "без ответа"]]
     .filter(([key]) => selected[key]).map(([, title]) => title);
-  const description = criteria.length ? criteria.join(", ") : "условия не выбраны";
+  const description = criteria.length ? criteria.join(", ") : "все входящие";
   const label = n ? "Писем " + description + ": " + n + ". Открыть список" : "Открыть почту: нет писем (" + description + ")";
   button.title = label; button.setAttribute("aria-label", label);
 }

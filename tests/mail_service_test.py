@@ -268,6 +268,7 @@ class MailServiceTests(unittest.TestCase):
             self.service._store_message(db, first, {**unread, "uid": "44", "message_id": "<read>", "unread": False}, "77", "INBOX")
         self.assertEqual(self.service.unread_count(), 2)
         self.assertEqual(self.service.important_count(), 3)
+        self.assertEqual(self.service.badge_count({}), 3, "no selected filter means all incoming messages")
         self.service.badge_filters_provider = lambda: {"important": True, "unread": False, "unanswered": True}
         self.assertEqual(self.service.badge_count(), 3)
         self.service.badge_filters_provider = lambda: {"important": True, "unread": True, "unanswered": False}

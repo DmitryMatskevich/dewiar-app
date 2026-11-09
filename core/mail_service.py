@@ -730,8 +730,6 @@ class MailService:
             clauses.append("unread=1")
         if filters.get("unanswered"):
             clauses.append("answered=0")
-        if not any(filters.get(key) for key in ("important", "unread", "unanswered")):
-            return 0
         with self._db() as db:
             row = db.execute("SELECT COUNT(DISTINCT COALESCE(NULLIF(message_id,''), "
                 "account_id || ':' || uidvalidity || ':' || uid)) "

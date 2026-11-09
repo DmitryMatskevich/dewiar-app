@@ -1447,6 +1447,11 @@ class CommandsMixin:
             before = self.s.snapshot()
             self.s.update(a["patch"])
             after = self.s.snapshot()
+            if before.get("ui", {}).get("mail_badge_filters") != after.get("ui", {}).get("mail_badge_filters") and getattr(self, "mail", None):
+                try:
+                    self.emit("mail_counts", **self.mail.badge_counts())
+                except Exception:  # noqa: BLE001
+                    log.exception("Не удалось обновить значок почты после изменения фильтров")
             if "audio" in a["patch"] and hasattr(self, "_end_frames"):
                 self._pause_apply()                              # пауза конца фразы — сразу, без перезапуска слуха
             if before["llm"].get("active") != after["llm"].get("active") or \
