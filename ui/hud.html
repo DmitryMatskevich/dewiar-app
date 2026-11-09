@@ -461,10 +461,20 @@
   .att .att-convert { width: 25px; height: 25px; flex: none; display: grid; place-items: center; padding: 0; border-radius: 50%; color: #93b2ff; background: rgba(99,130,235,.14); }
   .att .att-convert:hover, .att .att-convert[aria-expanded="true"] { color: #fff; background: rgba(86,120,232,.48); }
   .att-convert svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-  .att .att-format-picker { position: absolute; z-index: 30; top: calc(100% + 5px); right: 2px; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 1px solid rgba(255,255,255,.17); border-radius: 10px; background: #202634; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+  .att .att-format-picker { position: fixed; z-index: 9999; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 0; border-radius: 10px; background: #202634; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
   .att-format-picker[hidden] { display: none; }
   .att .att-format-picker button { padding: 6px 8px; border-radius: 6px; color: var(--ink); font-size: 11px; text-align: left; }
   .att .att-format-picker button:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .native-operation-result { width: 100%; margin-top: 8px; user-select: text; }
+  .native-operation-file { display:flex; align-items:center; gap:8px; margin:6px 0; overflow-wrap:anywhere; }
+  .native-operation-file-name { flex:1; min-width:0; }
+  .native-operation-preview { display:block; max-width:100%; max-height:260px; margin:6px 0; border-radius:8px; object-fit:contain; }
+  .native-operation-html { width:100%; height:240px; margin:6px 0; border:0; border-radius:8px; background:#fff; }
+  .native-operation-editor { box-sizing:border-box; width:100%; min-height:150px; max-height:42vh; resize:vertical; margin:6px 0; padding:9px; border:0; border-radius:8px; background:rgba(255,255,255,.12); color:var(--ink); font:inherit; user-select:text; }
+  .native-operation-actions { display:flex; flex-wrap:wrap; gap:5px; margin:5px 0; }
+  .native-operation-actions button { border:0; border-radius:8px; padding:6px 9px; background:rgba(255,255,255,.10); color:var(--ink); cursor:pointer; font:inherit; font-size:11px; }
+  .native-operation-actions button:hover { background:rgba(255,255,255,.18); }
+  .native-operation-status { display:block; color:var(--muted); font-size:11px; }
   body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
 
   #bar { flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; margin-top: 8px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; position: relative; z-index: 2; }
@@ -2044,20 +2054,58 @@ async function showNativeTaskResult(t) {
   const status = document.createElement("span"); status.className = "native-operation-status"; status.setAttribute("role", "status");
   const addButton = (label, title, fn) => { const button = document.createElement("button"); button.type = "button"; button.textContent = label; button.title = title; button.setAttribute("aria-label", title); button.onclick = fn; actions.append(button); return button; };
   for (const output of outs) {
-    const row = document.createElement("div"); row.textContent = output.source ? `${output.source} → ${output.title || output.path}` : (output.title || output.path); box.append(row);
+    const row = document.createElement("div"); row.className = "native-operation-file";
+    const fileName = document.createElement("span"); fileName.className = "native-operation-file-name";
+    fileName.textContent = output.source ? `${output.source} → ${output.title || output.path}` : (output.title || output.path); row.append(fileName); box.append(row);
     const ext = String(output.path || "").split(".").pop().toLowerCase();
+    if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) {
+      try {
+        const preview = await core.call("task_preview_result", {id:t.id,path:output.path});
+        if (!document.body.contains($("cap"))) return;
+        const image = document.createElement("img"); image.className = "native-operation-preview";
+        image.alt = output.title || output.path; image.src = `data:${preview.mime};base64,${preview.data}`; box.append(image);
+      } catch (_) { /* Для большого изображения остаётся кнопка открытия файла. */ }
+    }
     if (extracting || ["txt", "md", "html", "csv", "tsv"].includes(ext)) {
       try {
         const result = await core.call("task_read_result", {id:t.id,path:output.path});
         if (!document.body.contains($("cap"))) return;
-        const preview = document.createElement("pre"); preview.textContent = result.text || "Текст не распознан."; box.append(preview);
+        if (ext === "html") {
+          const preview = document.createElement("iframe"); preview.className = "native-operation-html";
+          preview.title = `Предпросмотр ${output.title || output.path}`; preview.setAttribute("sandbox", ""); preview.srcdoc = result.text || ""; box.append(preview);
+        } else { const preview = document.createElement("pre"); preview.textContent = result.text || "Текст не распознан."; box.append(preview); }
         if (result.truncated) { const clipped = document.createElement("div"); clipped.textContent = "Показана первая часть. Полный текст — в файле результата."; box.append(clipped); }
         addButton("Скопировать текст", "Скопировать показанный текст в буфер обмена", async () => {
           try { await navigator.clipboard.writeText(result.text || ""); status.textContent = "Текст скопирован."; }
           catch (_) { status.textContent = "Не удалось записать в буфер обмена. Выделите текст выше и скопируйте вручную."; }
         });
+        if (!result.truncated && ["txt", "md", "html", "csv", "tsv"].includes(ext)) addButton("✎", `Редактировать ${output.title || output.path}`, async () => {
+          const editor = document.createElement("textarea"); editor.className = "native-operation-editor";
+          editor.setAttribute("aria-label", `Текст файла ${output.title || output.path}`); editor.value = result.text || "";
+          const controls = document.createElement("div"); controls.className = "native-operation-actions";
+          const save = document.createElement("button"); save.type = "button"; save.textContent = "Сохранить изменения";
+          const cancel = document.createElement("button"); cancel.type = "button"; cancel.textContent = "Отмена";
+          controls.append(save, cancel); box.insertBefore(editor, actions); box.insertBefore(controls, actions);
+          editor.focus();
+          cancel.onclick = () => { editor.remove(); controls.remove(); };
+          save.onclick = async () => {
+            save.disabled = true;
+            try { await core.call("task_write_result", {id:t.id,path:output.path,text:editor.value});
+              status.textContent = `Изменения сохранены в «${output.title || output.path}».`;
+              const preview = editor.previousElementSibling;
+              if (ext === "html" && preview?.tagName === "IFRAME") preview.srcdoc = editor.value;
+              else if (preview?.tagName === "PRE") preview.textContent = editor.value;
+              result.text = editor.value; editor.remove(); controls.remove();
+            } catch (error) { status.textContent = error.message || String(error); save.disabled = false; }
+          };
+        });
       } catch (error) { const note = document.createElement("div"); note.textContent = `Не удалось показать текст: ${error.message}`; box.append(note); }
     }
+    addButton("Результаты задачи", `Открыть задачу «${t.title}» и вкладку с файлами результата`, async () => {
+      const a = api();
+      if (a?.open_settings) { await a.open_settings("tasks", "&task=" + encodeURIComponent(t.id)); status.textContent = "Открыта задача с результатами."; }
+      else status.textContent = "Откройте вкладку «Задачи» — там находится этот результат.";
+    });
     addButton("Открыть файл", `Открыть результат ${output.title || output.path}`, async () => {
       try { await core.call("task_open_result", {id:t.id,path:output.path}); status.textContent = `Открыт файл «${output.title || output.path}».`; }
       catch (error) { status.textContent = error.message || String(error); }
@@ -2353,7 +2401,14 @@ function renderAtts() {
       b.onclick = ev => { ev.stopPropagation(); picker.hidden = true; convertButton.setAttribute("aria-expanded", "false"); convertAttachment(i, fmt.toLowerCase()); }; picker.append(b); });
     convertButton.onclick = ev => { ev.stopPropagation(); const show = picker.hidden;
       document.querySelectorAll(".att-format-picker").forEach(x => { x.hidden = true; x.parentElement?.querySelector(".att-convert")?.setAttribute("aria-expanded", "false"); });
-      picker.hidden = !show; convertButton.setAttribute("aria-expanded", String(show)); };
+      picker.hidden = !show; convertButton.setAttribute("aria-expanded", String(show));
+      if (show) requestAnimationFrame(() => {
+        const r = convertButton.getBoundingClientRect(), menu = picker.getBoundingClientRect(), gap = 6;
+        const left = Math.max(6, Math.min(r.right - menu.width, innerWidth - menu.width - 6));
+        const below = innerHeight - r.bottom, above = r.top;
+        const top = below >= menu.height + gap || below >= above ? Math.min(innerHeight - menu.height - 6, r.bottom + gap) : Math.max(6, r.top - menu.height - gap);
+        picker.style.left = `${left}px`; picker.style.top = `${top}px`;
+      }); };
     d.append(picker);
     if (a.kind === "image") {
       const taskOcr = document.createElement("button"); taskOcr.type = "button"; taskOcr.className = "image-extract-task";

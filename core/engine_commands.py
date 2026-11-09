@@ -2113,6 +2113,37 @@ class CommandsMixin:
                 raise ValueError('Этот результат нельзя показать как текст')
             content = src.read_text(encoding='utf-8', errors='replace')
             return {'text':content[:30000], 'truncated':len(content) > 30000}
+        if cmd == 'task_write_result':
+            t = self.tasks.get(a.get('id'))
+            rel = str(a.get('path') or '')
+            allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
+            src = (t.dir / rel).resolve()
+            outdir = (t.dir / 'outputs').resolve()
+            if t.data.get('workflow') not in {'text-extraction', 'file-conversion'} or rel not in allowed or outdir not in src.parents:
+                raise ValueError('Такого текстового результата у задачи нет')
+            if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
+                raise ValueError('Этот тип результата нельзя редактировать здесь')
+            content = a.get('text')
+            if not isinstance(content, str) or len(content.encode('utf-8')) > 1_000_000:
+                raise ValueError('Текст результата должен быть не больше 1 МБ')
+            temp = src.with_name(src.name + '.edit.tmp')
+            temp.write_text(content, encoding='utf-8')
+            temp.replace(src)
+            return {'saved': True, 'path': rel}
+        if cmd == 'task_preview_result':
+            import base64 as _b64
+            import mimetypes as _mime
+            t = self.tasks.get(a.get('id'))
+            rel = str(a.get('path') or '')
+            allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
+            src = (t.dir / rel).resolve()
+            outdir = (t.dir / 'outputs').resolve()
+            if t.data.get('workflow') not in {'text-extraction', 'file-conversion'} or rel not in allowed or outdir not in src.parents or not src.is_file():
+                raise ValueError('Такого файла результата у задачи нет')
+            if src.suffix.lower() not in {'.png', '.jpg', '.jpeg', '.gif', '.webp'} or src.stat().st_size > 8 * 1024 * 1024:
+                raise ValueError('Предпросмотр доступен для изображений до 8 МБ')
+            return {'mime': _mime.guess_type(src.name)[0] or 'application/octet-stream',
+                    'data': _b64.b64encode(src.read_bytes()).decode('ascii')}
         if cmd in {"file_convert_begin", "file_convert_chunk", "file_convert_finish", "file_convert_abort"}:
             import base64 as _b64
             import shutil as _shutil

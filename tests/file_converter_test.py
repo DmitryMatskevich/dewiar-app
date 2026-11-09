@@ -67,6 +67,18 @@ class WebPageCommandHarness(CommandsMixin):
     def __init__(self): self.tasks=WebPageTasks(); self.quick=[]
     def _say_quick(self, text, source=''): self.quick.append((text,source))
 
+class ResultRecord:
+    def __init__(self, folder, outputs):
+        self.dir = Path(folder)
+        self.data = {'workflow':'file-conversion','outputs':outputs}
+class ResultTasks:
+    def __init__(self, record): self.record=record
+    def get(self, task_id):
+        if task_id != 'result-task': raise ValueError('Задача не найдена')
+        return self.record
+class ResultCommandHarness(CommandsMixin):
+    def __init__(self, record): self.tasks=ResultTasks(record)
+
 
 class FileConverterTest(unittest.TestCase):
     def setUp(self):
@@ -242,6 +254,21 @@ class FileConverterTest(unittest.TestCase):
         self.assertEqual(result['id'], 'page-task')
         self.assertEqual(harness.tasks.seen, ('https://example.com/guide', 'md', 'Лира, преобразовать страницу https://example.com/guide в MD'))
         self.assertIn('HTML-страницу', harness.quick[0][0])
+
+    def test_result_editor_writes_only_declared_text_outputs(self):
+        outdir = self.root / 'task' / 'outputs'; outdir.mkdir(parents=True)
+        result = outdir / 'result.md'; result.write_text('# Before\n', encoding='utf-8')
+        record = ResultRecord(outdir.parent, [{'path':'outputs/result.md'}])
+        harness = ResultCommandHarness(record)
+        saved = harness._command('task_write_result', {'id':'result-task','path':'outputs/result.md','text':'# After\n'})
+        self.assertTrue(saved['saved'])
+        self.assertEqual(result.read_text(encoding='utf-8'), '# After\n')
+        with self.assertRaisesRegex(ValueError, 'результата'):
+            harness._command('task_write_result', {'id':'result-task','path':'../../outside.txt','text':'x'})
+        pdf = outdir / 'result.pdf'; pdf.write_bytes(b'%PDF')
+        record.data['outputs'].append({'path':'outputs/result.pdf'})
+        with self.assertRaisesRegex(ValueError, 'нельзя редактировать'):
+            harness._command('task_write_result', {'id':'result-task','path':'outputs/result.pdf','text':'x'})
 
     def test_html_to_markdown_keeps_page_heading_and_table(self):
         html_source = "<html><body><h1>Склад</h1><p>Проверка страницы</p><table><tr><th>Код</th><th>Кол-во</th></tr><tr><td>001</td><td>2</td></tr></table></body></html>"

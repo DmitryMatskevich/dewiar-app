@@ -19,7 +19,9 @@ with tempfile.TemporaryDirectory(prefix="dewiar-file-converter-ui-") as folder, 
           if(cmd==='file_convert_chunk')return {received:args.b64.length,size:0};
           if(cmd==='file_convert_finish'||cmd==='file_convert')return {id:'conversion-test'};
           if(cmd==='text_extract')return {id:'ocr-test'};
-          if(cmd==='task_read_result')return {text:'Распознанный текст 42',truncated:false};
+          if(cmd==='task_read_result')return args.id==='ocr-test'?{text:'Распознанный текст 42',truncated:false}:{text:'# Результат\\n\\n| Код | Значение |\\n| --- | --- |\\n| 001 | Тест |',truncated:false};
+          if(cmd==='task_write_result')return {saved:true,path:args.path};
+          if(cmd==='task_preview_result')return {mime:'image/png',data:'iVBORw0KGgo='};
           if(cmd==='task_open_result')return {opened:true};
           if(cmd==='task_export')return {dir:'/tmp',name:'result.pdf'};
           return {};
@@ -46,6 +48,9 @@ with tempfile.TemporaryDirectory(prefix="dewiar-file-converter-ui-") as folder, 
     assert button.get_attribute("aria-label") == "Выбрать формат преобразования для этого файла"
     assert "результат появится сверху" in button.get_attribute("title")
     button.click()
+    bounds = page.locator('.att-format-picker').bounding_box()
+    assert bounds and bounds['x'] >= 0 and bounds['y'] >= 0
+    assert bounds['x'] + bounds['width'] <= 620 and bounds['y'] + bounds['height'] <= 780
     page.get_by_role("button", name="В XLSX").click()
     page.wait_for_function("calls.some(x=>x[0]==='file_convert')")
     call = page.evaluate("calls.find(x=>x[0]==='file_convert')")
@@ -71,13 +76,23 @@ with tempfile.TemporaryDirectory(prefix="dewiar-file-converter-ui-") as folder, 
     assert page.locator("#bot").get_by_text("table.csv → table.pdf").count() == 1
     page.locator("#bot").get_by_role("button", name="Открыть результат table.pdf").click()
     page.wait_for_function("calls.some(x=>x[0]==='task_open_result')")
+    page.evaluate("core._on.task.forEach(fn=>fn({task:{id:'conv-md',workflow:'file-conversion',status:'done',title:'Преобразовать report.docx в MD',outputs:[{path:'outputs/report.md',title:'report.md',source:'report.docx'},{path:'outputs/preview.png',title:'preview.png',source:'report.docx'}]}}))")
+    page.wait_for_selector(".native-operation-editor", state="detached")
+    results_link = page.locator("#bot").get_by_role("button", name="Открыть задачу «Преобразовать report.docx в MD» и вкладку с файлами результата")
+    assert results_link.count() == 2
+    page.locator("#bot").get_by_role("button", name="Редактировать report.md").click()
+    editor = page.locator(".native-operation-editor")
+    editor.fill("# Исправленный результат\n")
+    page.locator("#bot").get_by_role("button", name="Сохранить изменения").click()
+    page.wait_for_function("calls.some(x=>x[0]==='task_write_result'&&x[1].text==='# Исправленный результат\\n')")
+    assert page.locator("#bot").get_by_role("img", name="preview.png").count() == 1
 
     # >10 MiB uses bounded chunks and becomes a task without placing a huge base64
     # body into one bridge request.
     page.locator("#a-file").set_input_files({"name": "large.txt", "mimeType": "text/plain", "buffer": b"x" * (10 * 1024 * 1024 + 1)})
     page.wait_for_function("document.querySelectorAll('.att-convert').length===3")
     page.locator(".att-convert").nth(2).click()
-    page.get_by_role("button", name="В PDF").click()
+    page.get_by_role("button", name="В PDF", exact=True).click()
     page.wait_for_function("calls.some(x=>x[0]==='file_convert_finish')", timeout=30000)
     names = page.evaluate("calls.map(x=>x[0])")
     assert "file_convert_begin" in names and "file_convert_chunk" in names and "file_convert_finish" in names
