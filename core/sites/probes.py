@@ -182,25 +182,28 @@ def execute(spec, test=False):
 
 
 def specs(site):
-    host = urlsplit(site['url']).hostname
-    out = [dict(id='http', kind='http', target=site['url'], marker=site['marker'])]
-    net_host = '['+host+']' if ':' in host else host
-    if site.get('check_http', True):
-        out.append(dict(id='http_port', kind='http', target='http://'+net_host+'/', marker=''))
-    if site.get('check_https', True):
-        out.append(dict(id='https_port', kind='http', target='https://'+net_host+'/', marker=''))
+    host = urlsplit(site.get('url') or '').hostname or site.get('dns_host') or site.get('ssh_host') or site.get('mail_host') or site.get('mail_imap_host') or site.get('mail_smtp_host') or site.get('mail_mx_host')
+    out = []
+    if site.get('url'):
+        out.append(dict(id='http', kind='http', target=site['url'], marker=site['marker']))
+        net_host = '['+host+']' if ':' in host else host
+        if site.get('check_http', True):
+            out.append(dict(id='http_port', kind='http', target='http://'+net_host+'/', marker=''))
+        if site.get('check_https', True):
+            out.append(dict(id='https_port', kind='http', target='https://'+net_host+'/', marker=''))
     if site['health_url']:
         out.append(dict(id='health', kind='http', target=site['health_url'], marker=site['marker']))
     if site.get('console_url'):
         out.append(dict(id='console', kind='http', target=site['console_url'], marker=''))
     for kind in ('dns', 'ping'):
         if site[kind]:
-            out.append(dict(id=kind, kind=kind, target=(site.get('dns_host') or host) if kind == 'dns' else host))
+            out.append(dict(id=kind, kind=kind, target=(site.get('dns_host') or host) if kind == 'dns' else (site.get('ssh_host') or host)))
     for kind in ('ssh', 'ftp'):
         if site[kind]:
             out.append(dict(id=kind, kind=kind, target=site['ssh_host'] or host, port=site[kind+'_port']))
     if site['mail']:
-        out.append(dict(id='mail', kind=site['mail_kind'], target=site['mail_host'], port=site['mail_port']))
+        mail_host = site.get('mail_host') or site.get('mail_imap_host') or site.get('mail_smtp_host') or site.get('mail_mx_host')
+        out.append(dict(id='mail', kind=site['mail_kind'], target=mail_host, port=site['mail_port']))
     return out
 
 

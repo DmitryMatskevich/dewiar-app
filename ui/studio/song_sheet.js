@@ -155,7 +155,11 @@ window.SongSheet = (() => {
     return false;
   }
   function sheetRows(row) {
-    const parts = new Map((row.sections || []).map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
+    // With stanzas from the sheet, an automatic «Часть N» does not force a
+    // blank line; recognized parts (verse, chorus) and confirmed ones do.
+    const stanzaData=(row.guitar_sheet||[]).some(line=>line && 'stanza_start' in line);
+    const parts = new Map((row.sections || []).filter(s=>!stanzaData || (s.kind && s.kind!=='unknown') || s.review_state==='verified')
+      .map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
     const lines = [], width=columns(row), seenParts=new Set();
     let stanzaLines = 0, hasLyrics = false;
     const sourceState={hints:sourceStanzaHints(row),index:0,line:0,used:0};
@@ -236,13 +240,22 @@ window.SongSheet = (() => {
     }
     const chordSpans=[...paper.querySelectorAll('.song-chord-tip[data-start-ms]')];
     let activeChord=null;
+    const sounding=[];
     for(const chord of chordSpans) {
       const start=Number(chord.dataset.startMs);
       const end=Number(chord.dataset.endMs);
       const nextStart=Number(chord.dataset.nextStartMs);
       const effectiveEnd=Number.isFinite(end)&&end>start ? end : (Number.isFinite(nextStart) ? nextStart : Infinity);
-      const isActive=Number.isFinite(start)&&start<=ms&&ms<effectiveEnd;
-      if(isActive&&(!activeChord||start>=Number(activeChord.dataset.startMs))) activeChord=chord;
+      if(Number.isFinite(start)&&start<=ms&&ms<effectiveEnd) sounding.push(chord);
+    }
+    if(sounding.length) {
+      // A chord still sounding at the next line is printed again over its
+      // first word. Light the copy on the line being sung: the original over
+      // «…лодке, знаешь,», the repeat once «я очень…» begins.
+      const latest=Math.max(...sounding.map(chord=>Number(chord.dataset.startMs)));
+      const same=sounding.filter(chord=>Number(chord.dataset.startMs)===latest);
+      const sung=selected?.closest('.song-paper-line');
+      activeChord=same.find(chord=>sung && chord.closest('.song-paper-line')===sung) || same[0];
     }
     for(const chord of chordSpans) chord.classList.toggle('current-chord',chord===activeChord);
     const previousLine=paper.querySelector('.song-paper-line.playing-line');
@@ -372,7 +385,7 @@ window.SongSheet = (() => {
     if(fingerings.length) extras.push(`Аппликатуры (струны 1→6):\n${fingerings.join('\n')}`);
     if(sources.length) extras.push(`Источники:\n${sources.join('\n')}`);
     const tags=[...(row.tags||[])].filter(Boolean);
-    if(tags.length) extras.push(`Теги: ${tags.join(', ')}`);
+    if(tags.length) extras.push(tags.map(tag=>`Песня ${tag}`).join(' '));
     return [...header,body,...extras].filter(Boolean).join('\n\n');
   }
   const NOTE_PC={C:0,D:2,E:4,F:5,G:7,A:9,B:11,H:11};
@@ -796,14 +809,11 @@ window.SongSheet = (() => {
   function toolbar(row) {
     const button = (id, glyph, title, extra='') => `<button type="button" class="btn song-icon-btn" id="${id}" title="${title}" aria-label="${title}" ${extra}>${icon(glyph)}</button>`;
     return `<div class="song-sheet-tools" role="group" aria-label="Тональность, копирование и прослушивание">
+      <div class="song-tool-row song-tool-row--main">
       <div class="song-tool-group">
         ${button('song-key-down','down','Понизить аккорды и тональность воспроизведения на один полутон')}
         <span id="song-key-label" role="status" title="Сдвиг аккордов относительно исходной тональности, в полутонах" aria-label="Сдвиг аккордов: ${shiftLabel(row)} полутонов">${shiftLabel(row)}</span>
         ${button('song-key-up','up','Повысить аккорды и тональность воспроизведения на один полутон')}
-      </div>
-      <div class="song-tool-group song-copy-group" role="group" aria-label="Текст и копирование">
-        ${button('song-show-text','text','Показать текст с аккордами для копирования в выбранной тональности','aria-controls="song-copy-panel" aria-expanded="false"')}
-        ${button('song-copy-sheet','copy','Скопировать текст с аккордами, аппликатурами и ссылками на источники')}
       </div>
       <div class="song-tool-group" role="group" aria-label="Прослушивание песни">
         ${button('song-speed-down','speedDown','Замедлить воспроизведение на 10 процентов; тональность не меняется')}
@@ -811,10 +821,15 @@ window.SongSheet = (() => {
         ${button('song-speed-up','speedUp','Ускорить воспроизведение на 10 процентов; тональность не меняется')}
         ${button('song-sheet-previous','previous','Перейти к началу предыдущей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-play','play',row.capabilities?.audio ? 'Проиграть всю песню в исходной тональности записи' : 'Для прослушивания добавьте аудиозапись',row.capabilities?.audio ? '' : 'disabled')}
-        ${button('song-sheet-play-instrumental','karaoke',row.karaoke?.state === 'ready' ? 'Проиграть всю песню с минусовкой' : 'Минусовка ещё не готова',row.karaoke?.state === 'ready' ? '' : 'disabled')}
-        ${button('song-sheet-next','next','Перейти к началу следующей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
         ${button('song-sheet-stop','stop','Остановить воспроизведение и вернуться к началу песни','disabled')}
+        ${button('song-sheet-next','next','Перейти к началу следующей строки песни; при паузе воспроизведение остаётся на паузе','disabled')}
+        ${button('song-sheet-play-instrumental','karaoke',row.karaoke?.state === 'ready' ? 'Проиграть всю песню с минусовкой с текущей позиции' : 'Минусовка ещё не готова',row.karaoke?.state === 'ready' ? '' : 'disabled')}
       </div>
+      </div>
+      <div class="song-tool-row song-tool-row--copy"><div class="song-tool-group song-copy-group" role="group" aria-label="Текст и копирование">
+        ${button('song-show-text','text','Показать текст с аккордами для копирования в выбранной тональности','aria-controls="song-copy-panel" aria-expanded="false"')}
+        ${button('song-copy-sheet','copy','Скопировать текст с аккордами, аппликатурами и ссылками на источники')}
+      </div></div>
       <span id="song-copy-status" role="status"></span><span id="song-sheet-play-status" role="status"></span>
       </div><div class="song-current-edit-wrap"><div class="song-copy-preview" id="song-copy-panel" hidden><p class="hint">Текст в выбранной тональности, аппликатуры использованных аккордов и проверенные ссылки на источники.</p><textarea id="song-copy-preview" aria-label="Текст с аккордами, аппликатурами и источниками" readonly rows="16" wrap="off">${esc(plainText(row))}</textarea></div>
       <section class="song-live-editor" id="song-live-editor" aria-label="Правка текущей фразы и аккордов" hidden>

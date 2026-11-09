@@ -15,6 +15,8 @@ writes with a revision check, so a card edited meanwhile is skipped.
   ... --recover-text     also read «singing without text» again with Whisper and
                          Qwen; a line both models agree on is added (needs the
                          song models; run with .songs-venv/bin/python)
+  ... --placeholders     an editable «???» line where somebody sings and no
+                         text was recognized («Пение — текст не распознан»)
   ... --realign-grid     lines whose recognizer times were a whole-second grid
                          (30–32, 32–34 … s) are aligned again as one passage
                          (worker.realign_grid_runs; needs the song models)
@@ -142,6 +144,7 @@ def main():
     parser.add_argument('--separate', action='store_true')
     parser.add_argument('--recover-text', action='store_true')
     parser.add_argument('--realign-grid', action='store_true')
+    parser.add_argument('--placeholders', action='store_true')
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--report', type=Path,
                         default=APP / 'work' / f'vocal-timing-{dt.datetime.now():%Y%m%d-%H%M%S}.json')
@@ -211,6 +214,10 @@ def main():
                                                 duration):
             added, fitted, recovery = recover_text(audio, fitted, activity, hypotheses, title)
             item['text_recovery'] = recovery
+        placed = 0
+        if args.placeholders:
+            fitted, placed = vt.insert_placeholders(
+                fitted, dict(activity, lexical=vt.unrecognized_windows(fitted, hypotheses)), duration)
         after = vt.summary(fitted, dict(activity, lexical=vt.unrecognized_windows(fitted, hypotheses)), duration)
         changed = [c for p in fit.get('phrases', []) for c in p['changes']]
         item.update(before=before, after=after, changes=fit.get('phrases', []))
@@ -220,10 +227,11 @@ def main():
               f"текст без голоса {len(after['unvoiced_lyrics'])}; правок времени {len(changed)}"
               + (f"; пропущено несогласованных строк {fit['skipped']}" if fit.get('skipped') else '')
               + (f"; добавлено строк по двум распознавателям {added}" if added else '')
-              + (f"; заново выровнено отрывков с сеточным временем {regridded}" if regridded else ''), flush=True)
+              + (f"; заново выровнено отрывков с сеточным временем {regridded}" if regridded else '')
+              + (f"; строк «???» для пения без текста {placed}" if placed else ''), flush=True)
         if not args.apply:
             continue
-        if not changed and not added and not regridded and row.get('vocal_activity') == activity:
+        if not changed and not added and not regridded and not placed and row.get('vocal_activity') == activity:
             continue
         backup = args.root / row['song_id'] / 'audio' / 'analysis' / str(uuid.uuid4())
         backup.mkdir(parents=True, exist_ok=False)

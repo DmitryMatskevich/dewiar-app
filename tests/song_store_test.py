@@ -1,6 +1,7 @@
 import json
 
-from songs.store import SongStore
+from songs.store import SongStore, TAG_OPTIONS
+from songs.tags import infer_tags
 
 
 def test_song_store_round_trip(tmp_path):
@@ -25,6 +26,25 @@ def test_song_store_rejects_stale_revision(tmp_path):
         assert "изменилась" in str(exc)
     else:
         raise AssertionError("stale revision was accepted")
+
+
+def test_song_store_ratings_round_trip_and_filter(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    five = store.create("Пять звёзд", "Автор")
+    three = store.create("Три звезды", "Автор")
+    store.patch(five["song_id"], {"rating": 5}, five["revision"])
+    store.patch(three["song_id"], {"rating": 3}, three["revision"])
+
+    assert store.get(five["song_id"])["rating"] == 5
+    assert store.list(compact=True)[0]["rating"] == 3
+    assert [row["title"] for row in store.list(rating=5)] == ["Пять звёзд"]
+    assert [row["title"] for row in store.list(rating="3")] == ["Три звезды"]
+    try:
+        store.patch(three["song_id"], {"rating": 6})
+    except ValueError as exc:
+        assert "от 0 до 5" in str(exc)
+    else:
+        raise AssertionError("rating outside 0..5 was accepted")
 
 
 def test_song_store_processing_filters_include_active_and_stopped_jobs(tmp_path):
@@ -64,3 +84,21 @@ def test_song_store_delete_removes_owned_song_folder(tmp_path):
     assert store.delete(song["song_id"])
     assert not folder.exists()
     assert store.list() == []
+
+
+def test_song_store_accepts_rock_tag_and_infers_it(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    song = store.create("Рок-песня", "Группа")
+    updated = store.patch(song["song_id"], {"tags": ["Рок"]}, song["revision"])
+    assert updated["tags"] == ["Рок"]
+    tags, scores = infer_tags([{"text": "Мы играем рок и метал, гитары звучат"}])
+    assert "Рок" in tags
+    assert scores["Рок"] >= 0.70
+
+
+def test_removed_song_tags_are_not_allowed_or_inferred():
+    removed = {"Холодные", "Детские", "Италия", "Запад", "Военные", "Советские", "Из фильмов"}
+    assert not (removed & set(TAG_OPTIONS))
+    tags, scores = infer_tags([{"text": "Детская военная песня из советского фильма, западная Италия"}])
+    assert not (removed & set(tags))
+    assert not (removed & set(scores))

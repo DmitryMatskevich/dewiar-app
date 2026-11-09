@@ -142,7 +142,11 @@ def reference_candidates(phrases, references):
             left = ''.join(t['norm'] for t in target)
             right = ''.join(t['norm'] for t in pub[c:d])
             similarity = difflib.SequenceMatcher(None, left, right, autojunk=False).ratio()
-            if similarity < .7:
+            # A misheard phrase («Кто повторит?» for «И если не лень, то
+            # повторим») shares few letters; firm anchors on both sides (three
+            # equal words) still pin the publication's words to this place.
+            firm = min(before[2]-before[1], after[2]-after[1]) >= 3 and j - i <= 6
+            if similarity < .7 and not (firm and similarity >= .4):
                 continue
             one = _fragment(target[0]['phrase'], target)
             two = _fragment(dict(text=ref['plain_lyrics'], origin='publication',

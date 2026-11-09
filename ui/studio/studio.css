@@ -757,7 +757,16 @@ html.framed .drawer { top: 38px; }               /* боковые панели 
 .pi span p { margin: 0; display: inline; }
 .pnow { display: flex; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,201,120,.08); color: #FFD9A0; font-size: 13.5px; }
 .outs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.outs.stages { flex-direction: column; }
+.oi-row { display: contents; }
+.outs.stages .oi-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .oi { display: flex; gap: 8px; align-items: center; border: 0; border-radius: 12px; padding: 8px 12px; background: rgba(255,255,255,.06); color: var(--ink); cursor: pointer; font: inherit; text-align: left; max-width: 280px; }
+.outs.stages .oi { flex: 1; max-width: none; min-width: 0; }
+.oi-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.task-output-icon { width: 34px; height: 34px; padding: 7px; }
+.task-output-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.oedit { display: block; width: 100%; min-height: min(60vh, 640px); box-sizing: border-box; resize: vertical; border: 0; background: transparent; color: var(--ink); font: 13.5px/1.55 ui-monospace, "Ubuntu Mono", monospace; }
+.oedit-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; }
 .oi.on { background: rgba(138,155,255,.22); }
 .oi b { font-size: 20px; } .oi span { min-width: 0; font-size: 13.5px; } .oi small { display: block; color: var(--dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .opane { border-radius: 16px; overflow: hidden; background: rgba(0,0,0,.25); }
@@ -2170,12 +2179,21 @@ html.framed .py-drawer { top: 38px; }
 .ml-mail-app { display:grid; grid-template-columns:minmax(190px,230px) minmax(0,1fr); gap:14px; align-items:start; }
 .ml-sidebar { min-width:0; padding:10px; border:1px solid var(--line); border-radius:14px; background:color-mix(in srgb,var(--field) 62%,transparent); }
 .ml-nav-heading { margin:2px 8px 6px; font-size:13px; letter-spacing:.02em; }
+.ml-folders-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin:2px 8px 6px; }
+.ml-folders-head h3 { margin:0; font-size:13px; letter-spacing:.02em; }
+.ml-folders-head span { color:var(--muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ml-folders { display:grid; gap:2px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+.ml-folder { width:100%; min-width:0; min-height:38px; display:flex; align-items:center; gap:10px; padding:6px 9px; border:0; border-radius:9px; background:transparent; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.ml-folder:hover,.ml-folder:focus-visible,.ml-folder.selected { background:color-mix(in srgb,var(--accent) 13%,var(--field)); outline-color:var(--accent); }
+.ml-folder.selected { font-weight:650; }
+.ml-folder svg { width:21px; height:21px; flex:none; fill:none; stroke:#1683ff; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.ml-folder span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ml-badge-filters { display:grid; gap:8px; margin:12px 0; padding:10px 9px; border:1px solid var(--line); border-radius:12px; color:var(--muted); font-size:12px; }
+.ml-view-filters { margin-top:10px; }
 .ml-badge-filters legend { padding:0 4px; color:var(--ink); font-weight:650; }
 .ml-badge-filters label { display:flex; align-items:center; gap:8px; cursor:pointer; }
 .ml-badge-filters input { accent-color:var(--accent); }
 .ml-badge-filters p { margin:0; font-size:11px; line-height:1.4; }
-.ml-view-filters { margin-top:0; }
 .ml-mailboxes-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin:14px 4px 6px; }
 .ml-mailboxes-head h3 { margin:0; font-size:13px; letter-spacing:.02em; }
 .ml-mailboxes-head .hint { font-size:11px; }

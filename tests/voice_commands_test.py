@@ -92,6 +92,34 @@ class VoiceCommandsTest(unittest.TestCase):
         self.assertEqual(vc.parse('открой музыку')['application'], 'ru.yandex.desktop.music')
         self.assertEqual(vc.parse('найди песню Пожалуйста')['query'], 'Пожалуйста')
 
+    def test_song_processing_phrases_extract_query(self):
+        song = 'Папа тоже плачет Фролова'
+        for command in ('найти песню', 'поиск песни', 'поискать песню', 'обработать песню', 'обработай песню'):
+            with self.subTest(command=command):
+                result = vc.parse(f'{command} {song}')
+                self.assertEqual(result['action'], 'song_process')
+                self.assertEqual(result['query'], song)
+
+    def test_song_processing_command_creates_card_and_starts_background_batch(self):
+        row = {'song_id': 'song-id'}
+        store, sources = Mock(), Mock()
+        store.create.return_value = row
+        engine = SimpleNamespace(
+            s=SimpleNamespace(get=lambda *args: vc.config()),
+            song_store=store, song_sources=sources, _say_quick=Mock())
+        with patch.object(tools, 'MAC', False):
+            self.assertTrue(MusicMixin._pc_cmd(engine, 'найти песню Папа тоже плачет Фролова'))
+        store.create.assert_called_once_with('Папа тоже плачет Фролова', source='query')
+        sources.start.assert_called_once_with('song-id', process=True)
+        self.assertIn('Папа тоже плачет Фролова', engine._say_quick.call_args.args[0])
+
+    def test_old_voice_config_migrates_song_processing_action(self):
+        old = vc.config()
+        old.pop('defaults_revision')
+        old['actions'] = [a for a in old['actions'] if a['id'] != 'song_process']
+        migrated = vc.validate(old)
+        self.assertEqual(vc.parse('обработать песню Ленинград МГА', migrated)['action'], 'song_process')
+
     def test_edit_remove_disable_and_validate(self):
         c = vc.config(); self.assertEqual(vc.validate(c), c)
         c['actions'][0]['phrases'] = ['покажи мне {приложение}']

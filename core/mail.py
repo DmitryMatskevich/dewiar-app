@@ -74,12 +74,18 @@ PRESETS = {
     "rambler": ("smtp.rambler.ru", 465, "ssl", "imap.rambler.ru", 993, ""),
     "icloud": ("smtp.mail.me.com", 587, "starttls", "imap.mail.me.com", 993, "https://account.apple.com"),
     "yahoo": ("smtp.mail.yahoo.com", 465, "ssl", "imap.mail.yahoo.com", 993, ""),
+    # RU-CENTER/NIC.RU: the same host serves the webmail UI and mail protocols.
+    # SSL/TLS ports are the defaults; plaintext/STARTTLS alternatives are not
+    # used by Dewiar's current mail transport.
+    "nic": ("mail.nic.ru", 465, "ssl", "mail.nic.ru", 993, "", "https://www.mail.nic.ru/i"),
 }
+PROVIDER_NAMES = {"yandex": "Яндекс", "mailru": "Mail.ru", "gmail": "Gmail", "outlook": "Outlook",
+                  "rambler": "Rambler", "icloud": "iCloud", "yahoo": "Yahoo", "nic": "NIC.RU / RU-CENTER"}
 DOMAINS = {"yandex.ru": "yandex", "ya.ru": "yandex", "yandex.com": "yandex", "yandex.by": "yandex", "yandex.kz": "yandex",
            "narod.ru": "yandex", "mail.ru": "mailru", "bk.ru": "mailru", "inbox.ru": "mailru", "list.ru": "mailru",
            "internet.ru": "mailru", "gmail.com": "gmail", "googlemail.com": "gmail", "outlook.com": "outlook",
            "hotmail.com": "outlook", "live.com": "outlook", "rambler.ru": "rambler", "lenta.ru": "rambler",
-           "icloud.com": "icloud", "me.com": "icloud", "yahoo.com": "yahoo"}
+           "icloud.com": "icloud", "me.com": "icloud", "yahoo.com": "yahoo", "nic.ru": "nic"}
 
 
 class MailError(Exception):
@@ -98,16 +104,25 @@ class MailCredentialError(MailError):
         self.state = state
 
 
-def guess(address):
+def guess(address, provider=None):
     """Адрес → настройки серверов (по домену; неизвестный домен — smtp.<домен>:465 и imap.<домен>:993)."""
     dom = (address or "").rsplit("@", 1)[-1].lower().strip()
-    key = DOMAINS.get(dom)
+    key = provider if provider in PRESETS else DOMAINS.get(dom)
     if key:
-        s, sp, sec, i, ip, help_url = PRESETS[key]
-        return {"smtp_host": s, "smtp_port": sp, "smtp_security": sec, "imap_host": i, "imap_port": ip,
-                "help": help_url, "provider": key}
+        preset = PRESETS[key]
+        s, sp, sec, i, ip, help_url, *extra = preset
+        result = {"smtp_host": s, "smtp_port": sp, "smtp_security": sec, "imap_host": i, "imap_port": ip,
+                  "imap_security": "ssl", "help": help_url, "provider": key,
+                  "provider_name": PROVIDER_NAMES.get(key, key)}
+        if key == "nic":
+            result.update({"webmail": extra[0], "pop3_host": "mail.nic.ru", "pop3_port": 995,
+                           "pop3_security": "ssl", "smtp_auth": True,
+                           "username_format": "полный адрес почтового ящика",
+                           "auth_note": "Используйте полный адрес ящика как логин; для SMTP включите аутентификацию с теми же данными."})
+        return result
     return {"smtp_host": f"smtp.{dom}" if dom else "", "smtp_port": 465, "smtp_security": "ssl",
-            "imap_host": f"imap.{dom}" if dom else "", "imap_port": 993, "help": "", "provider": ""}
+            "imap_host": f"imap.{dom}" if dom else "", "imap_port": 993, "imap_security": "ssl",
+            "help": "", "provider": "", "provider_name": "Другой / свой сервер"}
 
 
 def _dec(v):
@@ -329,8 +344,10 @@ class Mail:
         d["has_password"] = self._has_secret()
         d["configured"] = bool(d.get("address") and d.get("smtp_host") and d["has_password"])
         d["credential_state"] = self.credential_state()
-        if d.get("address") and not d.get("help"):
-            d["help"] = guess(d["address"]).get("help", "")
+        if d.get("address"):
+            preset = guess(d["address"], d.get("provider"))
+            d.setdefault("help", preset.get("help", ""))
+            d.setdefault("webmail", preset.get("webmail", ""))
         return d
 
     def save(self, patch):
@@ -343,7 +360,7 @@ class Mail:
             if addr and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", addr):
                 raise MailError("это не похоже на адрес почты")
             if addr != self.data.get("address") and not patch.get("smtp_host"):
-                patch = {**guess(addr), **patch}                 # новый адрес — подставляем серверы сами
+                patch = {**guess(addr, patch.get("provider")), **patch}  # новый адрес — подставляем серверы сами
             previous_address, previous_ref = self.data.get("address"), self._ref()
             secret = patch.pop("password", None)
             self.data.update({k: v for k, v in patch.items() if k in (
@@ -380,6 +397,9 @@ class Mail:
         # Логин обычно совпадает с адресом; отдельное поле — для своих серверов, где это не так.
         return self.data.get("login") or self.data.get("address")
 
+    def _password_type(self):
+        return "пароль ящика" if self.data.get("provider") == "nic" else "пароль приложения"
+
     def _auth_rejected(self, candidate):
         """Сервер не принял пароль. Сохранённый пароль больше не пробуем, пока пользователь не введёт новый."""
         if candidate is None:
@@ -407,7 +427,7 @@ class Mail:
             return s
         except smtplib.SMTPAuthenticationError as e:
             self._auth_rejected(candidate)
-            raise MailAuthError("почта не приняла логин или пароль — нужен «пароль приложения», не обычный пароль") from e
+            raise MailAuthError(f"почта не приняла логин или пароль — проверьте {self._password_type()}") from e
         except (OSError, smtplib.SMTPException) as e:
             raise MailError(f"не удалось подключиться к {host}:{port} — {e}") from e
 
@@ -441,7 +461,7 @@ class Mail:
                 m.shutdown()
             except OSError:
                 pass
-            raise MailAuthError("почта не приняла логин или пароль (IMAP) — нужен «пароль приложения»") from e
+            raise MailAuthError(f"почта не приняла логин или пароль (IMAP) — проверьте {self._password_type()}") from e
         except OSError as e:
             raise MailError(f"не удалось подключиться к {host}:{port} — {e}") from e
 
@@ -450,7 +470,7 @@ class Mail:
         candidate — новый пароль, который проверяется до сохранения (сохранённый при этом не трогается)."""
         d = self.data
         if not (d.get("address") and d.get("smtp_host") and (candidate or self._has_secret())):
-            raise MailError("сначала укажите адрес и пароль приложения")
+            raise MailError("сначала укажите адрес и пароль ящика или приложения")
         out = {"smtp": "", "imap": "", "auth_rejected": False}
         try:
             self._smtp(candidate).quit()
@@ -637,6 +657,52 @@ class Mail:
                     if leaf in names:
                         return mailbox
             return ""
+        finally:
+            try:
+                m.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def folders(self):
+        """List usable mailboxes with stable IDs, standard roles, display names and server names."""
+        m = self._imap()
+        roles = {"\\inbox": "INBOX", "\\sent": "SENT", "\\trash": "TRASH", "\\drafts": "DRAFTS",
+                 "\\junk": "JUNK", "\\spam": "JUNK", "\\archive": "ARCHIVE", "\\all": "ARCHIVE"}
+        aliases = {
+            "inbox": "INBOX", "входящие": "INBOX", "входящие письма": "INBOX",
+            "sent": "SENT", "sent items": "SENT", "sent messages": "SENT", "отправленные": "SENT", "отправленные письма": "SENT",
+            "trash": "TRASH", "deleted": "TRASH", "deleted items": "TRASH", "deleted messages": "TRASH", "bin": "TRASH", "корзина": "TRASH", "удалённые": "TRASH", "удаленные": "TRASH",
+            "draft": "DRAFTS", "drafts": "DRAFTS", "черновики": "DRAFTS",
+            "junk": "JUNK", "spam": "JUNK", "junk e-mail": "JUNK", "спам": "JUNK",
+            "archive": "ARCHIVE", "archives": "ARCHIVE", "all mail": "ARCHIVE", "архив": "ARCHIVE", "архивные": "ARCHIVE",
+        }
+        found = []
+        try:
+            typ, rows = m.list()
+            if typ != "OK":
+                raise MailError("сервер не вернул список почтовых папок")
+            for row in rows or []:
+                raw = row.decode("utf-8", errors="replace") if isinstance(row, bytes) else str(row)
+                match = re.search(r'"((?:\\.|[^"])*)"\s*$', raw)
+                mailbox = match.group(1).replace('\\"', '"').replace('\\\\', '\\') if match else raw.rsplit(" ", 1)[-1].strip('"')
+                display = _imap_decode_utf7(mailbox)
+                flags = {flag.casefold() for flag in re.findall(r"\\[A-Za-z]+", raw.split(")", 1)[0])}
+                role = next((value for key, value in roles.items() if key in flags), "")
+                leaf = re.split(r"[/\\.]", display)[-1].strip().casefold()
+                role = role or aliases.get(leaf, "")
+                if not role:
+                    token = base64.urlsafe_b64encode(mailbox.encode("utf-8")).decode("ascii").rstrip("=")
+                    role = "F:" + token
+                found.append({"id": role, "name": display, "mailbox": mailbox, "special_use": sorted(flags)})
+            if not any(item["id"] == "INBOX" for item in found):
+                found.insert(0, {"id": "INBOX", "name": "Входящие", "mailbox": "INBOX", "special_use": ["\\inbox"]})
+            # When a provider exposes both a role flag and a localized alias, keep the role-flag mailbox.
+            unique = {}
+            for item in found:
+                if item["id"] not in unique or item["special_use"]:
+                    unique[item["id"]] = item
+            order = {key: i for i, key in enumerate(("INBOX", "SENT", "DRAFTS", "JUNK", "TRASH", "ARCHIVE"))}
+            return sorted(unique.values(), key=lambda item: (order.get(item["id"], 10), item["name"].casefold()))
         finally:
             try:
                 m.logout()

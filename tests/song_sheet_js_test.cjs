@@ -73,6 +73,9 @@ const copiedWithSources=s.plainText({source_candidates:[{url:'https://chords.exa
 assert.ok(copiedWithSources.endsWith('Источники:\nАккорды — https://chords.example/a\nТекст — https://lyrics.example/a\nЗапись — https://video.example/a'));
 assert.ok(copiedWithSources.includes('Em — 0-0-0-2-2-0'));assert.ok(copiedWithSources.includes('Am — 0-1-2-2-0-x'));
 assert.ok(!copiedWithSources.includes('(оценка)'));
+const copiedWithTags=s.plainText({title:'Песня с тегами',tags:['Юмор','Рок'],guitar_sheet:[{text:'Строка',cells:[{char_index:0,chords:['Em']}]}]});
+assert.ok(copiedWithTags.endsWith('Песня Юмор Песня Рок'));
+assert.ok(!copiedWithTags.includes('Теги:'));
 const copyInstrumental={title:'Песня с проигрышем',search_query:'точный поисковый запрос',guitar_sheet:[
  {text:'Первая строка',cells:[{char_index:0,chords:['Am']}]},
  {text:'',instrumental:true,unplaced_chords:[{name:'Dm',start_ms:1000,end_ms:2000}]},

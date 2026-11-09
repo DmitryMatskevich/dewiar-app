@@ -364,7 +364,7 @@ class CommandsMixin:
 
     @public_song_commands
     def command(self, cmd, a):
-        if cmd in ("sites_service", "sites_list", "sites_status", "sites_incidents"):
+        if cmd in ("sites_service", "sites_list", "sites_status", "sites_incidents", "sites_alert"):
             from sites.client import command
             return command(cmd, a)
         # Bridge commands run concurrently. Starting a turn and switching its context
@@ -387,6 +387,9 @@ class CommandsMixin:
             return command(self, cmd, a)
         if cmd == "image_ocr":
             from image_ocr import extract
+            return extract(a.get("image"))
+        if cmd == "image_contacts":
+            from image_contacts import extract
             return extract(a.get("image"))
         if isinstance(cmd,str) and cmd.startswith('contacts_'):
             from contacts_book import get_book
@@ -822,13 +825,17 @@ class CommandsMixin:
                     result = self.mail.sync_all(force=True)
                     self.emit("mail_counts", **self.mail.badge_counts())
                     return result
+                if cmd == "mail_folders":
+                    return self.mail.mail_folders(a.get("account_id", ""))
+                if cmd == "mail_folder_sync":
+                    return self.mail.sync_folder(a.get("account_id", ""), a.get("folder_id", "INBOX"))
                 if cmd == "mail_check":
                     return self.mail.check(force=bool(a.get("refresh", True)))
                 if cmd == "mail_list":
                     return self.mail.list_mail(limit=a.get("limit", 50), unread=bool(a.get("unread")),
                                                query=a.get("query", ""), important=bool(a.get("important")),
                                                account_id=a.get("account_id", ""), unanswered=bool(a.get("unanswered")),
-                                               incoming_only=bool(a.get("incoming_only")))
+                                               incoming_only=bool(a.get("incoming_only")), folder_id=a.get("folder_id", "INBOX"))
                 if cmd == "mail_thread":
                     return self.mail.mail_thread(a.get("thread_id", ""))
                 if cmd == "mail_unread_count":
@@ -858,7 +865,7 @@ class CommandsMixin:
                     self.emit("tools", tools=self.toolbox.catalog())
                     return r
                 if cmd == "mail_guess":
-                    return guess(a.get("address", ""))
+                    return guess(a.get("address", ""), a.get("provider"))
                 if cmd == "mail_test":
                     return self.mail.test()
                 if cmd == "mail_send_test":
@@ -1182,6 +1189,19 @@ class CommandsMixin:
             images = []
             files = list(a.get("files") or [])
             text_request = str(a.get('text') or '')
+            from file_converter import is_contact_extraction_command
+            if is_contact_extraction_command(text_request):
+                if not files:
+                    for k, im in enumerate(([a['image']] if a.get('image') else []) + list(a.get('images') or [])):
+                        mime = im[5:im.index(';')] if im.startswith('data:') and ';' in im[:40] else 'image/jpeg'
+                        ext = {'image/png':'.png','image/webp':'.webp','image/gif':'.gif','image/tiff':'.tiff','image/bmp':'.bmp'}.get(mime,'.jpg')
+                        files.append({'name':time.strftime('Картинка %d.%m %H-%M-%S') + (f' ({k + 1})' if k else '') + ext, 'b64':im})
+                if not files:
+                    self._say_quick('Прикрепите картинку и напишите «извлеки контактные данные».', text_request)
+                    return True
+                task = self.tasks.create_contact_extraction(files, goal=text_request)
+                self._say_quick(f'Извлекаю контактные данные с картинки. Контакты и исходное изображение появятся в результатах задачи {task.id}.', text_request)
+                return task.public()
             from file_converter import is_text_extraction_command
             extract_text = is_text_extraction_command(text_request)
             if extract_text:
@@ -1867,7 +1887,7 @@ class CommandsMixin:
             return self.tasks.list()
         if cmd == "songs_list":
             songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True,
-                                         tag=a.get("tag", ""), lyrics_query=a.get("lyrics_q", ""))
+                                         tag=a.get("tag", ""), lyrics_query=a.get("lyrics_q", ""), rating=a.get("rating", ""))
             for song in songs:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
                 song["processing"] = self.song_processing.describe(song)
@@ -2112,7 +2132,7 @@ class CommandsMixin:
             allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
             src = (t.dir / rel).resolve()
             outdir = (t.dir / 'outputs').resolve()
-            if t.data.get('workflow') not in {'text-extraction', 'file-conversion'} or rel not in allowed or outdir not in src.parents:
+            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription'} or rel not in allowed or outdir not in src.parents:
                 raise ValueError('Такого текстового результата у задачи нет')
             if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
                 raise ValueError('Этот результат нельзя показать как текст')
@@ -2124,7 +2144,7 @@ class CommandsMixin:
             allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
             src = (t.dir / rel).resolve()
             outdir = (t.dir / 'outputs').resolve()
-            if t.data.get('workflow') not in {'text-extraction', 'file-conversion'} or rel not in allowed or outdir not in src.parents:
+            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription'} or rel not in allowed or outdir not in src.parents:
                 raise ValueError('Такого текстового результата у задачи нет')
             if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
                 raise ValueError('Этот тип результата нельзя редактировать здесь')
@@ -2408,7 +2428,8 @@ class CommandsMixin:
             value = validate(config(value))
             result = parse(str(a.get("text") or ""), value)
             if result:
-                tool = "yandex_music" if result["action"] == "yandex_search" else "control_mac_app"
+                tool = ("yandex_music" if result["action"] == "yandex_search" else
+                        "start_task" if result["action"] == "song_process" else "control_mac_app")
                 result["allowed"], result["confirm"] = self.toolbox.policy(tool)
             return result
         if cmd == "tools":

@@ -646,6 +646,94 @@ class TaskManager:
         task.save(); task.journal(f'Создана задача локального извлечения текста из {len(records)} файл(а). Модели не используются.')
         return self.start(task.id)
 
+    def create_contact_extraction(self, files, goal=''):
+        """Create a native local-OCR workflow that extracts only contact fields from attached images."""
+        import base64
+        if not isinstance(files, list) or not 1 <= len(files) <= 10:
+            raise ValueError('Прикрепите от 1 до 10 картинок')
+        prepared, total = [], 0
+        for index, item in enumerate(files, 1):
+            if not isinstance(item, dict):
+                raise ValueError('Не удалось прочитать вложение')
+            name = Path(str(item.get('name') or f'contact-{index}.png')).name
+            ext = Path(name).suffix.lower()
+            if ext not in {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff'}:
+                raise ValueError(f'Извлечение контактов поддерживает картинки: «{name}»')
+            raw = str(item.get('b64') or '')
+            if raw.startswith('data:'):
+                raw = raw.split(',', 1)[-1]
+            try:
+                data = base64.b64decode(raw, validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError(f'Вложение «{name}» повреждено при передаче') from exc
+            if not data or len(data) > 10 * 1024 * 1024:
+                raise ValueError(f'«{name}»: выберите непустую картинку размером до 10 МБ')
+            total += len(data)
+            prepared.append((name[:160], data))
+        if total > 14_000_000:
+            raise ValueError('Суммарный размер картинок слишком велик. Запустите обработку по одной картинке.')
+        task = self.create(f'Извлечь контакты из {len(prepared)} картин' if len(prepared) > 1 else 'Извлечь контакты с картинки',
+                           (goal or 'Извлечь контактные данные из картинки').strip(), start=False)
+        input_dir = task.dir / 'inputs'; input_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        for index, (name, data) in enumerate(prepared, 1):
+            clean = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', name).strip(' .')[:140] or f'contact-{index}.png'
+            path = input_dir / f'{index:02d}-{clean}'; path.write_bytes(data)
+            records.append({'path':path.relative_to(task.dir).as_posix(), 'name':clean, 'size':len(data)})
+        checklist = ['Извлечь контактные данные с изображения', 'Сохранить контакты и исходное изображение в результатах']
+        (task.dir / 'план.md').write_text('# ' + task.title + '\n\n' + '\n'.join('- [ ] ' + x for x in checklist) + '\n', encoding='utf-8')
+        task.data.update(workflow='contact-extraction', contact_inputs=records, progress=[0,len(records)], activity='Подготовка результатов…')
+        task.save(); task.journal('Создана задача извлечения контактных данных из изображений.')
+        return self.start(task.id)
+
+    def _run_contact_extraction(self, task):
+        import base64
+        from image_contacts import extract as extract_image_contacts
+        outdir = task.dir / 'outputs'; outdir.mkdir(parents=True, exist_ok=True)
+        (outdir / 'contact-frames').mkdir(exist_ok=True)
+        lines = ['# Контактные данные', '']
+        results = []
+        for index, record in enumerate(task.data.get('contact_inputs') or [], 1):
+            if task.cancel.is_set(): break
+            src = task.dir / record['path']; ext = Path(record['name']).suffix.lower()
+            mime = {'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp',
+                    '.gif':'image/gif','.bmp':'image/bmp','.tif':'image/tiff','.tiff':'image/tiff'}.get(ext,'image/png')
+            image_rel = f'contact-frames/contact-card-{index:02d}{ext if ext in {".png",".jpg",".jpeg",".webp",".gif",".bmp",".tif",".tiff"} else ".png"}'
+            image_path = outdir / image_rel
+            shutil.copy2(src,image_path)
+            task.data['activity'] = f'Обрабатываю изображение {index} из {len(task.data.get("contact_inputs") or [])}…'
+            self._beat(task); self._emit(task)
+            try:
+                payload = f'data:{mime};base64,' + base64.b64encode(src.read_bytes()).decode('ascii')
+                result = extract_image_contacts(payload)
+                contacts = result.get('contacts') or {}
+                person = Path(record['name']).stem
+                lines += [f'## {person}', '']
+                found = False
+                for label,key in (('Почта','email'),('Телефон','phone'),('Сайт','website')):
+                    values = contacts.get(key) or []
+                    if values:
+                        found = True; lines.append(f'**{label}:** {", ".join(values)}')
+                if not found:
+                    lines.append('Контактные данные не найдены.')
+                lines += ['',f'- [Посмотреть исходную картинку {index}]({image_rel})','']
+                results.append({'source':record['name'],'contacts':contacts,'status':result.get('status'),
+                                'image':image_rel,'error':result.get('error') or ''})
+            except Exception as exc:
+                lines += [f'## {Path(record["name"]).stem}', '', 'Не удалось извлечь контактные данные.', '', f'- [Посмотреть исходную картинку {index}]({image_rel})', '']
+                results.append({'source':record['name'],'contacts':{'email':[],'phone':[],'website':[]},'status':'error','image':image_rel,'error':str(exc)[:400]})
+            task.data.update(progress=[index,len(task.data.get('contact_inputs') or [])]); task.save(); self._emit(task)
+        report = outdir / 'contacts.md'; report.write_text('\n'.join(lines),encoding='utf-8')
+        (outdir/'contacts.json').write_text(json.dumps({'version':1,'items':results},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        task.data.update(outputs=[], status='stopped' if task.cancel.is_set() else 'done', finished=not task.cancel.is_set(), activity='')
+        if not task.cancel.is_set():
+            self._work(task,'show',{'path':'outputs/contacts.md','title':'Извлечённые контактные данные'})
+            for row in results:
+                self._work(task,'show',{'path':'outputs/'+row['image'],'title':row['source']+' — исходная картинка'})
+            (task.dir/'итог.md').write_text('Контактные данные и исходные изображения — в результатах задачи.\n',encoding='utf-8')
+        task.journal('Обработка контактных данных завершена.')
+        task.save(); self._emit(task)
+
     def _run_text_extraction(self, task):
         from file_converter import convert
         output_dir = task.dir / 'outputs'; output_dir.mkdir(parents=True, exist_ok=True)
@@ -1168,7 +1256,8 @@ class TaskManager:
                   self._run_media if t.data.get('workflow') == 'media-transcription' else
                   self._run_media_translation if t.data.get('workflow') == 'video-translation' else
                   self._run_file_conversion if t.data.get('workflow') == 'file-conversion' else
-                  self._run_text_extraction if t.data.get('workflow') == 'text-extraction' else self._run)
+                  self._run_text_extraction if t.data.get('workflow') == 'text-extraction' else
+                  self._run_contact_extraction if t.data.get('workflow') == 'contact-extraction' else self._run)
         t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
         self._emit(t)
@@ -2121,6 +2210,35 @@ class TaskManager:
                         raise
                     r['speaker_error'] = str(exc)[:300]
                     notify(f"{r.get('title') or r['source']} — расшифровка готова, разметка выступающих не выполнена: {r['speaker_error']}")
+                # Sparse, local OCR only at speaker introductions and spoken contact cues.
+                # The source video is already in the media cache; no full-video frame scan.
+                try:
+                    from media_contacts import extract as extract_contacts
+                    segments = json.loads((folder / 'segments.json').read_text(encoding='utf-8'))
+                    contacts_file = extract_contacts(r['source'], folder,
+                        self.host.workspace.root / '.media-cache' / source_key(r['source']), segments,
+                        t.cancel, notify)
+                    if contacts_file:
+                        r['participants_contacts'] = contacts_file.relative_to(t.dir / 'outputs').as_posix()
+                        contact_cache = self.host.workspace.root / '.media-cache' / source_key(r['source'])
+                        contact_cache.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(contacts_file, contact_cache / contacts_file.name)
+                        details = contacts_file.with_suffix('.json')
+                        if details.is_file():
+                            shutil.copy2(details, contact_cache / details.name)
+                            contacts_data = json.loads(details.read_text(encoding='utf-8'))
+                            r['contact_frames'] = [
+                                (Path('transcripts') / source_key(r['source']) / item['frame']).as_posix()
+                                for item in contacts_data.get('items', []) if item.get('frame')]
+                        frame_dir = folder / 'contact-frames'
+                        shutil.rmtree(contact_cache / frame_dir.name, ignore_errors=True)
+                        if frame_dir.is_dir():
+                            shutil.copytree(frame_dir, contact_cache / frame_dir.name, dirs_exist_ok=True)
+                except Exception as contact_exc:
+                    if t.cancel.is_set():
+                        raise
+                    r['contacts_error'] = str(contact_exc)[:300]
+                    notify(f"{r.get('title') or r['source']} — контакты по кадрам не извлечены: {r['contacts_error']}")
             (t.dir / 'outputs/transcripts/batch-results.json').write_text(
                 json.dumps(results, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
             good = [r for r in results if r['status'] == 'ok']
@@ -2141,10 +2259,16 @@ class TaskManager:
                     if r.get('speakers'):
                         files.append(('speakers', 'расшифровка по выступающим'))
                         summary.append(f"Расшифровка по голосам: outputs/{r['speakers']}")
+                    if r.get('participants_contacts'):
+                        files.append(('participants_contacts', 'участники и контакты'))
+                        summary.append(f"Участники и контакты (тема редактируется в файле): outputs/{r['participants_contacts']}")
                     elif r.get('speaker_error'):
                         summary.append(f"Разметка выступающих не выполнена: {r['speaker_error']}")
                     for field, suffix in files:
                         self._work(t, 'show', {'path': 'outputs/' + r[field], 'title': f"{r.get('title') or r['source']} — {suffix}"})
+                    for index, image_path in enumerate(r.get('contact_frames') or [], 1):
+                        self._work(t, 'show', {'path': 'outputs/' + image_path,
+                            'title': f"{r.get('title') or r['source']} — кадр контактов {index}"})
                 else:
                     summary.append(f"{r['source']}: ОШИБКА — {r.get('error')}")
                     if r.get('extraction_complete'):

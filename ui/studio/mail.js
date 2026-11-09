@@ -2,6 +2,7 @@
 let mlAccounts = [], mlSelected = "", mlCurrentMessage = null, mlDraft = null, mlRulesData = {};
 let mlView = "all", mlAccountFilter = "", mlSelectedMessageId = "", mlCurrentThread = [], mlCurrentThreadId = "", mlScopeItems = [];
 let mlBadgeFilters = { important: true, unread: false, unanswered: true };
+let mlFolders = [], mlActiveFolder = "INBOX";
 let mlAttentionShown = false;
 document.querySelector('nav button[data-p="mail"]').addEventListener("click", () => {
   if (core.connected) mlLoad().catch(e => { $("#ml-res").textContent = e.message; });
@@ -35,6 +36,55 @@ function mlRenderAccounts() {
   });
   const active = mlAccounts.filter(a => a.enabled).length;
   $("#ml-connection-summary").textContent = `${active} из ${mlAccounts.length} подключено`;
+}
+const ML_FOLDER_ICONS = {
+  INBOX: '<path d="M3 7h18v11H3z"/><path d="M3 11h5l2 3h4l2-3h5"/><path d="M6 7l1-3h10l1 3"/>',
+  DRAFTS: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v6h5"/>',
+  SENT: '<path d="m3 11 18-8-7 19-3-8-8-3Z"/><path d="m11 14 5-5"/>',
+  TRASH: '<path d="M4 7h16l-1 14H5L4 7Z"/><path d="M3 4h18M9 4V2h6v2m-5 6v7m4-7v7"/>',
+  JUNK: '<path d="M3 7h18v13H3z"/><path d="M3 11h5l2 3h4l2-3h5M9 9l6 6m0-6-6 6"/>',
+  ARCHIVE: '<path d="M3 4h18v5H3zM5 9v12h14V9"/><path d="M10 13h4"/>',
+  REPLIES: '<path d="m9 7-5 5 5 5"/><path d="M4 12h9a7 7 0 0 1 7 7"/>',
+  CUSTOM: '<path d="M3 6h7l2 2h9v12H3z"/><path d="M3 9h18"/>'
+};
+async function mlLoadFolders() {
+  const owner = mlAccounts.find(a => a.id === mlSelected);
+  $("#ml-folder-owner").textContent = owner ? owner.label : "";
+  mlAccountFilter = mlSelected;
+  try { mlFolders = await core.call("mail_folders", { account_id: mlSelected }); }
+  catch (error) {
+    mlFolders = [{ id: "INBOX", name: "Входящие", standard: true }];
+    if (owner?.enabled) $("#ml-sync-state").textContent = error.message;
+  }
+  mlRenderFolders();
+  mlUpdateFolderHeading();
+}
+function mlRenderFolders() {
+  const nav = $("#ml-folders"); nav.replaceChildren();
+  mlFolders.forEach(folder => {
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "ml-folder" + (folder.id === mlActiveFolder ? " selected" : "");
+    button.setAttribute("aria-current", folder.id === mlActiveFolder ? "page" : "false");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = ML_FOLDER_ICONS[folder.id] || ML_FOLDER_ICONS.CUSTOM;
+    const label = document.createElement("span"); label.textContent = folder.name;
+    button.append(icon, label); button.onclick = () => mlChooseFolder(folder.id);
+    nav.appendChild(button);
+  });
+}
+async function mlChooseFolder(folderId) {
+  mlClearMessage(); mlActiveFolder = folderId; mlView = "folder"; mlAccountFilter = mlSelected;
+  mlUpdateFolderHeading();
+  mlRenderFolders();
+  try {
+    await core.call("mail_folder_sync", { account_id: mlSelected, folder_id: folderId });
+    await mlList();
+  } catch (error) {
+    $("#ml-sync-state").textContent = error.message;
+    const list = $("#ml-list"); list.replaceChildren();
+    const empty = document.createElement("div"); empty.className = "ml-empty"; empty.textContent = error.message; list.append(empty);
+  }
 }
 async function mlPublishScope(active = !!document.querySelector("#p-mail.cur")) {
   if (!core.connected) return;
@@ -89,7 +139,7 @@ function mlRemoveImportanceRule(id) {
 }
 function mlSetView(view) {
   mlClearMessage();
-  mlView = view; mlAccountFilter = "";
+  mlView = view; mlActiveFolder = "INBOX";
   const presets = { all: { important: false, unread: false, unanswered: false },
     unread: { important: false, unread: true, unanswered: false },
     important: { important: true, unread: false, unanswered: false },
@@ -100,22 +150,28 @@ function mlSetView(view) {
     document.querySelectorAll("[data-mail-badge-filter]").forEach(input => { input.checked = !!mlBadgeFilters[input.dataset.mailBadgeFilter]; });
     core.call("settings_save", { patch: { ui: { mail_badge_filters: mlBadgeFilters } } }).then(result => { S = result; }).catch(() => {});
   }
-  $("#ml-view-title").textContent = mlFilterTitle();
-  $("#ml-view-subtitle").textContent = "Выберите письмо, чтобы прочитать его";
-  mlRenderAccounts(); mlList();
+  mlUpdateFolderHeading();
+  mlRenderFolders(); mlRenderAccounts(); mlList();
 }
 function mlFilterTitle() {
   const selected = [["important", "Важные"], ["unread", "Непрочитанные"], ["unanswered", "Без ответа"]]
     .filter(([key]) => mlBadgeFilters[key]).map(([, label]) => label);
   return selected.length ? selected.join(" · ") : "Все входящие";
 }
-function mlChooseAccount(id) {
+function mlUpdateFolderHeading() {
+  const account = mlAccounts.find(item => item.id === mlSelected);
+  const folder = mlFolders.find(item => item.id === mlActiveFolder);
+  const filters = [["important", "важные"], ["unread", "непрочитанные"], ["unanswered", "без ответа"]]
+    .filter(([key]) => mlBadgeFilters[key]).map(([, label]) => label);
+  $("#ml-view-title").textContent = (account ? account.label + " · " : "") + (folder?.name || "Входящие");
+  $("#ml-view-subtitle").textContent = mlActiveFolder === "REPLIES" ? "Ответы в отправленных" :
+    mlActiveFolder === "INBOX" ? (filters.length ? "Фильтр: " + filters.join(", ") : "Все входящие") : "Все письма папки";
+}
+async function mlChooseAccount(id) {
   mlClearMessage();
-  mlAccountFilter = id; mlView = "account";
-  const a = mlAccounts.find(x => x.id === id);
-  $("#ml-view-title").textContent = (a ? a.label + " · " : "") + mlFilterTitle();
-  $("#ml-view-subtitle").textContent = a ? a.address : "";
-  mlRenderAccounts(); mlSelect(id); mlList();
+  mlSelected = id; mlAccountFilter = id; mlActiveFolder = "INBOX"; mlView = "folder";
+  mlUpdateFolderHeading();
+  mlRenderAccounts(); await mlSelect(id); await mlLoadFolders(); await mlList();
 }
 function mlClearMessage() {
   mlCurrentMessage = null; mlDraft = null; mlSelectedMessageId = "";
@@ -126,30 +182,59 @@ async function mlSelect(id) {
   mlSelected = id; const a = mlAccounts.find(x => x.id === id); if (!a) return;
   const unlock = $("#ml-unlock"); if (unlock) unlock.title = `Разрешить Dewiar читать сохранённый пароль ящика ${a.address} из Связки ключей`;
   $("#ml-selected-address").textContent = a.address;
+  const passwordType = a.provider === "nic" ? "пароль ящика" : "пароль приложения";
   $("#ml-name").value = a.name || ""; $("#ml-login").value = a.login || "";
   $("#ml-smtp").value = a.smtp_host || ""; $("#ml-sport").value = a.smtp_port || "";
   $("#ml-sec").value = a.smtp_security || "ssl"; $("#ml-imap").value = a.imap_host || ""; $("#ml-iport").value = a.imap_port || "";
-  $("#ml-pass").value = ""; $("#ml-pass").placeholder = a.needs_password ? "введите пароль приложения заново" :
-    a.has_password ? "пароль сохранён; введите новый только для замены" : "пароль приложения";
+  $("#ml-pass").value = ""; $("#ml-pass").placeholder = a.needs_password ? `введите ${passwordType} заново` :
+    a.has_password ? "пароль сохранён; введите новый только для замены" : passwordType;
+  $("#ml-provider").value = a.provider || "";
   $("#ml-on").style.display = a.configured ? "" : "none";
   $("#ml-state").textContent = a.enabled ? "Подключён: " + a.address : a.configured ? "Настройки сохранены" : "";
   mlRenderAccounts();
-  const g = await core.call("mail_guess", { address: a.address });
+  const g = await core.call("mail_guess", { address: a.address, provider: a.provider || "" });
   $("#ml-smtp").value ||= g.smtp_host; $("#ml-sport").value ||= g.smtp_port;
   $("#ml-sec").value ||= g.smtp_security; $("#ml-imap").value ||= g.imap_host; $("#ml-iport").value ||= g.imap_port;
-  const help = $("#ml-help"); help.replaceChildren(); help.append(document.createTextNode("Используйте пароль приложения. "));
+  const help = $("#ml-help"); help.replaceChildren();
+  help.append(document.createTextNode(g.auth_note || "Используйте пароль приложения. "));
   if (g.help) { const link = document.createElement("a"); link.href = g.help; link.target = "_blank"; link.rel = "noopener noreferrer";
     link.textContent = "Настройки безопасности почты"; help.append(link); }
+  if (g.webmail) {
+    if (g.help) help.append(document.createTextNode(" · "));
+    const link = document.createElement("a"); link.href = g.webmail; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = "Открыть веб-почту"; help.append(link);
+    if (g.pop3_host) {
+      const details = document.createElement("span");
+      details.textContent = ` · POP3: ${g.pop3_host}:${g.pop3_port} (SSL/TLS); IMAP: ${g.imap_host}:${g.imap_port} (SSL/TLS); SMTP: ${g.smtp_host}:${g.smtp_port} (SSL/TLS, с аутентификацией)`;
+      help.append(details);
+    }
+  }
 }
+$("#ml-provider").addEventListener("change", async () => {
+  const a = mlAccounts.find(x => x.id === mlSelected); if (!a) return;
+  const g = await core.call("mail_guess", { address: a.address, provider: $("#ml-provider").value });
+  $("#ml-smtp").value = g.smtp_host || ""; $("#ml-sport").value = g.smtp_port || "";
+  $("#ml-sec").value = g.smtp_security || "ssl"; $("#ml-imap").value = g.imap_host || ""; $("#ml-iport").value = g.imap_port || "";
+  const help = $("#ml-help"); help.replaceChildren(document.createTextNode(g.auth_note || "Используйте пароль приложения. "));
+  if (g.webmail) {
+    const link = document.createElement("a"); link.href = g.webmail; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = "Открыть веб-почту"; help.append(link);
+    if (g.pop3_host) help.append(document.createTextNode(` · POP3: ${g.pop3_host}:${g.pop3_port} (SSL/TLS)`));
+    help.append(document.createTextNode(` · IMAP: ${g.imap_host}:${g.imap_port} (SSL/TLS); SMTP: ${g.smtp_host}:${g.smtp_port} (SSL/TLS, с аутентификацией)`));
+  }
+});
 async function mlLoad(selectAccountId = "") {
   mlAccounts = await core.call("mail_accounts");
   if (selectAccountId && mlAccounts.some(a => a.id === selectAccountId)) mlSelected = selectAccountId;
   else if (!mlSelected || !mlAccounts.some(a => a.id === mlSelected)) mlSelected = (mlAccounts.find(a => a.enabled) || mlAccounts[0] || {}).id || "";
+  if (!mlAccountFilter) mlAccountFilter = mlSelected;
   const unlock = $("#ml-unlock"); if (unlock) unlock.disabled = !mlSelected;
   // Открыли по значку «!» — сразу ящик, который ждёт пароль (один раз за открытие страницы).
   const waiting = !mlAttentionShown && new URLSearchParams(location.search).has("attention") && mlAccounts.find(a => a.needs_password);
   if (waiting) { mlAttentionShown = true; mlSelected = waiting.id; }
+  if (waiting) mlAccountFilter = waiting.id;
   mlRenderAccounts(); if (mlSelected) await mlSelect(mlSelected);
+  if (mlSelected) await mlLoadFolders();
   if (waiting) mlAskPassword(waiting);
   const r = await core.call("mail_rules_get"); mlRulesData = r.rules; $("#ml-rules").value = JSON.stringify(r.rules, null, 2);
   mlRenderImportanceRules(r.rules.importance_rules || []);
@@ -159,9 +244,10 @@ async function mlLoad(selectAccountId = "") {
     input.checked = !!mlBadgeFilters[input.dataset.mailBadgeFilter];
     input.onchange = () => { mlView = "badge_custom"; $("#ml-view-title").textContent = mlFilterTitle(); mlSaveBadgeFilters(); };
   });
+  mlUpdateFolderHeading();
   $("#ml-rules-state").textContent = r.error || ""; await mlList();
   const params = new URLSearchParams(location.search);
-  if (params.has("badge")) mlSetView("badge_custom");
+  if (params.has("badge")) { mlView = "badge_custom"; mlList(); }
   else if (params.has("important") && params.has("unread")) mlSetView("important_unread");
   else if (params.has("important")) mlSetView("important"); else if (params.has("unread")) mlSetView("unread");
 }
@@ -184,7 +270,7 @@ mlAddAccountForm.onsubmit = async event => {
     await mlLoad(result.account.id);
     const settings = document.querySelector(".ml-settings"); if (settings) settings.open = true;
     const status = $("#ml-res"); status.className = "res";
-    status.textContent = "Ящик добавлен. Введите пароль приложения и нажмите «Сохранить и проверить».";
+    status.textContent = "Ящик добавлен. Укажите пароль ящика или приложения и нажмите «Сохранить и проверить».";
     $("#ml-pass").focus();
   } catch (error) { toast(error.message); }
   finally { submit.disabled = false; }
@@ -208,16 +294,15 @@ async function mlSaveBadgeFilters() {
 async function mlList() {
   try {
     const items = await core.call("mail_list", { limit: 150, query: $("#ml-query").value.trim(),
-      account_id: mlAccountFilter, important: !!mlBadgeFilters.important, unanswered: !!mlBadgeFilters.unanswered,
-      incoming_only: true, unread: !!mlBadgeFilters.unread });
+      account_id: mlAccountFilter, important: mlActiveFolder === "INBOX" && !!mlBadgeFilters.important,
+      unanswered: mlActiveFolder === "INBOX" && !!mlBadgeFilters.unanswered,
+      folder_id: mlActiveFolder, incoming_only: mlActiveFolder === "INBOX", unread: mlActiveFolder === "INBOX" && !!mlBadgeFilters.unread });
     mlScopeItems = items;
     const box = $("#ml-list"); box.replaceChildren();
     if (!items.length) {
       const empty = document.createElement("div"); empty.className = "ml-empty";
       const configured = mlAccounts.some(a => a.enabled);
-      empty.innerHTML = noBadgeFilters
-        ? "<b>Условия не выбраны</b><span>Отметьте, какие письма показывать на значке.</span>"
-        : `<b>${configured ? "Писем пока нет" : "Подключите почтовый ящик"}</b><span>${configured ? "Измените поиск или выберите другое представление." : "Откройте «Подключение и управление ящиками», чтобы начать получать письма."}</span>`;
+      empty.innerHTML = `<b>${configured ? "Писем пока нет" : "Подключите почтовый ящик"}</b><span>${configured ? "Измените условия слева или поиск." : "Откройте «Подключение и управление ящиками», чтобы начать получать письма."}</span>`;
       box.appendChild(empty); mlPublishScope().catch(() => {}); return;
     }
     items.forEach(m => {
@@ -249,6 +334,7 @@ async function mlOpen(id, threadId = "") {
   try {
     mlCurrentThreadId = threadId;
     const m = await core.call("mail_open", { message_id: id }); mlCurrentMessage = m; mlDraft = null; mlSelectedMessageId = id;
+    $("#ml-delete-message").hidden = m.folder === "TRASH";
     mlCurrentThread = threadId ? await core.call("mail_thread", { thread_id: threadId }) : [m];
     await mlList();
     const threadBox = $("#ml-thread-messages"); threadBox.replaceChildren(); threadBox.hidden = mlCurrentThread.length < 2;
@@ -266,7 +352,7 @@ async function mlOpen(id, threadId = "") {
       });
     }
     $("#ml-detail").hidden = false;
-    $("#ml-reply-prepare").disabled = m.folder === "SENT";
+    $("#ml-reply-prepare").disabled = ["SENT", "REPLIES", "TRASH", "JUNK", "DRAFTS"].includes(m.folder);
     $("#ml-message-subject").textContent = m.subject || "(без темы)";
     $("#ml-message-head").textContent = "От: " + m.from + "\nКому: " + m.to + "\nКопия: " + (m.cc || "—") +
       "\nПолучено: " + m.account + (m.folder === "SENT" ? " · Отправленные" : "") + "\nТема: " + m.subject + "\nДата: " + m.date + "\nВложения: " + ((m.files || []).join(", ") || "нет");
@@ -354,11 +440,12 @@ $("#ml-save").onclick = async ev => {
     const result = await core.call("mail_account_save", { account_id: mlSelected, patch: {
       address: a.address, password: $("#ml-pass").value, name: $("#ml-name").value.trim(), login: $("#ml-login").value.trim(),
       smtp_host: $("#ml-smtp").value.trim(), smtp_port: +$("#ml-sport").value || 465, smtp_security: $("#ml-sec").value,
-      imap_host: $("#ml-imap").value.trim(), imap_port: +$("#ml-iport").value || 993 }});
+      imap_host: $("#ml-imap").value.trim(), imap_port: +$("#ml-iport").value || 993,
+      provider: $("#ml-provider").value }});
     $("#ml-pass").value = ""; await mlLoad();
     const ok = result.test.smtp === "ok" && result.test.imap === "ok";
     if (result.test.auth_rejected) {   // новый пароль не принят — сохранённый не изменён, поле снова ждёт ввода
-      r.className = "res bad"; r.textContent = "Почта не приняла этот пароль, он не сохранён. Проверьте пароль приложения и введите его ещё раз.";
+      r.className = "res bad"; r.textContent = `Почта не приняла этот пароль, он не сохранён. Проверьте ${$("#ml-provider").value === "nic" ? "пароль ящика" : "пароль приложения"} и введите его ещё раз.`;
       $("#ml-pass").focus(); return;
     }
     r.className = ok ? "res ok" : "res bad";
@@ -376,7 +463,7 @@ $("#ml-unlock") && ($("#ml-unlock").onclick = async ev => {
     r.className = ok ? "res ok" : "res bad";
     r.textContent = ok ? "Доступ получен, IMAP и SMTP подключены." : [x.test.smtp !== "ok" ? "SMTP: " + x.test.smtp : "", x.test.imap !== "ok" ? "IMAP: " + x.test.imap : ""].filter(Boolean).join(" · ");
     if (ok) { await core.call("mail_sync"); await mlLoad(); }
-  } catch (e) { r.className = "res bad"; r.textContent = e.message + " Можно просто ввести пароль приложения заново."; $("#ml-pass").focus(); }
+  } catch (e) { r.className = "res bad"; r.textContent = e.message + " Можно ввести пароль ящика или приложения заново."; $("#ml-pass").focus(); }
   finally { ev.target.disabled = false; }
 });
 $("#ml-test").onclick = async ev => { ev.target.disabled = true; const r = $("#ml-res"); r.textContent = "Отправляю тестовое письмо в выбранный ящик…";
@@ -385,7 +472,10 @@ $("#ml-test").onclick = async ev => { ev.target.disabled = true; const r = $("#m
 $("#ml-off").onclick = async () => { if (!mlSelected || !await ask("Отключить ящик и удалить пароль из Связки ключей?")) return;
   try { await core.call("mail_account_forget", { account_id: mlSelected }); await mlLoad(); $("#ml-res").textContent = "Ящик отключён."; } catch (e) { toast(e.message); } };
 $("#ml-refresh").onclick = async ev => { ev.target.disabled = true; $("#ml-sync-state").textContent = "Проверяю подключённые ящики…";
-  try { const r = await core.call("mail_sync"); await mlLoad(); const ok = r.accounts.filter(x => x.ok).length, bad = r.accounts.filter(x => !x.ok);
+  try { const activeFolder = mlActiveFolder, activeAccount = mlSelected;
+    const r = await core.call("mail_sync");
+    if (activeFolder !== "INBOX" && activeAccount) await core.call("mail_folder_sync", { account_id: activeAccount, folder_id: activeFolder });
+    await mlLoad(); const ok = r.accounts.filter(x => x.ok).length, bad = r.accounts.filter(x => !x.ok);
     $("#ml-sync-state").textContent = "Проверено ящиков: " + ok + "." + (bad.length ? " Ошибки: " + bad.map(x => x.account_id + ": " + x.error).join("; ") : " Ошибок нет.");
   } catch (e) { $("#ml-sync-state").textContent = e.message; } finally { ev.target.disabled = false; } };
 $("#ml-query").oninput = () => mlList();

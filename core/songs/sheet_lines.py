@@ -56,7 +56,11 @@ def song_meter(tokens):
             lengths.append(count)
             count = 0
     lengths = sorted(x for x in lengths if 4 <= x <= 20)
-    return lengths[int(len(lengths) * .6)] if lengths else 10
+    if len(lengths) < 3:
+        return 10
+    # Sung Russian lines keep 7–15 syllables; a few odd cues must not make
+    # the whole song a ladder of three-word lines.
+    return max(7, min(15, lengths[int(len(lengths) * .6)]))
 
 
 def verse_cuts(tokens, meter, hard=(), max_chars=VERSE_CHARS):
@@ -190,10 +194,20 @@ def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
     output, group, waiting, absorbed = [], [], [], []
     starts, opened = set(section_starts), set()
     seen_changes = set()
-    # One meter for the whole song, from every lyric row.
-    passage = [t for row in rows if row.get('text')
-               for t in _tokens_of(row['text'], [(0, len(row['text']), row)], display_words(row))]
-    meter = song_meter(passage)
+    # One meter for the whole song, from every lyric row as one passage (a
+    # line also ends where one recognized row ends and the next begins).
+    whole, whole_spans, whole_cues = '', [], []
+    for row in rows:
+        if not row.get('text'):
+            continue
+        if whole:
+            whole += ' '
+        offset = len(whole)
+        whole += row['text']
+        whole_spans.append((offset, len(whole), row))
+        whole_cues.extend(dict(w, char_start=offset+w['char_start'], char_end=offset+w['char_end'])
+                          for w in display_words(row))
+    meter = song_meter(_tokens_of(whole, whole_spans, whole_cues))
 
     def flush():
         if not group:
@@ -302,6 +316,13 @@ def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
             close()
             output.append(row)
             seen_changes.update((c.get('start_ms'), c.get('name')) for c in row.get('unplaced_chords', []))
+            continue
+        if row['text'].strip() == '???':
+            # Singing without recognized words: its own line to type into.
+            close()
+            opened.add(row.get('phrase_id'))
+            group.append((row, []))
+            close()
             continue
         pause = sum(int(g.get('end_ms') or 0) - int(g.get('start_ms') or 0) for g in waiting)
         # A part of the song (verse, chorus) begins at its first phrase only;

@@ -13,7 +13,7 @@ def action(key, title, verbs, slot='приложение'):
 
 
 DEFAULT = {
-    'defaults_revision': 2,
+    'defaults_revision': 3,
     'actions': [
         action('open', 'Открыть приложение', ['открой', 'открыть', 'отрыть', 'запусти', 'запустить']),
         action('quit', 'Закрыть приложение', ['закрой', 'закрыть', 'заверши', 'завершить', 'отключи', 'отключить', 'выключи', 'выключить']),
@@ -25,6 +25,8 @@ DEFAULT = {
          'phrases': ['не беспокоить', 'переговоры', 'включи не беспокоить', 'включи режим не беспокоить', 'включи фокусировку не беспокоить']},
         {'id': 'dnd_off', 'title': 'Выключить «Не беспокоить» на Mac', 'enabled': True,
          'phrases': ['выключи не беспокоить', 'выключи режим не беспокоить', 'отключи не беспокоить', 'отключи режим не беспокоить']},
+        action('song_process', 'Добавить песню и запустить пакетную обработку',
+               ['найти песню', 'поиск песни', 'поискать песню', 'обработать песню', 'обработай песню'], 'запрос'),
         action('yandex_search', 'Найти песню в Яндекс Музыке', ['найди песню', 'открой песню', 'включи песню', 'найди трек', 'включи трек'], 'запрос'),
     ],
     'applications': [
@@ -57,6 +59,7 @@ DEFAULT = {
 }
 IDS = {a['id'] for a in DEFAULT['actions']}
 LITERAL_ACTIONS = {'dnd_on', 'dnd_off'}
+QUERY_ACTIONS = {'yandex_search', 'song_process'}
 NEW_APPLICATIONS = {'com.apple.iWork.Numbers', 'org.libreoffice.script', 'com.apple.mail', 'com.apple.AddressBook'}
 
 
@@ -81,6 +84,10 @@ def config(value=None):
                     labels = {norm(x) for x in [a['name'], a['target']] + a['aliases']}
                     if a['target'] in NEW_APPLICATIONS and not labels.intersection(used):
                         result['applications'].append(copy.deepcopy(a)); used.update(labels)
+        if revision < 3 and isinstance(result['actions'], list) and all(isinstance(a, dict) for a in result['actions']):
+            known = {a.get('id') for a in result['actions']}
+            result['actions'].extend(copy.deepcopy(a) for a in DEFAULT['actions']
+                                     if a['id'] == 'song_process' and a['id'] not in known)
     return result
 
 
@@ -100,7 +107,7 @@ def validate(value):
         phrases = a.get('phrases')
         if not isinstance(phrases, list) or not 1 <= len(phrases) <= 100:
             raise ValueError('Для действия нужно от 1 до 100 фраз')
-        slot = '{запрос}' if a['id'] == 'yandex_search' else '{приложение}'
+        slot = '{запрос}' if a['id'] in QUERY_ACTIONS else '{приложение}'
         for phrase in phrases:
             if a['id'] in LITERAL_ACTIONS:
                 if not isinstance(phrase, str) or not 3 <= len(phrase) <= 160 or re.search(r'[{}\n\r]', phrase):
@@ -156,7 +163,7 @@ def parse(text, value=None):
             if any(norm(literal) == norm(phrase) for phrase in a['phrases']):
                 matches.append((1000, {'action': a['id'], 'enabled': a['enabled'], 'title': a['title']}))
             continue
-        slot = '{запрос}' if a['id'] == 'yandex_search' else '{приложение}'
+        slot = '{запрос}' if a['id'] in QUERY_ACTIONS else '{приложение}'
         for phrase in a['phrases']:
             before, after = phrase.split(slot)
             pattern = re.escape(before.strip()) + r'\s+(.+?)' + (r'\s+' + re.escape(after.strip()) if after.strip() else '')

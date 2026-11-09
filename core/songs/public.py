@@ -43,9 +43,13 @@ def public_song(row, summary=False):
             members=[phrases[i] for i in section['phrase_indexes']]
             if members:
                 section.update(start_ms=min(p['start_ms'] for p in members),end_ms=max(p['end_ms'] for p in members))
+    # A recognized part (verse, chorus) or one the user confirmed starts a
+    # stanza. Automatic «Часть N» splits only mark gaps in the recording and
+    # are left to the stanza layout (one-line «parts» otherwise).
     starts = [phrases[s['phrase_indexes'][0]].get('phrase_id')
               for s in result.get('sections',[]) if s.get('phrase_indexes')
-              and 0 <= s['phrase_indexes'][0] < len(phrases)]
+              and 0 <= s['phrase_indexes'][0] < len(phrases)
+              and (s.get('kind') not in (None, '', 'unknown') or s.get('review_state') == 'verified')]
     events = sorted(copy.deepcopy(row.get('chords',[])), key=lambda c:c.get('start_ms',0))
     duration = max([row.get('audio',{}).get('duration_ms',0) or 0,
                     *[p.get('end_ms',0) or 0 for p in row.get('phrases',[])]])

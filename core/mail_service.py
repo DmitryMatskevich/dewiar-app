@@ -453,6 +453,49 @@ class MailService:
     def inbox(self, limit=10, unread=False, query="", folder="INBOX"):
         return self.list_mail(limit=limit, unread=unread, query=query)
 
+    def mail_folders(self, account_id):
+        box = self.account_get(account_id)
+        try:
+            folders = box.folders()
+        except MailError as exc:
+            raise MailServiceError(str(exc)) from exc
+        result = []
+        labels = {"INBOX": "Входящие", "DRAFTS": "Черновики", "SENT": "Отправленные",
+                  "TRASH": "Удалённые", "JUNK": "Спам", "ARCHIVE": "Архив"}
+        for folder in folders:
+            result.append({"id": folder["id"], "name": labels.get(folder["id"], folder["name"]), "standard": folder["id"] in
+                           {"INBOX", "DRAFTS", "SENT", "TRASH", "JUNK", "ARCHIVE"}})
+            if folder["id"] == "SENT":
+                result.append({"id": "REPLIES", "name": "Ответы", "standard": True, "virtual": True})
+        return result
+
+    def _mailbox_info(self, account_id, folder_id):
+        box = self.account_get(account_id)
+        if folder_id == "REPLIES":
+            folder_id = "SENT"
+        try:
+            folder = next((item for item in box.folders() if item["id"] == folder_id), None)
+        except MailError as exc:
+            raise MailServiceError(str(exc)) from exc
+        if not folder:
+            raise MailServiceError("Эта папка больше не найдена на почтовом сервере. Обновите список папок.")
+        return box, folder
+
+    def sync_folder(self, account_id, folder_id):
+        """Fetch one explicitly selected mailbox and index only its headers."""
+        box, folder = self._mailbox_info(account_id, folder_id)
+        stored_folder = folder["id"]
+        try:
+            rows = box.inbox(limit=500, folder=folder["mailbox"])
+            uidvalidity = box.uidvalidity(folder["mailbox"])
+        except MailError as exc:
+            raise MailServiceError(str(exc)) from exc
+        spec = next(item for item in self.rules.get("accounts", []) if item["id"] == account_id)
+        with self._db() as db:
+            for row in rows:
+                self._store_message(db, spec, row, uidvalidity, stored_folder)
+        return {"account_id": account_id, "folder_id": folder_id, "headers": len(rows)}
+
     def read(self, uid, folder="INBOX"):
         if isinstance(uid, str) and ":" in uid:
             parts = uid.split(":")
@@ -872,8 +915,11 @@ class MailService:
         result.sort(key=lambda item: item[0]["received_at"], reverse=True)
         return result
 
-    def list_mail(self, limit=30, unread=False, query="", important=False, account_id="", unanswered=False, incoming_only=False):
-        clauses, args = ["folder='INBOX'"], []
+    def list_mail(self, limit=30, unread=False, query="", important=False, account_id="", unanswered=False, incoming_only=False, folder_id="INBOX"):
+        if folder_id == "REPLIES":
+            clauses, args = ["folder='SENT'", "in_reply_to!=''"], []
+        else:
+            clauses, args = ["folder=?"], [folder_id or "INBOX"]
         if incoming_only:
             clauses.append("from_self=0")
         if unread:
@@ -939,7 +985,9 @@ class MailService:
         return row_roots[self._thread_key(target)]
 
     def _public_row(self, row):
-        suffix = ":s" if row["folder"] == "SENT" else ""
+        folder = row["folder"]
+        token = base64.urlsafe_b64encode(folder.encode("utf-8")).decode("ascii").rstrip("=")
+        suffix = "" if folder == "INBOX" else ":s" if folder == "SENT" else ":f" + token
         return {"id": f"{row['account_id']}:{row['uidvalidity']}:{row['uid']}{suffix}", "uid": row["uid"], "uidvalidity": row["uidvalidity"], "account_id": row["account_id"], "folder": row["folder"],
                 "account": next((a["address"] for a in self.rules.get("accounts", []) if a["id"] == row["account_id"]), ""),
                 "from": row["sender_name"], "sender": row["sender"], "to": ", ".join(json.loads(row["recipients"] or "[]")),
@@ -955,12 +1003,11 @@ class MailService:
                                (account_id, folder, validity, uid)).fetchone()
         if not known:
             raise MailServiceError("Письмо отсутствует в локальном индексе. Обновите переписку.")
-        box = self.account_get(account_id)
-        mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
-        if not mailbox or str(box.uidvalidity(mailbox)) != validity:
+        box, folder_info = self._mailbox_info(account_id, folder)
+        mailbox = folder_info["mailbox"]
+        if str(box.uidvalidity(mailbox)) != validity:
             raise MailServiceError("Папка с письмом изменилась. Обновите переписку, чтобы открыть актуальное письмо.")
-        detail = (box.read(uid, expected_uidvalidity=validity) if folder == "INBOX" else
-                  box.read(uid, folder=mailbox, expected_uidvalidity=validity))
+        detail = box.read(uid, folder=mailbox, expected_uidvalidity=validity)
         detail.update(account_id=account_id, id=message_key,
                       account=next((a["address"] for a in self.rules["accounts"] if a["id"] == account_id), ""), folder=folder)
         return detail
@@ -968,18 +1015,20 @@ class MailService:
     def delete_mail(self, message_key):
         """Move one selected inbox copy to the server Trash; leave other account copies untouched."""
         account_id, validity, uid, folder = self._parse_message_key(message_key)
+        if folder == "TRASH":
+            raise MailServiceError("Письмо уже в папке «Удалённые».")
         with self._db() as db:
             known = db.execute("SELECT 1 FROM messages WHERE account_id=? AND folder=? AND uidvalidity=? AND uid=?",
                                (account_id, folder, validity, uid)).fetchone()
         if not known:
             raise MailServiceError("Письмо уже удалено или отсутствует в текущей версии папки.")
         box = self.account_get(account_id)
-        mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
-        if not mailbox or str(box.uidvalidity(mailbox)) != validity:
+        _, folder_info = self._mailbox_info(account_id, folder)
+        mailbox = folder_info["mailbox"]
+        if str(box.uidvalidity(mailbox)) != validity:
             raise MailServiceError("Папка с письмом изменилась. Обновите список; удаление остановлено.")
         try:
-            result = (box.move_to_trash(uid, expected_uidvalidity=validity) if folder == "INBOX" else
-                      box.move_to_trash(uid, folder=mailbox, expected_uidvalidity=validity))
+            result = box.move_to_trash(uid, folder=mailbox, expected_uidvalidity=validity)
         except MailError as exc:
             raise MailServiceError(str(exc)) from exc
         with self._db() as db:
@@ -990,10 +1039,22 @@ class MailService:
 
     @staticmethod
     def _parse_message_key(message_key):
-        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+(?::s)?", message_key):
+        if not isinstance(message_key, str) or not re.fullmatch(r"[a-z0-9_-]{1,40}:[0-9]+:[0-9]+(?::(?:s|f[A-Za-z0-9_-]+))?", message_key):
             raise MailServiceError("Письмо выбирается по id из списка.")
         parts = message_key.split(":")
-        return (parts[0], parts[1], parts[2], "SENT" if len(parts) == 4 else "INBOX")
+        if len(parts) == 3:
+            folder = "INBOX"
+        elif parts[3] == "s":
+            folder = "SENT"
+        else:
+            token = parts[3][1:]
+            try:
+                folder = base64.urlsafe_b64decode(token + "=" * ((4 - len(token) % 4) % 4)).decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise MailServiceError("Папка письма указана неверно.") from exc
+            if folder in ("INBOX", "SENT"):
+                raise MailServiceError("Папка письма указана неверно.")
+        return (parts[0], parts[1], parts[2], folder)
 
     @staticmethod
     def _draft_view(draft_id, revision, state, payload):
@@ -1053,9 +1114,8 @@ class MailService:
         box = self.account_get(account_id)
         try:
             _, validity, _, folder = self._parse_message_key(message_key)
-            mailbox = "INBOX" if folder == "INBOX" else box.special_folder("\\Sent")
-            raw = (box.read_raw(original["uid"], expected_uidvalidity=validity) if folder == "INBOX" else
-                   box.read_raw(original["uid"], folder=mailbox, expected_uidvalidity=validity))
+            _, folder_info = self._mailbox_info(account_id, folder)
+            raw = box.read_raw(original["uid"], folder=folder_info["mailbox"], expected_uidvalidity=validity)
         except MailError as exc:
             raise MailServiceError(str(exc)) from exc
         subject = str(original.get("subject") or "(без темы)").strip()

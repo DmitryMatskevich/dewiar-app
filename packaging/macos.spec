@@ -7,9 +7,16 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 root = Path(SPECPATH).parent
+import sys
+sys.path.insert(0, str(root / 'tools'))
 import runpy
 runpy.run_path(str(root / 'tools/check_hud_scripts.py'))['check_hud_scripts'](root)
+from mac_build_identity import write_manifest
+build_id = uuid.uuid4().hex
+manifest_path = root / 'build/mac-build-manifest.json'
+write_manifest(root, manifest_path, build_id=build_id)
 datas = [(str(root / name), name) for name in ("core", "ui", "data", "icons")]
+datas += [(str(manifest_path), ".")]
 datas += [(str(root / name), "tools") for name in
           ("tools/subscription_ui_smoke.js", "tools/song_separation_probe.py")]
 # The official MCP SDK runs in an optional venv; bundle only helper source and pins.
@@ -67,7 +74,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Dewiar", console=Fals
 coll = COLLECT(exe, a.binaries, a.datas, name="Dewiar")
 app = BUNDLE(coll, name="Dewiar.app", bundle_identifier="pro.dewiar.macos",
              info_plist={"CFBundleDisplayName": "Dewiar", "CFBundleShortVersionString": "0.45.3",
-                         "DewiarBuildID": uuid.uuid4().hex,
+                         "DewiarBuildID": build_id,
                          "NSContactsUsageDescription": "Импорт выбранных контактов в Dewiar и создание новых карточек по вашему подтверждению",
                          "NSMicrophoneUsageDescription": "Голосовое общение с помощником Dewiar",
                          "NSDocumentsFolderUsageDescription": "Чтение выбранных вами документов и сохранение заметок в рабочей папке Dewiar",

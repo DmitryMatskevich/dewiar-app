@@ -1,6 +1,7 @@
 """Explicit, bounded lookups of public DNS and RDAP data. No automatic claims about the actual hoster."""
 import ipaddress
 import json
+import socket
 from urllib.parse import quote, urljoin, urlsplit
 
 import httpx
@@ -21,7 +22,12 @@ def _https_json(url):
             if u.scheme != "https" or not u.hostname or u.username or u.password or u.port not in (None, 443):
                 raise PolicyError("Недопустимый адрес RDAP")
             resolve(u.hostname, 443)
-            response = client.get(url)
+            try:
+                response = client.get(url)
+            except httpx.RequestError:
+                # Public RDAP/ASN services are optional enrichment. Keep useful
+                # DNS results when an auxiliary registry is temporarily unavailable.
+                return None
             if response.is_redirect:
                 location = response.headers.get("location")
                 if not location:
@@ -52,15 +58,19 @@ def _dns(domain, qtype):
 
 def _provider(host):
     h=(host or '').lower().rstrip('.')
-    if h.endswith(('.beget.com','.beget.ru','.beget.pro')):
-        return {'name':'Бегет','url':'https://beget.com','panel':'https://cp.beget.com','panel_name':'Панель Beget'}
-    if h.endswith(('.timeweb.ru','.timeweb.org')):
+    def matches(*domains):
+        return any(h==domain or h.endswith('.'+domain) for domain in domains)
+    if matches('beget.com','beget.ru','beget.pro'):
+        return {'name':'Beget','url':'https://beget.com','panel':'https://cp.beget.com','panel_name':'Панель Beget'}
+    if matches('timeweb.ru','timeweb.org','timeweb.com'):
         return {'name':'Timeweb','url':'https://timeweb.com','panel':'https://hosting.timeweb.ru','panel_name':'Панель Timeweb'}
-    if h.endswith(('.firstvds.ru',)):
+    if matches('firstvds.ru'):
         return {'name':'FirstVDS','url':'https://firstvds.ru','panel':'https://my.firstvds.ru','panel_name':'BILLmanager; доступ к панелям сервера из кабинета'}
-    if h.endswith(('.nic.ru','.nic.com')):
+    if matches('nic.ru','nic.com'):
         return {'name':'RU-CENTER / NIC.RU','url':'https://www.nic.ru','panel':'https://www.nic.ru/manager/','panel_name':'Кабинет RU-CENTER'}
-    if h.endswith(('.domaindiscover.com',)):
+    if matches('sweb.ru','spaceweb.ru'):
+        return {'name':'SpaceWeb','url':'https://sweb.ru','panel':'https://mcp.sweb.ru/main/auth/','panel_name':'Панель SpaceWeb'}
+    if matches('domaindiscover.com'):
         return {'name':'DomainDiscover','url':'https://www.domaindiscover.com','panel':'','panel_name':'DNS delegated to DomainDiscover'}
     return None
 
@@ -95,7 +105,10 @@ def discover(value):
     if "." not in host:
         raise ValueError("Введите полное доменное имя")
     guard()
-    addresses = resolve(host, 443)
+    try:
+        addresses = resolve(host, 443)
+    except socket.gaierror:
+        addresses = []
     domain = _rdap("https://rdap.org/domain/" + quote(host, safe=".")) or {}
     nameservers = sorted({str(x.get("ldhName", "")).lower().rstrip(".") for x in domain.get("nameservers", []) if x.get("ldhName")})
     if not nameservers:

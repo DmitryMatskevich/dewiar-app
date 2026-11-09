@@ -981,6 +981,14 @@ def main():
                         except Exception as exc:
                             # Optional: a failed recheck never loses the aligned text.
                             timed['sung_gap_recovery'] = {'applied': False, 'error': str(exc)[:300]}
+                        if activity:
+                            # What nobody recognized becomes an editable «???» line.
+                            from songs import vocal_timing
+                            import soundfile as sf
+                            lexical = vocal_timing.unrecognized_windows(timed.get('phrases') or [], context)
+                            timed['phrases'], timed['placeholders'] = vocal_timing.insert_placeholders(
+                                timed.get('phrases') or [], dict(activity, lexical=lexical),
+                                round(sf.info(str(args.input)).duration * 1000))
                     finally:
                         # Only this job's temporary separator outputs, never a
                         # selected karaoke file or an existing cached stem.

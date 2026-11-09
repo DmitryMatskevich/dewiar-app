@@ -20,6 +20,7 @@ _locks_guard = threading.Lock()
 _locks = {}
 FILES = ('transcript.txt', 'transcript-timed.txt', 'transcript.srt', 'segments.json', 'metadata.json', 'errors.log',
          'transcript.clean.md','transcript.review.md','cleanup.json','transcript.summary.md','transcript.topics.md','summary.json')
+FILES += ('participants-contacts.md', 'participants-contacts.json')
 
 
 def source_key(source):
@@ -85,6 +86,8 @@ def seed_cache(cache, task_dir):
             for name in FILES:
                 if (src/name).is_file():
                     shutil.copy2(src/name, dst/name)
+            if (src/'contact-frames').is_dir():
+                shutil.copytree(src/'contact-frames', dst/'contact-frames', dirs_exist_ok=True)
         finally:
             lock.release()
 
@@ -113,6 +116,8 @@ def _cached_batch(sources, output, resolve, recognize, cancel, language, force, 
             for name in FILES:
                 if (cache/key/name).is_file():
                     shutil.copy2(cache/key/name, dst/name)
+            if (cache/key/'contact-frames').is_dir():
+                shutil.copytree(cache/key/'contact-frames', dst/'contact-frames', dirs_exist_ok=True)
             if entry['status'] == 'ok' or entry.get('extraction_complete'):
                 entry['text'] = (dst/'transcript.txt').relative_to(output.parent).as_posix()
                 entry['srt'] = (dst/'transcript.srt').relative_to(output.parent).as_posix()

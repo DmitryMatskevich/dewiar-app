@@ -149,7 +149,21 @@ def catalog_search(title, artist=''):
                                  'title': song.get('full_title') or song.get('title') or ''})
     except Exception:
         pass
-    return hits[:5]
+    try:
+        # AMDM: lyrics with chords for most Russian songs; the search page is
+        # plain HTML (a table of «artist — song» rows).
+        with urlopen(Request('https://amdm.ru/search/?' + urlencode({'q': query}),
+                             headers={'User-Agent': 'Mozilla/5.0 Dewiar-Songs/0.1'}), timeout=8) as r:
+            page = r.read(2_000_001).decode('utf-8', 'replace')
+        table = page.split('<table class="items">', 1)[1].split('</table>', 1)[0] if '<table class="items">' in page else ''
+        for cell in re.findall(r'<td class="artist_name">(.*?)</td>', table, re.S):
+            links = re.findall(r'<a href="(https://amdm\.ru/akkordi/[^"]+)"[^>]*>([^<]*)</a>', cell)
+            if len(links) >= 2 and relevant(links[1][1], links[0][1]):
+                hits.append({'url': links[1][0], 'kind': 'lyrics', 'provider': 'amdm',
+                             'title': f'{links[0][1].strip()} — {links[1][1].strip()}'})
+    except Exception:
+        pass
+    return hits[:6]
 
 
 def confirm_text(text, selected):

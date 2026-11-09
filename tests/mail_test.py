@@ -160,6 +160,18 @@ trash_list_server = TrashListIMAP()
 with patch.object(m, "_imap", return_value=trash_list_server):
     localized_trash = m.special_folder("\\Trash")
 ok(localized_trash == _imap_quote("Корзина")[1:-1], "локализованная папка Корзина найдена без SPECIAL-USE")
+class FoldersIMAP:
+    def list(self):
+        return "OK", [b'(\\HasNoChildren \\Inbox) "/" "INBOX"', b'(\\HasNoChildren \\Sent) "/" "Sent"',
+                       b'(\\HasNoChildren \\Drafts) "/" "Drafts"', b'(\\HasNoChildren \\Junk) "/" "Spam"',
+                       b'(\\HasNoChildren) "/" "Clients"']
+    def logout(self): return "BYE", []
+folders_server = FoldersIMAP()
+with patch.object(m, "_imap", return_value=folders_server):
+    folders = m.folders()
+ok([f["id"] for f in folders] == ["INBOX", "SENT", "DRAFTS", "JUNK", folders[-1]["id"]]
+   and folders[-1]["name"] == "Clients" and folders[-1]["id"].startswith("F:"),
+   "стандартные и пользовательские папки IMAP определяются по SPECIAL-USE")
 (ws.root / "Заметки" / "Отчёт.md").write_text("# Отчёт\nВсё готово.", encoding="utf-8")
 res = m.send("", "Отчёт по задаче", "Привет! Отчёт во вложении.", ["Заметки/Отчёт.md"])
 msg = email.message_from_bytes(SENT[-1])

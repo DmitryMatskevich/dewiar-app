@@ -100,8 +100,9 @@ class App:
                     if days is not None and days<=7:
                         reasons.append(label+(' просрочена' if days<0 else ' скоро'))
                 if reasons:
-                    alerts.append({'id':site['id'],'name':site['name'],'reasons':list(dict.fromkeys(reasons))})
-            return {'count':len(alerts),'items':alerts,'updated_at':now}
+                    alerts.append({'id':site['id'],'name':site['name'],'state':site['state'],'reasons':list(dict.fromkeys(reasons))})
+            unavailable=sum(1 for site in items if site['state']=='DOWN')
+            return {'count':len(alerts),'unavailable_count':unavailable,'items':alerts,'updated_at':now}
         if path == '/api/incidents':
             return {'items': self.store.incidents(query.get('site',[None])[0])}
         if path == '/api/deliveries':

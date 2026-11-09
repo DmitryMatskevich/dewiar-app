@@ -85,8 +85,11 @@ def validate(data):
         if not isinstance(v, str) or len(v) > (2000 if k == 'notes' else 2048):
             raise ValueError('Некорректное поле ' + k)
         d[k] = v.strip()
-    d['url'] = web_url(d['url'])
-    d['name'] = (d['name'] or urlsplit(d['url']).hostname)[:160]
+    d['url'] = web_url(d['url']) if d['url'] else ''
+    hostname = urlsplit(d['url']).hostname if d['url'] else ''
+    d['name'] = (d['name'] or hostname)[:160]
+    if not d['name']:
+        raise ValueError('Укажите название сайта или почтового узла')
     for k in ('hosting_expires', 'domain_expires'):
         if d[k]:
             try:
@@ -110,18 +113,26 @@ def validate(data):
         if not isinstance(data.get(k, default), bool):
             raise ValueError('Неверный переключатель ' + k)
         d[k] = data.get(k, default)
-    if d['dns'] and not (d['dns_host'] or urlsplit(d['url']).hostname):
-        raise ValueError('Для проверки DNS требуется доменное имя')
     d['mail_kind'] = data.get('mail_kind', 'imap_tls')
     if d['mail_kind'] not in ('imap_tls', 'smtp_tls', 'smtp_starttls', 'smtp'):
         raise ValueError('Неверный тип почты')
     d['mail_smtp_kind']=data.get('mail_smtp_kind','smtp_starttls')
     if d['mail_smtp_kind'] not in ('smtp_tls','smtp_starttls'):
         raise ValueError('Неверный протокол SMTP')
-    if d['mail'] and not any(d[k] for k in ('mail_host','mail_imap_host','mail_smtp_host','mail_mx_host')):
-        raise ValueError('Укажите IMAP, SMTP или MX сервер')
-    if d['health_required'] and not d['health_url']:
-        raise ValueError('Укажите URL обязательной тестовой страницы')
+    target_host = hostname or d['dns_host'] or d['mail_host'] or d['mail_imap_host'] or d['mail_smtp_host'] or d['mail_mx_host'] or d['ssh_host']
+    # Site cards can be saved as inventory/drafts. Require a target only for
+    # checks that are actually enabled; a paused card needs no probe targets.
+    if d['enabled']:
+        if d['mail'] and not any(d[k] for k in ('mail_host','mail_imap_host','mail_smtp_host','mail_mx_host')):
+            raise ValueError('Для проверки почты укажите IMAP, SMTP или MX сервер')
+        if d['dns'] and not target_host:
+            raise ValueError('Для проверки DNS укажите домен или сервер')
+        if d['ping'] and not target_host:
+            raise ValueError('Для проверки IP укажите домен или сервер')
+        if (d['ssh'] or d['ftp']) and not (d['ssh_host'] or hostname or d['dns_host']):
+            raise ValueError('Для проверки SSH или FTP укажите домен или сервер')
+        if d['health_required'] and not d['health_url']:
+            raise ValueError('Для проверки HTML укажите URL тестовой страницы')
     return d
 
 
@@ -169,20 +180,30 @@ class Store:
                 {'type':'phone','label':'Россия','value':'8 (800) 700-10-81'}, {'type':'email','label':'Поддержка клиентов','value':'info@timeweb.ru'}, {'type':'ticket','label':'Тикеты в панели','value':'Поддержка → Написать в поддержку','url':'https://hosting.timeweb.ru'}, {'type':'chat','label':'Онлайн-чат','value':'Чат Timeweb','url':'https://timeweb.com'}]}
             ,{'id':'sweb','name':'Sweb','website_url':'https://sweb.ru','panel_url':'https://mcp.sweb.ru/main/auth/','panel_name':'Панель управления SpaceWeb','source_url':'https://sweb.ru/contactinfo/','contacts':[
                 {'type':'phone','label':'Россия, круглосуточно','value':'8 (800) 777-86-49'}, {'type':'phone','label':'Москва','value':'+7 (495) 109-41-49'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 209-41-49'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'support@sweb.ru'}, {'type':'ticket','label':'Заявка в панели → Поддержка','value':'Войти в панель','url':'https://mcp.sweb.ru/main/auth/'}]}
+            ,{'id':'nic-ru','name':'NIC.RU','website_url':'https://www.nic.ru','panel_url':'https://www.nic.ru/hcp/','panel_name':'Панель управления хостингом RU-CENTER','source_url':'https://www.nic.ru/help/monitoring-domenov_4451.html','notes':'Официальные телефоны и панель подтверждены страницами NIC.RU. Поддержка также доступна через кабинет. Адрес поддержки по электронной почте не добавлен: не удалось подтвердить его на официальном источнике.','contacts':[
+                {'type':'phone','label':'Служба поддержки RU-CENTER','value':'+7 (495) 009-13-33'}, {'type':'phone','label':'Служба поддержки RU-CENTER','value':'+7 (495) 994-46-01'}, {'type':'ticket','label':'Поддержка в личном кабинете','value':'Открыть поддержку','url':'https://www.nic.ru/support/'}, {'type':'news','label':'Официальный Telegram-канал Руцентра','value':'@rucenter','url':'https://t.me/rucenter'}]}
         ]
         with self.db() as c:
             now = minute()
+            resolved_ids = {}
             for item in seed:
                 cfg = validate_provider(item)
                 old = c.execute('SELECT * FROM providers WHERE id=?', (item['id'],)).fetchone()
                 if not old:
-                    c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
+                    old = c.execute("SELECT * FROM providers WHERE lower(json_extract(config, '$.name'))=lower(?)", (item['name'],)).fetchone()
+                    if not old:
+                        c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (item['id'], 1, now, now, json.dumps(cfg, ensure_ascii=False)))
+                        resolved_ids[item['id']] = item['id']
+                    else:
+                        resolved_ids[item['id']] = old['id']
+                else:
+                    resolved_ids[item['id']] = old['id']
             # One-time additive migration: add new official/user-supplied contact categories
             # without overwriting the provider name, links, notes, or existing contact edits.
             seeded = c.execute("SELECT value FROM provider_meta WHERE key='contact_categories_v2'").fetchone()
             if not seeded:
                 for item in seed:
-                    old = c.execute('SELECT * FROM providers WHERE id=?', (item['id'],)).fetchone()
+                    old = c.execute('SELECT * FROM providers WHERE id=?', (resolved_ids.get(item['id'], item['id']),)).fetchone()
                     if not old: continue
                     current = json.loads(old['config'])
                     contacts = current.setdefault('contacts', [])
@@ -194,7 +215,8 @@ class Store:
                                   (old['rev'] + 1, now, json.dumps(current, ensure_ascii=False), old['id']))
                 c.execute("INSERT INTO provider_meta VALUES ('contact_categories_v2','1')")
             # Link earlier free-text entries to their matching directory records.
-            aliases = {'beget':'beget', 'firstvds':'firstvds', 'timeweb':'timeweb', 'timeweb cloud':'timeweb-cloud'}
+            provider_ids = {json.loads(r['config'])['name'].strip().casefold():r['id'] for r in c.execute('SELECT id,config FROM providers').fetchall()}
+            aliases = {'beget':provider_ids.get('beget','beget'), 'firstvds':provider_ids.get('firstvds','firstvds'), 'timeweb':provider_ids.get('timeweb','timeweb'), 'timeweb cloud':provider_ids.get('timeweb cloud','timeweb-cloud'), 'nic.ru':provider_ids.get('nic.ru','nic-ru'), 'nic.ru / ru-center':provider_ids.get('nic.ru','nic-ru'), 'ru-center':provider_ids.get('nic.ru','nic-ru')}
             for row in c.execute('SELECT id,config FROM sites').fetchall():
                 cfg = json.loads(row['config'])
                 if not cfg.get('hosting_provider_id'):
@@ -351,7 +373,9 @@ class Store:
         now = minute() if now is None else now
         notification_settings = self.settings()
         channels = notification_settings['channels']
-        required = ['http'] + (['health'] if site['health_url'] and site['health_required'] else [])
+        required = ['http'] if site['url'] else (['mail'] if site['mail'] else [])
+        if site['health_url'] and site['health_required']:
+            required.append('health')
         selected = [r for r in results if r['probe'] in required]
         state = 'DOWN' if any(r['state'] == 'DOWN' for r in selected) else 'UP' if len(selected) == len(required) and all(r['state'] == 'UP' for r in selected) else 'UNKNOWN'
         reason = next((r.get('reason', '') for r in selected if r['state'] != 'UP'), 'OK')
@@ -406,7 +430,7 @@ class Store:
                     if probe not in ('web', 'ssh', 'ftp', 'mail'):
                         continue
                     stamp = datetime.fromtimestamp(now*60, ZoneInfo('Europe/Moscow')).strftime('%d.%m.%Y %H:%M МСК')
-                    body = f"Dewiar · {site['name']}\n{probe}: {'недоступен' if event == 'DOWN' else 'снова доступен'}\n{site['url']}\nПричина: {r.get('reason', '')}\nИнцидент {iid[:8]} · {stamp}"
+                    body = f"Dewiar · {site['name']}\n{probe}: {'недоступен' if event == 'DOWN' else 'снова доступен'}\n" + (site['url']+'\n' if site.get('url') else '') + f"Причина: {r.get('reason', '')}\nИнцидент {iid[:8]} · {stamp}"
                     for channel in channels:
                         dedupe = f'{iid}:{event}:{channel}'
                         target = {k: notification_settings[k] for k in ('email_to', 'mail_account_id')}
@@ -490,11 +514,11 @@ class Store:
                     if threshold is None or c.execute('SELECT 1 FROM renewal_alerts WHERE site=? AND kind=? AND deadline=? AND threshold=?',(row['id'],kind,site[field],threshold)).fetchone():
                         continue
                     if days < 0:
-                        message = f"Срок {label} сайта {site['name']} истёк {abs(days)} дн. назад: {site[field]}\n{site['url']}"
+                        message = f"Срок {label} сайта {site['name']} истёк {abs(days)} дн. назад: {site[field]}" + (f"\n{site['url']}" if site.get('url') else '')
                     elif days == 0:
-                        message = f"Сегодня заканчивается срок {label} сайта {site['name']}: {site[field]}\n{site['url']}"
+                        message = f"Сегодня заканчивается срок {label} сайта {site['name']}: {site[field]}" + (f"\n{site['url']}" if site.get('url') else '')
                     else:
-                        message = f"Через {days} дн. заканчивается срок {label} сайта {site['name']}: {site[field]}\n{site['url']}"
+                        message = f"Через {days} дн. заканчивается срок {label} сайта {site['name']}: {site[field]}" + (f"\n{site['url']}" if site.get('url') else '')
                     alert_id = uuid.uuid4().hex
                     c.execute('INSERT INTO renewal_alerts VALUES (?,?,?,?,?)',(row['id'],kind,site[field],threshold,minute()))
                     target = {k:cfg[k] for k in ('email_to','mail_account_id')}

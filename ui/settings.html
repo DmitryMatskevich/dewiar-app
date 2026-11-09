@@ -511,7 +511,8 @@
       <div class="songs-filters" role="group" aria-label="Фильтр песен">
         <button class="chip on" aria-pressed="true" data-song-status="">Все</button><button class="chip" aria-pressed="false" data-song-status="running">В работе</button><button class="chip" aria-pressed="false" data-song-status="batch">Пакетная обработка</button><button class="chip" aria-pressed="false" data-song-status="stopped">Остановились</button><button class="chip" aria-pressed="false" data-song-status="review">Проверить</button><button class="chip" aria-pressed="false" data-song-status="ready">Готовы</button>
       </div>
-      <div class="songs-tag-filters" role="group" aria-label="Фильтр по тегам"><span class="songs-filter-label">Теги:</span><button class="chip on" aria-pressed="true" data-song-tag="">Все</button><button class="chip" aria-pressed="false" data-song-tag="Компания">Компания</button><button class="chip" aria-pressed="false" data-song-tag="Италия">Италия</button><button class="chip" aria-pressed="false" data-song-tag="Мужская">Мужская</button><button class="chip" aria-pressed="false" data-song-tag="Любовь">Любовь</button><button class="chip" aria-pressed="false" data-song-tag="Шансон">Шансон</button><button class="chip" aria-pressed="false" data-song-tag="Бард">Бард</button><button class="chip" aria-pressed="false" data-song-tag="Запад">Запад</button><button class="chip" aria-pressed="false" data-song-tag="Грусть">Грусть</button><button class="chip" aria-pressed="false" data-song-tag="Юмор">Юмор</button><button class="chip" aria-pressed="false" data-song-tag="Военные">Военные</button><button class="chip" aria-pressed="false" data-song-tag="Дворовые">Дворовые</button><button class="chip" aria-pressed="false" data-song-tag="Народные">Народные</button><button class="chip" aria-pressed="false" data-song-tag="Из фильмов">Из фильмов</button><button class="chip" aria-pressed="false" data-song-tag="Советские">Советские</button><button class="chip" aria-pressed="false" data-song-tag="Детские">Детские</button></div>
+      <div class="songs-tag-filters" role="group" aria-label="Фильтр по тегам"><span class="songs-filter-label">Теги:</span><button class="chip on" aria-pressed="true" data-song-tag="">Все</button><button class="chip" aria-pressed="false" data-song-tag="Компания">Компания</button><button class="chip" aria-pressed="false" data-song-tag="Мужская">Мужская</button><button class="chip" aria-pressed="false" data-song-tag="Любовь">Любовь</button><button class="chip" aria-pressed="false" data-song-tag="Шансон">Шансон</button><button class="chip" aria-pressed="false" data-song-tag="Бард">Бард</button><button class="chip" aria-pressed="false" data-song-tag="Грусть">Грусть</button><button class="chip" aria-pressed="false" data-song-tag="Юмор">Юмор</button><button class="chip" aria-pressed="false" data-song-tag="Дворовые">Дворовые</button><button class="chip" aria-pressed="false" data-song-tag="Народные">Народные</button><button class="chip" aria-pressed="false" data-song-tag="Рок">Рок</button></div>
+      <div class="songs-rating-filters" role="group" aria-label="Фильтр по оценке"><span class="songs-filter-label">Оценка:</span><button class="chip on" aria-pressed="true" data-song-rating="">Все</button><button class="chip" aria-pressed="false" data-song-rating="5" title="Песни с оценкой 5 звёзд">★★★★★</button><button class="chip" aria-pressed="false" data-song-rating="4" title="Песни с оценкой 4 звезды">★★★★</button><button class="chip" aria-pressed="false" data-song-rating="3" title="Песни с оценкой 3 звезды">★★★</button><button class="chip" aria-pressed="false" data-song-rating="2" title="Песни с оценкой 2 звезды">★★</button><button class="chip" aria-pressed="false" data-song-rating="1" title="Песни с оценкой 1 звезда">★</button></div>
     </div>
     <div id="songs-empty" class="prof on songs-empty"><h2>Начните с песни</h2><p class="hint">Можно взять то, что сейчас играет в Яндекс Музыке, найти песню по названию или записать исполнение через микрофон.</p><div class="actions"><button class="btn primary" id="songs-empty-current">Разобрать текущую песню</button><button class="btn" id="songs-empty-query">Найти по названию</button><button type="button" class="btn song-icon-btn" id="songs-empty-mic" title="Создать песню и начать запись исполнения с микрофона" aria-label="Записать песню с микрофона"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 16v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
     <div id="songs-list" class="songs-list" aria-live="polite"></div>
@@ -549,12 +550,14 @@
     <div class="prof on" id="mail-box" style="padding:16px 18px;margin-bottom:22px">
       <div class="ml-mail-app">
         <aside class="ml-sidebar" aria-label="Ящики и фильтры писем">
+          <div class="ml-folders-head"><h3>Папки</h3><span id="ml-folder-owner"></span></div>
+          <nav id="ml-folders" class="ml-folders" aria-label="Папки выбранного ящика"></nav>
           <fieldset class="ml-badge-filters ml-view-filters" aria-describedby="ml-badge-help">
             <legend>Что посмотреть</legend>
             <label><input type="checkbox" data-mail-badge-filter="important"><span>Важные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unread"><span>Непрочитанные</span></label>
             <label><input type="checkbox" data-mail-badge-filter="unanswered"><span>Без ответа</span></label>
-            <p id="ml-badge-help">Отмеченные условия одновременно фильтруют список и задают число на значке. Если ничего не отмечено, показываются все входящие.</p>
+            <p id="ml-badge-help">Галочки фильтруют выбранную папку и задают число подходящих входящих на значке. Без галочек показываются все письма папки.</p>
           </fieldset>
           <div class="ml-mailboxes-head"><h3>Ящики</h3><span id="ml-connection-summary" class="hint"></span></div>
           <div id="ml-accounts" class="ml-accounts" aria-label="Почтовые ящики" aria-live="polite"></div>
@@ -613,12 +616,13 @@
               <h3>Подключение выбранного ящика</h3>
               <p id="ml-selected-address" class="hint"></p>
               <div class="actions ml-credentials">
-                <input type="password" id="ml-pass" placeholder="пароль приложения" autocomplete="new-password" aria-label="Пароль приложения выбранного ящика">
+                <input type="password" id="ml-pass" placeholder="пароль ящика или приложения" autocomplete="new-password" aria-label="Пароль ящика или приложения">
                 <button class="btn primary" id="ml-save">Сохранить и проверить</button>
               </div>
               <p class="hint" id="ml-help"></p>
               <details class="ml-server-settings"><summary>Дополнительные параметры сервера</summary>
                 <div class="row" style="margin-top:10px">
+                  <label class="f">Провайдер почты<select id="ml-provider"><option value="">Автоопределение по адресу</option><option value="yandex">Яндекс</option><option value="mailru">Mail.ru</option><option value="gmail">Gmail</option><option value="outlook">Outlook</option><option value="rambler">Rambler</option><option value="icloud">iCloud</option><option value="yahoo">Yahoo</option><option value="nic">NIC.RU / RU-CENTER</option></select></label>
                   <label class="f">Имя отправителя<input type="text" id="ml-name" placeholder="Dewiar"></label>
                   <label class="f">Логин (если не совпадает с адресом)<input type="text" id="ml-login" autocomplete="username"></label>
                   <label class="f">SMTP — отправка<input type="text" id="ml-smtp"></label>

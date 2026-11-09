@@ -83,6 +83,8 @@
     byId('screen-startup').checked = settings?.ui?.mac_screen_request_at_startup !== false;
     byId('files-startup').checked = settings?.ui?.mac_files_request_at_startup !== false;
     if (!settings?.ui || started || new URLSearchParams(location.search).get('mac_access_setup') !== '1') return;
+    // A Sites alert should stay on the requested monitoring page, not be redirected to Security.
+    if (new URLSearchParams(location.search).has('sites')) return;
     started = true;
     document.querySelector('nav button[data-p="safety"]')?.click();
     byId('setup').hidden = false;

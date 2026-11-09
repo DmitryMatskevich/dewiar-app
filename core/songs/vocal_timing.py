@@ -345,6 +345,30 @@ def _fit_word(word, vocal, is_first, is_last, previous_end, next_start, notes):
     return changed
 
 
+HELD_MS = 3000
+
+
+def _held_end(vocal, end, next_start=None, notes=None):
+    """A line whose last word is not measured ends with the voice, not before it.
+
+    «Как сто балерин»: the aligner timed «Как сто», the line stopped there and
+    «балерин» (still sung, 1.5 s) fell into the pause, which then showed its
+    chord on a line of its own. The line keeps the voiced stretch it ends in,
+    up to the next line and at most ``HELD_MS``.
+    """
+    for x, y in _intervals(vocal) or []:
+        if x <= end < y:
+            target = min(y + 150, end + HELD_MS)
+            if next_start is not None:
+                target = min(target, int(next_start))
+            if target > end:
+                if notes is not None:
+                    notes.append(dict(reason='held_last_word', before=end, after=target))
+                return target
+            break
+    return end
+
+
 def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
     """Return ``(phrase, notes)`` with edges moved out of unvoiced stretches."""
     rows = _intervals(vocal)
@@ -406,6 +430,7 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
                 end = tail + 150
             elif tail is None and end - int(last['end_ms']) >= EDGE_MS + 500:
                 end = int(last['end_ms'])
+            end = _held_end(vocal, end, next_start, notes)
     else:
         onset = first_voice(vocal, start, end)
         tail = last_voice(vocal, start, end)
@@ -418,6 +443,7 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
             start = onset - 60
         if end - tail >= EDGE_MS + 500:
             end = tail + 150
+        end = _held_end(vocal, end, next_start, notes)
     if previous_end is not None:
         start = max(start, int(previous_end))
     start = max(0, start)
@@ -503,6 +529,33 @@ def sung_gaps(phrases, vocal, duration_ms=None):
             out.extend((x, y) for x, y, kind in split_gap(vocal, cursor, a, duration_ms) if kind == 'vocal')
         cursor = max(cursor, int(p.get('end_ms') or 0))
     return out
+
+
+PLACEHOLDER = '???'
+
+
+def placeholder_rows(phrases, vocal, duration_ms=None):
+    """Editable lines «???» where somebody sings and no text was recognized.
+
+    Same passages as «Пение — текст не распознан» (voice in the stem and words
+    an independent recognizer heard). A line, not a label: the user opens it in
+    the phrase editor and types the words over the question marks.
+    """
+    return [{'phrase_id': f'sung-placeholder-{a}', 'text': PLACEHOLDER, 'start_ms': int(a), 'end_ms': int(b),
+             'words': [], 'timing_quality': 'phrase', 'alignment_stale': True, 'kind': 'unknown', 'note': '',
+             'review_state': 'needs_review', 'placeholder': True,
+             'alignment_warning': 'Здесь поют, но слова не распознаны — впишите текст вместо «???»'}
+            for a, b in sung_gaps(phrases, vocal, duration_ms)]
+
+
+def insert_placeholders(phrases, vocal, duration_ms=None):
+    """``(phrases, count)`` with a «???» line in every unrecognized sung passage."""
+    out = copy.deepcopy(phrases or [])
+    rows = placeholder_rows(out, vocal, duration_ms)
+    for row in rows:
+        index = next((i for i, p in enumerate(out) if int(p.get('start_ms') or 0) > row['start_ms']), len(out))
+        out.insert(index, row)
+    return out, len(rows)
 
 
 def _words(text):

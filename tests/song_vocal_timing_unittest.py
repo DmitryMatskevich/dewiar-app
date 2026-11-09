@@ -458,5 +458,39 @@ class GridRealignTests(unittest.TestCase):
         self.assertEqual(hyp['phrases'], self.rows())
         self.assertEqual(hyp['grid_realignment']['runs'][0]['reason'], 'alignment_outside_voice')
 
+
+class HeldEndAndPlaceholderTests(unittest.TestCase):
+    """«Давай, наливай»: «Как сто балерин» stopped after «сто» and «балерин»
+    showed up as a lone chord «G»; singing nobody recognized had no line to
+    type the words into."""
+
+    VOCAL = {'intervals': [[21560, 27380], [28960, 31080], [40000, 46000]],
+             'weak': [[21560, 27380], [28960, 31080], [40000, 46000]]}
+
+    def test_line_ends_with_the_voice_of_its_unmeasured_last_word(self):
+        row = phrase('c', 'Будущий день Как сто балерин', 21600, 25860, None)
+        fitted, notes = vt.fit_phrase(row, self.VOCAL, None, 28900)
+        self.assertEqual(fitted['end_ms'], 27530)
+        self.assertTrue(any(n['reason'] == 'held_last_word' for n in notes))
+        measured = phrase('m', 'Как сто балерин', 23000, 25860, [(23000, 23500), (23600, 24400), (24500, 25860)])
+        self.assertEqual(vt.fit_phrase(measured, self.VOCAL, None, 28900)[0]['end_ms'], 25860)
+        self.assertEqual(vt.fit_phrase(row, self.VOCAL, None, 26000)[0]['end_ms'], 26000)
+
+    def test_unrecognized_singing_gets_an_editable_line(self):
+        rows = [phrase('a', 'Первая строка песни', 28960, 31080, None),
+                phrase('b', 'Последняя строка', 47000, 49000, None)]
+        vocal = dict(self.VOCAL, lexical=[[40000, 46000]])
+        out, count = vt.insert_placeholders(rows, vocal, 60000)
+        self.assertEqual(count, 1)
+        self.assertEqual([p['text'] for p in out], ['Первая строка песни', '???', 'Последняя строка'])
+        self.assertEqual((out[1]['start_ms'], out[1]['end_ms']), (40000, 46000))
+        again, more = vt.insert_placeholders(out, vocal, 60000)
+        self.assertEqual(more, 0)
+        lines = build_guitar_sheet(out, [dict(name='Am', start_ms=0, end_ms=60000)], 60000, vocal)
+        from songs.sheet_lines import readable_sheet
+        sheet = [l['text'] for l in readable_sheet(lines, events=[dict(name='Am', start_ms=0, end_ms=60000)]) if l.get('text')]
+        self.assertIn('???', sheet)
+        self.assertFalse(any(l.get('vocal') for l in lines))
+
 if __name__ == '__main__':
     unittest.main()

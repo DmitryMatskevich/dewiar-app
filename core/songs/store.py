@@ -22,7 +22,7 @@ from pathlib import Path
 
 STAGES = ("identify", "sources", "record", "lyrics", "text_reference", "structure", "chords", "karaoke", "review")
 STATUS = {"queued", "recording", "running", "needs_input", "review", "ready", "partial", "failed", "cancelled", "interrupted"}
-TAG_OPTIONS = ("Компания", "Италия", "Мужская", "Любовь", "Шансон", "Бард", "Запад", "Грусть", "Юмор", "Военные", "Дворовые", "Народные", "Из фильмов", "Советские", "Детские")
+TAG_OPTIONS = ("Компания", "Мужская", "Любовь", "Шансон", "Бард", "Грусть", "Юмор", "Дворовые", "Народные", "Рок")
 
 
 def _now() -> str:
@@ -108,7 +108,7 @@ class SongStore:
         if not row:
             self._card_cache.pop(song_id, None)
             return None
-        fields = {'song_id', 'title', 'search_query', 'artist', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
+        fields = {'song_id', 'title', 'search_query', 'artist', 'rating', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
                   'capabilities', 'audio', 'phrases', 'analysis_state',
                   'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
                   'revision', 'source', 'source_ref', 'recording_version'}
@@ -139,10 +139,20 @@ class SongStore:
                     chunks.append(value)
         return " ".join(chunks).casefold()
 
-    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False, tag: str = "", lyrics_query: str = "") -> list[dict]:
+    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False, tag: str = "", lyrics_query: str = "", rating: int | str = "") -> list[dict]:
         query = _clean(query, 120).casefold()
         tag = _clean(tag, 40)
         lyrics_query = _clean(lyrics_query, 240).casefold()
+        rating_filter = None
+        if rating not in (None, "", 0, "0"):
+            try:
+                parsed_rating = int(rating)
+            except (TypeError, ValueError):
+                parsed_rating = -1
+            if 1 <= parsed_rating <= 5:
+                rating_filter = parsed_rating
+            else:
+                return []
         with self._lock:
             rows = []
             for song_id in reversed(self._read_index()):
@@ -171,11 +181,13 @@ class SongStore:
                     continue
                 if tag and tag not in (row.get("tags") or []):
                     continue
+                if rating_filter is not None and int(row.get("rating") or 0) != rating_filter:
+                    continue
                 if compact:
                     # The songs list only needs card/progress metadata. Avoid
                     # copying hypotheses, words and guitar sheets while an
                     # analysis worker is writing large song records.
-                    fields = {'song_id', 'title', 'search_query', 'artist', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
+                    fields = {'song_id', 'title', 'search_query', 'artist', 'rating', 'tags', 'tag_scores', 'status', 'stage', 'stage_label',
                               'capabilities', 'audio', 'phrases', 'analysis_state',
                               'source_candidates', 'selected_source_id', 'updated_at', 'created_at',
                               'revision', 'source', 'source_ref', 'recording_version'}
@@ -206,6 +218,7 @@ class SongStore:
             # Existing cards without this field continue to fall back to title.
             "search_query": title if source == "query" else "",
             "artist": artist,
+            "rating": 0,
             "tags": [],
             "tag_scores": {},
             "recording_version": "",
@@ -249,7 +262,7 @@ class SongStore:
             current_revision = int(row.get("revision") or 1)
             if base_revision is not None and int(base_revision) != current_revision:
                 raise ValueError("Песня уже изменилась — обновите карточку и повторите правку")
-            allowed = {"title", "search_query", "artist", "tags", "tag_scores", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
+            allowed = {"title", "search_query", "artist", "rating", "tags", "tag_scores", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
                        "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference",
@@ -262,6 +275,10 @@ class SongStore:
                 if key in allowed:
                     if key in {"title", "search_query", "artist"}:
                         row[key] = _clean(value)
+                    elif key == "rating":
+                        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 5:
+                            raise ValueError("Оценка песни должна быть от 0 до 5 звёзд")
+                        row[key] = value
                     elif key == "tags":
                         row[key] = clean_tags(value)
                     elif key == "tag_scores":

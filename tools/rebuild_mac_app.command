@@ -59,6 +59,14 @@ step "Сборка PyInstaller"
 
 step "Проверка сборки"
 codesign --verify --deep --strict dist/Dewiar.app && echo "OK   подпись" || fail "подпись dist/Dewiar.app"
+"$PY" - <<'PY' || fail "манифест свежести сборки"
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('tools').resolve()))
+from mac_build_identity import validate_manifest, source_fingerprint
+validate_manifest(Path('dist/Dewiar.app'), Path('.').resolve(), source_fingerprint(Path('.').resolve()))
+print('OK   манифест свежести исходников')
+PY
 TAP=$(find dist/Dewiar.app -name dewiar-audio-tap -type f | head -1)
 [ -n "$TAP" ] && echo "OK   хелпер звука: $TAP" || echo "--   хелпер звука не вложен (запись — через BlackHole)"
 UI=$(find dist/Dewiar.app -path "*ui/studio/links.js" | head -1)

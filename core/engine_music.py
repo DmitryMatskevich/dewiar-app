@@ -492,6 +492,24 @@ class MusicMixin:
         from voice_commands import parse as parse_voice
         settings = getattr(self, 's', None)
         configured = parse_voice(text, settings.get('voice_commands') if settings else None)
+        # Голосовые команды «найти/поискать/обработать песню …» добавляют
+        # карточку и сразу запускают фоновый поиск источников и пакетный разбор.
+        # Это локальная операция студии, поэтому она не должна превращаться
+        # в открытие Яндекс Музыки или ждать закрытого окна интерфейса.
+        if configured and configured['action'] == 'song_process':
+            if not configured['enabled']:
+                self._say_quick('Эта голосовая команда выключена в настройках «Руки → Голосовые команды».', text)
+                return True
+            query = configured.get('query', '').strip()
+            try:
+                row = self.song_store.create(query, source='query')
+                self.song_sources.start(row['song_id'], process=True)
+            except Exception as error:
+                self._say_quick('Не удалось запустить обработку песни: ' + str(error), text)
+                return True
+            self._say_quick(f'Песня «{query}» добавлена. Запустила пакетную обработку в фоне.', text,
+                            acts=['start_task'])
+            return True
         if configured and configured['action'] != 'yandex_search' and not _tools.MAC:
             configured = None
         if configured and not configured['enabled']:

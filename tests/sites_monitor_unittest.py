@@ -15,6 +15,7 @@ from sites.store import Store, availability, validate
 from sites.probes import execute, specs
 from sites.runtime import Runtime
 from sites.server import App, Handler, ThreadingHTTPServer
+from sites import discovery
 import urllib.request
 import urllib.error
 
@@ -93,7 +94,7 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):validate(data)
     def test_provider_directory_seed_and_site_link(self):
         providers={p['id']:p for p in self.store.providers()}
-        self.assertEqual(set(providers),{'beget','firstvds','timeweb','timeweb-cloud','sweb'})
+        self.assertEqual(set(providers),{'beget','firstvds','timeweb','timeweb-cloud','sweb','nic-ru'})
         self.assertEqual(providers['beget']['panel_url'],'https://cp.beget.com')
         self.assertIn('support@beget.com',[c['value'] for c in providers['beget']['contacts']])
         self.assertIn('@begetbot',[c['value'] for c in providers['beget']['contacts']])
@@ -103,6 +104,8 @@ class StoreTests(unittest.TestCase):
         self.assertIn(('feedback@beget.com','feedback'),[(c['value'],c['type']) for c in beget_contacts])
         self.assertIn(('abuse@beget.com','abuse'),[(c['value'],c['type']) for c in beget_contacts])
         self.assertIn('support@sweb.ru',[c['value'] for c in providers['sweb']['contacts']])
+        self.assertEqual(providers['nic-ru']['panel_url'],'https://www.nic.ru/hcp/')
+        self.assertIn('+7 (495) 009-13-33',[c['value'] for c in providers['nic-ru']['contacts']])
         linked=self.store.save(dict(self.site,hosting_provider_id='timeweb'))
         self.assertEqual(linked['hoster'],'Timeweb')
         self.assertEqual(self.store.get(self.site['id'])['hosting_provider']['id'],'timeweb')
@@ -114,6 +117,36 @@ class StoreTests(unittest.TestCase):
         migrated=Store(self.tmp.name)
         self.assertEqual(migrated.provider('firstvds')['notes'],'Existing edit')
         self.assertEqual(migrated.provider('sweb')['name'],'Sweb')
+    def test_provider_seed_reuses_existing_record_with_same_name(self):
+        original=self.store.provider('nic-ru')
+        with self.store.db() as c:
+            c.execute("DELETE FROM providers WHERE id='nic-ru'")
+            c.execute('INSERT INTO providers VALUES (?,?,?,?,?)',('existing-nic',1,100,100,json.dumps(original,ensure_ascii=False)))
+        migrated=Store(self.tmp.name)
+        self.assertEqual(len([p for p in migrated.providers() if p['name']=='NIC.RU']),1)
+        self.assertEqual(migrated.provider('existing-nic')['name'],'NIC.RU')
+    def test_mail_only_site_without_website_url(self):
+        with patch('sites.store.minute',return_value=100):
+            mail=self.store.save({'name':'Почтовый узел','mail':True,'mail_host':'mail.example.org','check_http':False,'check_https':False})
+        self.assertEqual(mail['url'],'')
+        checks={r['id']:r for r in specs(mail)}
+        self.assertNotIn('http',checks)
+        self.assertNotIn('http_port',checks)
+        self.assertEqual(checks['dns']['target'],'mail.example.org')
+        self.assertEqual(checks['mail']['target'],'mail.example.org')
+        self.assertTrue(self.store.ingest(mail,[dict(probe='mail',state='UP',reason='OK')],'mail-up',100))
+        self.assertEqual(self.store.history(mail,100,105)['uptime'],100.0)
+
+    def test_disabled_monitoring_allows_incomplete_draft(self):
+        draft=self.store.save({'name':'Почтовый узел — черновик','enabled':False,'dns':False,'mail':True,'mail_host':''})
+        self.assertEqual(draft['url'],'')
+        self.assertFalse(draft['enabled'])
+
+    def test_enabled_selected_checks_require_their_own_target(self):
+        with self.assertRaisesRegex(ValueError,'DNS'):
+            validate({'name':'Черновик','enabled':True,'dns':True})
+        with self.assertRaisesRegex(ValueError,'почты'):
+            validate({'name':'Почтовый узел','enabled':True,'dns':False,'mail':True})
     def test_bare_site_name_gets_https(self):
         self.assertEqual(validate({'url':'example.org'})['url'],'https://example.org')
     def test_provider_edit_revision_and_validation(self):
@@ -174,6 +207,19 @@ class ProbeTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate({'url':'https://site.example','dns_host':'bad/name'})
 
 
+class DiscoveryTests(unittest.TestCase):
+    def test_asn_candidate_and_root_provider_domains(self):
+        domain={'nameservers':[{'ldhName':'ns1.beget.com'}]}
+        ip_data={}
+        ripe_network={'data':{'asns':['AS123'],'prefix':'157.22.207.0/24'}}
+        ripe_as={'data':{'holder':'JSC IOT'}}
+        with patch('sites.discovery.resolve',return_value=['157.22.207.74']), patch('sites.discovery._rdap',side_effect=[domain,ip_data]), patch('sites.discovery._dns',return_value=[]), patch('sites.discovery._https_json',side_effect=[ripe_network,ripe_as]):
+            result=discovery.discover('example.ru')
+        self.assertEqual(result['addresses'],['157.22.207.74'])
+        self.assertEqual(result['dns_provider_candidate']['name'],'Beget')
+        self.assertEqual(result['hosting_provider_candidate']['name'],'FirstVDS')
+
+
 class RuntimeTests(unittest.TestCase):
     def test_network_policy_reconciles_after_restart(self):
         with tempfile.TemporaryDirectory() as root:
@@ -217,7 +263,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.request('/api/sites')['items'][0]['name'],'B')
     def test_provider_api_list_and_edit(self):
         providers=self.request('/api/providers')['items']
-        self.assertEqual({p['id'] for p in providers},{'beget','firstvds','timeweb','timeweb-cloud','sweb'})
+        self.assertEqual({p['id'] for p in providers},{'beget','firstvds','timeweb','timeweb-cloud','sweb','nic-ru'})
         p=next(p for p in providers if p['id']=='beget')
         saved=self.request('/api/providers',dict(p,notes='Synthetic note'))['item']
         self.assertEqual(saved['notes'],'Synthetic note')

@@ -12,6 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_ID = "pro.dewiar.macos"
+LSREGISTER = Path("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+sys.path.insert(0, str(ROOT / "tools"))
+from mac_build_identity import validate_manifest  # noqa: E402
 
 
 def signing(bundle):
@@ -22,12 +25,15 @@ def signing(bundle):
     return result.stdout + result.stderr
 
 
-def validate_bundle(bundle):
+def validate_bundle(bundle, *, expected_fingerprint=None):
     with (bundle / "Contents/Info.plist").open("rb") as stream:
         info = plistlib.load(stream)
     if info.get("CFBundleIdentifier") != BUNDLE_ID:
         raise ValueError("Установка отменена: это не сборка Dewiar")
-    return signing(bundle)
+    signature = signing(bundle)
+    if expected_fingerprint is not None:
+        validate_manifest(bundle, ROOT, expected_fingerprint)
+    return signature
 
 
 def requirement(signature):
@@ -39,13 +45,13 @@ def requirement(signature):
     raise ValueError("Не удалось определить идентичность подписи приложения")
 
 
-def install(source, target):
+def install(source, target, *, expected_fingerprint=None):
     source, target = Path(source).resolve(), Path(target).absolute()
     if target.name != "Dewiar.app" or target.is_symlink():
         raise ValueError("Нужен обычный путь установки с именем Dewiar.app")
     if source == target or source in target.parents or target in source.parents:
         raise ValueError("Сборка и установленное приложение должны быть отдельными папками")
-    new_signature = validate_bundle(source)
+    new_signature = validate_bundle(source, expected_fingerprint=expected_fingerprint)
     if target.exists():
         old_signature = validate_bundle(target)
         if old_signature != new_signature:
@@ -65,7 +71,7 @@ def install(source, target):
     installed = False
     try:
         subprocess.run(["/usr/bin/ditto", str(source), str(staged)], check=True)
-        validate_bundle(staged)
+        validate_bundle(staged, expected_fingerprint=expected_fingerprint)
         if set(p.name for p in staged.iterdir()) != {'Contents'}:
             raise ValueError('Неожиданная структура новой .app: установка отменена')
         if target.exists():
@@ -81,7 +87,7 @@ def install(source, target):
             (target / 'Contents').rename(old_contents)
             try:
                 (staged / 'Contents').rename(target / 'Contents')
-                validate_bundle(target)
+                validate_bundle(target, expected_fingerprint=expected_fingerprint)
             except Exception:
                 if (target / 'Contents').exists():
                     shutil.rmtree(target / 'Contents')
@@ -100,6 +106,32 @@ def install(source, target):
                 shutil.rmtree(folder)
         if not backup.exists():
             shutil.rmtree(stage_root)
+
+
+def unregister_legacy_launchers(source, target):
+    """Remove stale Dewiar paths from LaunchServices without deleting files.
+
+    macOS can otherwise resolve ``open -a Dewiar`` to an older .app left in a
+    worktree or a previous experiment.  The canonical copy remains registered
+    at ``/Applications/Dewiar.app``; old bundles are only unregistered.
+    """
+    if not LSREGISTER.is_file():
+        return
+    source = Path(source).resolve()
+    target = Path(target).resolve()
+    candidates = {source}
+    for search_root in (ROOT.parent, Path("/Applications")):
+        if not search_root.exists():
+            continue
+        try:
+            candidates.update(path.resolve() for path in search_root.rglob("Dewiar.app"))
+        except OSError:
+            continue
+    for candidate in sorted(candidates, key=str):
+        if candidate == target or not candidate.is_dir():
+            continue
+        subprocess.run([str(LSREGISTER), "-u", str(candidate)], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def main():
@@ -124,7 +156,11 @@ def main():
         processes = subprocess.check_output(["/bin/ps", "-axo", "command="], text=True)
         if any(line == exe or line.startswith(exe + " ") for line in processes.splitlines() for exe in binaries):
             parser.error("Сначала завершите Dewiar и его процессы ядра; запущенную сборку заменять нельзя")
-        install(args.source, args.target)
+    from mac_build_identity import source_fingerprint
+    expected_fingerprint = source_fingerprint(ROOT)
+    install(args.source, args.target, expected_fingerprint=expected_fingerprint)
+    unregister_legacy_launchers(args.source, args.target)
+    print(f"LaunchServices: оставлена только копия {args.target}")
 
 
 if __name__ == "__main__":

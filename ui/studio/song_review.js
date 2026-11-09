@@ -225,13 +225,22 @@ window.SongReview = (() => {
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
     }
-    full.onclick = () => { variant='original'; if (variantSelect) variantSelect.value='original'; followSheet=true; return playFull(true); };
-    if (instrumentalPlay) instrumentalPlay.onclick = () => {
-      if (row.karaoke?.state !== 'ready') return;
-      variant='instrumental'; if (variantSelect) variantSelect.value='instrumental';
-      followSheet=true; return playFull(true);
-    };
     const variantSelect = document.getElementById('song-play-variant');
+    async function switchFullVariant(next) {
+      if (next === 'instrumental' && row.karaoke?.state !== 'ready') return;
+      const previous = variant;
+      const active = !!player.dataset.session && !player.dataset.phraseId;
+      const wasPlaying = active && !player.paused && !player.ended;
+      const position = active && Number.isFinite(player.currentTime) ? player.currentTime : null;
+      variant = next;
+      if (variantSelect) variantSelect.value = next;
+      followSheet = true;
+      // Clicking the already selected transport button pauses/resumes in place.
+      if (previous === next && active && wasPlaying) { player.pause(); return; }
+      return playFull(false, wasPlaying, position);
+    }
+    full.onclick = () => switchFullVariant('original');
+    if (instrumentalPlay) instrumentalPlay.onclick = () => switchFullVariant('instrumental');
     setPlaybackVariant = value => {
       if (!variantSelect || (value === 'instrumental' && row.karaoke?.state !== 'ready')) return false;
       variant=variantSelect.value=value;
@@ -241,7 +250,8 @@ window.SongReview = (() => {
       if (!setPlaybackVariant(value)) return Promise.resolve();
       followSheet=true;
       const position=player.dataset.session && !player.dataset.phraseId ? player.currentTime : null;
-      return playFull(false,true,position);
+      const wasPlaying=!player.paused&&!player.ended;
+      return playFull(false,wasPlaying,position);
     };
     if (variantSelect) variantSelect.onchange = async () => {
       const wasPlaying = !player.paused && !player.ended;

@@ -45,7 +45,9 @@ class _VisibleText(HTMLParser):
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
-        if tag in {'script', 'style', 'noscript', 'svg'}:
+        # <sup> holds footnote marks («Гоп³», «приком⁴»): glued to a word they
+        # turn every line into a false correction.
+        if tag in {'script', 'style', 'noscript', 'svg', 'sup'}:
             self.hidden += 1
         elif tag == 'title':
             self.title_depth += 1
@@ -53,7 +55,7 @@ class _VisibleText(HTMLParser):
             self.parts.append('\n')
 
     def handle_endtag(self, tag):
-        if tag in {'script', 'style', 'noscript', 'svg'} and self.hidden:
+        if tag in {'script', 'style', 'noscript', 'svg', 'sup'} and self.hidden:
             self.hidden -= 1
         elif tag == 'title' and self.title_depth:
             self.title_depth -= 1
@@ -97,6 +99,33 @@ def _embedded_lyrics(document, url):
                 if self.depth: self.parts.append(data)
         parser=Poem(); parser.feed(document)
         return re.sub(r'\n{3,}', '\n\n', ''.join(parser.parts)).strip()
+    if host in {'amdm.ru', 'www.amdm.ru'}:
+        # The song's text with chords; the rest of the page is site menus.
+        block = re.search(r'<pre[^>]*itemprop="chordsBlock"[^>]*>(.*?)</pre>', document, re.S)
+        return html.unescape(re.sub(r'<[^>]+>', '', block.group(1))).strip() if block else ''
+    if host in {'mychords.net', 'www.mychords.net'}:
+        # Lyrics with chords: one <div class="single-line"> per line inside
+        # <div class="w-words__text">; chords are spans, removed later with
+        # every other chord-only line (lyrics_only).
+        class Words(HTMLParser):
+            def __init__(self):
+                super().__init__(); self.depth=0; self.parts=[]
+            def handle_starttag(self, tag, attrs):
+                classes=(dict(attrs).get('class') or '').split()
+                if tag=='div' and 'w-words__text' in classes and not self.depth:
+                    self.depth=1; return
+                if self.depth:
+                    if tag=='div':
+                        self.depth+=1; self.parts.append('\n')
+                    elif tag=='br':
+                        self.parts.append('\n')
+            def handle_endtag(self, tag):
+                if self.depth and tag=='div': self.depth-=1
+            def handle_data(self, data):
+                if self.depth: self.parts.append(data)
+        parser=Words(); parser.feed(document)
+        text='\n'.join(line.strip() for line in ''.join(parser.parts).replace('\xa0',' ').splitlines())
+        return re.sub(r'\n{3,}', '\n\n', text).strip()
     if host in {'genius.com', 'www.genius.com'}:
         class Lyrics(HTMLParser):
             def __init__(self):

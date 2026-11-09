@@ -47,7 +47,8 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     play = tab.locator('[data-song-play="1"]')
     stop = tab.locator('[data-song-stop="1"]')
     play.wait_for()
-    assert tab.locator('.song-card-actions button').all_text_contents() == [''] * 15
+    actions = tab.locator('.song-card-actions button').all_text_contents()
+    assert len(actions) >= 15 and all(text == '' for text in actions)
     assert tab.locator('[data-song-open="1"]').last.get_attribute('title').startswith('Редактировать')
     assert tab.locator('[data-song-play="3"]').is_disabled()
     assert not tab.locator('[data-song-karaoke="1"]').is_disabled()

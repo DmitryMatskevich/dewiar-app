@@ -93,6 +93,7 @@ function renderDiff(d) {
 let tOpenedFor = "", tOutSel = "";   // для какой задачи уже выбрана вкладка по умолчанию; выбранный файл результата
 let taskViewVersion = 0;
 const TASK_COPY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+const TASK_EDIT_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.8 4.3 4.3-.8L19.8 7.7a2.1 2.1 0 0 0-3-3L4 16.5Z"/><path d="m14.8 6.7 3 3"/></svg>';
 const TASK_SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>';
 const TASK_DELETE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M9.5 7V5a1.5 1.5 0 0 1 1.5-1h2a1.5 1.5 0 0 1 1.5 1v2M6.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.4h6a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>';
 function taskCopySource(button, text, truncated = false, empty = "В этой вкладке пока нет текста для копирования") {
@@ -151,11 +152,14 @@ function outUrl(t, rel) { const p = (t.dir + "/" + rel).replace(/\\/g, "/"); ret
 const OUT_FILE_OK = location.protocol === "file:";
 function renderOutputs(t) {
   const outs = t.outputs || [];
+  const stages = ["media-transcription", "text-extraction", "contact-extraction"].includes(t.workflow);
   const preferred = t.workflow === 'media-transcription' ? (outs.slice().reverse().find(o => o.path.endsWith('/transcript.summary.md')) || outs.slice().reverse().find(o => o.path.endsWith('/transcript.clean.md')) || outs.slice().reverse().find(o => o.path.endsWith('/transcript.txt'))) : null;
   if (!outs.find(o => o.path === tOutSel)) tOutSel = (preferred || outs[outs.length - 1] || {}).path || "";
   const shown = t.workflow === 'media-transcription' ? outs.slice() : outs.slice().reverse();
-  return `<div class="outs">${shown.map(o => { const ext = o.path.split(".").pop().toLowerCase();
-      return `<button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>`; }).join("")}</div>
+  return `<div class="outs${stages ? " stages" : ""}">${shown.map(o => { const ext = o.path.split(".").pop().toLowerCase();
+      const textFile = ["md", "txt", "srt", "csv", "tsv", "json"].includes(ext);
+      const editable = ["media-transcription", "text-extraction", "contact-extraction"].includes(t.workflow) && ["md", "txt", "srt", "csv", "tsv"].includes(ext);
+      return `<div class="oi-row"><button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>${stages && textFile ? `<div class="oi-actions"><button class="btn small icon task-output-icon" data-out-copy="${escH(o.path)}" title="Скопировать текст этапа" aria-label="Скопировать текст этапа">${TASK_COPY_ICON}</button>${editable ? `<button class="btn small icon task-output-icon" data-out-edit="${escH(o.path)}" title="Редактировать файл этапа" aria-label="Редактировать файл этапа">${TASK_EDIT_ICON}</button>` : ""}</div>` : ""}</div>`; }).join("")}</div>
     <div class="opane"><div class="obar"><span id="o-name"></span><span style="flex:1"></span>
       <button class="btn small" id="o-full">На весь экран</button><button class="btn small" id="o-open">Открыть</button><button class="btn small" id="o-dir">Папка</button>
       <button class="btn small primary" id="o-dl">Скачать</button><button class="btn small primary" id="o-pdf">PDF</button></div>
@@ -165,6 +169,35 @@ async function wireOutputs(t) {
   const rel = tOutSel; if (!rel) return;
   const dirRel = "Задачи/" + t.dir.replace(/\\/g, "/").split("/Задачи/").pop();   // ws_* принимают пути от корня папки ассистента
   $$("#t-view .oi").forEach(b => b.onclick = () => { tOutSel = b.dataset.p; openTask(t.id); });
+  $$("#t-view [data-out-copy]").forEach(b => b.onclick = async e => {
+    e.stopPropagation(); b.disabled = true;
+    try { const f = await core.call("ws_read", {path:dirRel + "/" + b.dataset.outCopy});
+      if (f.truncated || f.binary) throw Error("Файл слишком большой или не содержит текст для копирования");
+      await chatCopyText(f.text || ""); toast("Текст этапа скопирован");
+    } catch (error) { toast(error.message || "Не удалось скопировать текст", 5000, "bad"); }
+    finally { b.disabled = false; }
+  });
+  $$("#t-view [data-out-edit]").forEach(b => b.onclick = async e => {
+    e.stopPropagation(); tOutSel = b.dataset.outEdit;
+    $$("#t-view .oi").forEach(item => item.classList.toggle("on", item.dataset.p === tOutSel));
+    $("#o-name").textContent = tOutSel;
+    const view = $("#o-view"); if (!view) return;
+    try {
+      const f = await core.call("ws_read", {path:dirRel + "/" + tOutSel});
+      if (f.truncated || f.binary) throw Error("Этот файл слишком большой для встроенного редактора");
+      const area = document.createElement("textarea"); area.className = "otext oedit"; area.value = f.text || "";
+      area.setAttribute("aria-label", `Редактирование ${tOutSel}`); view.replaceChildren(area);
+      const controls = document.createElement("div"); controls.className = "oedit-actions";
+      const save = document.createElement("button"); save.className = "btn small primary"; save.textContent = "Сохранить";
+      const cancel = document.createElement("button"); cancel.className = "btn small"; cancel.textContent = "Отмена";
+      controls.append(save, cancel); view.append(controls); area.focus();
+      cancel.onclick = () => wireOutputs(t);
+      save.onclick = async () => { save.disabled = true;
+        try { await core.call("task_write_result", {id:t.id,path:tOutSel,text:area.value}); toast("Изменения сохранены"); await openTask(t.id); }
+        catch (error) { toast(error.message || "Не удалось сохранить файл", 6000, "bad"); save.disabled = false; }
+      };
+    } catch (error) { toast(error.message || "Не удалось открыть файл для редактирования", 6000, "bad"); }
+  });
   $("#o-name").textContent = rel;
   $("#o-open").onclick = () => core.call("ws_open", { path: dirRel + "/" + rel }).catch(e => toast(e.message));
   const ext0 = rel.split(".").pop().toLowerCase(), page = ["html", "htm"].includes(ext0);
@@ -206,6 +239,12 @@ async function wireOutputs(t) {
     else v.innerHTML = openHint;
   } else if (["md", "txt", "srt", "csv", "json", "py", "js", "css"].includes(ext)) {
     try { const f = await core.call("ws_read", { path: dirRel + "/" + rel }); copyResult(f); v.innerHTML = ext === "md" ? `<div class="md otext">${md(f.text || "")}</div>` : `<pre class="otext"></pre>`; if (ext !== "md") $("pre", v).textContent = f.text || "";
+      v.querySelectorAll("[data-contact-frame]").forEach(link => link.addEventListener("click", event => {
+        event.preventDefault();
+        const imagePath = `${rel.slice(0, rel.lastIndexOf("/"))}/${link.dataset.contactFrame}`;
+        if ((t.outputs || []).some(item => item.path === imagePath)) { tOutSel = imagePath; openTask(t.id); }
+        else core.call("ws_open", { path: dirRel + "/" + imagePath }).catch(error => toast(error.message || "Не удалось открыть кадр"));
+      }));
       if (f.truncated) v.insertAdjacentHTML('beforeend', '<p class="hint">Показан и доступен для копирования только загруженный фрагмент. Полный файл откройте в его программе.</p>'); }
     catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; taskCopySource(copy, '', false, 'Не удалось прочитать текст результата: ' + e.message); }
   } else {

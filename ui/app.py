@@ -1709,6 +1709,18 @@ class Api:
         _ui_log(f"студия: открыть {page or ''}{' (с параметрами)' if query else ''}")
         if self._studio is not None and not WIN and self._gtk(lambda: self._studio_gw() is not None) is False:
             self._studio = None                         # окна уже нет (закрыто мимо нас) — откроем новое
+        # A HUD site alert is in-window navigation; query parameters must not spawn a second Studio.
+        if self._studio is not None and page == "tasks" and "sites=" in query:
+            try:
+                self._studio.show()
+                self._raise_studio()
+                if ui_settings().get("studio_max", True): self._studio.maximize()
+                else: self._studio.restore()
+                filter_value = "unavailable" if "sites=unavailable" in query else ""
+                self._studio.evaluate_js(f"window.openSitesMonitor && window.openSitesMonitor({_json.dumps(filter_value)})")
+                return
+            except Exception:  # noqa: BLE001
+                self._studio = None
         if self._studio is not None and not query:
             try:
                 self._studio.show()

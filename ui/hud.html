@@ -278,6 +278,10 @@
   #b-notes.has-new-notes { color: var(--accent, #8b8cf7); background: rgba(139,140,247,.18); }
   #bar:has(#b-notes.has-new-notes) { opacity: 1; }
   #b-mail, #b-cal { position: relative; }
+  #b-sites-warning { position:relative; }
+  #b-sites-warning[hidden] { display:none; }
+  #b-sites-warning-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
+  #b-sites-warning-count[hidden] { display:none; }
   #b-mail-count, #b-cal-count { position:absolute; top:-3px; right:-3px; min-width:15px; height:15px; padding:0 3px; border-radius:9px; display:grid; place-items:center; background:#e54870; color:#fff; box-shadow:0 0 0 2px var(--bg,#172336); font:700 9px/1 sans-serif; }
   #b-mail-count[hidden], #b-cal-count[hidden] { display:none; }
   #b-mail.has-mail-count { color:var(--accent,#8b8cf7); background:rgba(139,140,247,.18); }
@@ -759,6 +763,7 @@ body.mini #assistant-topbar{display:none}
     <button class="btn" id="a-meet" title="Начать встречу: запись экрана и двух дорожек звука" aria-label="Начать встречу"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h5M8 12h3M16 10v4"/><path d="M6 22h12"/></svg></button>
     <button class="btn" id="a-shot" title="Сделать снимок и распознать текст в сообщении ассистента" aria-label="Снимок экрана в сообщении ассистента"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><circle cx="12" cy="10.5" r="2.5"/></svg></button>
     <button class="btn" id="b-mail" title="Почта: непрочитанных писем нет" aria-label="Открыть почту"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg><span id="b-mail-count" hidden aria-hidden="true"></span></button>
+    <button class="btn" id="b-sites-warning" hidden title="Все сайты доступны" aria-label="Открыть мониторинг сайтов"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 22 20H2L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg><span id="b-sites-warning-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-tasks" hidden title="Задачи — ход выполнения" aria-label="Открыть задачи"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H5v16h14V5h-4M9 3h6v4H9zM8 12h8M8 16h5"/></svg><span id="b-tasks-count" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-notes" title="Заметки: все записи, поиск, фото и файлы"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h8l4 4v13h-12z"/><path d="M14.5 3.5v4h4M9 12h6M9 15.5h6M9 9h2.5"/></svg><span id="b-notes-dot" hidden aria-hidden="true"></span></button>
     <button class="btn" id="b-cal" title="Календарь: дела, деньги, напоминания" aria-label="Открыть календарь"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 17.2h.01M12 17.2h.01"/></svg><span id="b-cal-count" hidden aria-hidden="true"></span></button>
@@ -1595,11 +1600,10 @@ core.on("dictation", e => {
     dictationUi(false);
     if (!e.submit) $("ask-feedback").textContent = "Запись остановлена. Распознанный текст остался в поле.";
     const bounds = dictationBounds; dictationBounds = null;
-    if (bounds && bounds.end > bounds.start) {
-      const input = $("askin");
-      input.setSelectionRange(bounds.start, bounds.end);
-      cleanDraftText(true).finally(() => { if (e.submit) sendAsk(); });
-    } else if (e.submit) sendAsk();
+    // Finishing voice input sends the draft as recognized.  Text cleanup is an
+    // explicit action (menu/voice command), never an implicit replacement of
+    // what the recognizer just produced.
+    if (e.submit) sendAsk();
   }
 });
 function copyDraftByVoice(action) {
@@ -2344,6 +2348,32 @@ async function refreshMailCounts() { try { setMailBadgeCounts(await core.call("m
 $("b-mail").onclick = () => { const a = api(); if (a) a.open_settings("mail", mailBadgeCounts.attention ? "&attention=1" : "&badge=1"); };
 core.on("mail_counts", counts => setMailBadgeCounts(counts));
 core.on("hello", d => { setMailBadgeMode((((d || {}).settings || {}).ui || {}).mail_badge_mode); setTimeout(refreshMailCounts, 700); });
+async function refreshSitesWarning() {
+  try {
+    const status = await core.call("sites_alert");
+    if (!status || !Number.isFinite(Number(status.unavailable_count))) throw new Error("Служба не вернула состояние сайтов");
+    const count = Math.max(0, Number(status.unavailable_count));
+    const button = $("b-sites-warning");
+    const badge = $("b-sites-warning-count");
+    const down = (status?.items || []).filter(site => site.state === "DOWN");
+    button.hidden = count === 0;
+    badge.hidden = count === 0; badge.textContent = count > 99 ? "99+" : String(count);
+    const names = down.map(site => site.name).filter(Boolean);
+    const label = count ? `Недоступны сайты (${count}): ${names.join(", ") || "откройте мониторинг"}. Открыть мониторинг сайтов` : "Все сайты доступны. Открыть мониторинг сайтов";
+    button.title = label; button.setAttribute("aria-label", label);
+  } catch (_) {
+    const button = $("b-sites-warning"), badge = $("b-sites-warning-count");
+    button.hidden = false; badge.hidden = false; badge.textContent = "!";
+    button.title = "Не удалось получить состояние мониторинга сайтов. Открыть список сайтов";
+    button.setAttribute("aria-label", button.title);
+  }
+}
+$("b-sites-warning").onclick = async () => {
+  const a = api(); if (a?.open_settings) await a.open_settings("tasks", "&sites=unavailable");
+};
+core.on("hello", () => setTimeout(refreshSitesWarning, 700));
+setInterval(() => { if (!document.hidden) refreshSitesWarning(); }, 60000);
+window.addEventListener("focus", refreshSitesWarning);
 /* окно голосом (ядро: _window_cmd): «спрячься» — как кнопка «В трей», «покажись» — вернуть, «отключись» — выйти совсем */
 core.on("window", e => { const a = api(); if (!a || mode !== "card") return;
   if (e.do === "tray" && a.to_tray) { a.to_tray(); core.call("settings_save", { patch: { ui: { hud_tray: true } } }).catch(() => {}); }

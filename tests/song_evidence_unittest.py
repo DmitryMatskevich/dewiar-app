@@ -149,9 +149,13 @@ class EvidenceTests(unittest.TestCase):
     def test_display_split_retains_manual_character_anchor(self):
         from songs.chord_layout import build_guitar_sheet
         from songs.sheet_lines import readable_sheet
-        p={'phrase_id':'p','text':'Первая строка. Любовь','start_ms':0,'end_ms':8000}
-        event={'name':'E7','start_ms':6000,'anchor':{'phrase_id':'p','kind':'manual','grapheme_index':18}}
+        # Lines follow the verse (09.11.2026): a one-word sentence stays on its
+        # line; the manual anchor keeps its letter on the second verse line.
+        text='Первая строка у нас длинная. Любовь приходит внезапно'
+        p={'phrase_id':'p','text':text,'start_ms':0,'end_ms':8000}
+        event={'name':'E7','start_ms':6000,'anchor':{'phrase_id':'p','kind':'manual','grapheme_index':text.index('Любовь')+3}}
         lines=readable_sheet(build_guitar_sheet([p],[event]))
+        self.assertTrue(lines[1]['text'].startswith('Любовь'))
         mark=next(m for m in lines[1]['chords'] if m['anchor_quality']=='manual')
         self.assertEqual(mark['char_index'],3)
 
@@ -171,8 +175,9 @@ class EvidenceTests(unittest.TestCase):
         from songs.chord_layout import build_guitar_sheet
         from songs.sheet_lines import readable_sheet
         p={'phrase_id':'p','text':'Ты меня слышишь? Да.\nДо встречи.','start_ms':0,'end_ms':10000}
+        # An explicit line break is kept; a short answer stays in its verse line.
         self.assertEqual([l['text'] for l in readable_sheet(build_guitar_sheet([p],[]))],
-                         ['Ты меня слышишь?','Да.','До встречи.'])
+                         ['Ты меня слышишь? Да.','До встречи.'])
 
     def test_decoder_loop_is_flagged_without_rewriting(self):
         phrase = {'text':'Пара'*110+' Пока!', 'start_ms':201820, 'end_ms':204000}

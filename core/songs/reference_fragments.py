@@ -162,15 +162,67 @@ def publication_match(text, selected):
                 hits=hits, version_verified=False)
 
 
+CHORD_TOKEN = re.compile(r'^[A-H](?:#|b|♯|♭)?(?:maj|min|m|dim|aug|sus|add|M|\+|°|ø|\d+|b\d+|#\d+|\(\w+\))*'
+                         r'(?:/[A-H](?:#|b|♯|♭)?)?$')
+SECTION_LABEL = re.compile(r'^\s*\[?\s*(?:\d+\s*)?(?:Припев|Куплет|Вступление|Проигрыш|Бридж|Кода|Концовка|Окончание|Интро|Аутро|'
+                           r'Соло|Chorus|Verse|Intro|Outro|Bridge|Solo|Pre-?chorus)\b[\s\d.]*(?:\(\s*\d+\s*р(?:аза?)?\s*\))?'
+                           r'\s*[:\]]?\s*', re.I)
+PLAYING_NOTE = re.compile(r'^\s*(?:Аккорды|Бой|Перебор|Ритм|Тональность|Каподастр|Capo|Тюнинг|Строй|Исполнитель|'
+                          r'Слова|Музыка|Автор|Темп|Табулатура)\b[^:\n]{0,30}:|можно заменить|заменить на', re.I)
+
+
+def _chord_line(line):
+    # Repeat marks and separators of a chord line: «F Gadd9 Fm C - 2 раза», «| Am | G |».
+    rest = re.sub(r'\b\d+\s*(?:р\.?|раза?|x|х)(?!\w)|(?<!\w)[xх]\s*\d+\b', ' ', line, flags=re.I)
+    tokens = re.sub(r'[|,;()\[\]{}–—\-:]', ' ', rest).split()
+    return bool(tokens) and all(CHORD_TOKEN.fullmatch(t) for t in tokens)
+
+
+_UNITS = 'ноль один два три четыре пять шесть семь восемь девять десять одиннадцать двенадцать тринадцать ' \
+         'четырнадцать пятнадцать шестнадцать семнадцать восемнадцать девятнадцать'.split()
+_TENS = 'двадцать тридцать сорок пятьдесят шестьдесят семьдесят восемьдесят девяносто'.split()
+_HUNDREDS = 'сто двести триста четыреста пятьсот шестьсот семьсот восемьсот девятьсот'.split()
+
+
+def number_words(n):
+    """0…1000 in words («100 балерин» is sung «сто балерин»)."""
+    if n == 1000:
+        return 'тысяча'
+    words = []
+    if n >= 100:
+        words.append(_HUNDREDS[n // 100 - 1]); n %= 100
+        if not n:
+            return ' '.join(words)
+    if n >= 20:
+        words.append(_TENS[n // 10 - 2]); n %= 10
+        if n:
+            words.append(_UNITS[n])
+    else:
+        words.append(_UNITS[n])
+    return ' '.join(words)
+
+
 def lyrics_only(text):
-    """Remove chord-only lines from read HTML; never strip words inline."""
-    chord=re.compile(r'^[A-G](?:#|b)?(?:m7b5|m(?:aj)?\d*|maj\d*|dim\d*|aug\d*|sus\d*|add\d*|\d+)?(?:/[A-G](?:#|b)?)?$')
-    lines=[]
-    for line in text.splitlines():
-        parts=line.strip().strip('|').split()
-        if parts and all(chord.fullmatch(p.strip('|,')) for p in parts):
+    """Sung words from a page or a pasted text with chords.
+
+    Removes chord lines (also with repeat marks), ChordPro marks ``[Am]``,
+    section labels («Куплет 1:», «Припев:» — the sung rest of such a line is
+    kept) and playing notes («Аккорды: …», «Бой: …», «Gadd9 можно заменить
+    на G»). Words inside a lyric line are never removed.
+    """
+    lines = []
+    for raw in str(text or '').splitlines():
+        line = re.sub(r'\[[A-H][^\]\s]{0,12}\]', '', raw)
+        if PLAYING_NOTE.search(line) or _chord_line(line):
             continue
-        if re.fullmatch(r'\s*\[?(?:Припев|Куплет|Вступление|Проигрыш|Бридж)\s*\d*\]?:?\s*',line,re.I):
-            continue
+        label = SECTION_LABEL.match(line)
+        if label:
+            line = line[label.end():]
+            if not line.strip() or _chord_line(line):
+                continue
+        line = line if (label or line != raw) else raw
+        # Publications write numbers as digits; the singer sings words.
+        line = re.sub(r'(?<![\w.,:])(\d{1,4})(?![\w.,:]\d)(?!\w)',
+                      lambda m: number_words(int(m.group(1))) if int(m.group(1)) <= 1000 else m.group(1), line)
         lines.append(line)
     return '\n'.join(lines)

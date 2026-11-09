@@ -36,6 +36,12 @@ class FakeMail:
     def inbox(self, **kwargs):
         return self.latest
 
+    def folders(self):
+        return [{"id": "INBOX", "name": "INBOX", "mailbox": "INBOX", "special_use": ["\\inbox"]},
+                {"id": "SENT", "name": "Sent", "mailbox": "Sent", "special_use": ["\\sent"]},
+                {"id": "DRAFTS", "name": "Drafts", "mailbox": "Drafts", "special_use": ["\\drafts"]},
+                {"id": "F:Q3VzdG9t", "name": "Custom", "mailbox": "Custom", "special_use": []}]
+
     def read(self, uid, folder="INBOX", expected_uidvalidity=""):
         self.last_folder = folder
         return {"uid": uid, "from": "Client <client@example.org>", "reply_to": "reply@example.org",
@@ -48,10 +54,10 @@ class FakeMail:
         self.sent.append(dict(payload))
         return {"sent_copy": "appended"}
 
-    def read_raw(self, uid, expected_uidvalidity=""):
+    def read_raw(self, uid, folder="INBOX", expected_uidvalidity=""):
         return b"From: client@example.org\r\nSubject: Original\r\n\r\nOriginal body\r\n"
 
-    def move_to_trash(self, uid, expected_uidvalidity=""):
+    def move_to_trash(self, uid, folder="INBOX", expected_uidvalidity=""):
         self.trashed.append(str(uid))
         return {"state": "moved", "folder": "Trash"}
 
@@ -193,6 +199,19 @@ class MailServiceTests(unittest.TestCase):
         self.assertEqual(detail["text"], "Здравствуйте!\nПодскажите цену.")
         with self.assertRaises(MailServiceError):
             self.service.open_mail("dcnt:76:42")
+
+    def test_standard_folders_and_custom_mailbox_ids_are_exposed_and_indexed_on_demand(self):
+        folders = self.service.mail_folders("dcnt")
+        ids = [item["id"] for item in folders]
+        self.assertEqual(ids, ["INBOX", "SENT", "REPLIES", "DRAFTS", "F:Q3VzdG9t"])
+        self.assertEqual(next(item["name"] for item in folders if item["id"] == "INBOX"), "Входящие")
+        self.box.latest = [{"uid": "56", "from": "Dmitry <d@dcnt.ru>", "to": "client@example.org",
+                            "subject": "Черновик", "date": "Mon, 02 Nov 2026 10:00:00 +0300",
+                            "message_id": "<draft1>"}]
+        self.service.sync_folder("dcnt", "DRAFTS")
+        drafts = self.service.list_mail(account_id="dcnt", folder_id="DRAFTS")
+        self.assertEqual(drafts[0]["subject"], "Черновик")
+        self.assertTrue(drafts[0]["id"].endswith(":f" + __import__("base64").urlsafe_b64encode(b"DRAFTS").decode().rstrip("=")))
 
     def test_server_received_date_overrides_bad_sender_date_for_sorting_and_quotes(self):
         received = 1793945497.0  # 2026-11-06 09:11:37 +0300

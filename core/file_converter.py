@@ -115,6 +115,14 @@ def is_text_extraction_command(text: str) -> bool:
     return bool(re.search(r"\b(?:извлеч\w*\s+текст|распозн\w*\s+текст|вытащ\w*\s+текст|прочит\w*\s+текст|получ\w*\s+текст|ocr)\b", value))
 
 
+def is_contact_extraction_command(text: str) -> bool:
+    """Recognise a deliberate request to extract contact details from an attached image."""
+    value = str(text or "").lower().replace("ё", "е")
+    verb = r"(?:извлеч\w*|получ\w*|найд\w*|определ\w*|прочит\w*|extract|get|find)"
+    contact = r"(?:контакт\w*|e[ -]?mail|email|телефон\w*|почт\w*)"
+    return bool(re.search(rf"\b{verb}\b.{{0,40}}\b{contact}\b|\b{contact}\b.{{0,40}}\b{verb}\b", value, re.I))
+
+
 def webpage_url(text: str) -> str | None:
     match = re.search(r"https?://[^\s<>\"']+", str(text or ""), re.I)
     if not match: return None

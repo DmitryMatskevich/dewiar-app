@@ -18,6 +18,7 @@ function mdInline(t) {
   t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
        .replace(/(^|\W)_([^_]+)_(?=\W|$)/g, "$1<em>$2</em>").replace(/~~([^~]+)~~/g, "<s>$1</s>")
        .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_, a, b) => `<a class="wl" href="wiki:${encodeURIComponent(a.trim())}">${b || a}</a>`)
+       .replace(/\[([^\]]+)\]\((contact-frames\/[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|tiff?))\)/gi, '<a href="#" data-contact-frame="$2">$1</a>')
        .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank">$1</a>');
   return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
 }
