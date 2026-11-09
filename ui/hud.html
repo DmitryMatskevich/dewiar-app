@@ -461,10 +461,13 @@
   .att .att-convert { width: 25px; height: 25px; flex: none; display: grid; place-items: center; padding: 0; border-radius: 50%; color: #93b2ff; background: rgba(99,130,235,.14); }
   .att .att-convert:hover, .att .att-convert[aria-expanded="true"] { color: #fff; background: rgba(86,120,232,.48); }
   .att-convert svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-  .att .att-format-picker { position: fixed; z-index: 9999; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 0; border-radius: 10px; background: #202634; box-shadow: 0 8px 24px rgba(0,0,0,.32); }
+  /* Меню форматов использует ту же тему и визуальную основу, что и штатное меню вложений (#att-menu). */
+  .att .att-format-picker { position: fixed; z-index: 9999; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 0; border-radius: 15px; background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
   .att-format-picker[hidden] { display: none; }
-  .att .att-format-picker button { padding: 6px 8px; border-radius: 6px; color: var(--ink); font-size: 11px; text-align: left; }
-  .att .att-format-picker button:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .att .att-format-picker button { min-height: 34px; padding: 6px 9px; border: 0; border-radius: 10px; background: none; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; text-align: left; }
+  .att .att-format-picker button:hover, .att .att-format-picker button:focus-visible { background: rgba(255,255,255,.1); outline: none; }
+  body.light .att .att-format-picker { background: #fff; color: var(--ink); box-shadow: 0 15px 35px rgba(20,30,60,.2); }
+  body.light .att .att-format-picker button:hover, body.light .att .att-format-picker button:focus-visible { background: rgba(20,20,40,.07); }
   .native-operation-result { width: 100%; margin-top: 8px; user-select: text; }
   .native-operation-file { display:flex; align-items:center; gap:8px; margin:6px 0; overflow-wrap:anywhere; }
   .native-operation-file-name { flex:1; min-width:0; }

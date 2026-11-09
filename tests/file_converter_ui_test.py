@@ -51,6 +51,16 @@ with tempfile.TemporaryDirectory(prefix="dewiar-file-converter-ui-") as folder, 
     bounds = page.locator('.att-format-picker').bounding_box()
     assert bounds and bounds['x'] >= 0 and bounds['y'] >= 0
     assert bounds['x'] + bounds['width'] <= 620 and bounds['y'] + bounds['height'] <= 780
+    contrast = page.locator('.att-format-picker').evaluate('''el => {
+      const rgb = value => value.match(/[\\d.]+/g).slice(0,3).map(Number).map(v => {
+        v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+      });
+      const [a,b] = [rgb(getComputedStyle(el).color), rgb(getComputedStyle(el).backgroundColor)];
+      const lum = c => .2126*c[0] + .7152*c[1] + .0722*c[2];
+      return (Math.max(lum(a),lum(b)) + .05) / (Math.min(lum(a),lum(b)) + .05);
+    }''')
+    assert contrast >= 4.5, f'format menu text contrast is too low: {contrast:.2f}:1'
+    assert page.locator('.att-format-picker button').first.evaluate("el => getComputedStyle(el).borderTopWidth") == '0px'
     page.get_by_role("button", name="В XLSX").click()
     page.wait_for_function("calls.some(x=>x[0]==='file_convert')")
     call = page.evaluate("calls.find(x=>x[0]==='file_convert')")
