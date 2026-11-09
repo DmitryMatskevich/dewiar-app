@@ -229,6 +229,7 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper-instrumental { color:var(--muted); }
 .song-paper-instrumental.playing-instrumental { color:var(--ink); font-weight:700; }
 .song-paper-instrumental-label { white-space:pre; }
+.song-paper-unsung { display:block; margin-top:2px; font-size:.78em; font-weight:400; color:var(--muted, #6b7280); white-space:normal; }
 .song-paper-cue-part { display:inline-block; border-radius:3px; transition:background-color .12s ease,color .12s ease,transform .12s ease; }
 .song-paper-cue-part.countdown-lit { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 32%,var(--field)); transform:translateY(-1px); }
 .song-paper-line.playing-line { background:color-mix(in srgb,var(--accent,#4d78c9) 7%,transparent); border-radius:4px; }

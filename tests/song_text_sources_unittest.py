@@ -81,4 +81,38 @@ class TextSourcesTests(unittest.TestCase):
         doc='<h1>Wrong title</h1><div data-lyrics-container="true"><div data-exclude-from-selection="true"><span>3 Contributors</span><h2>Lyrics</h2></div>[Куплет 1]<br>Тихий <a><span>вечер</span></a><br>Наш дом</div><p>Buy tickets</p><div data-lyrics-container="true">[Припев]<br>Свет в окне</div>'
         self.assertEqual(_embedded_lyrics(doc,'https://genius.com/test-lyrics'),'Тихий вечер\nНаш дом\n\nСвет в окне')
 
-if __name__=='__main__':unittest.main()
+
+
+class CatalogSearchTests(unittest.TestCase):
+    """Search engines answer the app's browser with a robot check; lyric
+    catalogues searched by title and artist still find the publication."""
+
+    def test_catalog_publication_is_checked_before_blocked_search(self):
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / 'core'))
+        from songs.reference_text import tokens
+        lines = ['Вечерний поезд медленно уходит за деревню',
+                 'Тихий ветер согревает окна нашего дома',
+                 'Ранним утром золотые листья падают на землю']
+        phrases = [dict(phrase_id=str(i), text=line, start_ms=i * 10000, end_ms=(i + 1) * 10000, words=[],
+                        agreement=[dict(char_start=t['start'], char_end=t['end'], text=t['text'], agree=2, models=2,
+                                        alternatives=[t['text']], needs_review=False) for t in tokens(line)])
+                   for i, line in enumerate(lines)]
+        def blocked(query):
+            raise RuntimeError('yandex: Поисковик запросил проверку в браузере')
+        fetched = []
+        def fetch(url):
+            fetched.append(url)
+            return dict(status='available', extracted_text='\n'.join(lines), page_title='Песня')
+        updated, report = run(phrases, {'title': 'Песня', 'artist': 'Автор'}, search=blocked, fetch=fetch,
+                              catalog=lambda title, artist: [{'url': 'https://lrclib.net/api/get/7', 'kind': 'lyrics',
+                                                              'provider': 'lrclib'}])
+        self.assertEqual(fetched[0], 'https://lrclib.net/api/get/7')
+        self.assertEqual(report['state'], 'compared')
+        self.assertEqual(report['references'][0]['url'], 'https://lrclib.net/api/get/7')
+        self.assertEqual(report['catalog'], [{'url': 'https://lrclib.net/api/get/7', 'provider': 'lrclib'}])
+
+
+if __name__ == '__main__':
+    unittest.main()

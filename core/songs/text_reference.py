@@ -108,6 +108,50 @@ def web_search(query, *, blocked=None):
     return []
 
 
+def catalog_search(title, artist=''):
+    """Lyric catalogues that answer a plain request (no search engine, no CAPTCHA).
+
+    Public search engines answer the app's automated browser with a robot
+    check, so every query can fail. LRCLIB and Genius are searched by title
+    and artist directly; their pages still have to pass the same three-anchor
+    confirmation as any other publication.
+    """
+    query = ' '.join(x for x in (str(title or '').strip(), str(artist or '').strip()) if x)
+    if not query:
+        return []
+    wanted = {t['norm'] for t in tokens(query) if len(t['norm']) >= 3}
+
+    def relevant(*values):
+        have = {t['norm'] for v in values for t in tokens(str(v or ''))}
+        return len(wanted & have) >= min(2, len(wanted))
+
+    hits, headers = [], {'User-Agent': 'Dewiar-Songs/0.1 (personal music study)'}
+    try:
+        with urlopen(Request('https://lrclib.net/api/search?' + urlencode({'q': query}), headers=headers), timeout=8) as r:
+            rows = json.loads(r.read(2_000_001))
+        for row in rows[:10]:
+            if row.get('plainLyrics') and relevant(row.get('trackName'), row.get('artistName')):
+                hits.append({'url': 'https://lrclib.net/api/get/' + str(row['id']), 'kind': 'lyrics',
+                             'title': f"{row.get('artistName') or ''} — {row.get('trackName') or ''}".strip(' —'),
+                             'provider': 'lrclib'})
+    except Exception:
+        pass
+    try:
+        with urlopen(Request('https://genius.com/api/search/multi?' + urlencode({'q': query}), headers=headers), timeout=8) as r:
+            data = json.loads(r.read(2_000_001))
+        for section in (data.get('response') or {}).get('sections') or []:
+            if section.get('type') != 'song':
+                continue
+            for hit in section.get('hits') or []:
+                song = hit.get('result') or {}
+                if song.get('url') and relevant(song.get('title'), (song.get('primary_artist') or {}).get('name')):
+                    hits.append({'url': song['url'], 'kind': 'lyrics', 'provider': 'genius',
+                                 'title': song.get('full_title') or song.get('title') or ''})
+    except Exception:
+        pass
+    return hits[:5]
+
+
 def confirm_text(text, selected):
     match=publication_match(text,selected)
     hits=[h for h in match['hits'] if h['exact_full_anchor']]
@@ -169,7 +213,7 @@ def reconcile(phrases, references, verify=None):
     return result,proposals
 
 
-def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress=lambda _:None):
+def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress=lambda _:None, catalog=None):
     # A CAPTCHA blocks a provider for this run; do not repeatedly relaunch it
     # for every lyric query. Other providers and direct pages remain usable.
     default_search=search is None or search is web_search
@@ -221,6 +265,19 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
     for candidate in (context.get('text_reference') or {}).get('references',[])+context.get('source_candidates',[]):
         if checked>=4:break  # Reserve page slots for newly discovered publications.
         if candidate.get('kind') in {'lyrics','reference','chords'}: inspect(candidate)
+    # Catalogues by title/artist first: they work when search engines ask
+    # for a robot check, and the anchors still decide what is confirmed.
+    if catalog is None:
+        catalog = catalog_search if default_search else (lambda title, artist: [])
+    try:
+        found = catalog(context.get('title', ''), context.get('artist', ''))
+        report['catalog'] = [{'url': c.get('url'), 'provider': c.get('provider')} for c in found]
+        if found:
+            progress('Сверка с источником текста: ищем в каталогах текстов')
+        for candidate in found:
+            inspect(candidate)
+    except Exception as exc:
+        report['errors'].append({'error': 'Каталоги текстов: ' + str(exc)[:200]})
     plan=query_plan(selected,context.get('title',''),context.get('artist',''),limit=8)
     # Search by recognized text for chord pages as well, not an assumed artist.
     plan += [{'query':'"'+a['text'].replace('"','')+'" аккорды','stage':'chords'} for a in selected[:2]]

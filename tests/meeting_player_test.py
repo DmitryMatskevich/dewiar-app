@@ -168,7 +168,9 @@ with tempfile.TemporaryDirectory() as tmp:
     p2._ask_model = lambda *a, **k: "## Коротко\nок"
     p2._summarize()
     head = Path(p2._transcript_path).read_text(encoding="utf-8").splitlines()
-    assert head[2] == "# Участники: Анна, Пётр", head[:4]
+    # The header also records «# Начало» and «# Завершение» (prompter.py);
+    # the participants line follows them.
+    assert "# Участники: Анна, Пётр" in head[:6], head[:6]
     assert any(ln.startswith("[00:03] Вы: Хорошо, Пётр.") for ln in head)
 
 print("OK: «Прошлые встречи» — звук/дорожки/видео/кадры/папка, проигрыватель с шкалой записи, Range-раздача, папки в итоге")

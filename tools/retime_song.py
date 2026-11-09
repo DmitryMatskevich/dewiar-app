@@ -9,7 +9,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'core'))
-from songs.worker import align_phrases, save
+from songs.worker import align_phrases, apply_vocal_timing, save
 from songs.onset_check import existing_vocals
 
 
@@ -28,8 +28,13 @@ def main():
         decoded=Path(tmp)/'audio.wav'
         subprocess.run(['ffmpeg','-v','error','-nostdin','-i',str(audio),
                         '-ar','16000','-ac','1',str(decoded)],check=True)
+        vocals=existing_vocals(audio)
         align_phrases(decoded,timed,lambda s:print(s,flush=True),
-                      selected.get('hypotheses',[]),vocal_path=existing_vocals(audio))
+                      selected.get('hypotheses',[]),vocal_path=vocals)
+        # Same final step as the batch worker: edges and breaks from the stem.
+        result={}
+        apply_vocal_timing(timed,vocals,lambda s:print(s,flush=True),result)
+        timed['vocal_activity']=result.get('vocal_activity')
     assert {p['phrase_id']:p['text'] for p in timed['phrases']} == {
         p['phrase_id']:p['text'] for p in row['phrases']}, 'Text must not change'
     protected={p['phrase_id']:p for p in row['phrases'] if p.get('review_state')=='verified'

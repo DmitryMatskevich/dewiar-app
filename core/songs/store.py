@@ -252,7 +252,8 @@ class SongStore:
             allowed = {"title", "search_query", "artist", "tags", "tag_scores", "source", "source_ref", "recording_version", "status", "analysis_state", "review_state",
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
-                       "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference"}
+                       "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference",
+                       "vocal_activity", "timing_version"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
             if "status" in changes and changes["status"] not in STATUS:
@@ -346,12 +347,32 @@ class SongStore:
             if 'text_reference' in result:
                 from .text_reference import result_patch
                 changes.update(result_patch(row,result['text_reference']))
+            activity = result.get('vocal_activity') if 'vocal_activity' in result else row.get('vocal_activity')
+            if 'vocal_activity' in result:
+                from .vocal_timing import VERSION as timing_version
+                run['vocal_activity'] = copy.deepcopy(result['vocal_activity'])
+                changes.update(vocal_activity=copy.deepcopy(result['vocal_activity']), timing_version=timing_version)
+            if keep and result.get('vocal_activity'):
+                # The user's text and manual boundaries stay; only edges that
+                # the new vocal map shows inside a break are moved.
+                from .vocal_timing import fit_phrases
+                fitted, report = fit_phrases(row.get('phrases') or [], result['vocal_activity'])
+                if report.get('applied'):
+                    sections = copy.deepcopy(row.get('sections') or [])
+                    for section in sections:
+                        members = [fitted[i] for i in section.get('phrase_indexes', []) if 0 <= i < len(fitted)]
+                        if members:
+                            section.update(start_ms=min(p['start_ms'] for p in members),
+                                           end_ms=max(p['end_ms'] for p in members))
+                    changes.update(phrases=fitted, words=[w for p in fitted for w in p.get('words', [])],
+                                   sections=sections, stage_label='Новый разбор сохранён; ваши правки оставлены, '
+                                   'начала и концы строк сверены с голосом')
             if not keep:
                 chords = harmony.get('events', [])
                 changes.update(phrases=selected, words=[w for p in selected for w in p.get('words', [])],
                                selected_run_id=run_id, timing_quality='word_estimated' if timed else 'phrase',
                                sections=infer_sections(selected), chords=chords, harmony=harmony,
-                               guitar_sheet=build_guitar_sheet(selected, chords),
+                               guitar_sheet=build_guitar_sheet(selected, chords, None, activity),
                                capabilities={**row.get('capabilities', {}), 'lyrics': bool(selected),
                                              'structure': bool(selected), 'chords': has_chords})
             tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))

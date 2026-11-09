@@ -251,12 +251,18 @@ class SongAnalyzer:
             harmony = result.get("harmony")
             if harmony is not None:
                 run["harmony"] = copy.deepcopy(harmony)
+            if "vocal_activity" in result:
+                from .vocal_timing import VERSION as timing_version
+                run["vocal_activity"] = copy.deepcopy(result["vocal_activity"])
             changes = {
                 "analysis_runs": runs, "active_run_id": None, "status": "review",
                 "stage": "review", "analysis_state": "full_partial" if result.get("errors") else "full_ready",
                 "analysis_errors": copy.deepcopy(result.get("errors") or []),
                 "review_state": "needs_review",
             }
+            if "vocal_activity" in result:
+                changes.update(vocal_activity=copy.deepcopy(result["vocal_activity"]),
+                               timing_version=timing_version)
             if 'text_reference' in result and logical in {'lyrics','text_reference'}:
                 from .text_reference import result_patch
                 changes.update(result_patch(row,result['text_reference']))
@@ -284,22 +290,14 @@ class SongAnalyzer:
                         sections=infer_sections(selected_phrases),
                     )
                 else:
-                    current_phrases = copy.deepcopy(row.get("phrases") or [])
-                    for index, fresh in enumerate(selected_phrases):
-                        if index >= len(current_phrases):
-                            break
-                        current = current_phrases[index]
-                        for key in ("start_ms", "end_ms", "timing_quality", "alignment_warning"):
-                            if key in fresh:
-                                current[key] = copy.deepcopy(fresh[key])
-                        if fresh.get("words") and current.get("words"):
-                            # Keep edited word text, but accept improved word
-                            # boundaries when the word sequence is unchanged.
-                            if len(fresh["words"]) == len(current["words"]):
-                                for old_word, new_word in zip(current["words"], fresh["words"]):
-                                    for key in ("start_ms", "end_ms", "timing_quality"):
-                                        if key in new_word:
-                                            old_word[key] = copy.deepcopy(new_word[key])
+                    # Match phrases by id/identical text, never by position:
+                    # a rerun that splits or drops one phrase must not move
+                    # every later line's time onto its neighbour.
+                    from .vocal_timing import merge_timing, fit_phrases
+                    current_phrases, _ = merge_timing(row.get("phrases") or [], selected_phrases)
+                    activity = result.get("vocal_activity", row.get("vocal_activity"))
+                    if activity:
+                        current_phrases, _ = fit_phrases(current_phrases, activity)
                     if current_phrases:
                         changes.update(
                             phrases=current_phrases,

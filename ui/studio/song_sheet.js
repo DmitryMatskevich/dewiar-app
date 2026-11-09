@@ -23,7 +23,8 @@ window.SongSheet = (() => {
       const end = j < tokens.length ? tokens[j].index : line.text.length;
       const text = line.text.slice(start,end).trimEnd();
       const marks = chordCandidates(line).filter(c=>c.char_index>=start && c.char_index<start+text.length).map(c=>({...c,char_index:c.char_index-start}));
-      pieces.push({...line,text,chords:marks,cells:[],unplaced_chords:[],display_words:(line.display_words || []).filter(w=>w.char_start>=start && w.char_end<=start+text.length).map(w=>({...w,char_start:w.char_start-start,char_end:w.char_end-start}))});
+      // A verse wider than the sheet continues on the next line of the same stanza.
+      pieces.push({...line,text,chords:marks,cells:[],unplaced_chords:[],...(pieces.length?{stanza_start:false,verse_continuation:true}:{}),display_words:(line.display_words || []).filter(w=>w.char_start>=start && w.char_end<=start+text.length).map(w=>({...w,char_start:w.char_start-start,char_end:w.char_end-start}))});
       i=j;
     }
     return pieces;
@@ -86,10 +87,14 @@ window.SongSheet = (() => {
     };
     for(let i=0;i<source.length;) {
       if(source[i].text) { result.push(...wrapLine(source[i],width)); i++; continue; }
-      const first=i, group=[];
-      while(i<source.length && !source[i].text) group.push(source[i++]);
+      // Gap rows keep their kind: a break («Вступление/Проигрыш»), singing
+      // without recognized words, or a short pause between two lines.
+      const gapKind=line=>line.vocal?'vocal':line.pause?'pause':'break';
+      const first=i, group=[], kind=gapKind(source[i]), voiced=kind==='vocal';
+      while(i<source.length && !source[i].text && gapKind(source[i])===kind) group.push(source[i++]);
       const events=group.flatMap(line=>line.unplaced_chords||[]).filter(event=>event.name && event.name!=='N');
       if(!events.length && !group.some(line=>line.instrumental)) continue;
+      if(kind==='pause' && !events.length) continue;
       const previous=[...source.slice(0,first)].reverse().find(line=>line.text);
       const next=source.slice(i).find(line=>line.text);
       const eventStart=Math.min(...events.map(event=>Number(event.start_ms)||0));
@@ -101,8 +106,11 @@ window.SongSheet = (() => {
       if(!Number.isFinite(end)||end<=start) { start=eventStart; end=Math.max(eventEnd,eventStart+1000); }
       const phraseId=next?.source_phrase_ids?.[0]||next?.phrase_id;
       const section=sectionByPhrase.get(phraseId);
-      result.push({...group[0],phrase_id:phraseId,instrumental:true,unplaced_chords:events,start_ms:start,end_ms:end,
-        next_section_label:next?targetName(section):'Окончание'});
+      // A break followed only by unrecognized singing is still «Проигрыш».
+      const laterVoice=!voiced && source.slice(i).some(line=>!line.text && line.vocal);
+      result.push({...group[0],phrase_id:phraseId,instrumental:true,vocal:voiced,pause:kind==='pause',
+        unsung:group.flatMap(line=>line.unsung||[]),unplaced_chords:events,start_ms:start,end_ms:end,
+        next_section_label:next?targetName(section):laterVoice?'Вокал':'Окончание'});
     }
     return result;
   }
@@ -151,28 +159,39 @@ window.SongSheet = (() => {
     const lines = [], width=columns(row), seenParts=new Set();
     let stanzaLines = 0, hasLyrics = false;
     const sourceState={hints:sourceStanzaHints(row),index:0,line:0,used:0};
+    const flagged=(row.guitar_sheet||[]).some(line=>line && 'stanza_start' in line);
     for (const line of presentationLines(row,width)) {
       const newPart=parts.has(line.phrase_id) && !seenParts.has(line.phrase_id);
       seenParts.add(line.phrase_id);
-      if (lines.length && (newPart || stanzaLines >= 4)) { lines.push({kind:'space',text:''}); stanzaLines=0; }
+      // Stanzas come with the sheet (four verse lines where the song allows,
+      // split at the longest pauses); a verified publication's own stanza
+      // breaks win, with the old four-line fallback.
+      const stanza=(sourceState.hints.length || !flagged) ? stanzaLines >= 4 : !!line.stanza_start;
+      if (lines.length && (newPart || stanza) && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
+      else if (newPart || stanza) stanzaLines=0;
       const chords=compactChords(line,offset(row),width);
       let text='';
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
-      if(text && !line.text && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
+      const pause=!line.text && line.pause;
+      if(text && !line.text && !pause && lines.length && lines.at(-1).kind!=='space') lines.push({kind:'space',text:''});
       const phraseId=line.source_phrase_ids?.[0]||line.phrase_id||'';
       if(text) lines.push({kind:'chords',text,phrase_id:phraseId,song_id:row.song_id,chord_marks:chords.map(c=>({name:c.name,at:c.at,
         song_id:row.song_id,source_name:c.source_name,key_shift:offset(row),
         start_ms:c.start_ms,end_ms:c.end_ms,
         voicing_fingering:c.voicing_fingering||c.fingering||c.voicing?.fingering,
         voicing_probability:c.voicing_probability??c.fingering_probability??c.voicing?.probability}))});
+      // A pause between two lines shows its chord changes on their own line,
+      // without the word «Проигрыш» and without a countdown.
+      if(pause) { if(text) lines.push({kind:'pause',text:''}); continue; }
       if(line.text) {
         const sourceBreak=sourceStanzaBreak(row,line.text,sourceState);
         if(sourceBreak && lines.length && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
         lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
           display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true;
       }
-      else if(text || line.instrumental) { lines.push({kind:'instrumental',text:hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
-        phrase_id:line.phrase_id,start_ms:line.start_ms,end_ms:line.end_ms,next_section_label:line.next_section_label});lines.push({kind:'space',text:''}); }
+      else if(text || line.instrumental) { lines.push({kind:'instrumental',text:line.vocal?'Пение — текст не распознан':hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
+        vocal:!!line.vocal,unsung:line.unsung||[],phrase_id:line.phrase_id,start_ms:line.start_ms,end_ms:line.end_ms,next_section_label:line.next_section_label});lines.push({kind:'space',text:''});
+        if(line.vocal) hasLyrics=true; }
     }
     return lines;
   }
@@ -313,6 +332,7 @@ window.SongSheet = (() => {
         if(out.length && out.at(-1)!=='') out.push('');
         continue;
       }
+      if(current.kind==='pause') continue;
       if(current.kind==='instrumental') {
         let next=i+1, chordLines=[];
         while(next<rows.length && rows[next].kind!=='lyrics') {
@@ -727,12 +747,16 @@ window.SongSheet = (() => {
     for(let i=0;i<rows.length;i++) {
       const r=rows[i];
       if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
+      if(r.kind==='pause') continue;
       const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
       const lyric=['lyrics','instrumental'].includes(r.kind) ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
       let lyricHTMLContent='';
       if(lyric?.kind==='lyrics') lyricHTMLContent=lyricHTML(lyric);
       else if(lyric?.kind==='instrumental') {
         lyricHTMLContent=`<span class="song-paper-instrumental-label">${instrumentalCueMarkup(lyric.text)}</span>`;
+        // Text a recognizer produced where the vocal track is silent: kept
+        // for review, not shown as a sung line.
+        if(lyric.unsung?.length) lyricHTMLContent+=`<span class="song-paper-unsung" title="Распознаватель выдал этот текст там, где в записи нет голоса. Проверьте и удалите его в редакторе фраз.">в записи нет голоса: «${esc(lyric.unsung.map(u=>u.text).join(' / '))}»</span>`;
       }
       const timing=lyric?.kind==='instrumental'&&Number.isFinite(lyric.start_ms)&&Number.isFinite(lyric.end_ms)
         ? ` data-start-ms="${lyric.start_ms}" data-end-ms="${lyric.end_ms}" data-next-section="${esc(lyric.next_section_label||'вокала')}"` : '';
@@ -936,7 +960,7 @@ window.SongSheet = (() => {
         let text='', cursor=0;
         for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
         lines.push(text+(line.text || '').slice(cursor));
-        if(line.instrumental && chords.length) lines.push('{comment: Проигрыш}');
+        if(line.instrumental && !line.pause && chords.length) lines.push(line.vocal ? '{comment: Пение — текст не распознан}' : '{comment: Проигрыш}');
       }
       const url = URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
       const link = document.createElement('a'); link.href=url; link.download=(current.title.replace(/[\\/:*?"<>|]/g,'_') || 'song')+'.cho'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);

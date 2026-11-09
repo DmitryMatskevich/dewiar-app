@@ -120,7 +120,15 @@ def _vocal_slices(phrase):
     return slices
 
 
-def layout_chords(phrases, events, duration_ms=None):
+def layout_chords(phrases, events, duration_ms=None, vocal=None):
+    """Lyric rows with chords plus the gaps between them.
+
+    ``vocal`` is the vocal activity of the recording (``vocal_timing``). With
+    it a gap is a break only where nobody sings; a voiced stretch without
+    recognized words becomes its own row marked ``vocal`` instead of being
+    called an instrumental break.
+    """
+    from .vocal_timing import split_gap
     valid = []
     for event in events or []:
         if not isinstance(event, dict):
@@ -137,10 +145,27 @@ def layout_chords(phrases, events, duration_ms=None):
         valid.append({**base, **voicing, 'name': name, 'start_ms': start})
     valid.sort(key=lambda e: e['start_ms'])
     out = []
-    for phrase in [part for p in phrases or [] for part in _vocal_slices(p)]:
+    # Text placed where the vocal stem is silent is not a sung line: it is
+    # listed with the break it falls into, for review, and does not cut the
+    # intro or a break in two.
+    unsung = [p for p in phrases or [] if vocal and p.get('vocal_evidence') == 'none'
+              and str(p.get('text') or '').strip()]
+    sung = [p for p in phrases or [] if not any(p is q for q in unsung)]
+    slices = [part for p in sung for part in _vocal_slices(p) if str(part.get('text') or '')]
+    spans = [_vocal_bounds(part) for part in slices]
+    # Each chord change belongs to ONE line: the narrowest line sounding at
+    # that moment. Overlapping recognitions (one line stretched over a minute)
+    # must not swallow the changes of the lines inside it, leaving those
+    # lines without chords.
+    owner = {}
+    for k, event in enumerate(valid):
+        best = None
+        for j, (a, b) in enumerate(spans):
+            if a <= event['start_ms'] < b and (best is None or b - a < spans[best][1] - spans[best][0]):
+                best = j
+        owner[k] = best
+    for index, phrase in enumerate(slices):
         text = str(phrase.get('text') or '')
-        if not text:
-            continue
         ps, pe = int(phrase.get('start_ms') or 0), int(phrase.get('end_ms') or 0)
         vocal_ps, vocal_pe = _vocal_bounds(phrase)
         marks, unplaced = [], []
@@ -152,15 +177,8 @@ def layout_chords(phrases, events, duration_ms=None):
         active = max(previous, key=lambda e: int(e.get('start_ms',0)), default=None)
         if active and clean_chord(active.get('name')) and (active.get('end_ms') is None or active['end_ms'] > vocal_ps):
             marks.append({**active, 'char_index':0, 'anchor_quality':'continuation', 'continued':True})
-        for event in valid:
-            event_end = int(event.get('end_ms') or event['start_ms'])
-            if vocal_ps <= event['start_ms'] < vocal_pe:
-                pass
-            elif event['start_ms'] < vocal_ps and event_end > vocal_ps:
-                # A chord crossing the first word is already shown as a
-                # carry-in chord; do not duplicate it in the instrumental row.
-                continue
-            else:
+        for k, event in enumerate(valid):
+            if owner.get(k) != index:
                 continue
             at, quality = _anchor(event, {**phrase, 'start_ms': vocal_ps,
                                           'end_ms': vocal_pe, 'text': text})
@@ -190,14 +208,29 @@ def layout_chords(phrases, events, duration_ms=None):
                 if end is None:
                     end = valid[i+1]['start_ms'] if i+1 < len(valid) else duration
                 if event['start_ms'] < finish and end > cursor:
-                    changes.append(dict(event))
-            # Unknown harmony must not erase an otherwise timed vocal break.
-            out.append({'text':'', 'start_ms':cursor, 'end_ms':finish,
-                        'cells':[], 'chords':[], 'unplaced_chords':changes,
-                        'instrumental':True, 'timing_quality':'gap'})
+                    changes.append((dict(event), int(end)))
+            for part_start, part_end, kind in split_gap(vocal, cursor, finish, duration):
+                # Unknown harmony must not erase an otherwise timed vocal break.
+                held = [dict(event) for event, end in changes
+                        if event['start_ms'] < part_end and end > part_start]
+                if kind == 'pause':
+                    # Between two lines only a passing chord needs its own
+                    # place; a chord still sounding at the next line is shown
+                    # over its first word, and the previous one is already up.
+                    held = [dict(event) for event, end in changes
+                            if part_start <= event['start_ms'] < part_end and end <= finish]
+                gap = {'text':'', 'start_ms':part_start, 'end_ms':part_end, 'cells':[], 'chords':[],
+                       'unplaced_chords':held, 'instrumental':True, 'timing_quality':'gap'}
+                if kind != 'break':
+                    gap[kind] = True
+                notes = [{'phrase_id': p.get('phrase_id'), 'text': p.get('text')} for p in unsung
+                         if part_start <= int(p.get('start_ms') or 0) < part_end]
+                if notes:
+                    gap['unsung'] = notes
+                out.append(gap)
         cursor = max(cursor, row['end_ms'])
     return sorted(out, key=lambda row: row['start_ms'])
 
 
-def build_guitar_sheet(phrases, events, duration_ms=None):
-    return layout_chords(phrases, events, duration_ms)
+def build_guitar_sheet(phrases, events, duration_ms=None, vocal=None):
+    return layout_chords(phrases, events, duration_ms, vocal)

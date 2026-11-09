@@ -514,7 +514,226 @@ def _vocal_onset_ms(vocals):
     return 0
 
 
-def align_intro_from_vocals(audio, output, hypothesis, context, progress, original_start_ms=None):
+def apply_vocal_timing(hypothesis, vocals, progress, result=None):
+    """Fit phrase edges to the vocal stem and keep the activity for the sheet.
+
+    This runs on every alignment, not only for a suspicious first phrase:
+    breaks between lines, a long intro and the outro all come from the same
+    vocal map. Text and phrase order are never changed here.
+    """
+    from songs import vocal_timing
+    if not vocals:
+        hypothesis['vocal_timing'] = {'applied': False, 'reason': 'no_vocal_stem',
+                                      'version': vocal_timing.VERSION}
+        return None
+    import numpy as np
+    import soundfile as sf
+    progress('Сверяем вступление и проигрыши с голосом')
+    samples, sr = sf.read(str(vocals), dtype='float32', always_2d=True)
+    env = vocal_timing.envelope(np.mean(samples, axis=1), sr)
+    activity = vocal_timing.activity(env, round(len(samples) / sr * 1000))
+    if result is not None:
+        result['vocal_activity'] = activity
+    phrases, report = vocal_timing.fit_phrases(hypothesis.get('phrases') or [], activity)
+    hypothesis['phrases'] = phrases
+    hypothesis['vocal_timing'] = report
+    return activity
+
+
+def realign_grid_runs(audio, hypothesis, activity, context, progress, align=None, vocals=None):
+    """Re-time lines whose recognizer windows were a synthetic whole-second grid.
+
+    Every line of such a passage was aligned inside its own two-second crop,
+    so a whole verse could sit one line early. The passage is aligned again
+    as one text over one crop (mixture, and the vocal stem when present);
+    the result replaces the old times only if most words are measured and
+    they lie where the stem has voice. Text, order and ids never change.
+    """
+    from songs import vocal_timing
+    rows = hypothesis.get('phrases') or []
+    report = {'method': 'joint_alignment_over_whole_second_grid', 'runs': []}
+    hypothesis['grid_realignment'] = report
+    if not activity:
+        report['reason'] = 'no_vocal_activity'
+        return 0
+    spans = vocal_timing.grid_spans(context)
+    groups = vocal_timing.grid_groups(rows, vocal_timing.grid_segments(context))
+    report['spans'] = [list(s) for s in spans]
+    if not groups:
+        return 0
+    import soundfile as sf
+    duration = round(sf.info(str(audio)).duration * 1000)
+    sources = ['mixture'] + (['vocals'] if vocals else [])
+    if align is None:
+        release_qwen_model()
+        import numpy as np
+        import torch
+        from qwen_asr import Qwen3ForcedAligner
+        from songs.alignment_words import measured_words
+        model = Qwen3ForcedAligner.from_pretrained(snapshot('Qwen/Qwen3-ForcedAligner-0.6B'),
+            dtype=torch.float32, device_map='cpu', attn_implementation='eager')
+        loaded = {}
+
+        def load(source):
+            if source not in loaded:
+                data, rate = sf.read(str(audio if source == 'mixture' else vocals), dtype='float32', always_2d=True)
+                loaded[source] = (np.mean(data, axis=1), rate)
+            return loaded[source]
+
+        def align(text, a, b, source):
+            samples, rate = load(source)
+            units = list(model.align(audio=(samples[round(a*rate/1000):round(b*rate/1000)], rate),
+                                     text=text, language='Russian')[0])
+            return measured_words(text, units, a, b)
+    changed = 0
+    for indexes, span in groups:
+        # The crop without the previous line's held word, and the plain one:
+        # the aligner is sensitive to where a crop begins.
+        windows = [vocal_timing.grid_window(rows, indexes, span, duration, activity)]
+        plain = vocal_timing.grid_window(rows, indexes, span, duration)
+        if plain != windows[0]:
+            windows.append(plain)
+        text = ' '.join(str(rows[i].get('text') or '') for i in indexes)
+        count = len(text.split())
+        item = {'span_ms': list(span), 'window_ms': list(windows[0]), 'lines': len(indexes), 'words': count,
+                'phrase_ids': [rows[i].get('phrase_id') for i in indexes], 'attempts': [], 'applied': False}
+        report['runs'].append(item)
+        a, b = windows[0]
+        progress(f'Выравниваем заново отрывок {round(a/1000)}–{round(b/1000)} с: время строк было сеткой')
+        best = None
+        for a, b in windows:
+            for source in sources:
+                try:
+                    words = vocal_timing.grid_edge_words(align(text, a, b, source), (a, b), activity)
+                except Exception as exc:
+                    item['attempts'].append({'source': source, 'window_ms': [a, b], 'error': str(exc)[:300]})
+                    continue
+                ok, reason, share = vocal_timing.grid_alignment_quality(words, count, activity)
+                item['attempts'].append({'source': source, 'window_ms': [a, b], 'measured': len(words),
+                                         'voiced_share': share,
+                                         'placed': [[w['text'], w['start_ms'], w['end_ms']] for w in words],
+                                         **({'reason': reason} if reason else {})})
+                if ok and (best is None or (len(words), share) > (len(best[0]), best[1])):
+                    best = (words, share, source, (a, b))
+        if best is None:
+            item['reason'] = item['attempts'][-1].get('reason', 'alignment_failed') if item['attempts'] else 'alignment_failed'
+            continue
+        rows = vocal_timing.apply_grid_words(rows, indexes, best[0], best[3], activity,
+                                            {'source': best[2], 'measured': len(best[0]), 'words': count})
+        item.update(applied=True, source=best[2], window_ms=list(best[3]), measured=len(best[0]),
+                    voiced_share=best[1])
+        changed += 1
+    if changed:
+        rows, fit = vocal_timing.fit_phrases(rows, activity)
+        report['vocal_fit_applied'] = bool(fit.get('applied'))
+    hypothesis['phrases'] = rows
+    report['applied'] = changed
+    return changed
+
+
+def recover_sung_gaps(audio, hypothesis, activity, context, progress, transcribe=None, align=None,
+                      limit=8, run_id='sung'):
+    """Fill «singing without recognized text» from a fresh two-model reading.
+
+    Each voiced gap with lexical support is decoded again by Whisper and Qwen
+    on a crop of just that passage (the first pass may have lost it to a
+    hallucination over the intro). Only words both models agree on are kept;
+    the forced aligner then has to place every word inside the voiced gap.
+    Nothing existing is changed; a new line is added for review.
+    """
+    from songs import vocal_timing
+    rows = hypothesis.get('phrases') or []
+    report = {'method': 'two_model_sung_gap', 'windows': []}
+    hypothesis['sung_gap_recovery'] = report
+    if not activity:
+        report['reason'] = 'no_vocal_activity'
+        return 0
+    import soundfile as sf
+    duration = round(sf.info(str(audio)).duration * 1000)
+    vocal = dict(activity, lexical=vocal_timing.unrecognized_windows(rows, context))
+    gaps = vocal_timing.sung_gaps(rows, vocal, duration)[:limit]
+    if not gaps:
+        return 0
+    qwen_repo = ('Qwen/Qwen3-ASR-1.7B' if any(h.get('model') == 'Qwen3-ASR-1.7B' for h in context or [])
+                 else 'Qwen/Qwen3-ASR-0.6B')
+    if transcribe is None:
+        def transcribe(a, b, index):
+            whisper = whisper_transcribe(audio, f'{run_id}-{index}', a, b)
+            qwen = qwen_transcribe(audio, progress, [(a, b)], model_repo=qwen_repo)
+            return ((whisper.get('decoded_text') or ' '.join(p['text'] for p in whisper.get('phrases', []))),
+                    ' '.join(p['text'] for p in qwen.get('phrases', [])), [whisper['model'], qwen['model']])
+    # Decode every passage first, then free the recognizer before the aligner.
+    found = []
+    for index, (x, y) in enumerate(gaps):
+        a, b = max(0, x - 800), min(duration, y + 800)
+        b = min(b, a + 30000)
+        item = {'start_ms': x, 'end_ms': y, 'window_ms': [a, b], 'applied': False}
+        report['windows'].append(item)
+        progress(f'Ищем слова в пении без текста: {index + 1}/{len(gaps)}')
+        try:
+            first, second, models = transcribe(a, b, index)
+        except Exception as exc:
+            item['error'] = str(exc)[:300]
+            continue
+        sung = [p for p in rows if str(p.get('text') or '').strip() and p.get('vocal_evidence') != 'none']
+        before = [p for p in sung if int(p.get('end_ms') or 0) <= x + 500]
+        after = [p for p in sung if int(p.get('start_ms') or 0) >= y - 500]
+        agreed, basis = vocal_timing.agreed_text(first, second), 'two_models'
+        if not agreed:
+            agreed, basis = vocal_timing.repeated_line(first, second, sung, x, y), 'two_models_and_repeated_line'
+        text = vocal_timing.trim_neighbors(agreed, before[-1]['text'] if before else '',
+                                           after[0]['text'] if after else '')
+        item.update(readings=[first[:300], second[:300]], models=models, text=text, basis=basis)
+        if len(text.split()) < 3:
+            item['reason'] = 'models_disagree'
+            continue
+        found.append((item, text, models))
+    release_qwen_model()
+    if not found:
+        return 0
+    if align is None:
+        import numpy as np
+        import torch
+        from qwen_asr import Qwen3ForcedAligner
+        from songs.alignment_words import measured_words
+        model = Qwen3ForcedAligner.from_pretrained(snapshot('Qwen/Qwen3-ForcedAligner-0.6B'),
+            dtype=torch.float32, device_map='cpu', attn_implementation='eager')
+        samples, sr = sf.read(str(audio), dtype='float32', always_2d=True)
+        samples = np.mean(samples, axis=1)
+        def align(text, a, b):
+            units = list(model.align(audio=(samples[round(a*sr/1000):round(b*sr/1000)], sr),
+                                     text=text, language='Russian')[0])
+            return measured_words(text, units, a, b)
+    added = 0
+    for item, text, models in found:
+        a, b = item['window_ms']
+        progress('Ставим найденные слова по времени')
+        try:
+            words = align(text, a, b)
+        except Exception as exc:
+            item['error'] = str(exc)[:300]
+            continue
+        count = len(text.split())
+        x, y = item['start_ms'], item['end_ms']
+        item['measured_words'] = len(words)
+        # Most words placed by the aligner: keep the line, the rest is shown
+        # as an estimate between measured neighbours (as for other lines).
+        if len(words) < max(3, -(-7 * count // 10)):
+            item['reason'] = 'alignment_incomplete'
+            continue
+        if words[0]['start_ms'] < x - 1000 or words[-1]['end_ms'] > y + 1000:
+            item['reason'] = 'alignment_outside_voice'
+            continue
+        rows = vocal_timing.insert_recovered(rows, text, words, item['window_ms'], models,
+                                             f'{run_id}-sung-{x}', item.get('basis', 'two_models'), (x, y))
+        item.update(applied=True, phrase_start_ms=words[0]['start_ms'], phrase_end_ms=words[-1]['end_ms'])
+        added += 1
+    hypothesis['phrases'] = rows
+    report['added'] = added
+    return added
+
+
+def align_intro_from_vocals(audio, output, hypothesis, context, progress, original_start_ms=None, vocals=None):
     """Retry a false zero-second first phrase on vocal-only audio, if available offline."""
     phrases = hypothesis.get('phrases') or []
     if not phrases:
@@ -530,9 +749,20 @@ def align_intro_from_vocals(audio, output, hypothesis, context, progress, origin
                    or window[1] - int(first.get('end_ms') or 0) >= 1200)
     if not needs_retry:
         return False
-    vocals = _separate_vocals_for_intro(audio, output, progress)
+    # A shared stem belongs to the caller, which removes it after all timing
+    # checks; only a stem separated here is removed here.
+    shared = vocals is not None
+    vocals = vocals() if callable(vocals) else vocals
+    if vocals is None:
+        if shared:
+            return False
+        vocals = _separate_vocals_for_intro(audio, output, progress)
     if vocals is None:
         return False
+    def cleanup():
+        if not shared:
+            import shutil
+            shutil.rmtree(vocals.parent, ignore_errors=True)
     candidate = copy.deepcopy(first)
     candidate['start_ms'], candidate['end_ms'] = window
     retry = {'phrases': [candidate]}
@@ -550,19 +780,16 @@ def align_intro_from_vocals(audio, output, hypothesis, context, progress, origin
                 'source': 'HTDemucs vocal stem onset', 'suggested_start_ms': onset,
                 'applied': False,
                 'end_ms': int(first.get('end_ms') or 0)}
-            import shutil
-            shutil.rmtree(vocals.parent, ignore_errors=True)
+            cleanup()
             return False
-        import shutil
-        shutil.rmtree(vocals.parent, ignore_errors=True)
+        cleanup()
         return False
     first.clear()
     first.update(aligned)
     hypothesis.setdefault('alignment', {})['intro_vocal_check'] = {
         'source': 'HTDemucs vocal stem', 'start_ms': aligned['start_ms'],
         'end_ms': aligned['end_ms']}
-    import shutil
-    shutil.rmtree(vocals.parent, ignore_errors=True)
+    cleanup()
     return True
 
 
@@ -725,20 +952,41 @@ def main():
                         context.insert(0, json.loads(args.baseline.read_text()))
                     initial_start = (timed.get('phrases') or [{}])[0].get('start_ms', 0)
                     generated = []
+                    stem = {}
                     def vocals_for_timing():
-                        path = _separate_vocals_for_intro(args.input,args.output,progress)
-                        if path:
-                            generated.append(path)
-                        return path
+                        # One stem per run: the karaoke stem of this exact
+                        # recording, else a temporary separation. The same
+                        # stem serves word retries, the intro and every break.
+                        if 'path' not in stem:
+                            from songs.onset_check import existing_vocals
+                            stem['path'] = existing_vocals(args.input)
+                            if stem['path'] is None:
+                                stem['path'] = _separate_vocals_for_intro(args.input,args.output,progress)
+                                if stem['path']:
+                                    generated.append(stem['path'])
+                        return stem['path']
                     try:
                         align_phrases(args.input,timed,progress,context,vocal_factory=vocals_for_timing)
+                        align_intro_from_vocals(args.input,args.output,timed,context,progress,initial_start,
+                                                vocals=vocals_for_timing)
+                        activity = apply_vocal_timing(timed,vocals_for_timing(),progress,result)
+                        try:
+                            realign_grid_runs(args.input,timed,activity,context,progress,
+                                              vocals=vocals_for_timing())
+                        except Exception as exc:
+                            # Optional: the per-line alignment stays as it was.
+                            timed['grid_realignment'] = {'applied': False, 'error': str(exc)[:300]}
+                        try:
+                            recover_sung_gaps(args.input,timed,activity,context,progress,run_id=args.run_id)
+                        except Exception as exc:
+                            # Optional: a failed recheck never loses the aligned text.
+                            timed['sung_gap_recovery'] = {'applied': False, 'error': str(exc)[:300]}
                     finally:
                         # Only this job's temporary separator outputs, never a
                         # selected karaoke file or an existing cached stem.
                         import shutil
                         for path in generated:
                             shutil.rmtree(path.parent,ignore_errors=True)
-                    align_intro_from_vocals(args.input,args.output,timed,context,progress,initial_start)
             elif step == 'consensus':
                 from songs.consensus import consensus, choose_spine, recover_omissions
                 hypotheses = list(result['hypotheses'])

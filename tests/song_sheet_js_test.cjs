@@ -210,3 +210,57 @@ assert.equal(s.sheetRows(unknownGap)[0].kind,'instrumental');
 assert.equal(s.sheetRows(unknownGap)[0].end_ms,100);
 assert.match(s.sheetHTML(unknownGap),/song-paper-instrumental/);
 console.log('Subsecond instrumental without a known chord remains visible: OK');
+
+// A voiced stretch without recognized words sits between two breaks of the
+// same gap: it must stay a separate row and must not be called «Проигрыш».
+const voicedGap={song_id:'voiced-gap',guitar_sheet:[
+  {instrumental:true,text:'',start_ms:0,end_ms:20000,unplaced_chords:[{name:'Am7',start_ms:0,end_ms:10000},{name:'D6',start_ms:10000,end_ms:20000}]},
+  {text:'Первая строка',start_ms:20000,end_ms:30000,chords:[],cells:[{text:'Первая строка',char_index:0,chords:[]}]},
+  {instrumental:true,text:'',start_ms:30000,end_ms:40000,unplaced_chords:[{name:'G',start_ms:30000,end_ms:40000}]},
+  {instrumental:true,vocal:true,text:'',start_ms:40000,end_ms:50000,unplaced_chords:[{name:'Em',start_ms:40000,end_ms:50000}]},
+  {instrumental:true,text:'',start_ms:50000,end_ms:60000,unplaced_chords:[{name:'C',start_ms:50000,end_ms:60000}]},
+  {text:'Вторая строка',start_ms:60000,end_ms:70000,chords:[],cells:[{text:'Вторая строка',char_index:0,chords:[]}]}]};
+const voicedRows=s.sheetRows(voicedGap).filter(r=>r.kind==='instrumental');
+assert.deepEqual(voicedRows.map(r=>[r.text,r.start_ms,r.end_ms]),[
+  ['Вступление',0,20000],['Проигрыш',30000,40000],['Пение — текст не распознан',40000,50000],['Проигрыш',50000,60000]]);
+assert.ok(s.plainText(voicedGap).includes('Am7'));
+console.log('Voiced gap without words is shown apart from breaks: OK');
+
+// A short pause between two lines is not «Проигрыш»: its chord change gets
+// its own chord line without a label; a pause without a change is invisible.
+// Text without voice in the recording is listed under the intro for review.
+const paused={song_id:'paused',guitar_sheet:[
+  {instrumental:true,text:'',start_ms:0,end_ms:13900,unplaced_chords:[{name:'Am7',start_ms:0,end_ms:13900}],unsung:[{phrase_id:'x',text:'Валерий Курас'}]},
+  {text:'Первая строка',start_ms:13900,end_ms:16000,chords:[],cells:[{text:'Первая строка',char_index:0,chords:[]}]},
+  {instrumental:true,pause:true,text:'',start_ms:16000,end_ms:17000,unplaced_chords:[{name:'D6',start_ms:16200,end_ms:17000}]},
+  {text:'Вторая строка',start_ms:17000,end_ms:19000,chords:[],cells:[{text:'Вторая строка',char_index:0,chords:[]}]},
+  {instrumental:true,pause:true,text:'',start_ms:19000,end_ms:19500,unplaced_chords:[]},
+  {text:'Третья строка',start_ms:19500,end_ms:21000,chords:[],cells:[{text:'Третья строка',char_index:0,chords:[]}]}]};
+const pausedRows=s.sheetRows(paused);
+assert.deepEqual(pausedRows.filter(r=>r.kind==='instrumental').map(r=>r.text),['Вступление']);
+assert.equal(pausedRows.filter(r=>r.kind==='pause').length,1);
+const pauseAt=pausedRows.findIndex(r=>r.kind==='pause');
+assert.equal(pausedRows[pauseAt-1].kind,'chords');
+assert.match(pausedRows[pauseAt-1].text,/D6/);
+const pausedHTML=s.sheetHTML({...paused,title:'T'});
+assert.match(pausedHTML,/в записи нет голоса: «Валерий Курас»/);
+assert.doesNotMatch(pausedHTML,/Проигрыш|Про<\/span>/);
+assert.ok(s.plainText(paused).includes('D6\nВторая строка')||s.plainText(paused).includes('D6'));
+console.log('Short pauses carry chords without a «Проигрыш» label; voiceless text is a note: OK');
+{
+  // Stanzas come from the sheet (verse lines, not recognizer phrases); a
+  // verse wider than the paper wraps without starting a new stanza.
+  const verse=(text,stanza)=>({text,cells:[{char_index:0,chords:['Am']}],stanza_start:stanza});
+  const sheet={song_id:'stanzas',guitar_sheet:[
+    verse('На зоне был, не фраерил,',true),verse('Там это ни к чему,',false),
+    verse('Я молча пил, а лес валил,',false),verse('Летели щепки.',false),
+    verse('Хозяин бил, я не скулил, и сил упадок не косил, а срок костил',true),
+    verse('А срок костил, я не просил,',false),verse('Я парень крепкий.',false)]};
+  const rows=s.sheetRows(sheet);
+  const lyrics=rows.filter(r=>r.kind==='lyrics').map(r=>r.text);
+  assert.equal(rows.filter(r=>r.kind==='space').length,1);
+  const space=rows.findIndex(r=>r.kind==='space');
+  assert.equal(rows.slice(0,space).filter(r=>r.kind==='lyrics').length,4);
+  assert.ok(lyrics.length>7);
+  console.log('Quatrains from the sheet; wrapped verse stays in its stanza: OK');
+}
