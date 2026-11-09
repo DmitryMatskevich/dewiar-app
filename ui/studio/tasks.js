@@ -159,7 +159,7 @@ function renderOutputs(t) {
   return `<div class="outs${stages ? " stages" : ""}">${shown.map(o => { const ext = o.path.split(".").pop().toLowerCase();
       const textFile = ["md", "txt", "srt", "csv", "tsv", "json"].includes(ext);
       const editable = ["media-transcription", "text-extraction", "contact-extraction"].includes(t.workflow) && ["md", "txt", "srt", "csv", "tsv"].includes(ext);
-      return `<div class="oi-row"><button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>${stages && textFile ? `<div class="oi-actions"><button class="btn small icon task-output-icon" data-out-copy="${escH(o.path)}" title="Скопировать текст этапа" aria-label="Скопировать текст этапа">${TASK_COPY_ICON}</button>${editable ? `<button class="btn small icon task-output-icon" data-out-edit="${escH(o.path)}" title="Редактировать файл этапа" aria-label="Редактировать файл этапа">${TASK_EDIT_ICON}</button>` : ""}</div>` : ""}</div>`; }).join("")}</div>
+      return `<div class="oi-row"><button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>${stages && textFile ? `<div class="oi-actions"><button class="btn small icon task-output-icon" data-out-copy="${escH(o.path)}" title="Скопировать текст этапа" aria-label="Скопировать текст этапа">${TASK_COPY_ICON}</button>${editable ? `<button class="btn small icon task-output-icon" data-out-edit="${escH(o.path)}" title="Редактировать файл этапа" aria-label="Редактировать файл этапа">${TASK_EDIT_ICON}</button>` : ""}${t.workflow==='contact-extraction'&&o.path.endsWith('contacts.md')?'<button class="btn small" data-out-contacts title="Создать карточки из найденных контактов">Создать контакты</button>':''}</div>` : ""}</div>`; }).join("")}</div>
     <div class="opane"><div class="obar"><span id="o-name"></span><span style="flex:1"></span>
       <button class="btn small" id="o-full">На весь экран</button><button class="btn small" id="o-open">Открыть</button><button class="btn small" id="o-dir">Папка</button>
       <button class="btn small primary" id="o-dl">Скачать</button><button class="btn small primary" id="o-pdf">PDF</button></div>
@@ -169,6 +169,25 @@ async function wireOutputs(t) {
   const rel = tOutSel; if (!rel) return;
   const dirRel = "Задачи/" + t.dir.replace(/\\/g, "/").split("/Задачи/").pop();   // ws_* принимают пути от корня папки ассистента
   $$("#t-view .oi").forEach(b => b.onclick = () => { tOutSel = b.dataset.p; openTask(t.id); });
+  $$("#t-view [data-out-contacts]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const f = await core.call('ws_read', {path:dirRel + '/outputs/contacts.json'});
+      if (f.truncated || f.binary) throw Error('Не удалось прочитать полный список контактов.');
+      const data = JSON.parse(f.text || '{}'), entries = data.items || data.pages || [];
+      const candidates = entries.filter(row => Object.values(row.contacts || {}).some(values => Array.isArray(values) ? values.length : !!values)).map(row => {
+        const c = row.contacts || {}, socials = c.social || [];
+        return {organization:row.page_name || row.source || row.source_name || '', emails:c.email || [], phones:c.phone || [], websites:c.website || [], telegram:socials.find(x=>/t\.me\//i.test(x)) || '', whatsapp:socials.find(x=>/wa\.me\//i.test(x)) || ''};
+      });
+      if (!candidates.length) throw Error('В результате не найдено контактных данных для карточек.');
+      if (candidates.length > 1 && !await ask(`Найдено карточек: ${candidates.length}. Каждую можно проверить и создать отдельно. Открыть первую?`, {ok:'Открыть'})) return;
+      for (const [index, candidate] of candidates.entries()) {
+        const saved = await window.DewiarContactCreate.open(candidate, {title:`Контакт ${index+1} из ${candidates.length}`, source:`Проверьте данные из результата извлечения${candidate.organization ? `: ${candidate.organization}` : ''}.`});
+        if (!saved) break;
+      }
+    } catch (error) { toast(error.message || 'Не удалось открыть контакты результата'); }
+    finally { b.disabled = false; }
+  });
   $$("#t-view [data-out-copy]").forEach(b => b.onclick = async e => {
     e.stopPropagation(); b.disabled = true;
     try { const f = await core.call("ws_read", {path:dirRel + "/" + b.dataset.outCopy});
@@ -199,7 +218,9 @@ async function wireOutputs(t) {
     } catch (error) { toast(error.message || "Не удалось открыть файл для редактирования", 6000, "bad"); }
   });
   $("#o-name").textContent = rel;
-  $("#o-open").onclick = () => core.call("ws_open", { path: dirRel + "/" + rel }).catch(e => toast(e.message));
+  const inPreview = /^Mac/.test(navigator.platform) && /\.pdf$/i.test(rel);
+  $("#o-open").textContent = inPreview ? "Открыть в Просмотре" : "Открыть";
+  $("#o-open").onclick = () => core.call("ws_open", { path: dirRel + "/" + rel, ...(inPreview ? {in_preview:true} : {}) }).catch(e => toast(e.message));
   const ext0 = rel.split(".").pop().toLowerCase(), page = ["html", "htm"].includes(ext0);
   $("#o-dl").textContent = page ? "Скачать HTML" : "Скачать";
   $("#o-pdf").style.display = page || ext0 === "md" ? "" : "none";

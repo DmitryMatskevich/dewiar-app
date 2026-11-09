@@ -4,6 +4,7 @@ import io
 from datetime import date
 from pathlib import Path
 import sys
+import socket
 import tempfile
 import threading
 import unittest
@@ -12,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'core'))
 from sites.store import Store, availability, validate
-from sites.probes import execute, specs
+from sites.probes import execute, specs, port_diagnostic_specs, provider_console_spec
 from sites.runtime import Runtime
 from sites.server import App, Handler, ThreadingHTTPServer
 from sites import discovery
@@ -158,6 +159,26 @@ class StoreTests(unittest.TestCase):
     def test_aggregate_overlap(self):
         spans=[dict(probe=p,start=0,end=10,state='DOWN') for p in ['a','b','c']]
         h=availability(spans,[],['a','b','c'],0,10);self.assertEqual(h['D'],10)
+    def test_port_diagnostics_are_short_lived_and_not_uptime_history(self):
+        with patch('sites.store.minute',return_value=100):
+            self.store.save_port_diagnostics(self.site['id'],[dict(probe='ssh',state='UP',reason='OK',detail={'ip':'93.184.216.34','port':22}),dict(probe='ftp',state='DOWN',reason='CONNECTION_FAILED')])
+        rows={r['probe']:r for r in self.store.results(self.site['id'])}
+        self.assertTrue(rows['ssh']['diagnostic'])
+        self.assertEqual(rows['ssh']['until_min'],115)
+        self.assertEqual(rows['ftp']['state'],'DOWN')
+        self.assertEqual(self.store.history(self.site,100,110)['U'],0)
+        self.store.save_port_diagnostics(self.site['id'],[dict(probe='ssh',state='UP',reason='OK')],now=101,rev=self.site['rev']+1)
+        self.assertEqual({r['probe'] for r in self.store.results(self.site['id'])},{'ssh','ftp'})
+        with patch('sites.store.minute',return_value=116):
+            self.assertFalse(any(r.get('until_min',0)>116 for r in self.store.results(self.site['id'])))
+
+    def test_provider_panel_diagnostic_is_bound_to_panel_revision(self):
+        provider=self.store.provider('timeweb-cloud')
+        self.assertEqual(provider['panel_url'],'https://timeweb.cloud/my/login')
+        self.store.save_provider_diagnostic(provider['id'],dict(state='UP',reason='OK',detail={'http_code':302}),now=100,rev=provider['rev'])
+        self.assertEqual(self.store.provider(provider['id'])['panel_check']['state'],'UP')
+        changed=self.store.save_provider(dict(provider,panel_url='https://timeweb.cloud/custom-login'))
+        self.assertIsNone(changed['panel_check'])
 
 
 class ProbeTests(unittest.TestCase):
@@ -167,6 +188,8 @@ class ProbeTests(unittest.TestCase):
             def do_GET(self):
                 if self.path=='/redirect':self.send_response(302);self.send_header('Location','http://169.254.169.254/');self.end_headers();return
                 self.send_response(503 if self.path=='/down' else 200);self.end_headers();self.wfile.write(b'fixture healthy')
+            def do_HEAD(self):
+                self.send_response(503 if self.path=='/down' else 302);self.end_headers()
             def log_message(self,*a):pass
         cls.http=HTTPServer(('127.0.0.1',0),Fixture)
         cls.thread=threading.Thread(target=cls.http.serve_forever,daemon=True);cls.thread.start()
@@ -175,6 +198,12 @@ class ProbeTests(unittest.TestCase):
     def tearDownClass(cls):cls.http.shutdown();cls.http.server_close();cls.thread.join()
     def probe(self,path='',marker='',test=True):return execute(dict(id='http',kind='http',target=self.url+path,marker=marker),test)
     def test_http(self):self.assertEqual(self.probe()['state'],'UP')
+    def test_provider_console_http_response_without_following_login_redirect(self):
+        spec=dict(provider_console_spec({'panel_url':self.url+'/login'}),id='console')
+        result=execute(spec,test=True)
+        self.assertEqual(result['state'],'UP')
+        self.assertEqual(result['detail']['http_code'],302)
+        self.assertEqual(execute(dict(spec,target=self.url+'/down'),test=True)['state'],'DOWN')
     def test_down(self):self.assertEqual(self.probe('/down')['reason'],'HTTP_STATUS')
     def test_marker(self):self.assertEqual(self.probe(marker='missing')['reason'],'CONTENT_MISMATCH')
     def test_ssrf(self):self.assertEqual(self.probe(test=False)['reason'],'TARGET_POLICY')
@@ -205,6 +234,22 @@ class ProbeTests(unittest.TestCase):
         self.assertIn('health',by_id)
     def test_dns_host_validation(self):
         with self.assertRaises(ValueError):validate({'url':'https://site.example','dns_host':'bad/name'})
+    def test_ssh_and_ftp_diagnostics_read_banners_without_authentication(self):
+        for kind, port, greeting in [('ssh',22,b'SSH-2.0-fixture\r\n'),('ftp',21,b'220 fixture ready\r\n')]:
+            listener=socket.socket();listener.bind(('127.0.0.1',0));listener.listen(1);actual_port=listener.getsockname()[1]
+            def serve(sock=listener, banner=greeting):
+                conn,_=sock.accept();conn.sendall(banner);conn.close();sock.close()
+            thread=threading.Thread(target=serve,daemon=True);thread.start()
+            result=execute(dict(id=kind,kind=kind,target='127.0.0.1',port=actual_port),test=True)
+            thread.join(2)
+            self.assertEqual(result['state'],'UP')
+            self.assertEqual(result['detail']['port'],actual_port)
+    def test_port_diagnostic_targets_saved_ip_even_without_service_configuration(self):
+        site=validate({'name':'Fixture','url':'https://site.example','server_ip':'157.22.207.74'})
+        checks={r['id']:r for r in port_diagnostic_specs(site)}
+        self.assertEqual(checks['ssh'],{'id':'ssh','kind':'ssh','target':'157.22.207.74','port':22})
+        self.assertEqual(checks['ftp']['port'],21)
+        self.assertEqual(port_diagnostic_specs({'name':'Draft','enabled':False}),[])
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -221,6 +266,28 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_opening_view_queues_separate_port_diagnostics_without_probe_slots(self):
+        with tempfile.TemporaryDirectory() as root:
+            store=Store(root)
+            site=store.save({'name':'Fixture','url':'https://example.org'})
+            runtime=Runtime(store)
+            submitted=[]
+            try:
+                with patch.object(runtime.port_pool,'submit',side_effect=lambda *args: submitted.append(args)), patch.object(runtime,'local_only',return_value=False):
+                    result=runtime.scan_ports()
+                    self.assertEqual(result['queued_sites'],1)
+                    self.assertEqual(result['queued_consoles'],6)
+                    self.assertEqual(result['queued'],7)
+                    self.assertEqual(len(runtime.active),0)
+                    self.assertEqual(len(runtime.port_active),1)
+                    self.assertEqual(runtime.jobs[next(iter(runtime.port_active.values()))]['mode'],'port-diagnostic')
+                    self.assertEqual(runtime.scan_ports()['queued'],0)
+                with store.db() as c:
+                    self.assertEqual(c.execute('SELECT count(*) FROM spans').fetchone()[0],0)
+                    self.assertEqual(c.execute('SELECT count(*) FROM incidents').fetchone()[0],0)
+            finally:
+                runtime.pool.shutdown();runtime.port_pool.shutdown()
+
     def test_network_policy_reconciles_after_restart(self):
         with tempfile.TemporaryDirectory() as root:
             store=Store(root)
@@ -244,7 +311,7 @@ class ApiTests(unittest.TestCase):
         self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler);self.server.app=self.app
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.url='http://127.0.0.1:'+str(self.server.server_port)
-    def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.app.runtime.pool.shutdown()
+    def tearDown(self):self.server.shutdown();self.server.server_close();self.thread.join();self.app.runtime.pool.shutdown();self.app.runtime.port_pool.shutdown()
     def request(self,path,body=None,auth=True,origin=None):
         headers={'Content-Type':'application/json'}
         if auth:headers['Authorization']='Bearer '+self.app.token
@@ -292,6 +359,10 @@ class ApiTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             urllib.request.urlopen(urllib.request.Request(self.url+'/api/settings',data=b'{"paused":true}',headers=headers))
     def test_status(self):self.assertTrue(self.request('/api/status')['test'])
+    def test_scan_ports_route_is_one_shot_and_returns_queued_count(self):
+        with patch.object(self.app.runtime,'scan_ports',return_value={'queued':2,'skipped':1}) as scan:
+            self.assertEqual(self.request('/api/scan-ports',{'open':True}),{'queued':2,'skipped':1})
+            scan.assert_called_once_with()
     def test_discover_is_explicit_public_lookup_and_does_not_save_site(self):
         result={'domain':'example.org','addresses':['93.184.216.34'],'nameservers':['ns.example.org'],'registrar':'Example','domain_expires':'2030-01-01','networks':[],'sources':[],'note':'test'}
         with patch('sites.server.discovery.discover',return_value=result) as lookup:

@@ -151,6 +151,7 @@ $("#ch-new").onclick = async () => {
 async function chatManage(button) {
   const action = button.dataset.chatAction, dialog_id = CH.thread;
   if (!dialog_id) return;
+  $("#ch-manage").open = false;
   const archived = CH.archived;
   if (action === "delete" && !await ask("Удалить весь выбранный чат со всеми вопросами и ответами без возможности восстановления? Сохранённые файлы и отдельная память ассистента останутся.")) return;
   button.disabled = true;
@@ -229,14 +230,21 @@ function chatAttsRender() {
     b.onclick = () => { chAtts.splice(+b.dataset.i, 1); chatAttsRender(); };
     const attachment = chAtts[+b.dataset.i];
     if (attachment.kind !== "image") return;
-    const ocr = document.createElement("button"); ocr.type = "button"; ocr.className = "image-ocr-action";
-    ocr.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM7 8h10M7 11h7M7 14h10M7 17h6"/><path d="M17 15v4m-2-2h4"/></svg>`;
-    ocr.title = "Распознать текст картинки локальным OCR и вставить его в черновик"; ocr.setAttribute("aria-label", ocr.title);
-    ocr.onclick = () => window.extractImageText(attachment, text => {
+    const menu = document.createElement("details"); menu.className = "image-extract-menu";
+    const summary = document.createElement("summary"); summary.textContent = "Извлечь"; summary.title = "Извлечь контакт или текст с картинки";
+    const actions = document.createElement("div"); actions.className = "image-extract-options";
+    const run = (label, fn) => { const action = document.createElement("button"); action.type = "button"; action.textContent = label; action.onclick = async () => {
+      menu.open = false; action.disabled = true;
+      try { await fn(); } catch (error) { $("#ch-res").textContent = error.message || String(error); }
+      finally { action.disabled = false; }
+    }; actions.append(action); };
+    const insertText = text => {
       const input = $("#ch-text"); input.value = [input.value.trimEnd(), text].filter(Boolean).join("\n\n");
       input.dispatchEvent(new Event("input", {bubbles:true})); input.focus();
-    });
-    b.before(ocr);
+    };
+    run("Извлечь контакт", () => window.extractImageContacts(attachment, insertText));
+    run("Распознать текст", () => window.extractImageText(attachment, insertText));
+    menu.append(summary, actions); b.before(menu);
   });
 }
 function chatSend() {

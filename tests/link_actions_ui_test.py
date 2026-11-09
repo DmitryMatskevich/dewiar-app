@@ -21,50 +21,75 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
     page.goto((ui/'hud.html').as_uri());page.evaluate("openAsk();applyLook({skin:'neusky'})")
     assert page.evaluate("calls.some(x=>x.cmd==='link_choices')") is False,'Startup must not restore stale link cards'
     field=page.locator('#askin');draft=page.locator('.link-draft-actions')
+    def open_menu(card, label):
+        card.get_by_role('button', name=label, exact=True).click()
+
     field.fill('https://example.org/article')
+    open_menu(draft,'Текст')
+    for action in ('text','html','contacts'):
+        assert draft.locator(f'[data-link-action="{action}"]').is_visible(), action
+    assert draft.locator('[data-link-action="seo-page"]').is_hidden()
+    open_menu(draft,'SEO')
     assert draft.locator('[data-link-action="seo-page"]').is_visible()
     assert page.evaluate('calls.length')==0,'Pasting must not start work or fetch links'
     assert draft.locator('[data-link-action="audio"]').count()==0
     page.evaluate('sendAsk()');assert draft.locator('article').count()==0,'Sending clears the draft menu, leaving the assistant result'
     field.fill('Проанализируй https://example.org/article');assert draft.locator('article').count()==0
     field.fill('https://youtu.be/test\nhttps://youtu.be/second')
+    open_menu(draft,'Видео')
     assert draft.locator('[data-link-action="video"]').is_visible()
-    draft.locator('[data-link-action="batch"]').click()
+    assert draft.locator('[data-link-action="transcribe"]').is_visible()
+    draft.locator('[data-link-action="transcribe"]').click()
     assert page.locator('#media-panel').is_visible()
     assert page.locator('#mt-links').input_value()=='https://youtu.be/test\nhttps://youtu.be/second'
     assert page.evaluate('calls.length')==0
     page.locator('#mt-close').click()
     assert field.input_value(),'Reviewing and cancelling batch must retain the draft'
     field.fill('https://example.org/article');page.evaluate('fail=true')
+    open_menu(draft,'SEO')
     draft.locator('[data-link-action="seo-page"]').click()
     assert 'Fixture: no model' in draft.inner_text()
     assert field.input_value()=='https://example.org/article'
-    page.evaluate('fail=false');draft.locator('[data-link-action="seo-site"]').click()
+    page.evaluate('fail=false');open_menu(draft,'SEO')
+    draft.locator('[data-link-action="seo-site"]').click()
     page.wait_for_function("document.getElementById('askin').value===''")
     assert page.evaluate('calls.at(-1).args.action')=='seo-site'
     # Persisted assistant choice renders via the same shared card.
     page.evaluate("fire('chat',{item:{att:[{kind:'link_actions',urls:['https://example.org/article'],media:false}]}})")
     sent=page.locator('#link-messages .link-actions');assert sent.is_visible()
+    open_menu(sent,'Текст')
+    sent.locator('[data-link-action="html"]').click()
+    assert page.evaluate('calls.at(-1).args.action')=='html'
+    open_menu(sent,'Текст')
+    sent.locator('[data-link-action="contacts"]').click()
+    assert page.evaluate('calls.at(-1).args.action')=='contacts'
+    open_menu(sent,'SEO')
     sent.locator('[data-link-action="seo-page"]').click()
+    open_menu(sent,'SEO')
     sent.locator('[data-link-action="seo-page"]').click()
     assert page.evaluate('calls.filter(x=>x.args.action===\'seo-page\').length')==2,'One failed attempt plus one created task; second click opens task'
     assert page.evaluate('opens.at(-1)')==['tasks','&task=fixture-task']
     assert sent.locator('[data-link-action="seo-site"]').inner_text()=='SEO всего сайта'
-    # Unknown media providers can be explicitly classified without fetching.
-    sent.locator('.la-mode').click();assert sent.locator('[data-link-action="audio"]').is_visible()
+    # Media URLs can be treated as site pages without fetching.
+    page.evaluate("fire('chat',{item:{att:[{kind:'link_actions',urls:['https://example.org/sample.mp3'],media:true,video:false}]}})")
+    open_menu(sent,'Аудио');assert sent.locator('[data-link-action="audio"]').is_visible()
+    sent.locator('.la-mode').click();open_menu(sent,'Текст')
+    assert sent.locator('[data-link-action="html"]').is_visible()
     # A previous screenshot and task result must not compress the assistant menu to zero.
     page.evaluate("document.getElementById('screenshot-messages').innerHTML='<div class=ss-card style=height:160px>Previous screenshot</div>';document.getElementById('task').innerHTML='<div style=height:150px>Completed task</div>';fire('chat',{item:{att:[{kind:'link_actions',urls:['https://example.org/'],media:false}]}})")
     page.wait_for_timeout(100)
     bounds=page.locator('#mid').bounding_box()
-    for button in sent.locator('[data-link-action]').all():
+    for button in sent.locator('.la-menu-toggle:visible').all():
         b=button.bounding_box();assert b and b['y']>=bounds['y'] and b['y']+b['height']<=bounds['y']+bounds['height'],(b,bounds)
     for width in (340,420,640):
         page.set_viewport_size({'width':width,'height':850})
         field.fill('https://youtu.be/test')
-        for button in draft.locator('[data-link-action]').all():
+        open_menu(draft,'Видео')
+        for button in draft.locator('[data-link-action]:visible').all():
             b=button.bounding_box();assert b and b['x']>=0 and b['x']+b['width']<=width+1,(width,b)
         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+        open_menu(draft,'Видео')
     shot=ROOT/'work/link-actions-menu.png';shot.parent.mkdir(exist_ok=True);page.screenshot(path=str(shot))
     assert not errors,errors
     browser.close()
-print('ALL OK: local detection, media/site choices, batch review, explicit tasks, retry, no duplicate launch, responsive buttons')
+print('ALL OK: extraction/video menus, task routing, transcription review, retry and responsive layout')

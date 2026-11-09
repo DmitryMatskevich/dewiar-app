@@ -120,6 +120,27 @@ def _vocal_slices(phrase):
     return slices
 
 
+def held_spans(spans, vocal, duration_ms=None):
+    """Line spans that end with the voice they end in.
+
+    The aligner ends the last word at its consonants; the held vowel goes on
+    in the stem («Ты так хороша-а»). A chord changed under it fell into the
+    pause after the line and showed on a line of its own, without text, while
+    the line above was still sung. The line keeps that voiced stretch, up to
+    the next line and at most ``HELD_MS`` (the same rule as an unmeasured
+    last word in ``vocal_timing``).
+    """
+    from .vocal_timing import _held_end
+    starts = sorted(a for a, _ in spans)
+    out = []
+    for a, b in spans:
+        nxt = next((s for s in starts if s >= b), None)
+        if duration_ms:
+            nxt = min(nxt, int(duration_ms)) if nxt is not None else int(duration_ms)
+        out.append((a, max(b, _held_end(vocal, b, nxt))))
+    return out
+
+
 def layout_chords(phrases, events, duration_ms=None, vocal=None):
     """Lyric rows with chords plus the gaps between them.
 
@@ -153,6 +174,8 @@ def layout_chords(phrases, events, duration_ms=None, vocal=None):
     sung = [p for p in phrases or [] if not any(p is q for q in unsung)]
     slices = [part for p in sung for part in _vocal_slices(p) if str(part.get('text') or '')]
     spans = [_vocal_bounds(part) for part in slices]
+    if vocal:
+        spans = held_spans(spans, vocal, duration_ms)
     # Each chord change belongs to ONE line: the narrowest line sounding at
     # that moment. Overlapping recognitions (one line stretched over a minute)
     # must not swallow the changes of the lines inside it, leaving those
@@ -167,7 +190,9 @@ def layout_chords(phrases, events, duration_ms=None, vocal=None):
     for index, phrase in enumerate(slices):
         text = str(phrase.get('text') or '')
         ps, pe = int(phrase.get('start_ms') or 0), int(phrase.get('end_ms') or 0)
-        vocal_ps, vocal_pe = _vocal_bounds(phrase)
+        vocal_ps, vocal_pe = spans[index]
+        sung_ps, sung_pe = _vocal_bounds(phrase)
+        tokens = list(re.finditer(r'\S+', text))
         marks, unplaced = [], []
         # A lyric line also needs the chord already sounding at its start.
         # This is a continuation, not an invented new change. N stops carry-in.
@@ -180,8 +205,11 @@ def layout_chords(phrases, events, duration_ms=None, vocal=None):
         for k, event in enumerate(valid):
             if owner.get(k) != index:
                 continue
-            at, quality = _anchor(event, {**phrase, 'start_ms': vocal_ps,
-                                          'end_ms': vocal_pe, 'text': text})
+            at, quality = _anchor(event, {**phrase, 'start_ms': sung_ps,
+                                          'end_ms': sung_pe, 'text': text})
+            if event['start_ms'] >= sung_pe and tokens and quality not in ('manual', 'char_ctc'):
+                # Changed under the held last vowel: over the last word.
+                at, quality = tokens[-1].start(), 'held_word'
             mark = {**event, 'char_index': at, 'anchor_quality': quality}
             (marks if at is not None else unplaced).append(mark)
         grouped = {}

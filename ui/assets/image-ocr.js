@@ -14,6 +14,7 @@
       <textarea id="image-ocr-text" rows="10" spellcheck="false"></textarea>
       <p id="image-ocr-error" role="alert"></p>
       <footer>
+        <button type="button" id="image-ocr-create-contact" hidden>Создать контакт</button>
         <button type="button" id="image-ocr-copy" title="Скопировать текст в буфер обмена" aria-label="Скопировать текст в буфер обмена" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg>
         </button>
@@ -25,6 +26,9 @@
     by('image-ocr-close').onclick = () => panel.close();
     panel.addEventListener('close', () => { serial++; });
     by('image-ocr-text').oninput = () => controls(!by('image-ocr-text').value.trim());
+    by('image-ocr-create-contact').onclick = async () => {
+      if (window._imageOcrContactDraft) await window.DewiarContactCreate?.open(window._imageOcrContactDraft, {title:'Создать контакт из распознанных данных', source:'Проверьте контактные данные, при необходимости дополните имя и выберите сохранение в Контактах macOS.'});
+    };
     by('image-ocr-copy').onclick = async () => {
       by('image-ocr-error').textContent = '';
       try {
@@ -42,7 +46,11 @@
   window.extractImageText = async (attachment, insert) => {
     init();
     const request = ++serial;
+    by('image-ocr-title').textContent = 'Текст с картинки';
+    by('image-ocr-create-contact').hidden = true; window._imageOcrContactDraft = null;
+    by('image-ocr-text').previousElementSibling.textContent = 'Распознанный текст — можно исправить перед вставкой';
     by('image-ocr-text').value = ''; by('image-ocr-error').textContent = ''; controls(true);
+    by('image-ocr-create-contact').hidden = true; window._imageOcrContactDraft = null;
     by('image-ocr-status').textContent = 'Распознаю текст локально…';
     by('image-ocr-text').disabled = true;
     by('image-ocr-insert').onclick = () => {
@@ -65,6 +73,32 @@
       if (serial !== request || !panel.open) return;
       by('image-ocr-status').textContent = 'Не удалось извлечь текст.';
       by('image-ocr-error').textContent = error.message || String(error);
+    }
+  };
+  window.extractImageContacts = async (attachment, insert) => {
+    init();
+    const request = ++serial;
+    by('image-ocr-text').value = ''; by('image-ocr-error').textContent = ''; controls(true);
+    by('image-ocr-text').disabled = true;
+    by('image-ocr-title').textContent = 'Контакты с картинки';
+    by('image-ocr-status').textContent = 'Ищу контактные данные локально…';
+    by('image-ocr-text').previousElementSibling.textContent = 'Найденные контакты — проверьте перед использованием';
+    by('image-ocr-insert').onclick = () => { const text = by('image-ocr-text').value; panel.close(); insert?.(text); };
+    if (!panel.open) panel.showModal();
+    try {
+      const result = await core.call('image_contacts', {image: attachment.ocrData || attachment.url || attachment.b64});
+      if (serial !== request || !panel.open) return;
+      if (result.status === 'error') throw Error(result.error || 'Не удалось извлечь контакты.');
+      const rows = [['Телефон', result.contacts?.phone], ['Электронная почта', result.contacts?.email], ['Сайт', result.contacts?.website]]
+        .flatMap(([label, values]) => (values || []).map(value => `${label}: ${value}`));
+      if (!rows.length) { by('image-ocr-status').textContent = result.error || 'Контакты не найдены.'; return; }
+      by('image-ocr-text').value = rows.join('\n'); by('image-ocr-text').disabled = false; controls(false);
+      window._imageOcrContactDraft = {phones:result.contacts?.phone||[], emails:result.contacts?.email||[], websites:result.contacts?.website||[]};
+      by('image-ocr-create-contact').hidden = false;
+      by('image-ocr-status').textContent = 'Контакты извлечены локально. Проверьте результат.';
+    } catch (error) {
+      if (serial !== request || !panel.open) return;
+      by('image-ocr-status').textContent = 'Не удалось извлечь контакты.'; by('image-ocr-error').textContent = error.message || String(error);
     }
   };
 })();

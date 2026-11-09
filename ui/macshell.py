@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 
 from settings import CONFIG_DIR, STATE_DIR, WS_PORT, ensure_token
 
+HUD_MIN_SIZE = (280, 330)
+
 
 def core_authenticated(port, token):
     """A listening TCP socket alone may belong to a different application."""
@@ -641,11 +643,9 @@ def make_api(app):
             zoom = app.zoom_of(ui.get("zoom"))
             width = ui.get("hud_w") or app.CARD_DEFAULT[0]
             height = ui.get("hud_h") or app.CARD_DEFAULT[1]
-            if ui.get("hud_show_orb") is False and not ui.get("hud_orb_height"):
-                height = max(app.CARD_MIN[1], height - 220)
             window = webview.create_window(
                 "Dewiar", self._url("hud.html", "&mode=card"), width=round(width * zoom), height=round(height * zoom),
-                min_size=(180, 250), js_api=self, on_top=True,
+                min_size=HUD_MIN_SIZE, js_api=self, on_top=True,
                 background_color="#0b0b0e", menu=getattr(self, "_mac_menu_spec", []),
             )
             self._hud = window
@@ -730,7 +730,8 @@ def make_api(app):
 
         def resize_card(self, w, h, final=False):
             if self._hud is not None:
-                self._hud.resize(max(280, min(640, int(w))), max(360, min(1000, int(h))))
+                min_w, min_h = HUD_MIN_SIZE
+                self._hud.resize(max(min_w, min(640, int(w))), max(min_h, min(1000, int(h))))
 
         def set_zoom(self, z):
             if app.set_zoom_sizes(z) and self._hud is not None:

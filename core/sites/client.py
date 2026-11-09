@@ -44,6 +44,11 @@ def command(cmd, args):
     ep = endpoint(start=cmd!='sites_alert')
     if cmd == 'sites_service':
         return {'url':ep['url']}
+    if cmd == 'sites_scan_ports':
+        req = urllib.request.Request(ep['base']+'/api/scan-ports', data=b'{}',
+            headers={'Authorization':'Bearer '+ep['token'],'Content-Type':'application/json'}, method='POST')
+        with urllib.request.urlopen(req,timeout=5) as r:
+            return json.load(r)
     routes = {'sites_list':'/api/sites', 'sites_status':'/api/status', 'sites_incidents':'/api/incidents', 'sites_alert':'/api/alerts'}
     if cmd not in routes:
         raise ValueError('Неизвестная команда сайтов')

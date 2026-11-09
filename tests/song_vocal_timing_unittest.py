@@ -492,5 +492,194 @@ class HeldEndAndPlaceholderTests(unittest.TestCase):
         self.assertIn('???', sheet)
         self.assertFalse(any(l.get('vocal') for l in lines))
 
+
+class VoicedPauseRealignTests(unittest.TestCase):
+    """«Давай, наливай»: «Но ты не одна, и ты не один» packed into 1.8 s;
+    «и ты не один» was sung in the «pause» after it and its chords (Am, D, G)
+    stood on a line without text."""
+
+    VOCAL = {'intervals': [[141340, 143800], [144920, 147100], [148560, 154860]],
+             'weak': [[141340, 143800], [144920, 147100], [148560, 154860]]}
+    A = 'Но ты не одна, и ты не один,'
+    B = 'Ведь нас окружают всё те же незримые Сто балерин.'
+    SUNG = [(141400, 141800), (141900, 142200), (142300, 142500), (142600, 143700), (144950, 145200),
+            (145300, 145600), (145700, 145900), (146000, 147000),
+            (148600, 148800), (149000, 149400), (149500, 150000), (150050, 150250), (150900, 151100),
+            (151300, 151500), (151500, 152400), (152600, 153300), (153400, 154000)]
+
+    def setUp(self):
+        import types
+        fake = types.ModuleType('soundfile')
+        fake.info = lambda path: types.SimpleNamespace(duration=200.0)
+        self._saved = sys.modules.get('soundfile')
+        sys.modules['soundfile'] = fake
+        import importlib
+        self.worker = importlib.import_module('songs.worker')
+        self.worker.release_qwen_model = lambda: None
+
+    def tearDown(self):
+        if self._saved is None:
+            sys.modules.pop('soundfile', None)
+        else:
+            sys.modules['soundfile'] = self._saved
+
+    def rows(self):
+        return [phrase('a', self.A, 140400, 142160, [(140400, 141040), None, None, None, None, (141680, 141920), None,
+                                                     (141920, 142160)] and None),
+                phrase('b', self.B, 148600, 153960)]
+
+    def test_group_only_for_a_short_voiced_pause_without_other_words(self):
+        rows = self.rows()
+        self.assertEqual(vt.voiced_gap_groups(rows, self.VOCAL, 200000), [([0, 1], (140400, 153960))])
+        lexical = dict(self.VOCAL, lexical=[[144900, 147200]])
+        lexical['intervals'] = [[141340, 143800], [144920, 148400], [148560, 154860]]
+        self.assertEqual(vt.voiced_gap_groups(rows, dict(lexical, weak=lexical['intervals']), 200000), [])
+        far = [rows[0], dict(rows[1], start_ms=160000, end_ms=165000)]
+        self.assertEqual(vt.voiced_gap_groups(far, self.VOCAL, 200000), [])
+
+    def test_line_takes_its_singing_back_from_the_pause(self):
+        def align(text, a, b, source):
+            self.assertEqual(text, self.A + ' ' + self.B)
+            return words(text, self.SUNG)
+        hyp = {'phrases': self.rows()}
+        changed = self.worker.realign_voiced_gaps('x.wav', hyp, self.VOCAL, [], lambda s: None, align=align)
+        self.assertEqual(changed, 1)
+        a = hyp['phrases'][0]
+        self.assertEqual((a['start_ms'], a['end_ms']), (141400, 147000))
+        self.assertLessEqual(vt.uncovered_voice(hyp['phrases'], self.VOCAL, 140000, 148000), 200)
+
+    def test_no_change_when_the_alignment_leaves_the_pause_empty(self):
+        squeezed = [(141400 + i * 100, 141480 + i * 100) for i in range(8)] + self.SUNG[8:]
+        hyp = {'phrases': self.rows()}
+        changed = self.worker.realign_voiced_gaps('x.wav', hyp, self.VOCAL, [], lambda s: None,
+                                                  align=lambda text, a, b, source: words(text, squeezed))
+        self.assertEqual(changed, 0)
+        self.assertEqual(hyp['phrases'], self.rows())
+        self.assertEqual(hyp['gap_realignment']['runs'][0]['reason'], 'no_better_than_before')
+
+    def test_no_change_when_a_word_is_stretched_over_silence(self):
+        # Covers the singing, but «один,» also runs over the silent bar
+        # before the next line: not better.
+        stretched = self.SUNG[:7] + [(146000, 148500)] + self.SUNG[8:]
+        hyp = {'phrases': self.rows()}
+        changed = self.worker.realign_voiced_gaps('x.wav', hyp, self.VOCAL, [], lambda s: None,
+                                                  align=lambda text, a, b, source: words(text, stretched))
+        self.assertEqual(changed, 0)
+        self.assertEqual(hyp['phrases'], self.rows())
+
+    def test_held_last_vowel_is_not_a_voiced_pause(self):
+        # «Давай, наливай, поговорим.»: «наливай-ай» held 1 s after its
+        # measured end, then a silent bar. The sheet keeps the held vowel
+        # with its line; nothing to realign.
+        vocal = {'intervals': [[163940, 165900], [167900, 169820], [171580, 177120]]}
+        vocal['weak'] = vocal['intervals']
+        rows = [phrase('a', 'Давай, наливай, поговорим.', 163960, 168920,
+                       [(163960, 164440), (164600, 164920), (167880, 168920)]),
+                phrase('b', 'Будущий день покажется светлым,', 171720, 175000,
+                       [(171720, 172600), (172680, 172840), (173320, 174040), (174120, 175000)])]
+        self.assertLessEqual(vt.uncovered_voice(rows, vocal, 163000, 172000), 200)  # onsets only
+        self.assertEqual(vt.voiced_gap_groups(rows, vocal, 200000), [])
+
+
+    def test_word_placed_after_its_voice_inside_one_line(self):
+        # «Давай, наливай, поговорим Будущий день покажется светлым,»:
+        # «поговорим» placed at 89.2 s, sung at 85.4–87.2; the sheet cut the
+        # line there and showed Am D G alone.
+        vocal = {'intervals': [[81440, 83400], [85400, 87160], [89080, 94680]]}
+        vocal['weak'] = vocal['intervals']
+        text = 'Давай, наливай, поговорим Будущий день покажется светлым,'
+        late = [(81440, 81920), (82080, 82320), (89200, 89440), (89440, 90080), (90160, 90400),
+                (90880, 91600), (91600, 92480)]
+        sung = [(81440, 81920), (82080, 82720), (85400, 87100), (89100, 90080), (90160, 90400),
+                (90880, 91600), (91600, 92480)]
+        rows = [phrase('a', 'Ну хватит мечтать, пора продолжать.', 73920, 78560,
+                       [(73920, 74080), (74160, 74560), (74560, 75040), (75040, 75200), (75200, 78560)]),
+                phrase('b', text, 81440, 92480, late)]
+        vocal_all = dict(vocal, intervals=[[73840, 78600], *vocal['intervals']])
+        vocal_all['weak'] = vocal_all['intervals']
+        self.assertEqual(vt.voiced_gap_groups(rows, vocal_all, 200000), [([1], (81440, 92480))])
+        hyp = {'phrases': rows}
+        changed = self.worker.realign_voiced_gaps('x.wav', hyp, vocal_all, [], lambda s: None,
+                                                  align=lambda t, a, b, source: words(t, sung))
+        self.assertEqual(changed, 1)
+        got = hyp['phrases'][1]['words'][2]
+        self.assertEqual((got['text'], got['start_ms']), ('поговорим', 85400))
+
+
+    def test_best_fit_to_the_voice_wins_over_more_words(self):
+        # Mixture: all 7 words, but «наливай» where «поговорим» was sung.
+        # Vocals: 6 words in the right places. The vocals result is taken.
+        vocal = {'intervals': [[73840, 78600], [81440, 83400], [85400, 87160], [89080, 94680]]}
+        vocal['weak'] = vocal['intervals']
+        text = 'Давай, наливай, поговорим Будущий день покажется светлым,'
+        late = [(81440, 81920), (82080, 82320), (89200, 89440), (89440, 90080), (90160, 90400),
+                (90880, 91600), (91600, 92480)]
+        rows = [phrase('a', 'Ну хватит мечтать, пора продолжать.', 73920, 78560,
+                       [(73920, 74080), (74160, 74560), (74560, 75040), (75040, 75200), (75200, 78560)]),
+                phrase('b', text, 81440, 92480, late)]
+        wrong = [(81460, 81940), (86020, 86340), (89220, 89460), (89460, 90020), (90180, 90420),
+                 (90820, 91620), (91620, 92420)]
+        right = [(81460, 81940), (81940, 82340), (85380, 86900), (89220, 90820), None,
+                 (90820, 91460), (91620, 92580)]
+
+        def align(t, a, b, source):
+            got = words(t, [x or (0, 0) for x in (wrong if source == 'mixture' else right)])
+            return [w for w, x in zip(got, wrong if source == 'mixture' else right) if x]
+        hyp = {'phrases': rows}
+        changed = self.worker.realign_voiced_gaps('x.wav', hyp, vocal, [], lambda s: None, align=align,
+                                                  vocals='v.wav')
+        self.assertEqual(changed, 1)
+        run = hyp['gap_realignment']['runs'][0]
+        self.assertEqual(run['source'], 'vocals')
+        got = {w['text']: w['start_ms'] for w in hyp['phrases'][1]['words']}
+        self.assertEqual(got['поговорим'], 85380)
+
+
+class HeldEndRerunTests(unittest.TestCase):
+    def test_rerun_does_not_hold_the_line_again(self):
+        # The stem sings without a break (one interval for the whole song):
+        # every rerun used to add another 3 s to the line («Тишины хочу»).
+        vocal = {'intervals': [[26280, 262940]]}
+        text = 'всё плохое улетит в тучи неба.'
+        row = phrase('a', text, 171980, 175000, [(171980, 172220), (172220, 172860), (172940, 173340),
+                                                 None and (0, 0) or (173340, 173400), (173400, 174060),
+                                                 (174060, 174620)])
+        row['words'] = row['words'][:5]  # «неба.» not measured
+        once, _ = vt.fit_phrases([row], vocal)
+        twice, _ = vt.fit_phrases(once, vocal)
+        self.assertEqual(once[0]['end_ms'], 178000)
+        self.assertEqual(twice[0]['end_ms'], 178000)
+        grown = dict(once[0], end_ms=184000)
+        fixed, _ = vt.fit_phrases([grown], vocal)
+        self.assertEqual(fixed[0]['end_ms'], 178000)
+
+
+class HeldVowelSheetTests(unittest.TestCase):
+    """«Ты так хороша-а»: the Am changed under the held «а» showed on a line
+    of its own (no text) below the line that was still sung."""
+
+    VOCAL = {'intervals': [[126140, 128640], [130100, 132500]]}
+    ROWS = [phrase('a', 'Ты так хороша,', 126000, 127600, [(126000, 126400), (126500, 126900), (127120, 127600)]),
+            phrase('b', 'мне не объяснить.', 130200, 131900, [(130200, 130500), (130560, 130720), (130720, 131900)])]
+    EVENTS = [dict(name='Em', start_ms=125900, end_ms=128000), dict(name='Am', start_ms=128000, end_ms=130150),
+              dict(name='D', start_ms=130150, end_ms=132000)]
+
+    def test_chord_under_held_vowel_stays_on_its_line(self):
+        sheet = build_guitar_sheet(self.ROWS, self.EVENTS, 133000, self.VOCAL)
+        line = next(r for r in sheet if r.get('text') == 'Ты так хороша,')
+        self.assertIn(('Am', 7), [(m['name'], m['char_index']) for m in line['chords']])
+        self.assertEqual(line['end_ms'], 128640 + 150)
+        gaps = [r for r in sheet if not r.get('text') and 127600 <= r['start_ms'] < 130200]
+        self.assertFalse(any(g['unplaced_chords'] for g in gaps), gaps)
+        # Measured words keep their times; only the line span grows.
+        self.assertEqual(line['words'][-1]['end_ms'], 127600)
+
+    def test_no_voice_after_the_word_no_change(self):
+        vocal = {'intervals': [[126140, 127650], [130100, 132500]]}
+        sheet = build_guitar_sheet(self.ROWS, self.EVENTS, 133000, vocal)
+        line = next(r for r in sheet if r.get('text') == 'Ты так хороша,')
+        self.assertLessEqual(line['end_ms'], 127800)
+        self.assertNotIn('Am', [m['name'] for m in line['chords']])
+
 if __name__ == '__main__':
     unittest.main()

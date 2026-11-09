@@ -106,8 +106,10 @@ with sync_playwright() as playwright:
     page.wait_for_function('canvasEditor.api.getSceneElements().length===2')
     assert page.evaluate("canvasEditor.api.getSceneElements().some(e=>e.type==='rectangle'&&e.strokeColor==='#e5484d')")
     # Chat edits enter Excalidraw's undo stack as a normal, single action.
-    page.locator('.excalidraw').click(position={'x':600,'y':200});page.keyboard.press('Meta+z')
-    page.wait_for_function('canvasEditor.api.getSceneElements().length===1')
+    page.locator('.excalidraw').focus();page.keyboard.press('Meta+z')
+    try:page.wait_for_function('canvasEditor.api.getSceneElements().length===1',timeout=5000)
+    except Exception:
+        print(page.evaluate('({elements:canvasEditor.api.getSceneElements().map(e=>e.type),active:document.activeElement?.className,selection:canvasEditor.api.getAppState().selectedElementIds})'),flush=True);raise
     chat_send('Верни')
     page.wait_for_function('canvasEditor.api.getSceneElements().length===2')
     chat_send('Отмени')
@@ -179,6 +181,68 @@ with sync_playwright() as playwright:
         page.screenshot(path=str(artifacts/('ocr-chat-'+kind+'.png')))
         print('PASS: real Russian OCR fixture; two phrases/all; unrelated selection; mixed quotes delete; white PNG pixels/neighbor intact; undo/redo/reload; original unchanged',flush=True)
     # Main assistant input reaches the editor without invoking the general answer.
+    # Real canvas pointer hit testing, multi-selection and exact RGB.
+    page.locator('#canvas-chat-toggle').click()
+    box=page.locator('#canvas-root').bounding_box()
+    def draw(x,y):
+        page.locator('.excalidraw').click(position={'x':x,'y':y-25});page.keyboard.press('r')
+        page.mouse.move(box['x']+x,box['y']+y);page.mouse.down()
+        page.mouse.move(box['x']+x+90,box['y']+y+60,steps=8);page.mouse.up()
+    draw(310,230);page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').length===1")
+    page.wait_for_function("canvasEditor.api.getAppState().selectedElementIds[canvasEditor.api.getSceneElements().find(e=>e.type==='rectangle').id]")
+    draw(520,230);page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').length===2")
+    page.wait_for_function("canvasEditor.api.getAppState().selectedElementIds[canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').at(-1).id]")
+    def click_shape(x,modifiers=()):
+        page.locator('.excalidraw').click(position={'x':x,'y':233},modifiers=list(modifiers))
+    click_shape(350,('Shift',))
+    page.wait_for_function("Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length===2")
+    # Use the built-in Excalidraw property button to edit both objects.
+    page.locator('label:has([data-testid="strokeWidth-extraBold"])').click()
+    page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').every(e=>e.strokeWidth===4)")
+    page.locator('#canvas-palette summary').click()
+    page.locator('#palette-r').fill('12');page.locator('#palette-g').fill('34');page.locator('#palette-b').fill('56')
+    assert page.locator('#palette-hex').input_value()=='#0c2238'
+    page.locator('#palette-apply').click()
+    page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').every(e=>e.strokeColor==='#0c2238')")
+    page.locator('#palette-set').select_option('Пастельная')
+    page.get_by_role('button',name='Цвет #ffc9c9',exact=True).click()
+    page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='rectangle').every(e=>e.strokeColor==='#ffc9c9')")
+    page.locator('#canvas-palette summary').click()
+    click_shape(350)
+    page.wait_for_function("Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length===1")
+    click_shape(560)
+    page.wait_for_function("Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length===0")
+    page.locator('#canvas-chat-toggle').click();page.evaluate('canvasEditor.flush()')
+    objects=command('canvas_chat_state',{'canvas_id':page.evaluate('canvasEditor.doc.id')})['objects']
+    nums=[r['number'] for r in objects if r['type']=='rectangle'];assert len(nums)==2
+    chat_send(f'Выбери #{nums[0]}')
+    chat_send(f'Добавь #{nums[1]} к выделению')
+    assert page.evaluate('Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length')==2
+    chat_send(f'Сними выделение с #{nums[0]}')
+    assert page.evaluate('Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length')==1
+    chat_send('Сними выделение')
+    assert page.evaluate('Object.values(canvasEditor.api.getAppState().selectedElementIds).filter(Boolean).length')==0
+    chat_send('Добавь текст «Первая подпись» в точке 320, 360')
+    chat_send('Добавь текст «Вторая подпись» в точке 520, 360')
+    rows=command('canvas_chat_state',{'canvas_id':page.evaluate('canvasEditor.doc.id')})['objects']
+    texts=[r for r in rows if r['type']=='text']
+    assert len(texts)==2 and page.evaluate('(id)=>canvasEditor.api.getAppState().selectedElementIds[id]',texts[-1]['id'])
+    chat_send('Выбери '+' и '.join(f"#{r['number']}" for r in texts))
+    page.locator('label:has([data-testid="fontSize-large"])').click()
+    page.wait_for_function("canvasEditor.api.getSceneElements().filter(e=>e.type==='text').every(e=>e.fontSize>24)")
+    page.locator('.excalidraw').click(position={'x':760,'y':400})
+    page.wait_for_function("!Object.values(canvasEditor.api.getAppState().selectedElementIds).some(Boolean)")
+    # Brush finalizes with the stroke selected, so its width can change immediately.
+    page.keyboard.press('p')
+    root=page.locator('.excalidraw').bounding_box()
+    page.mouse.move(root['x']+320,root['y']+490);page.mouse.down()
+    page.mouse.move(root['x']+460,root['y']+490,steps=12);page.mouse.up()
+    page.wait_for_function("canvasEditor.api.getSceneElements().some(e=>e.type==='freedraw'&&canvasEditor.api.getAppState().selectedElementIds[e.id])")
+    page.locator('.excalidraw').click(position={'x':390,'y':520})
+    page.wait_for_function("!Object.values(canvasEditor.api.getAppState().selectedElementIds).some(Boolean)")
+    page.locator('.excalidraw').click(position={'x':390,'y':492})
+    page.wait_for_function("canvasEditor.api.getSceneElements().some(e=>e.type==='freedraw'&&canvasEditor.api.getAppState().selectedElementIds[e.id])")
+    print('PASS: latest shape selected; shift multi-select; native stroke width; RGB and palette; repeat-click deselect; chat selection',flush=True)
     scope_id=page.evaluate('canvasEditor.doc.id')
     command('canvas_scope_active',{'canvas_id':scope_id})
     command('canvas_scope_mode',{'mode':'follow'})

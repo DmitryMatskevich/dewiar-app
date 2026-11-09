@@ -1,4 +1,5 @@
-import {CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
+import {activeIds,selectionPatch} from './selection.js';
+import {CaptureUpdateAction,convertToExcalidrawElements,getCommonBounds} from '@excalidraw/excalidraw';
 import {localElement} from './local-elements.js';
 const $=id=>document.getElementById(id);
 export function installCanvasChat(host){
@@ -26,14 +27,22 @@ export function installCanvasChat(host){
  async function refresh(){
   if(!host.doc||running)return;await host.flush();const data=await host.call('canvas_chat_state');objects=data.objects;const selected=host.api.getAppState().selectedElementIds||{};
   const list=$('canvas-object-list');list.replaceChildren();
-  for(const e of objects){const button=document.createElement('button');button.type='button';button.className='canvas-object';button.textContent=`#${e.number} · ${e.text||({image:'Картинка',rectangle:'Прямоугольник',ellipse:'Овал',arrow:'Стрелка',text:'Текст',line:'Линия',freedraw:'Кисть'}[e.type]||e.type)}`;button.title=`X ${Math.round(e.x)}, Y ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)}`;button.setAttribute('aria-pressed',String(!!selected[e.id]));button.onclick=()=>{host.api.updateScene({appState:{selectedElementIds:{[e.id]:true}}});host.api.scrollToContent([host.api.getSceneElements().find(x=>x.id===e.id)],{fitToContent:false});$('canvas-chat-input').focus();refresh().catch(()=>{});};list.append(button);}
+  for(const e of objects){const button=document.createElement('button');button.type='button';button.className='canvas-object';button.textContent=`#${e.number} · ${e.text||({image:'Картинка',rectangle:'Прямоугольник',ellipse:'Овал',arrow:'Стрелка',text:'Текст',line:'Линия',freedraw:'Кисть'}[e.type]||e.type)}`;button.title=`X ${Math.round(e.x)}, Y ${Math.round(e.y)} · ${Math.round(e.width)}×${Math.round(e.height)}`;button.setAttribute('aria-pressed',String(!!selected[e.id]));button.dataset.elementId=e.id;button.onclick=event=>{
+   const all=host.api.getSceneElements(),old=activeIds(host.api.getAppState()),target=all.find(x=>x.id===e.id);
+   if(!target||target.locked)return;
+   const group=selectionPatch(all,[e.id]).selectedElementIds;
+   const ids=old.includes(e.id)?old.filter(id=>!group[id]):event.shiftKey?[...old,e.id]:[e.id];
+   host.api.updateScene({appState:selectionPatch(all,ids),captureUpdate:CaptureUpdateAction.NEVER});
+   if(!old.includes(e.id))host.api.scrollToContent([target],{fitToContent:false});
+  };list.append(button);}
   $('canvas-object-count').textContent=String(objects.length);
  }
  function modify(answer){
   if(stopped)throw Error('Запрос остановлен.');
   if(stateStamp()!==stamp)throw Error('Холст изменился после запроса. Повторите команду.');
   let elements=structuredClone(host.api.getSceneElementsIncludingDeleted()),appState={};
-  const add=spec=>{elements.push(localElement(spec));};
+  let created=[];
+  const add=spec=>{const newElements=convertToExcalidrawElements([spec],{regenerateIds:false});elements.push(...newElements);created=newElements.map(e=>e.id);};
   const updated=e=>({...e,version:e.version+1,versionNonce:Math.floor(Math.random()*2147483647),updated:Date.now()});
   let ops=answer.operations;
   if(answer.ocr){const value=(pending===answer?document.querySelector('#canvas-chat-candidates input:checked')?.value:null)||'0';const candidates=value==='all'?answer.ocr.candidates:[answer.ocr.candidates[Number(value)]];ops=candidates.map(c=>({op:answer.ocr.op,color:c.color||answer.ocr.color,box:[c.x,c.y,c.x+c.width,c.y+c.height],shape:c.shape,corners:c.corners,imageId:c.image_id}));}
@@ -41,14 +50,19 @@ export function installCanvasChat(host){
    if(op.op==='background'){appState.viewBackgroundColor=op.color;continue;}
    if(op.op==='text'){add({type:'text',text:op.text,x:op.x,y:op.y,fontSize:24,fontFamily:2,strokeColor:op.color});continue;}
    let ids=new Set(op.target?.ids||[]),targets=elements.filter(e=>ids.has(e.id)&&!e.isDeleted);
-   if(!op.box&&!targets.length)throw Error('Цель команды больше не существует.');
-   if(targets.some(e=>e.locked)&&op.op!=='select')throw Error('Объект заблокирован.');
-   if(op.op==='select'){appState.selectedElementIds=Object.fromEntries([...ids].map(id=>[id,true]));continue;}
+   if(op.op!=='select_clear'&&!op.box&&!targets.length)throw Error('Цель команды больше не существует.');
+   if(targets.some(e=>e.locked)&&!op.op.startsWith('select'))throw Error('Объект заблокирован.');
+   if(['select','select_add','select_remove','select_clear'].includes(op.op)){
+    const old=activeIds({...host.api.getAppState(),...appState});
+    const group=selectionPatch(elements,[...ids]).selectedElementIds;
+    Object.assign(appState,selectionPatch(elements,op.op==='select_clear'?[]:op.op==='select_add'?[...old,...ids]:op.op==='select_remove'?old.filter(id=>!group[id]):[...ids]));
+    created=[];continue;
+   }
    if(op.op==='cover'){
     const image=elements.find(e=>e.id===op.imageId&&!e.isDeleted);if(!image||image.locked)throw Error('Картинка отсутствует или заблокирована.');
     const mask=[localElement({type:'rectangle',...op.shape,strokeColor:op.color,backgroundColor:op.color,strokeWidth:0,fillStyle:'solid',roughness:0,opacity:100,customData:{dewiarTextCover:true}})];
     // Insert directly above the raster so existing captions/marks stay visible.
-    elements.splice(elements.indexOf(image)+1,0,...mask);continue;
+    elements.splice(elements.indexOf(image)+1,0,...mask);created=mask.map(e=>e.id);continue;
    }
    if(op.op==='outline'||op.op==='underline'){
     if(op.shape){
@@ -76,6 +90,7 @@ export function installCanvasChat(host){
    }else throw Error('Неподдерживаемое действие.');
   }
   if(elements.length>2000)throw Error('На холсте допускается до 2000 объектов.');
+  if(created.length)Object.assign(appState,selectionPatch(elements,created));
   return {elements,appState};
  }
  async function apply(answer){
@@ -123,6 +138,7 @@ export function installCanvasChat(host){
  $('canvas-model-settings').onclick=()=>{const native=window.api?.();if(native?.open_settings)native.open_settings('models');else line('assistant','Откройте настройки Dewiar → Модели → назначение «Изображения».');};
  window.addEventListener('pagehide',()=>{if(host.doc)host.call('canvas_scope_closed').catch(()=>{});});
  return {
+  selectionChanged(state){const ids=state.selectedElementIds||{};for(const button of document.querySelectorAll('.canvas-object'))button.setAttribute('aria-pressed',String(!!ids[button.dataset.elementId]));},
   setEnabled(value){enabled=value;controls();},
   changed(){clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>refresh().catch(()=>{}),1000);},
   async mount(){

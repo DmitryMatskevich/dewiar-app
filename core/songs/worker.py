@@ -561,30 +561,56 @@ def realign_grid_runs(audio, hypothesis, activity, context, progress, align=None
     report['spans'] = [list(s) for s in spans]
     if not groups:
         return 0
+    rows, changed = _joint_realign(audio, rows, groups, activity, report, progress, align, vocals,
+                                   'время строк было сеткой')
+    hypothesis['phrases'] = rows
+    report['applied'] = changed
+    return changed
+
+
+def _aligner(audio, vocals):
+    """Forced aligner over the mixture or the vocal stem: ``align(text, a, b, source)``."""
+    import numpy as np
+    import soundfile as sf
+    import torch
+    from qwen_asr import Qwen3ForcedAligner
+    from songs.alignment_words import measured_words
+    release_qwen_model()
+    model = Qwen3ForcedAligner.from_pretrained(snapshot('Qwen/Qwen3-ForcedAligner-0.6B'),
+        dtype=torch.float32, device_map='cpu', attn_implementation='eager')
+    loaded = {}
+
+    def load(source):
+        if source not in loaded:
+            data, rate = sf.read(str(audio if source == 'mixture' else vocals), dtype='float32', always_2d=True)
+            loaded[source] = (np.mean(data, axis=1), rate)
+        return loaded[source]
+
+    def align(text, a, b, source):
+        samples, rate = load(source)
+        units = list(model.align(audio=(samples[round(a*rate/1000):round(b*rate/1000)], rate),
+                                 text=text, language='Russian')[0])
+        return measured_words(text, units, a, b)
+    return align
+
+
+def _joint_realign(audio, rows, groups, activity, report, progress, align, vocals, why, improves=None, cost=None):
+    """Align each group of lines again as one text; keep a result only if it is sound.
+
+    ``improves(old_rows, new_rows, indexes, window)`` may refuse a result that
+    does not make the timing better by an independent measure. With
+    ``cost(new_rows, window)`` the sound result that fits the voice best wins,
+    not the one with the most measured words (the mixture timed «наливай»
+    where «поговорим» was sung and still measured one word more).
+    """
+    from songs import vocal_timing
+    if not groups:
+        return rows, 0
     import soundfile as sf
     duration = round(sf.info(str(audio)).duration * 1000)
     sources = ['mixture'] + (['vocals'] if vocals else [])
     if align is None:
-        release_qwen_model()
-        import numpy as np
-        import torch
-        from qwen_asr import Qwen3ForcedAligner
-        from songs.alignment_words import measured_words
-        model = Qwen3ForcedAligner.from_pretrained(snapshot('Qwen/Qwen3-ForcedAligner-0.6B'),
-            dtype=torch.float32, device_map='cpu', attn_implementation='eager')
-        loaded = {}
-
-        def load(source):
-            if source not in loaded:
-                data, rate = sf.read(str(audio if source == 'mixture' else vocals), dtype='float32', always_2d=True)
-                loaded[source] = (np.mean(data, axis=1), rate)
-            return loaded[source]
-
-        def align(text, a, b, source):
-            samples, rate = load(source)
-            units = list(model.align(audio=(samples[round(a*rate/1000):round(b*rate/1000)], rate),
-                                     text=text, language='Russian')[0])
-            return measured_words(text, units, a, b)
+        align = _aligner(audio, vocals)
     changed = 0
     for indexes, span in groups:
         # The crop without the previous line's held word, and the plain one:
@@ -599,8 +625,9 @@ def realign_grid_runs(audio, hypothesis, activity, context, progress, align=None
                 'phrase_ids': [rows[i].get('phrase_id') for i in indexes], 'attempts': [], 'applied': False}
         report['runs'].append(item)
         a, b = windows[0]
-        progress(f'Выравниваем заново отрывок {round(a/1000)}–{round(b/1000)} с: время строк было сеткой')
+        progress(f'Выравниваем заново отрывок {round(a/1000)}–{round(b/1000)} с: {why}')
         best = None
+        whole = (min(w[0] for w in windows), max(w[1] for w in windows))
         for a, b in windows:
             for source in sources:
                 try:
@@ -609,23 +636,73 @@ def realign_grid_runs(audio, hypothesis, activity, context, progress, align=None
                     item['attempts'].append({'source': source, 'window_ms': [a, b], 'error': str(exc)[:300]})
                     continue
                 ok, reason, share = vocal_timing.grid_alignment_quality(words, count, activity)
+                miss = None
+                if ok and (improves is not None or cost is not None):
+                    trial = vocal_timing.apply_grid_words(rows, indexes, words, (a, b), activity, {})
+                    if improves is not None and not improves(rows, trial, indexes, (a, b)):
+                        ok, reason = False, 'no_better_than_before'
+                    elif cost is not None:
+                        miss = cost(trial, whole)
                 item['attempts'].append({'source': source, 'window_ms': [a, b], 'measured': len(words),
                                          'voiced_share': share,
                                          'placed': [[w['text'], w['start_ms'], w['end_ms']] for w in words],
-                                         **({'reason': reason} if reason else {})})
-                if ok and (best is None or (len(words), share) > (len(best[0]), best[1])):
-                    best = (words, share, source, (a, b))
+                                         **({'reason': reason} if reason else {}),
+                                         **({'cost_ms': miss} if miss is not None else {})})
+                # Within a quarter second the fits are equal; then more measured words.
+                key = (-round((miss or 0) / 250), len(words), share)
+                if ok and (best is None or key > best[4]):
+                    best = (words, share, source, (a, b), key)
         if best is None:
             item['reason'] = item['attempts'][-1].get('reason', 'alignment_failed') if item['attempts'] else 'alignment_failed'
             continue
         rows = vocal_timing.apply_grid_words(rows, indexes, best[0], best[3], activity,
-                                            {'source': best[2], 'measured': len(best[0]), 'words': count})
+                                            {'source': best[2], 'measured': len(best[0]), 'words': count,
+                                             'method': report.get('method')})
         item.update(applied=True, source=best[2], window_ms=list(best[3]), measured=len(best[0]),
                     voiced_share=best[1])
         changed += 1
     if changed:
         rows, fit = vocal_timing.fit_phrases(rows, activity)
         report['vocal_fit_applied'] = bool(fit.get('applied'))
+    return rows, changed
+
+
+def realign_voiced_gaps(audio, hypothesis, activity, context, progress, align=None, vocals=None):
+    """Lines around a pause in which somebody sings while no text is there.
+
+    «Но ты не одна, и ты не один»: the aligner packed the line into 1.8 s,
+    «и ты не один» was sung after it, in the «pause», and the chords played
+    under those words (Am, D, G) stood on a line of their own. The lines
+    around such a pause are aligned again together; the result is kept only
+    if it leaves less singing without text than before and puts no word over
+    silence («наливай» stretched over a silent bar). A held last vowel is not
+    such a pause: the sheet keeps it with its line (``chord_layout.held_spans``).
+    """
+    from songs import vocal_timing
+    rows = hypothesis.get('phrases') or []
+    report = {'method': 'joint_alignment_over_voiced_pause', 'runs': []}
+    hypothesis['gap_realignment'] = report
+    if not activity:
+        report['reason'] = 'no_vocal_activity'
+        return 0
+    import soundfile as sf
+    duration = round(sf.info(str(audio)).duration * 1000)
+    vocal = dict(activity, lexical=vocal_timing.unrecognized_windows(rows, context))
+    groups = vocal_timing.voiced_gap_groups(rows, vocal, duration)
+
+    def improves(old, new, indexes, window):
+        # Less singing without text, and no word stretched over silence.
+        a, b = window
+        return (vocal_timing.uncovered_voice(new, activity, a, b, duration)
+                <= vocal_timing.uncovered_voice(old, activity, a, b, duration) - vocal_timing.GAP_VOICE_GAIN
+                and vocal_timing.covered_silence(new, activity, a, b)
+                <= vocal_timing.covered_silence(old, activity, a, b) + vocal_timing.GAP_SILENCE_SLACK)
+    def cost(new, window):
+        a, b = window
+        return (vocal_timing.uncovered_voice(new, activity, a, b, duration)
+                + vocal_timing.covered_silence(new, activity, a, b))
+    rows, changed = _joint_realign(audio, rows, groups, activity, report, progress, align, vocals,
+                                   'в паузе поют, а текста нет', improves, cost)
     hypothesis['phrases'] = rows
     report['applied'] = changed
     return changed
@@ -976,6 +1053,11 @@ def main():
                         except Exception as exc:
                             # Optional: the per-line alignment stays as it was.
                             timed['grid_realignment'] = {'applied': False, 'error': str(exc)[:300]}
+                        try:
+                            realign_voiced_gaps(args.input,timed,activity,context,progress,
+                                                vocals=vocals_for_timing())
+                        except Exception as exc:
+                            timed['gap_realignment'] = {'applied': False, 'error': str(exc)[:300]}
                         try:
                             recover_sung_gaps(args.input,timed,activity,context,progress,run_id=args.run_id)
                         except Exception as exc:

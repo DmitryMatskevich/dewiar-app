@@ -53,5 +53,16 @@ with sync_playwright() as p:
     check(any(c[0] == "ws_set_path" and c[1]["path"] == "/tmp/New Dewiar" for c in calls),
           "кнопка реально передаёт выбранную папку ядру")
     check(page.locator("#f-change").is_enabled(), "после выбора кнопка снова доступна")
+    page.evaluate("""() => {
+      Object.defineProperty(navigator, "platform", {configurable:true, value:"MacIntel"});
+      const old = core.call;
+      core.call = async (cmd,args) => cmd === "ws_read"
+        ? {binary:true, size:456, mtime:0}
+        : old(cmd,args);
+    }""")
+    page.evaluate("openFile('Пример.PDF')")
+    page.get_by_role('button', name='Открыть в Просмотре', exact=True).click()
+    check(page.evaluate("window.__folderCalls.some(([cmd,a]) => cmd==='ws_open' && a.path==='Пример.PDF' && a.in_preview===true)"),
+          "кнопка PDF передаёт явный запрос на открытие в Apple Preview")
     browser.close()
 print("OK: выбор рабочей папки")

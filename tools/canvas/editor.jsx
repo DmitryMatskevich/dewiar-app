@@ -1,9 +1,10 @@
 import React from 'react';
 import {installCanvasChat} from './chat.js';
 import {createRoot} from 'react-dom/client';
-import {Excalidraw,MainMenu,exportToBlob,CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
+import {Excalidraw,MainMenu,exportToBlob,convertToExcalidrawElements,CaptureUpdateAction,getCommonBounds} from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import {parseMermaidToExcalidraw} from '@excalidraw/mermaid-to-excalidraw';
+import {installPalette,installSelection,selectionPatch} from './selection.js';
 import {localImageElement,localEllipseLabel} from './local-elements.js';
 
 const $=id=>document.getElementById(id),core=window.core;
@@ -53,12 +54,13 @@ function center(){const state=api.getAppState();return {x:-state.scrollX+state.w
 async function addImages(files){
  if(busy){status('Дождитесь завершения текущей операции');return;}if(!files.length)return;busy=true;controls();
  try{
-  await ensureDocument();await flush();let offset=0;const point=center();
+  await ensureDocument();await flush();let offset=0;const point=center();let last=[];
   for(const file of files){
    const item=await upload(file,'image',{name:file.name});const data=await call('canvas_file',{file_id:item.id});known.add(item.id);api.addFiles([data]);
-   const elements=[localImageElement({fileId:item.id,x:point.x+offset,y:point.y+offset,width:item.width,height:item.height})];
+   const elements=last=[localImageElement({fileId:item.id,x:point.x+offset,y:point.y+offset,width:item.width,height:item.height})];
    api.updateScene({elements:[...api.getSceneElementsIncludingDeleted(),...elements],captureUpdate:CaptureUpdateAction.IMMEDIATELY});offset+=50;
   }
+  api.updateScene({appState:selectionPatch(api.getSceneElements(),last.map(e=>e.id)),captureUpdate:CaptureUpdateAction.NEVER});
   await flush();api.scrollToContent(api.getSceneElements(),{fitToContent:true});status('Изображения добавлены без уменьшения');
  }catch(e){status(e.message);}finally{busy=false;controls();}
 }
@@ -96,8 +98,8 @@ document.addEventListener('drop',e=>{const files=[...(e.dataTransfer?.files||[])
 $('instruction').onclick=()=>{api.updateScene({appState:{currentItemStrokeColor:'#e5484d',currentItemStrokeWidth:2,currentItemRoughness:0,currentItemBackgroundColor:'transparent',currentItemFontFamily:2},captureUpdate:CaptureUpdateAction.IMMEDIATELY});changed();status('Стиль «Инструкция»: красный, 2 px, ровные фигуры');};
 $('number').onclick=()=>{
  const n=Math.max(0,...api.getSceneElements().map(e=>e.customData?.dewiarNumber||0))+1,p=center(),group=crypto.randomUUID();
- const elements=[localEllipseLabel({text:n,x:p.x,y:p.y,customData:{dewiarNumber:n}})];
- elements.forEach(e=>{e.groupIds=[group];e.customData={dewiarNumber:n};});api.updateScene({elements:[...api.getSceneElementsIncludingDeleted(),...elements],captureUpdate:CaptureUpdateAction.IMMEDIATELY});changed();
+ const elements=convertToExcalidrawElements([localEllipseLabel({text:n,x:p.x,y:p.y,customData:{dewiarNumber:n}})]);
+ elements.forEach(e=>{e.groupIds=[group];e.customData={dewiarNumber:n};});api.updateScene({elements:[...api.getSceneElementsIncludingDeleted(),...elements],appState:selectionPatch(elements,elements.map(e=>e.id)),captureUpdate:CaptureUpdateAction.IMMEDIATELY});changed();
 };
 function blocks(){const all=api.getSceneElementsIncludingDeleted();return all.filter(e=>e.customData?.mermaidSource&&all.some(other=>!other.isDeleted&&other.customData?.mermaidBlock===e.customData.mermaidBlock));}
 $('mermaid').onclick=()=>{$('diagram-block').replaceChildren(new Option('Добавить новую',''));blocks().forEach((e,i)=>$('diagram-block').append(new Option('Схема '+(i+1),e.customData.mermaidBlock)));$('diagram-error').textContent='';$('diagram-dialog').showModal();};
@@ -116,7 +118,7 @@ async function insertMermaid(source,blockId=''){
  const point=old.length?{x:Math.min(...old.map(e=>e.x)),y:Math.min(...old.map(e=>e.y))}:center();
  const left=Math.min(...converted.map(e=>e.x)),top=Math.min(...converted.map(e=>e.y));
  converted.forEach((e,i)=>{e.x+=point.x-left;e.y+=point.y-top;e.customData={mermaidBlock:id,...(i===0?{mermaidSource:source}:{})};});
- api.updateScene({elements:[...before.filter(e=>!blockId||e.customData?.mermaidBlock!==blockId),...converted],captureUpdate:CaptureUpdateAction.IMMEDIATELY});await flush();api.scrollToContent(converted,{fitToContent:true});return converted;
+ api.updateScene({elements:[...before.filter(e=>!blockId||e.customData?.mermaidBlock!==blockId),...converted],appState:selectionPatch(converted,converted.map(e=>e.id)),captureUpdate:CaptureUpdateAction.IMMEDIATELY});await flush();api.scrollToContent(converted,{fitToContent:true});return converted;
 }
 $('diagram-apply').onclick=async()=>{$('diagram-apply').disabled=true;try{await insertMermaid($('diagram-source').value,$('diagram-block').value);$('diagram-dialog').close();}catch(e){$('diagram-error').textContent=e.message;}finally{$('diagram-apply').disabled=false;}};
 async function output(command,args={}){
@@ -168,10 +170,10 @@ async function mountDocument(id){
   doc=await core.call('canvas_open',{canvas_id:id});$('title').value=doc.title;$('documents').value=id;library=doc.libraryItems||[];const files={};
   for(const item of Object.values(doc.files)){files[item.id]=await call('canvas_file',{file_id:item.id});known.add(item.id);}
   let resolve;const ready=new Promise(r=>resolve=r);reactRoot=createRoot($('canvas-root'));
-  reactRoot.render(<Excalidraw langCode="ru-RU" initialData={{elements:doc.elements,appState:doc.appState,files,libraryItems:library,scrollToContent:true}} excalidrawAPI={value=>{api=value;resolve();}} onChange={changed} onLibraryChange={items=>{library=items;changed();}} handleKeyboardGlobally={false} AIEnabled={false} onLinkOpen={(element,event)=>event.preventDefault()} validateEmbeddable={()=>false} UIOptions={{tools:{image:false},canvasActions:{loadScene:false,export:false,saveToActiveFile:false,saveAsImage:false,toggleTheme:false}}}>
+  reactRoot.render(<Excalidraw langCode="ru-RU" initialData={{elements:doc.elements,appState:doc.appState,files,libraryItems:library,scrollToContent:true}} excalidrawAPI={value=>{api=value;resolve();}} onChange={(_elements,state)=>{chat.selectionChanged(state);changed();}} onLibraryChange={items=>{library=items;changed();}} handleKeyboardGlobally={false} AIEnabled={false} onLinkOpen={(element,event)=>event.preventDefault()} validateEmbeddable={()=>false} UIOptions={{tools:{image:false},canvasActions:{loadScene:false,export:false,saveToActiveFile:false,saveAsImage:false,toggleTheme:false}}}>
    <MainMenu><MainMenu.DefaultItems.ClearCanvas/><MainMenu.DefaultItems.ChangeCanvasBackground/></MainMenu>
   </Excalidraw>);
-  await ready;await new Promise(r=>setTimeout(r,150));loaded=true;if(api.getSceneElements().length)api.scrollToContent(api.getSceneElements(),{fitToContent:true});saved=snapshot();controls();$('annotations').hidden=!doc.sources.length;for(const source of new Map(doc.sources.map(s=>[s.screenshot_id,s])).values())$('annotations').append(new Option(source.title,source.screenshot_id));status('Сохранено · вставка ⌘V, файлы и схемы работают локально');
+  await ready;installSelection(api);installPalette(api,status);await new Promise(r=>setTimeout(r,150));loaded=true;if(api.getSceneElements().length)api.scrollToContent(api.getSceneElements(),{fitToContent:true});saved=snapshot();controls();$('annotations').hidden=!doc.sources.length;for(const source of new Map(doc.sources.map(s=>[s.screenshot_id,s])).values())$('annotations').append(new Option(source.title,source.screenshot_id));status('Сохранено · вставка ⌘V, файлы и схемы работают локально');
   window.canvasEditor={get api(){return api},get doc(){return doc},flush,output,upload,addImages,insertMermaid,get library(){return library}};
   await chat.mount();
 }

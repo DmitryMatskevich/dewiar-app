@@ -45,6 +45,18 @@ def open_target(target, reveal=False):
     if result.returncode:
         raise OSError(result.stderr.strip() or "macOS не смогла открыть файл или адрес")
 
+def open_pdf_in_preview(path):
+    """Open a supported document/image in Apple's Preview, regardless of file association."""
+    target = Path(path).resolve()
+    if target.suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"} or not target.is_file():
+        raise ValueError("Для Просмотра выберите PDF или изображение")
+    result = subprocess.run(
+        ["/usr/bin/open", "-b", "com.apple.Preview", str(target)],
+        capture_output=True, text=True, timeout=15,
+    )
+    if result.returncode:
+        raise OSError(result.stderr.strip() or "Не удалось открыть файл в Просмотре")
+
 
 def trash(path):
     from Foundation import NSFileManager, NSURL

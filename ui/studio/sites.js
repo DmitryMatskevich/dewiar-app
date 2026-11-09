@@ -23,7 +23,7 @@
     document.getElementById('tasks-work-content').hidden=true;
     document.getElementById('tasks-work-tab').setAttribute('aria-pressed','false');
     panel.hidden=false;button.setAttribute('aria-pressed','true');
-    try{if(!url){const r=await core.call('sites_service');url=withRequestedFilter(r.url);frame.src=url;}note.textContent='Мониторинг работает отдельным процессом. Настройки и состояние доступны во вкладках ниже.';}
+    try{if(!url){const r=await core.call('sites_service');url=withRequestedFilter(r.url);frame.src=url;}const scan=await core.call('sites_scan_ports');const bits=[];if(scan.queued_sites)bits.push('SSH и FTP · '+scan.queued_sites+' сайтов');if(scan.queued_consoles)bits.push('консоли · '+scan.queued_consoles+' провайдеров');note.textContent=bits.length?'В фоне проверяются '+bits.join(' · ')+'. Проверки не занимают планировщик мониторинга.':'Фоновые проверки уже выполняются или недавно завершились.';}
     catch(e){note.textContent=e.message;}
   };
   open.onclick=()=>{if(url)window.open(url,'_blank','noopener');};

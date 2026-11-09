@@ -2,7 +2,7 @@
    Правки сохраняются с контролем ревизий; рабочие настройки не изменяются. */
 (function () {
   "use strict";
-  const state = { rows: [], query: "", lyricsQuery: "", status: "", tag: "", rating: "", current: null, transcribeSongId: "" };
+  const state = { rows: [], query: "", lyricsQuery: "", status: "", tags: [], rating: "", current: null, transcribeSongId: "" };
   let cardPlayback = {}, openRequest = 0, cardRequest = 0;
   const processingSongs = new Set();
   const stoppingCaptures = new Set();
@@ -16,9 +16,9 @@
   const stopCaptureButton = (id) => `<button type="button" class="btn primary song-record-stop" data-song-stop-capture="${esc(id)}" title="Остановить запись, сохранить звук и запустить пакетную обработку" ${stoppingCaptures.has(id)?'disabled aria-busy="true"':''}>${SongSheet.icon('stop')}${stoppingCaptures.has(id)?'Сохраняем запись…':'Остановить запись'}</button>`;
   const statusText = { queued: "Ожидает", recording: "Записываем", running: "В работе", needs_input: "Нужно выбрать", review: "Нужно проверить", ready: "Готово", partial: "Частично", failed: "Ошибка", cancelled: "Отменено", interrupted: "Прервано" };
   const TAG_OPTIONS = ["Компания", "Мужская", "Любовь", "Шансон", "Бард", "Грусть", "Юмор", "Дворовые", "Народные", "Рок"];
-  function tagEditor(row) {
+  function tagAddMenu(row) {
     const selected = new Set(row.tags || []);
-    return `<fieldset class="song-tags-editor"><legend>Теги песни</legend><div class="song-tag-options">${TAG_OPTIONS.map(tag => `<label class="song-tag-option"><input type="checkbox" data-song-tag-edit="${esc(tag)}" ${selected.has(tag) ? "checked" : ""}><span>${esc(tag)}</span></label>`).join("")}</div><p class="hint">Теги можно использовать в фильтре списка песен.</p></fieldset>`;
+    return `<div class="song-tag-add-menu" data-song-tag-menu hidden role="menu" aria-label="Добавить тег к песне">${TAG_OPTIONS.filter(tag => !selected.has(tag)).map(tag => `<button type="button" class="song-tag-option" data-song-tag-option="${esc(tag)}" data-song-tag-song="${esc(row.song_id)}" role="menuitem">${esc(tag)}</button>`).join("") || '<span class="hint">Все доступные теги уже добавлены</span>'}</div>`;
   }
   function ratingMarkup(row) {
     const rating = Math.max(0, Math.min(5, Number(row.rating) || 0));
@@ -160,13 +160,13 @@
     const ks = row.karaoke?.state;
     const canProcessSelected=!!row.processing?.can_resume;
     const processing=processingSongs.has(row.song_id);
-    const tags=(row.tags||[]).map(tag=>`<button type="button" class="song-tag" data-song-card-tag="${esc(tag)}" title="Показать песни с тегом «${esc(tag)}»">${esc(tag)}</button>`).join("");
+    const tags=(row.tags||[]).map(tag=>`<button type="button" class="song-tag" data-song-card-tag="${esc(tag)}" title="Убрать тег «${esc(tag)}» у этой песни" aria-label="Убрать тег «${esc(tag)}»">${esc(tag)}</button>`).join("");
     const karaokeBadge = ["queued", "preparing", "separating", "checking"].includes(ks) ? '<span class="song-karaoke-status" data-state="busy">Минусовка готовится</span>' : ks === "failed" || ks === "interrupted" ? '<span class="song-karaoke-status" data-state="failed">Минусовка: повторить</span>' : "";
     return `<article class="song-card" data-song-id="${esc(row.song_id)}">
       <div class="song-card-main" data-song-open="${esc(row.song_id)}" tabindex="0" role="button" aria-label="Открыть ${esc(row.title)}">
         <div class="song-heading"><div class="song-title">${esc(row.title)}</div>${artist}</div>
         ${ratingMarkup(row)}
-        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span>${karaokeBadge}</div>${tags ? `<div class="song-tags" aria-label="Фильтр по тегам песни">${tags}</div>` : ""}
+        <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span>${karaokeBadge}</div><div class="song-tags" aria-label="Теги песни"><button type="button" class="song-tag-add" data-song-tag-add="${esc(row.song_id)}" aria-label="Добавить тег к песне «${esc(row.title)}»" title="Добавить тег к этой песне">+</button>${tags}</div>${tagAddMenu(row)}
       </div>
       ${row.status==='recording'?liveCapture(row):''}
       <div class="song-card-actions">
@@ -195,6 +195,42 @@
       toast(`Оценка сохранена: ${rating} из 5`);
     } catch (error) { toast(error.message || 'Не удалось сохранить оценку', 4000, 'bad'); }
   }
+  async function addSongTag(button) {
+    const songId = button.dataset.songTagSong;
+    const tag = button.dataset.songTagOption;
+    const row = state.rows.find(item => item.song_id === songId);
+    if (!row || !TAG_OPTIONS.includes(tag)) return;
+    button.disabled = true;
+    try {
+      const tags = [...new Set([...(row.tags || []), tag])];
+      const saved = await call('song_patch', {song_id: songId, base_revision: row.revision, changes: {tags}});
+      const index = state.rows.findIndex(item => item.song_id === songId);
+      if (index >= 0) state.rows[index] = {...state.rows[index], ...saved};
+      renderList();
+      toast(`Тег добавлен: ${tag}`);
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'Не удалось добавить тег', 4000, 'bad');
+    }
+  }
+  async function removeSongTag(button) {
+    const songId = button.closest('[data-song-id]')?.dataset.songId;
+    const tag = button.dataset.songCardTag;
+    const row = state.rows.find(item => item.song_id === songId);
+    if (!row || !TAG_OPTIONS.includes(tag)) return;
+    button.disabled = true;
+    try {
+      const tags = (row.tags || []).filter(item => item !== tag);
+      const saved = await call('song_patch', {song_id: songId, base_revision: row.revision, changes: {tags}});
+      const index = state.rows.findIndex(item => item.song_id === songId);
+      if (index >= 0) state.rows[index] = {...state.rows[index], ...saved};
+      renderList();
+      toast(`Тег убран: ${tag}`);
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'Не удалось убрать тег', 4000, 'bad');
+    }
+  }
   function renderList() {
     const list = $s("songs-list"), empty = $s("songs-empty");
     if (!list || !empty) return;
@@ -212,11 +248,18 @@
     list.querySelectorAll('[data-song-process-selected]').forEach(el=>el.addEventListener('click',()=>processSelectedSource(el)));
     list.querySelectorAll('[data-song-karaoke]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songKaraoke,'instrumental')));
     list.querySelectorAll('[data-song-stop]').forEach(el=>el.addEventListener('click',stopCard));
+    list.querySelectorAll('[data-song-tag-add]').forEach(button=>button.addEventListener('click', event=>{
+      event.stopPropagation();
+      const menu = button.closest('.song-card')?.querySelector('[data-song-tag-menu]');
+      if (menu) menu.hidden = !menu.hidden;
+    }));
+    list.querySelectorAll('[data-song-tag-option]').forEach(button=>button.addEventListener('click', event=>{
+      event.stopPropagation();
+      addSongTag(button);
+    }));
     list.querySelectorAll('[data-song-card-tag]').forEach(el=>el.addEventListener('click', event=>{
       event.stopPropagation();
-      const tag=el.dataset.songCardTag;
-      const filter=[...document.querySelectorAll('[data-song-tag]')].find(item=>item.dataset.songTag===tag);
-      if(filter) filter.click();
+      removeSongTag(el);
     }));
     list.querySelectorAll('[data-song-rating-value]').forEach(el=>el.addEventListener('click', event=>{
       event.stopPropagation();
@@ -339,8 +382,6 @@
       <details class="song-properties" ${row.status === 'needs_input' ? 'open' : ''}><summary>Источники, свойства и правка аккордов</summary>${row.recording_version ? `<p class="song-note"><b>Выбранная запись:</b> ${esc(row.recording_version)}</p>` : ""}${errors}<label class="f">Название песни<input id="song-edit-title" value="${esc(row.title)}"></label><label class="f">Поисковый запрос<input id="song-edit-search-query" value="${esc(row.search_query || (row.source === 'query' ? row.title : ''))}" placeholder="Название и исполнитель для поиска"></label><label class="f">Исполнитель<input id="song-edit-artist" value="${esc(row.artist || "")}"></label><p class="hint">Поисковый запрос хранится отдельно: его можно уточнить, не меняя название песни. Источник: ${esc(row.source || "поиск")}.</p><div class="actions"><button class="btn" id="song-save-meta">Сохранить название</button><button class="btn" id="song-refresh">Обновить карточку</button><button class="btn" id="song-find-sources" ${row.status === "running" || row.status === "recording" ? "disabled" : ""}>Найти записи и текст</button>${captureButton("song-attach-audio", "upload", "Добавить аудиофайл")}${captureAction}</div><input id="song-audio-input" type="file" accept="audio/*,video/*" hidden><p class="hint" id="song-audio-hint">${row.audio?.path ? `Файл: ${esc(row.audio.original_name || row.audio.format || "аудио")}${row.audio.duration_ms ? ` · ${Math.round(row.audio.duration_ms / 1000)} с` : ""}` : "Можно импортировать локальную запись, если системный захват недоступен."}</p><h3>Добавить свой источник</h3><label class="f">Ссылка на запись или публикацию<input id="song-manual-url" type="url" maxlength="2048" placeholder="https://…"></label><label class="f">Текст песни для сверки (необязательно)<textarea id="song-manual-lyrics" maxlength="100000" rows="4"></textarea></label><p class="hint">Прямая ссылка YouTube запускает загрузку и пакетный разбор автоматически. Ссылки Яндекс Музыки можно открыть и записать системный звук. Остальные ссылки сохраняются как справочные источники.</p><button class="btn" id="song-add-manual-source" ${row.status === 'running' || row.status === 'recording' ? 'disabled' : ''}>Добавить источник</button><p class="hint" id="song-manual-source-result" role="status"></p>${SongSheet.html(row)}<h3>Источники</h3>${confirmedSources(row)}${sources ? `<h4>Другие записи и поиск</h4>${sources}` : ""}</details></div>`;
     bindCaptureStops(detail);
     bindBatchRestarts(detail);
-    const artistField = detail.querySelector('#song-edit-artist');
-    artistField?.parentElement?.insertAdjacentHTML('afterend', tagEditor(row));
     async function textSourceAction(button,action,args) {
       button.disabled=true;
       const message=$s('song-text-source-result');
@@ -522,7 +563,7 @@
     });
     $s("songs-detail-close").onclick = closeDetail;
     $s("song-save-meta").onclick = async () => {
-      try { const tags = [...detail.querySelectorAll('[data-song-tag-edit]:checked')].map(input => input.dataset.songTagEdit); const saved = await call("song_patch", { song_id: row.song_id, base_revision: state.current.revision, changes: { title: $s("song-edit-title").value, search_query: $s("song-edit-search-query").value, artist: $s("song-edit-artist").value, tags } }); state.current = saved; await load(); renderDetail(saved); toast("Карточка сохранена"); }
+      try { const saved = await call("song_patch", { song_id: row.song_id, base_revision: state.current.revision, changes: { title: $s("song-edit-title").value, search_query: $s("song-edit-search-query").value, artist: $s("song-edit-artist").value } }); state.current = saved; await load(); renderDetail(saved); toast("Карточка сохранена"); }
       catch (error) { toast(error.message || "Не удалось сохранить", 4000, "bad"); }
     };
     $s("song-start-system-capture")?.addEventListener("click", async () => {
@@ -619,7 +660,7 @@
     if(request===cardRequest) {
       const same=cardPlayback.songId===id && cardPlayback.variant===variant && cardPlayback.active;
       if(same) await SongReview.toggleFull(false);
-      else await SongReview.playVariant(variant);
+      else await SongReview.playVariant(variant,false);
     }
   }
   async function openSong(id,scroll=true,force=false) {
@@ -633,11 +674,12 @@
         renderDetail(row);
       }
       if(scroll)$s('songs-detail')?.scrollIntoView({behavior:'smooth',block:'start'});
+      else if(typeof window !== 'undefined') window.scrollTo({top:0,left:0,behavior:'auto'});
       return true;
     } catch(error) { if(request===openRequest)toast(error.message || 'Песня не найдена',4000,'bad');return false; }
   }
   function closeDetail() { stopCard(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
-  async function load() { try { state.rows = await call("songs_list", { q: state.query, lyrics_q: state.lyricsQuery, status: state.status, tag: state.tag, rating: state.rating, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
+  async function load() { try { state.rows = await call("songs_list", { q: state.query, lyrics_q: state.lyricsQuery, status: state.status, tags: state.tags, rating: state.rating, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
   async function create(source, title, artist) { try { const row = await call("song_create", { source, title, artist }); await load(); renderDetail(row); if (source === "query") renderDetail(await call("song_find_sources", {song_id: row.song_id})); } catch (error) { toast(error.message || "Не удалось создать карточку", 4000, "bad"); } }
   async function createMicSong() {
     const title=`Запись с микрофона · ${new Date().toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`;
@@ -738,7 +780,18 @@
     $s("songs-query")?.addEventListener("input", (event) => { state.query = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
     $s("songs-lyrics-query")?.addEventListener("input", (event) => { state.lyricsQuery = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
     document.querySelectorAll("[data-song-status]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-status]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.status = el.dataset.songStatus; load(); }));
-    document.querySelectorAll("[data-song-tag]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-tag]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.tag = el.dataset.songTag; load(); }));
+    document.querySelectorAll("[data-song-tag]").forEach((el) => el.addEventListener("click", () => {
+      const requested = el.dataset.songTag || '';
+      if (!requested) state.tags = [];
+      else state.tags = state.tags.includes(requested) ? state.tags.filter(tag => tag !== requested) : [...state.tags, requested];
+      document.querySelectorAll('[data-song-tag]').forEach(button => {
+        const tag = button.dataset.songTag || '';
+        const active = tag ? state.tags.includes(tag) : state.tags.length === 0;
+        button.classList.toggle('on', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      load();
+    }));
     document.querySelectorAll("[data-song-rating]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-rating]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.rating = el.dataset.songRating; load(); }));
     function taskTab(songs) {
       $s('p-songs').hidden = !songs; $s('tasks-work-content').hidden = songs;

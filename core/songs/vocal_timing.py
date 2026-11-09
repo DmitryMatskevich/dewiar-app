@@ -348,17 +348,26 @@ def _fit_word(word, vocal, is_first, is_last, previous_end, next_start, notes):
 HELD_MS = 3000
 
 
-def _held_end(vocal, end, next_start=None, notes=None):
+def _held_end(vocal, end, next_start=None, notes=None, limit=None):
     """A line whose last word is not measured ends with the voice, not before it.
 
     «Как сто балерин»: the aligner timed «Как сто», the line stopped there and
     «балерин» (still sung, 1.5 s) fell into the pause, which then showed its
     chord on a line of its own. The line keeps the voiced stretch it ends in,
-    up to the next line and at most ``HELD_MS``.
+    up to the next line and at most ``HELD_MS``. The sheet does the same for
+    a measured last word whose vowel is held (``chord_layout.held_spans``).
     """
+    if limit is not None and end > limit:
+        # Held more than once (each rerun added another HELD_MS while the
+        # stem kept singing): back to one hold from the measured end.
+        if notes is not None:
+            notes.append(dict(reason='held_last_word', before=end, after=int(limit)))
+        end = int(limit)
     for x, y in _intervals(vocal) or []:
         if x <= end < y:
             target = min(y + 150, end + HELD_MS)
+            if limit is not None:
+                target = min(target, int(limit))
             if next_start is not None:
                 target = min(target, int(next_start))
             if target > end:
@@ -383,6 +392,9 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
     start, end = int(out.get('start_ms') or 0), int(out.get('end_ms') or 0)
     if end <= start:
         return out, notes
+    # A held end counts from the edge measured before any fit, so a rerun
+    # does not hold the same line another 3 s («Тишины хочу» 175→178→181 s).
+    held_limit = int(out.get('measured_end_ms', end)) + HELD_MS
     words = _measured(out)
     tokens = list(re.finditer(r'\S+', str(out.get('text') or '')))
     if any(int(w['start_ms']) < start - 500 or int(w['end_ms']) > end + 500 for w in words):
@@ -430,7 +442,7 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
                 end = tail + 150
             elif tail is None and end - int(last['end_ms']) >= EDGE_MS + 500:
                 end = int(last['end_ms'])
-            end = _held_end(vocal, end, next_start, notes)
+            end = _held_end(vocal, end, next_start, notes, held_limit)
     else:
         onset = first_voice(vocal, start, end)
         tail = last_voice(vocal, start, end)
@@ -443,7 +455,7 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
             start = onset - 60
         if end - tail >= EDGE_MS + 500:
             end = tail + 150
-        end = _held_end(vocal, end, next_start, notes)
+        end = _held_end(vocal, end, next_start, notes, held_limit)
     if previous_end is not None:
         start = max(start, int(previous_end))
     start = max(0, start)
@@ -829,6 +841,126 @@ def _voiced_around(vocal, at, lower, upper, side):
         return max(lower, hits[-1]) if hits else lower
     hits = [y for x, y in rows if y >= at and x < upper]
     return min(upper, hits[0]) if hits else upper
+
+
+# ---------------------------------------------------------------- voiced pauses
+#
+# A pause between two lines in which the stem has voice (and no recognizer
+# heard words missing from the text) is the lines' own singing: a line packed
+# into too short a span by the aligner, or a line that starts late. Chords
+# played under those words then stood on a line of their own.
+
+GAP_VOICE_MIN = 1000
+GAP_VOICE_GAIN = 500
+GAP_REALIGN_MAX = 8000
+GAP_SILENCE_SLACK = 500
+
+
+def sheet_spans(phrases, vocal, duration_ms=None):
+    """Sung spans as the chord sheet shows them: measured words, held vowels.
+
+    The sheet cuts a line at a measured pause between its words and keeps
+    the held last vowel of a line (``chord_layout.held_spans``). Voice
+    is «without text» only where the sheet shows no line over it.
+    """
+    from .chord_layout import _vocal_bounds, _vocal_slices, held_spans
+    sung = [p for p in phrases or [] if str(p.get('text') or '').strip() and p.get('vocal_evidence') != 'none']
+    spans = [_vocal_bounds(part) for p in sung for part in _vocal_slices(p) if str(part.get('text') or '')]
+    if _intervals(vocal) is not None:
+        spans = held_spans(spans, vocal, duration_ms)
+    return sorted(spans)
+
+
+def uncovered_voice(phrases, vocal, a, b, duration_ms=None):
+    """Voiced ms in ``[a, b)`` that no sung line of the sheet covers."""
+    spans = sheet_spans(phrases, vocal, duration_ms)
+    total = 0
+    for x, y in _intervals(vocal) or []:
+        x, y = max(a, x), min(b, y)
+        if y <= x:
+            continue
+        cursor = x
+        for s, e in spans:
+            if e <= cursor or s >= y:
+                continue
+            if s > cursor:
+                total += s - cursor
+            cursor = max(cursor, e)
+            if cursor >= y:
+                break
+        if cursor < y:
+            total += y - cursor
+    return total
+
+
+def covered_silence(phrases, vocal, a, b):
+    """Ms in ``[a, b)`` where a sung line (its measured words) is over silence.
+
+    Quiet singing (``weak``) counts as voice. A realignment that moves a
+    word over a silent bar («наливай» stretched over 4 s) is not better
+    even if it also covers more singing.
+    """
+    from .chord_layout import _vocal_bounds, _vocal_slices
+    rows = vocal.get('weak') if isinstance(vocal, dict) and vocal.get('weak') is not None else _intervals(vocal)
+    rows = sorted(tuple(r) for r in rows or [])
+    total = 0
+    for p in phrases or []:
+        if not str(p.get('text') or '').strip() or p.get('vocal_evidence') == 'none':
+            continue
+        for part in _vocal_slices(p):
+            if not str(part.get('text') or ''):
+                continue
+            s, e = _vocal_bounds(part)
+            s, e = max(a, s), min(b, e)
+            if e > s:
+                total += (e - s) - voiced_ms(rows, s, e)
+    return total
+
+
+def voiced_gap_groups(phrases, vocal, duration_ms=None):
+    """``[(indexes, span)]``: neighbouring lines around a voiced pause without text.
+
+    Not for «singing without recognized text» (another recognizer heard other
+    words there: that is recovery or «???»), not across a long break (a solo
+    instrument also lands in the stem) and never around a line the user timed.
+    A held last vowel is not «without text»: the sheet keeps it with its line.
+    """
+    from .chord_layout import _vocal_bounds, _vocal_slices
+    lines = [i for i, p in enumerate(phrases or []) if str(p.get('text') or '').strip()
+             and p.get('vocal_evidence') != 'none' and str(p.get('text') or '').strip() != PLACEHOLDER]
+    pairs = []
+    for i, j in zip(lines, lines[1:]):
+        x = min(int(phrases[i].get('end_ms') or 0), _vocal_bounds(phrases[i])[1])
+        y = max(int(phrases[j].get('start_ms') or 0), _vocal_bounds(phrases[j])[0])
+        if not 600 <= y - x <= GAP_REALIGN_MAX or _grid_protected(phrases[i]) or _grid_protected(phrases[j]):
+            continue
+        # Only a pause: a «break» with voice is a solo instrument in the stem.
+        if any(kind != 'pause' for _, _, kind in split_gap(vocal, x, y, duration_ms)):
+            continue
+        if uncovered_voice(phrases, vocal, x, y, duration_ms) >= GAP_VOICE_MIN:
+            pairs.append((i, j))
+    groups = []
+    for i, j in pairs:
+        if groups and groups[-1][-1] == i:
+            groups[-1].append(j)
+        else:
+            groups.append([i, j])
+    # The same inside one line: «Давай, наливай, поговорим Будущий день…»
+    # with «поговорим» placed 4 s late, after the voice that sang it; the
+    # sheet cut the line at that pause and showed its chords alone.
+    grouped = {i for g in groups for i in g}
+    for i in lines:
+        if i in grouped or _grid_protected(phrases[i]):
+            continue
+        parts = [_vocal_bounds(part) for part in _vocal_slices(phrases[i]) if str(part.get('text') or '')]
+        for (_, x), (y, _) in zip(parts, parts[1:]):
+            if (600 <= y - x <= GAP_REALIGN_MAX
+                    and all(kind == 'pause' for _, _, kind in split_gap(vocal, x, y, duration_ms))
+                    and uncovered_voice(phrases, vocal, x, y, duration_ms) >= GAP_VOICE_MIN):
+                groups.append([i])
+                break
+    groups.sort()
+    return [(g, (int(phrases[g[0]].get('start_ms') or 0), int(phrases[g[-1]].get('end_ms') or 0))) for g in groups]
 
 
 def grid_edge_words(words, window, vocal):

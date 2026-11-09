@@ -100,6 +100,28 @@ def http_probe(url, marker='', test=False):
     return 'DOWN', 'REDIRECT_LIMIT', {}
 
 
+def http_status_probe(url, test=False):
+    """Check a provider console without logging in or following auth redirects."""
+    u = urlsplit(url)
+    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+        raise PolicyError('Недопустимый адрес консоли')
+    host = u.hostname.encode('idna').decode('ascii')
+    port = u.port or (443 if u.scheme == 'https' else 80)
+    sock, ip = connect(host, port, test, u.scheme == 'https')
+    conn = (http.client.HTTPSConnection if u.scheme == 'https' else http.client.HTTPConnection)(host, port, timeout=5)
+    conn.sock = sock
+    try:
+        path = (u.path or '/') + ('?' + u.query if u.query else '')
+        conn.request('HEAD', path, headers={'User-Agent':'Dewiar-SiteCheck/1.0','Connection':'close'})
+        response = conn.getresponse()
+        detail = {'http_code':response.status, 'ip':ip}
+        if response.status >= 500:
+            return 'DOWN', 'HTTP_STATUS', detail
+        return 'UP', 'OK', detail
+    finally:
+        conn.close()
+
+
 def banner(sock, limit=2048):
     data = b''
     while len(data) < limit:
@@ -118,6 +140,8 @@ def execute(spec, test=False):
     try:
         if kind == 'http':
             state, reason, detail = http_probe(spec['target'], spec.get('marker', ''), test)
+        elif kind == 'http_status':
+            state, reason, detail = http_status_probe(spec['target'], test)
         elif kind == 'dns':
             ips = resolve(spec['target'], 443, test)
             state, reason, detail = 'UP', 'OK', {'addresses': ips}
@@ -137,11 +161,11 @@ def execute(spec, test=False):
             try:
                 greeting = banner(sock)
                 if kind == 'ssh':
-                    ok = greeting.startswith(b'SSH-2.0-')
+                    ok = greeting.startswith((b'SSH-2.0-', b'SSH-1.99-'))
                 elif kind == 'imap_tls':
                     ok = greeting.upper().startswith(b'* OK')
                 else:
-                    ok = greeting.startswith(b'220')
+                    ok = greeting.startswith((b'220', b'120'))
                 if ok and kind == 'smtp_starttls':
                     sock.sendall(b'EHLO monitor.invalid\r\n')
                     data = b''
@@ -182,7 +206,7 @@ def execute(spec, test=False):
 
 
 def specs(site):
-    host = urlsplit(site.get('url') or '').hostname or site.get('dns_host') or site.get('ssh_host') or site.get('mail_host') or site.get('mail_imap_host') or site.get('mail_smtp_host') or site.get('mail_mx_host')
+    host = urlsplit(site.get('url') or '').hostname or site.get('dns_host') or site.get('ssh_host') or site.get('server_ip') or site.get('mail_host') or site.get('mail_imap_host') or site.get('mail_smtp_host') or site.get('mail_mx_host')
     out = []
     if site.get('url'):
         out.append(dict(id='http', kind='http', target=site['url'], marker=site['marker']))
@@ -205,6 +229,27 @@ def specs(site):
         mail_host = site.get('mail_host') or site.get('mail_imap_host') or site.get('mail_smtp_host') or site.get('mail_mx_host')
         out.append(dict(id='mail', kind=site['mail_kind'], target=mail_host, port=site['mail_port']))
     return out
+
+
+def port_diagnostic_specs(site):
+    """One-shot TCP/banner checks. Never attempts SSH/FTP authentication."""
+    host = (site.get('ssh_host') or site.get('server_ip') or
+            urlsplit(site.get('url') or '').hostname or site.get('dns_host') or
+            site.get('mail_host') or site.get('mail_imap_host') or
+            site.get('mail_smtp_host') or site.get('mail_mx_host'))
+    if not host:
+        return []
+    return [
+        dict(id='ssh', kind='ssh', target=host, port=site.get('ssh_port') or 22),
+        dict(id='ftp', kind='ftp', target=host, port=site.get('ftp_port') or 21),
+    ]
+
+
+def provider_console_spec(provider):
+    url = provider.get('panel_url') or ''
+    if not url:
+        return None
+    return dict(id='console', kind='http_status', target=url)
 
 
 if __name__ == '__main__':

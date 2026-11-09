@@ -686,6 +686,93 @@ class TaskManager:
         task.save(); task.journal('Создана задача извлечения контактных данных из изображений.')
         return self.start(task.id)
 
+    def create_webpage_extraction(self, urls, kind):
+        """Fetch one or more public pages and save their HTML or contact details locally."""
+        from link_actions import urls_only
+        urls = urls_only('\n'.join(urls if isinstance(urls, list) else []))
+        if not urls or len(urls) > 10:
+            raise ValueError('Для извлечения укажите от 1 до 10 ссылок на страницы')
+        if kind not in {'html', 'contacts'}:
+            raise ValueError('Выберите извлечение HTML или контактных данных')
+        title = 'Извлечь HTML' if kind == 'html' else 'Извлечь контакты со страниц'
+        task = self.create(title, '\n'.join(urls), start=False)
+        task.data.update(workflow='webpage-extraction', webpage_urls=urls, webpage_kind=kind,
+                         progress=[0, len(urls)], activity='Подготовка к загрузке страниц…')
+        task.save()
+        task.journal('Создана локальная задача извлечения данных с веб-страниц. Страницы будут загружены без cookies и без выполнения скриптов.')
+        return self.start(task.id)
+
+    def _run_webpage_extraction(self, task):
+        import json
+        from file_converter import fetch_webpage
+        from web_contacts import extract as extract_web_contacts
+        outdir = task.dir / 'outputs'; outdir.mkdir(parents=True, exist_ok=True)
+        kind = task.data.get('webpage_kind')
+        results, errors = [], []
+        for index, url in enumerate(task.data.get('webpage_urls') or [], 1):
+            if task.cancel.is_set(): break
+            try:
+                fetched = task.dir / f'_page-{index:02d}.html'
+                task.data['activity'] = f'Загружаю страницу {index} из {len(task.data["webpage_urls"])}…'
+                self._beat(task); self._emit(task)
+                fetch_webpage(url, fetched, cancel=task.cancel)
+                raw = fetched.read_text(encoding='utf-8')
+                page = extract_web_contacts(raw, url)
+                stem = re.sub(r'[^\w.-]+', '-', page['title'] or (Path(url.split('?',1)[0]).stem or 'страница'), flags=re.UNICODE).strip('-.')[:80] or f'страница-{index}'
+                if kind == 'html':
+                    final = outdir / f'{stem}.html'
+                    if final.exists(): final = outdir / f'{stem}-{index}.html'
+                    shutil.copyfile(fetched, final)
+                    results.append({'path':final.relative_to(task.dir).as_posix(), 'title':final.name, 'source':url})
+                else:
+                    contacts = page['contacts']
+                    results.append({'source':url, 'page_name':page['title'] or stem, 'contacts':contacts})
+                fetched.unlink(missing_ok=True)
+            except Exception as exc:
+                errors.append(f'{url}: {exc}')
+            task.data.update(progress=[index, len(task.data.get('webpage_urls') or [])], activity=f'Обработано {index} из {len(task.data.get("webpage_urls") or [])} страниц…')
+            task.save(); self._emit(task)
+        if kind == 'contacts':
+            labels = (('Электронная почта', 'email'), ('Телефон', 'phone'), ('Сайт', 'website'), ('Социальные сети', 'social'))
+            lines = ['# Контакты со страниц', '']
+            for row in results:
+                lines.extend([f"## {row['page_name']}", '', f"Источник: {row['source']}", ''])
+                found = False
+                for label, key in labels:
+                    values = row['contacts'].get(key) or []
+                    if values:
+                        found = True
+                        lines.extend([f'**{label}:**', *[f'- {value}' for value in values], ''])
+                if not found: lines.extend(['Контактные данные не найдены.', ''])
+            report = outdir / 'contacts.md'; report.write_text('\n'.join(lines), encoding='utf-8')
+            (outdir / 'contacts.json').write_text(json.dumps({'version':1,'pages':results},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+            results = [{'path':'outputs/contacts.md','title':'Контакты со страниц'}]
+        stopped = task.cancel.is_set()
+        succeeded = bool(results) and not errors and not stopped
+        message = ('HTML сохранён в результатах. При необходимости его можно преобразовать в PDF через конвертер файлов.'
+                   if succeeded and kind == 'html' else 'Контакты сохранены в результатах задачи.'
+                   if succeeded and kind == 'contacts' else
+                   f'Обработано страниц: {len(results)} из {len(task.data.get("webpage_urls") or [])}.')
+        if errors: message += '\n\nОшибки:\n' + '\n'.join('- ' + error for error in errors)
+        output_records = []
+        if not stopped:
+            for row in results:
+                output_path = (task.dir / row['path']).resolve()
+                if task.dir.resolve() not in output_path.parents or not output_path.is_file():
+                    errors.append(f"Не удалось показать результат: {row['path']}")
+                    continue
+                output_records.append({'path':output_path.relative_to(task.dir.resolve()).as_posix(),
+                                       'title':row['title'][:120],
+                                       'time':dt.datetime.now().isoformat(timespec='seconds')})
+            task.data['outputs'] = output_records
+            task.save(); self._emit(task)
+            for row in output_records:
+                task.journal(f"👁 Показал пользователю: {row['path']}")
+            (task.dir / 'итог.md').write_text(message+'\n', encoding='utf-8')
+        task.data.update(status='stopped' if stopped else 'done' if results and output_records else 'failed',
+                         finished=not stopped and bool(results and output_records), activity='')
+        task.journal(message); task.save(); self._beat(task); self._emit(task)
+
     def _run_contact_extraction(self, task):
         import base64
         from image_contacts import extract as extract_image_contacts
@@ -1257,7 +1344,8 @@ class TaskManager:
                   self._run_media_translation if t.data.get('workflow') == 'video-translation' else
                   self._run_file_conversion if t.data.get('workflow') == 'file-conversion' else
                   self._run_text_extraction if t.data.get('workflow') == 'text-extraction' else
-                  self._run_contact_extraction if t.data.get('workflow') == 'contact-extraction' else self._run)
+                  self._run_contact_extraction if t.data.get('workflow') == 'contact-extraction' else
+                  self._run_webpage_extraction if t.data.get('workflow') == 'webpage-extraction' else self._run)
         t.thread = threading.Thread(target=runner, args=(t,), name=f"task-{t.id}", daemon=True)
         t.thread.start()
         self._emit(t)

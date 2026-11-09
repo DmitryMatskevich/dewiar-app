@@ -364,7 +364,7 @@ class CommandsMixin:
 
     @public_song_commands
     def command(self, cmd, a):
-        if cmd in ("sites_service", "sites_list", "sites_status", "sites_incidents", "sites_alert"):
+        if cmd in ("sites_service", "sites_list", "sites_status", "sites_incidents", "sites_alert", "sites_scan_ports"):
             from sites.client import command
             return command(cmd, a)
         # Bridge commands run concurrently. Starting a turn and switching its context
@@ -1784,6 +1784,9 @@ class CommandsMixin:
                 return r
             except (WorkspaceError, OSError, ValueError) as e:
                 raise ValueError(str(e)) from e
+        if cmd in ("pdf_editor_info", "pdf_editor_page", "pdf_editor_save"):
+            from pdf_editor import command
+            return command(self.workspace, cmd, a)
         if cmd == "ws_read":
             try:
                 return self.workspace.read(a.get("path", ""))
@@ -1811,7 +1814,13 @@ class CommandsMixin:
         if cmd == "ws_open":
             from tools import launch
             p = self.workspace.safe(a.get("path", "")) if a.get("path") else self.workspace.ensure()
-            launch(["xdg-open", str(p)])
+            if a.get("in_preview") is True:
+                if sys.platform != "darwin":
+                    raise ValueError("Приложение «Просмотр» доступно на Mac")
+                from macsys import open_pdf_in_preview
+                open_pdf_in_preview(p)
+            else:
+                launch(["xdg-open", str(p)])
             return str(p)
         if cmd in ("soul_get", "soul_save", "soul_update", "const_get", "const_save", "const_reset"):
             name = (a.get("persona") or "").strip() or self.persona_name()
@@ -1887,7 +1896,7 @@ class CommandsMixin:
             return self.tasks.list()
         if cmd == "songs_list":
             songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True,
-                                         tag=a.get("tag", ""), lyrics_query=a.get("lyrics_q", ""), rating=a.get("rating", ""))
+                                         tags=a.get("tags", a.get("tag", "")), lyrics_query=a.get("lyrics_q", ""), rating=a.get("rating", ""))
             for song in songs:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
                 song["processing"] = self.song_processing.describe(song)
@@ -1939,8 +1948,8 @@ class CommandsMixin:
             return _tools.media_track_info()
         if cmd == "song_patch":
             changes = a.get("changes") or {}
-            if not isinstance(changes, dict) or set(changes) - {"title", "search_query", "artist", "tags", "recording_version"}:
-                raise ValueError("Эта команда меняет только название, исполнителя и версию записи")
+            if not isinstance(changes, dict) or set(changes) - {"title", "search_query", "artist", "tags", "rating", "recording_version"}:
+                raise ValueError("Эта команда меняет только название, исполнителя, теги, оценку и версию записи")
             if a.get("base_revision") is None:
                 raise ValueError("Для сохранения нужна ревизия карточки")
             return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
@@ -2120,6 +2129,67 @@ class CommandsMixin:
         if cmd == "task_create":
             t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""), start=a.get("start", True),team=a.get('team'))
             return t.public()
+        if cmd in {"attachment_open_begin", "attachment_open_chunk", "attachment_open_finish", "attachment_open_abort"}:
+            import base64 as _b64
+            import shutil as _shutil
+            import time as _time
+            import uuid as _uuid
+            sessions = self.__dict__.setdefault("_attachment_open_uploads", {})
+            lock = self.__dict__.setdefault("_attachment_open_uploads_lock", threading.RLock())
+            upload_id = str(a.get("upload_id") or "")
+            if cmd == "attachment_open_begin":
+                name = Path(str(a.get("name") or "file")).name
+                try: size = int(a.get("size") or 0)
+                except (TypeError, ValueError): raise ValueError("Не удалось определить размер файла")
+                action = str(a.get("action") or "open")
+                if action not in {"open", "preview"}: raise ValueError("Неизвестное действие с файлом")
+                if not name or not 0 < size <= 2 * 1024**3: raise ValueError("Поддерживаются файлы от 1 байта до 2 ГБ")
+                if action == "preview" and Path(name).suffix.lower() not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+                    raise ValueError("Просмотр macOS доступен для PDF и изображений")
+                root = self.workspace.ensure() / ".media-cache" / "chat-attachments"
+                root.mkdir(parents=True, exist_ok=True)
+                now = _time.time()
+                with lock:
+                    for key, old in list(sessions.items()):
+                        if now - old["created"] > 3600:
+                            _shutil.rmtree(old["dir"], ignore_errors=True); sessions.pop(key, None)
+                    token = _uuid.uuid4().hex
+                    folder = root / token; folder.mkdir()
+                    path = folder / re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", name)[:140]
+                    path.touch()
+                    sessions[token] = {"dir":folder, "path":path, "name":name, "size":size,
+                                       "received":0, "action":action, "created":now}
+                return {"upload_id":token, "chunk_bytes":2 * 1024 * 1024}
+            with lock:
+                session = sessions.get(upload_id)
+                if not session: raise ValueError("Загрузка истекла или не найдена. Начните ещё раз.")
+                if cmd == "attachment_open_abort":
+                    sessions.pop(upload_id, None); _shutil.rmtree(session["dir"], ignore_errors=True)
+                    return {"aborted":True}
+                if cmd == "attachment_open_chunk":
+                    raw = str(a.get("b64") or "")
+                    if raw.startswith("data:"): raw = raw.split(",", 1)[-1]
+                    try: data = _b64.b64decode(raw, validate=True)
+                    except (ValueError, _b64.binascii.Error) as exc: raise ValueError("Блок файла повреждён") from exc
+                    if not data or len(data) > 2 * 1024 * 1024 or session["received"] + len(data) > session["size"]:
+                        raise ValueError("Неверный размер блока файла")
+                    with session["path"].open("ab") as stream: stream.write(data)
+                    session["received"] += len(data)
+                    return {"received":session["received"], "size":session["size"]}
+                if session["received"] != session["size"]: raise ValueError("Файл загружен не полностью")
+                sessions.pop(upload_id, None)
+            try:
+                if session["action"] == "preview":
+                    if sys.platform != "darwin": raise ValueError("Просмотр Apple доступен только в macOS")
+                    from macsys import open_pdf_in_preview
+                    open_pdf_in_preview(session["path"])
+                else:
+                    from export import open_file
+                    open_file(session["path"])
+                return {"opened":True, "name":session["name"]}
+            finally:
+                # Keep the staged file available to the external editor/Preview.
+                pass
         if cmd == "file_convert":
             t = self.tasks.create_file_conversion(a.get("files") or [], a.get("target") or "", goal=a.get("goal", ""))
             return t.public()

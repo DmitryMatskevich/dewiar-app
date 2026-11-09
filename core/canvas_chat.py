@@ -10,7 +10,7 @@ import threading
 from urllib.parse import urlparse
 
 COLORS={'красн':'#e5484d','син':'#1971c2','зел':'#2f9e44','желт':'#ffd43b','черн':'#000000','бел':'#ffffff','оранж':'#f08c00','фиолет':'#7048e8'}
-OPS={'outline','underline','delete','move','color','fill','text','background','select'}
+OPS={'outline','underline','delete','move','color','fill','text','background','select','select_add','select_remove','select_clear'}
 HELP='Например: обведи выделенное красным; добавь текст «Проверьте» в точке 120, 240; перемести #2 в 400, 180; удали #2; сделай фон белым. Текст внутри картинки можно обвести через локальное OCR.'
 
 
@@ -72,6 +72,12 @@ def parse(text,selection):
         if any(w in plain for w in ('фото','картин','изображен')):raise ValueError('Эта команда меняет фон холста. Замена фона фотографии пока не поддерживается.')
         if not color:raise ValueError('Укажите цвет фона, например: сделай фон белым.')
         return [{'op':'background','color':color}]
+    if re.fullmatch(r'(?:сними|снять|сбрось|сбросить|отмени) (?:выбор|выделение)',plain):
+        return [{'op':'select_clear'}]
+    if numbers and re.match(r'^(?:сними|убери|исключи|снять)\b',plain) and re.search(r'выбор|выделен',plain):
+        return [{'op':'select_remove','target':target}]
+    if numbers and re.match(r'^(?:добавь|добавить|включи)\b',plain) and re.search(r'выбор|выделен',plain):
+        return [{'op':'select_add','target':target}]
     if re.match(r'^(добавь|добавить|напиши|написать)\b',plain):
         if not quoted:raise ValueError('Заключите подпись в кавычки: добавь текст «Готово» в точке 120, 240.')
         point=re.search(r'(?:в(?:\s+точк[еу])?\s+)(-?\d+(?:\.\d+)?)\s*[,;]\s*(-?\d+(?:\.\d+)?)',plain)
@@ -92,7 +98,7 @@ def validate_ops(ops):
     if not isinstance(ops,list) or len(ops)>20:raise ValueError('Допускается до 20 действий за один запрос.')
     for op in ops:
         if not isinstance(op,dict) or op.get('op') not in OPS:raise ValueError('Модель предложила неподдерживаемое действие.')
-        allowed={'outline':{'target','color'},'underline':{'target','color'},'delete':{'target'},'move':{'target','x','y'},'color':{'target','color'},'fill':{'target','color'},'select':{'target'},'text':{'text','x','y','color'},'background':{'color'}}[op['op']]
+        allowed={'outline':{'target','color'},'underline':{'target','color'},'delete':{'target'},'move':{'target','x','y'},'color':{'target','color'},'fill':{'target','color'},'select':{'target'},'select_add':{'target'},'select_remove':{'target'},'select_clear':set(),'text':{'text','x','y','color'},'background':{'color'}}[op['op']]
         if set(op)!={'op'}|allowed:raise ValueError('Неверные поля действия.')
         if 'color' in op and (not isinstance(op['color'],str) or not re.fullmatch('#[0-9a-fA-F]{6}',op['color'])):raise ValueError('Цвет должен иметь вид #1971c2.')
         for axis in ('x','y'):
@@ -120,7 +126,7 @@ def resolve(ops,objects):
         if len(found)!=expected:
             if len(found)>1:raise ValueError('Найдено несколько надписей. Выберите нужную в списке объектов или укажите #номер.')
             raise ValueError('Объект не найден. Выберите его на холсте или укажите #номер. Для текста в пикселях доступны локальные команды обведения и подчёркивания.')
-        if op['op']!='select' and any(e['locked'] for e in found):raise ValueError('Объект заблокирован. Сначала разблокируйте его на холсте.')
+        if not op['op'].startswith('select') and any(e['locked'] for e in found):raise ValueError('Объект заблокирован. Сначала разблокируйте его на холсте.')
         op['target']={'ids':[e['id'] for e in found]}
     return ops
 

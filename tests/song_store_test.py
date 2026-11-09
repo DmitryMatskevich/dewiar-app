@@ -47,6 +47,19 @@ def test_song_store_ratings_round_trip_and_filter(tmp_path):
         raise AssertionError("rating outside 0..5 was accepted")
 
 
+def test_song_store_supports_multiple_tag_filters(tmp_path):
+    store = SongStore(tmp_path / "songs")
+    love = store.create("Любовь", "Автор")
+    rock = store.create("Рок", "Автор")
+    other = store.create("Другое", "Автор")
+    store.patch(love["song_id"], {"tags": ["Любовь"]}, love["revision"])
+    store.patch(rock["song_id"], {"tags": ["Рок"]}, rock["revision"])
+    store.patch(other["song_id"], {"tags": ["Юмор"]}, other["revision"])
+
+    assert {row["title"] for row in store.list(tags=["Любовь", "Рок"])} == {"Любовь", "Рок"}
+    assert {row["title"] for row in store.list(tag=["Любовь", "Рок"])} == {"Любовь", "Рок"}
+
+
 def test_song_store_processing_filters_include_active_and_stopped_jobs(tmp_path):
     store = SongStore(tmp_path / "songs")
     active = store.create("Активная", "Исполнитель")

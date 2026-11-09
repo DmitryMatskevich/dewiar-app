@@ -127,14 +127,52 @@
   @media (prefers-reduced-motion: reduce) { #bubble.hold::before { animation: none; } #orb.holding { transform: none; } }
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
-  /* по центру, но не выше имени: при нехватке места «распорки» сжимаются до нуля, а лишнее уходит вниз (не наезжает на имя) */
-  #mid { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; flex-direction: column; justify-content: flex-start; gap: 8px; padding: 10px 0 8px; overflow: hidden; }
-  #card.no-orb #mid { padding-top: 10px; }
-  /* Ввод всегда находится над нижней панелью. До появления ответа свободное место — это область
-     переписки; при открытом ответе карточка ответа занимает её целиком. */
-  #mid::before { content: ""; flex: 0 0 0; min-height: 0; margin: -4px 0; }
-  #mid::after { content: ""; display: none; }
-  #ask { margin-top: auto; flex: 0 0 auto; min-height: 0; position: relative; z-index: 1; }
+  /* Only the conversation yields space. The latest result and composer have their own rows. */
+  #hud-workspace { display:flex; flex:1 1 0; flex-direction:column; align-items:center; width:100%; min-height:0; }
+  #mid { flex: 1 1 0; min-width:0; min-height: 0; width: 100%; display: flex; flex-direction: column; gap: 8px; padding: 2px 0 8px; overflow: auto; scrollbar-width:thin; overscroll-behavior:contain; }
+  #recent-activity { display:none; }
+  #recent-activity:not(:empty) { display:flex; flex:1 1 0; flex-direction:column; gap:5px; min-height:0; overflow:hidden; padding:4px 6px; }
+  /* The scroll origin is the newest message, so a resize does not displace it. */
+  #recent-activity .activity-scroll { display:flex; flex:1 1 0; flex-direction:column-reverse; min-height:0; overflow:auto; scrollbar-width:thin; overscroll-behavior:contain; overflow-anchor:none; }
+  #recent-activity .activity-scroll:focus-visible { outline:2px solid var(--accent, currentColor); outline-offset:-2px; border-radius:9px; }
+  #recent-activity .activity-list { display:flex; flex:none; flex-direction:column; gap:5px; margin-bottom:auto; }
+  #recent-activity .activity-row { flex:none; }
+  #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb {
+    width:clamp(52px, 14vw, 86px); height:auto; aspect-ratio:1; margin:0 0 5px;
+  }
+  @media (min-width:480px), (max-height:440px) {
+    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #hud-workspace {
+      flex-direction:row; align-items:stretch; gap:8px; container-type:size;
+    }
+    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb {
+      align-self:center; width:min(clamp(44px, 15vw, 112px), 100cqh); margin:0;
+    }
+  }
+  @media (max-height:440px) {
+    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb { width:min(clamp(38px, 12vw, 60px), 100cqh); }
+  }
+  #recent-activity .activity-heading { flex:none; padding:3px 7px 5px; color:var(--muted); font-size:10.5px; letter-spacing:.03em; }
+  #recent-activity .activity-row { display:block; width:100%; min-width:0; padding:7px 9px; border:0; border-radius:11px; background:var(--glass,rgba(128,140,180,.10)); color:var(--ink); font:inherit; text-align:left; }
+  #recent-activity .activity-row.chat { border-left:2px solid var(--persona); }
+  #recent-activity .activity-row.task { border-left:2px solid rgba(75,190,145,.7); }
+  #recent-activity .activity-meta { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:10px; line-height:1.3; }
+  #recent-activity .activity-meta time { margin-left:auto; flex:none; }
+  #recent-activity .activity-actions { display:flex; flex:none; gap:3px; margin-left:auto; }
+  #recent-activity time + .activity-actions { margin-left:0; }
+  #recent-activity .activity-copy { display:grid; place-items:center; flex:none; width:24px; height:24px; padding:4px; border:0; border-radius:7px; background:var(--glass,rgba(128,140,180,.10)); color:var(--muted); cursor:pointer; }
+  #recent-activity .activity-copy:hover { background:var(--glass2,rgba(128,140,180,.16)); color:var(--ink); }
+  #recent-activity .activity-copy.copied { color:#219b72; }
+  #recent-activity .activity-copy svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  #recent-activity .activity-text { margin-top:2px; font-size:11.5px; line-height:1.35; overflow-wrap:anywhere; white-space:pre-wrap; }
+  @media (max-height:330px) {
+    #card.has-screenshots #mid { padding-block:0; gap:4px; }
+    #card.has-screenshots #recent-activity:not(:empty) { min-height:24px; }
+    #recent-activity:not(:empty) { padding:0 3px; }
+    #recent-activity .activity-heading { display:none; }
+    #recent-activity .activity-row { padding-block:3px; }
+  }
+  #recent-activity .activity-empty { padding:10px; color:var(--muted); font-size:11.5px; text-align:center; }
+  #ask { flex: 0 0 auto; min-height: 0; position: relative; z-index: 4; }
   #cap { display: none; flex: 0 1 auto; min-height: 0; width: 100%; overflow: hidden; padding: 10px 13px; border-radius: 18px; background: var(--glass); font-size: calc(13.5px * var(--dw-text, 1)); line-height: 1.42; cursor: default;
          box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   #cap.show, #cap.running { display: flex; flex-direction: column; }
@@ -203,6 +241,11 @@
      no-orb mode and health messages. No content may start behind its controls. */
   body:not(.mini) #card.has-assistant-topbar { padding-top: 48px; }
   #card.has-assistant-topbar #bubble { top: 48px; }
+  @media(max-height:330px) {
+    body:not(.mini) #card.has-assistant-topbar { padding-top:40px; padding-bottom:8px; }
+    #card.has-assistant-topbar #bubble { top:40px; }
+    #card.has-screenshots #bar { margin-top:5px; }
+  }
   @media(max-height:160px) {
     #card.has-assistant-topbar #mid, #card.has-assistant-topbar.no-orb #mid { padding: 0; }
     #card.has-assistant-topbar #health { min-height: 0; overflow: auto; font-size: 11px; line-height: 1.2; padding: 2px 6px; }
@@ -447,7 +490,10 @@
   .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
   .askbox.has .ab.send { background: var(--brand); color: #fff; }
   .ab.send svg { width: 15px; height: 15px; }
-  #card.crowd #orb { width: calc(104px * var(--ok, 1)); height: calc(104px * var(--ok, 1)); }      /* тесно (fitCap): карточки и кнопки важнее большого облика */
+  #card.crowd #orb { width: calc(92px * var(--ok, 1)); height: calc(92px * var(--ok, 1)); margin-top:24px; }
+  @media (max-height:440px) {
+    #card.crowd #orb { width:76px; height:76px; margin-top:12px; }
+  }
   #card.long #orb { width: calc(84px * var(--ok, 1)); height: calc(84px * var(--ok, 1)); }          /* длинный текст — сфера уступает место полю */
   #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
   #card.long #cap.show, #card.long #cap.running { display: flex; }
@@ -468,6 +514,9 @@
   /* Меню форматов использует ту же тему и визуальную основу, что и штатное меню вложений (#att-menu). */
   .att .att-format-picker { position: fixed; z-index: 9999; min-width: 172px; display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 6px; border: 0; border-radius: 15px; background: #171a25; color: var(--ink); box-shadow: 0 15px 35px rgba(0,0,0,.42); }
   .att-format-picker[hidden] { display: none; }
+  .att .att-open, .att .att-preview { width:25px; height:25px; flex:none; display:grid; place-items:center; padding:0; border-radius:50%; color:var(--muted); background:rgba(255,255,255,.07); }
+  .att .att-open:hover, .att .att-preview:hover { color:#fff; background:rgba(255,255,255,.16); }
+  .att-open svg, .att-preview svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
   .att .att-format-picker button { min-height: 34px; padding: 6px 9px; border: 0; border-radius: 10px; background: none; color: inherit; cursor: pointer; font: inherit; font-size: 11.5px; text-align: left; }
   .att .att-format-picker button:hover, .att .att-format-picker button:focus-visible { background: rgba(255,255,255,.1); outline: none; }
   body.light .att .att-format-picker { background: #fff; color: var(--ink); box-shadow: 0 15px 35px rgba(20,30,60,.2); }
@@ -484,10 +533,14 @@
   .native-operation-status { display:block; color:var(--muted); font-size:11px; }
   body.drop #card { box-shadow: inset 0 0 0 2px rgba(193,235,255,.35); }
 
-  #bar { flex: 0 0 auto; display: flex; flex-wrap: nowrap; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; margin-top: 8px; border-radius: 999px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; position: relative; z-index: 2; }
+  #bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; max-width:100%; gap: 1px; align-items: center; justify-content: center; padding: 4px 6px; margin-top: 8px; border-radius: 18px; background: var(--glass); box-shadow: var(--glass-shadow); opacity: .6; transition: opacity .2s; cursor: default; position: relative; z-index: 2; }
   #card:hover #bar, #bar.pinned { opacity: 1; }
   .btn { width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
   #bar .btn { flex: none; width: clamp(24px, calc(12.5vw - 7px), 28px); }
+  @media (max-width:320px) {
+    #bar { gap:0; padding-inline:4px; }
+    #bar .btn { width:24px; }
+  }
   .btn:hover, .btn:focus-visible { color: #fff; background: rgba(255,255,255,.1); outline: none; }
   .btn.on { color: #ff7a93; }
   .btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -575,8 +628,9 @@
 
   /* ---------- значок ---------- */
   body.mini #card { padding: 0; justify-content: center; }     /* значок — в той же теме, что и карточка */
-  body.mini #orb { width: 92px; height: 92px; }
-  body.mini #bubble, body.mini #mid, body.mini #bar, body.mini #ask-model, body.mini #model-menu { display: none; }
+  body.mini #hud-workspace { flex:none; align-items:center; }
+  body.mini #orb { width: 92px; height: 92px; margin:0; }
+  body.mini #bubble, body.mini #mid, body.mini #ask, body.mini #screenshot-messages, body.mini #bar, body.mini #ask-model, body.mini #model-menu { display: none; }
   #grow { display: none; position: absolute; left: 62px; top: 62px; width: 24px; height: 24px; border-radius: 50%; border: 0;
           background: rgba(40,40,52,.92); color: #E6E7F2; place-items: center; cursor: pointer; opacity: 0; transition: opacity .2s; }
   #grow svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -667,11 +721,12 @@ body.mini #assistant-topbar{display:none}
   <button id="bubble" hidden aria-hidden="true" title="Состояние режима ввода. Модель выбирается кнопкой в верхней строке." aria-label="Состояние режима ввода; модель выбирается отдельной кнопкой">
     <span id="say">Подключаюсь…</span>
   </button>
+  <div id="hud-workspace">
   <div id="orb" tabindex="0" role="button" title="Нажмите — выбрать помощника. Удерживайте — диктовка любой длины, отпустите — отправлю" aria-label="Выбрать помощника"><canvas id="cv"></canvas>
     <svg id="tarc" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="48.5" pathLength="100" stroke-dasharray="100" stroke-dashoffset="0"/></svg><span id="tmini"></span></div>
   <div id="mid">
+    <section id="recent-activity" aria-label="Предыдущие сообщения и обработки" aria-live="polite"></section>
     <div id="cap"><div class="you" id="you"></div><div id="act" title="Ход работы"></div><div id="answer-row"><div class="bot" id="bot"></div><span id="run-status" role="status"></span><button class="ab" id="a-stop" title="Остановить ответ и текущую работу модели" aria-label="Остановить ответ"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><div id="media"></div><button id="more">Открыть целиком</button></div>
-    <div id="screenshot-messages" aria-label="Снимки в сообщениях ассистента"></div>
     <div id="yn"><button class="yes" id="y">Да</button><button id="n">Нет</button></div>
     <div id="note"></div><div id="ldbar"><i></i></div>
     <div id="health" title="Что сейчас с ассистентом"></div>
@@ -682,14 +737,17 @@ body.mini #assistant-topbar{display:none}
     <div id="cloudlow"></div>
     <div id="annb" role="button" tabindex="0"><span id="annb-t"></span><button id="annb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
     <div id="clb" role="button" tabindex="0" title="Открыть переписку"><span id="clb-t"></span><em id="clb-n" hidden></em><button id="clb-x" title="Скрыть" aria-label="Скрыть">✕</button></div>
-    <div id="ask">
-      <div id="link-messages" aria-label="Ссылки в сообщениях ассистента"></div>
+    <div id="link-messages" aria-label="Ссылки в сообщениях ассистента"></div>
       <section id="background-dictation" hidden style="margin:8px 0;padding:10px;border-radius:12px;background:var(--glass2,rgba(127,127,127,.12))">
         <label for="background-draft" style="display:block;font-size:12px;margin-bottom:4px">Фоновая диктовка · можно редактировать</label>
         <textarea id="background-draft" rows="3" style="width:100%;resize:vertical;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:8px;padding:8px" aria-label="Текст фоновой диктовки"></textarea>
         <div id="background-dictation-status" role="status" style="font-size:12px;margin-top:4px"></div>
       </section>
       <div id="voice-command-feedback" role="status" aria-live="polite" hidden><span id="voice-command-message"></span><button id="voice-command-access" type="button" hidden title="Открыть настройки управления устройством">Открыть настройки</button><button id="voice-command-dismiss" type="button" aria-label="Скрыть сообщение о команде" title="Скрыть сообщение о команде">×</button></div>
+  </div>
+  </div>
+  <section id="screenshot-messages" aria-label="Последний снимок экрана"></section>
+    <div id="ask">
       <div class="askbox" id="askbox">
         <textarea id="askin" rows="1" placeholder="Я Лира, жду ваше задание…" title="Enter — новая строка. Отправить — кнопка со стрелкой вверх. Голосовой текст вставляется в позицию курсора, заменяя выделение; курсор перемещается за вставленный текст. Для завершения и отправки голосового ввода произнесите имя текущего помощника отдельно или в конце фразы." autocomplete="off" spellcheck="true"></textarea>
         <div class="askrow">
@@ -716,7 +774,6 @@ body.mini #assistant-topbar{display:none}
       <div id="atts"></div>
       <span id="askn" aria-hidden="true"></span>
     </div>
-  </div>
   <div id="team" role="dialog" aria-modal="true" aria-label="Выбор помощника">
     <div class="team-head"><b>Выберите помощника</b><button class="team-close" id="team-close" type="button" title="Закрыть выбор помощника (Esc)" aria-label="Закрыть">×</button></div>
     <div id="team-list"></div>
@@ -782,6 +839,7 @@ body.mini #assistant-topbar{display:none}
 <script src="assets/calendar-badge.js"></script>
 <script src="assets/hud-access.js"></script>
 <script src="assets/dialog.js"></script>
+<script src="assets/contact-create.js"></script>
 <script src="assets/rich.js"></script>
 <link rel="stylesheet" href="assets/screenshot-card.css">
 <script src="assets/screenshot-card.js"></script>
@@ -798,40 +856,24 @@ const hudAccess = DewiarHudAccess.create({api: () => window.api?.(), notify: tex
 // «speaking» (голос с сервера приходит через несколько секунд после начала ответа)
 const entity = new DewiarEntity($("cv"), { style: "nexus", color: "#8A9BFF", plate: false, tone: "mono", fx: "bars", voiceLevels: true, lookGain: 0.5 });
 const VOICE_FX = ["bars", "pulse", "wave"];
-let orbShown = null, orbUi = {};
-function setOrbVisible(on, persist = false, ui = null) {
-  ui = ui || orbUi;
-  const previous = orbShown;
+let orbShown = null;
+function setOrbVisible(on, persist = false) {
   orbShown = !!on;
   $("card").classList.toggle("no-orb", !orbShown);
   const b = $("b-orb");
   if (b) {
     b.classList.toggle("on", !orbShown);
-    b.title = orbShown ? "Скрыть большой образ Лиры и освободить место для ответа" : "Показать большой образ Лиры";
+    b.title = orbShown ? "Скрыть аватар ассистента" : "Показать аватар ассистента";
     b.setAttribute("aria-label", b.title);
     b.setAttribute("aria-pressed", String(!orbShown));
   }
-  if (previous !== null && previous !== orbShown) {
-    const show = orbShown, a = api(), zoom = Math.max(.7, Math.min(1.5, +(ui.zoom || 1)));
-    if (a && a.card_size && a.resize_card) a.card_size().then(size => {
-      const currentHeight = Math.round(size[1] / zoom);
-      const restoreHeight = Number(ui.hud_orb_height) || (show ? (Number(ui.hud_h) || 520) : currentHeight);
-      const nextHeight = show ? restoreHeight : Math.max(360, currentHeight - 220);
-      return a.resize_card(size[0], Math.round(nextHeight * zoom), true).then(() => {
-        const patch = { hud_h: nextHeight, hud_orb_height: show ? null : restoreHeight };
-        if (persist) patch.hud_show_orb = show;
-        return core.call("settings_save", { patch: { ui: patch } });
-      });
-    }).catch(() => {});
-    else if (persist) core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
-  } else if (persist && typeof core !== "undefined") {
+  if (persist) {
     core.call("settings_save", { patch: { ui: { hud_show_orb: orbShown } } }).catch(() => {});
   }
   requestAnimationFrame(() => { fitCap(); fitAsk(); });
 }
 function applyLook(ui) {                      // тема карточки и облика (assets/skins.*) + чем голос отзывается вокруг портрета
   ui = ui || {};
-  orbUi = ui;
   const sk = window.dewiarSkin ? dewiarSkin(ui.skin) : { id: "brand" };
   (window.DEWIAR_SKIN_IDS || ["brand"]).forEach(k => document.body.classList.toggle("skin-" + k, k === sk.id));
   document.body.classList.toggle("light", !!sk.light);
@@ -839,7 +881,7 @@ function applyLook(ui) {                      // тема карточки и о
   entity.tone = sk.tone || "mono";
   entity.fx = VOICE_FX.includes(ui.voice_fx) ? ui.voice_fx : "bars";
   applyZoom(ui);
-  setOrbVisible(ui.hud_show_orb !== false, false, ui);
+  setOrbVisible(ui.hud_show_orb !== false);
   lookOn = ui.cursor_look === true;
   if (!lookOn) { clearTimeout(lookT); entity.look(null); }   // выключено — сразу прямо
 }
@@ -1020,7 +1062,7 @@ function showCap(you, bot, err) {
 let capHover = false, capHideMs = 0, capScrolled = false;
 function hideCapLater(ms) {
   clearTimeout(capTimer); capHideMs = ms;
-  capTimer = setTimeout(() => { if (capHover && ms > 1000) return; $("cap").classList.remove("show"); capScrolled = false; $("card").classList.toggle("chat-open", $("ask").style.display === "block"); requestAnimationFrame(fitCap); }, ms);
+  capTimer = setTimeout(() => { if (capHover && ms > 1000) return; $("cap").classList.remove("show"); capScrolled = false; $("card").classList.toggle("chat-open", $("ask").style.display === "block"); requestAnimationFrame(fitCap); scheduleRecentActivity?.(); }, ms);
 }
 $("cap").addEventListener("mouseenter", () => { capHover = true; });
 $("cap").addEventListener("mouseleave", () => { capHover = false; if (capHideMs > 1000 && $("cap").classList.contains("show")) hideCapLater(Math.max(capHideMs, 8000)); });
@@ -1432,7 +1474,7 @@ card.addEventListener("pointerdown", async (ev) => {
   // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
   // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
   // строки «ИИ-баланс…» и объявления — тоже кнопки (24.10: щелчок по #cloudlow уходил в перетаскивание и студия не открывалась)
-  if (ev.button !== 0 || ev.target.closest("button, input, textarea, select, option, a, [role=button], #assistant-topbar, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
+  if (ev.button !== 0 || ev.target.closest("button, input, textarea, select, option, summary, a, [role=button], #assistant-topbar, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
@@ -1442,7 +1484,7 @@ card.addEventListener("pointerdown", async (ev) => {
 document.addEventListener("keydown", (e) => {          // пробел в виджете — то же удержание (не в поле ввода)
   if (e.code === "Escape" && hold) { e.preventDefault(); if (!holdFinish(true)) hold = null; return; }
   if (e.code !== "Space" || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
-  if (/^(INPUT|TEXTAREA|BUTTON|SELECT)$/.test((document.activeElement || {}).tagName || "") || $("reader").classList.contains("on")) return;
+  if (/^(INPUT|TEXTAREA|BUTTON|SELECT|SUMMARY)$/.test((document.activeElement || {}).tagName || "") || e.target.closest?.(".activity-scroll") || $("reader").classList.contains("on")) return;
   e.preventDefault(); holdBegin("key");
 });
 document.addEventListener("keyup", (e) => {
@@ -1993,7 +2035,67 @@ $('b-notes').onclick = guard($('b-notes'), async () => {
 }, () => 'Ожидается разрешение доступа к файлам в macOS…');
 /* фоновые задачи и обновления — строкой в карточке */
 const tasks = {}, doneAt = {}, dismissed = new Set();
+let recentActivityTimer;
 const isNativeTask = t => ["file-conversion", "text-extraction"].includes(t?.workflow);
+let recentActivityVersion = 0;
+let activityThread;
+function scheduleRecentActivity() { clearTimeout(recentActivityTimer); recentActivityTimer=setTimeout(refreshRecentActivity,250); }
+async function refreshRecentActivity() {
+  const version = ++recentActivityVersion, box = $('recent-activity');
+  if (!box || document.body.classList.contains('mini')) return;
+  try {
+    const thread = await core.call('chat_threads');
+    const page = await core.call('chat_list', {limit:80, chat_id:thread.active});
+    if (version !== recentActivityVersion) return;
+    const previousScroll = activityThread === thread.active ? box.querySelector('.activity-scroll')?.scrollTop ?? 0 : 0;
+    activityThread = thread.active;
+    const rows = [], currentVisible = $('cap').classList.contains('show');
+    const currentText = new Set(currentVisible ? [$('you').textContent,$('bot').textContent].map(s=>String(s||'').replace(/\s+/g,' ').trim()).filter(Boolean) : []);
+    for (const m of page.items || []) {
+      if ((m.att || []).some(a=>a.capture)) continue;
+      const rawText = String(m.text || '').trim(), comparable = rawText.replace(/\s+/g,' ').trim();
+      if (!rawText || currentText.has(comparable)) continue;
+      rows.push({kind:'chat',ts:Number(m.ts)||0,role:m.role,text:rawText,who:m.who||''});
+    }
+    for (const task of Object.values(tasks)) {
+      if (!task.title || !task.created) continue;
+      const ts = Date.parse(task.updated || task.created);
+      rows.push({kind:'task',ts:Number.isFinite(ts)?ts/1000:0,id:task.id,title:task.title,
+        status:task.status_ru || task.status || 'задача',detail:task.activity || (task.outputs?.length ? `результатов: ${task.outputs.length}` : '')});
+    }
+    rows.sort((a,b)=>a.ts-b.ts);
+    const recent = rows.slice(-24);
+    if (!recent.length) { box.replaceChildren(); return; }
+    const heading=document.createElement('div');heading.className='activity-heading';heading.textContent='Недавние сообщения и обработки';
+    const scroll=document.createElement('div');scroll.className='activity-scroll';scroll.tabIndex=0;
+    scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Лента сообщений и задач');
+    const list=document.createElement('div');list.className='activity-list';scroll.append(list);
+    for (const row of recent) {
+      const item = document.createElement('div'); item.className=`activity-row ${row.kind}`;
+      const meta=document.createElement('div');meta.className='activity-meta';
+      const label=document.createElement('span');label.textContent=row.kind==='task'?`Обработка · ${row.status}`:row.role==='user'?'Вы':(row.who||'Ассистент');meta.append(label);
+      if(row.ts){const time=document.createElement('time');time.dateTime=new Date(row.ts*1000).toISOString();time.textContent=new Date(row.ts*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});meta.append(time);}
+      item.append(meta);
+      const content=document.createElement('div');content.className='activity-text';
+      content.textContent=row.kind==='task'?[row.title,row.detail].filter(Boolean).join(' · '):row.text.slice(0,240)+(row.text.length>240?'…':'');
+      item.append(content);
+      const actions=document.createElement('div');actions.className='activity-actions';
+      const copy=document.createElement('button');copy.type='button';copy.className='activity-copy';copy.title='Скопировать сообщение';copy.setAttribute('aria-label','Скопировать сообщение');
+      copy.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg>';
+      const fullText=row.kind==='task'?[row.title,row.status,row.detail].filter(Boolean).join('\n'):row.text;
+        copy.onclick=async()=>{copy.disabled=true;try{await writeClipboardText(fullText,copy);copy.title='Сообщение скопировано';copy.setAttribute('aria-label',copy.title);copy.classList.add('copied');}catch(error){showErr(error);}finally{setTimeout(()=>{if(copy.isConnected){copy.disabled=false;copy.title='Скопировать сообщение';copy.setAttribute('aria-label',copy.title);copy.classList.remove('copied');}},1400);}};
+      actions.append(copy);
+      if(row.kind==='task'){
+        const open=document.createElement('button');open.type='button';open.className='activity-copy';open.title='Открыть обработку';open.setAttribute('aria-label','Открыть обработку');
+        open.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M4 9h16"/></svg>';
+        open.onclick=()=>{const a=api();a?.open_settings?.('tasks','&task='+encodeURIComponent(row.id));};actions.append(open);
+      }
+      meta.append(actions);list.append(item);
+    }
+    box.replaceChildren(heading,scroll);
+    scroll.scrollTop=previousScroll;
+  } catch (_) { /* История не мешает работе окна, если ядро отключено. */ }
+}
 /* Готовая расшифровка открывает сохранённый текст, а не предлагает действия с исходным роликом.
    Экспорт остальных видов задач остаётся доступен; карточка висит 30 минут или пока её не скроют. */
 function renderDone(el, t) {
@@ -2168,6 +2270,8 @@ core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTas
 $("task").onclick = () => { const a = api(); if (a) a.open_settings("tasks"); };
 $('b-tasks').onclick = () => { const a = api(), id = $('b-tasks').dataset.taskId; if (a) a.open_settings('tasks', id ? '&task=' + encodeURIComponent(id) : ''); };
 core.on('tasks', e => { Object.keys(tasks).forEach(id => delete tasks[id]); (e.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); });
+core.on('hello',scheduleRecentActivity).on('chat_changed',scheduleRecentActivity).on('chat',scheduleRecentActivity)
+  .on('answer',e=>{if(e.done)scheduleRecentActivity();}).on('task',scheduleRecentActivity).on('tasks',scheduleRecentActivity);
 /* значок обновления у жучка: есть обновление — ставит сразу (как строка «Доступна версия…»); нет — проверяет (и скачивает
    найденное) и тоже ставит; новее нет — так и говорит строкой на 5 секунд */
 const UPD = { avail: null };
@@ -2421,10 +2525,13 @@ function renderAtts() {
     const d = document.createElement("div"); d.className = "att";
     d.style.position = "relative";
     const ext = (a.name.split(".").pop() || "").slice(0, 4).toUpperCase();
-    const actions = `<button class="att-convert" type="button" title="Выбрать формат и преобразовать это вложение локально; результат появится сверху и сохранится в задаче" aria-label="Выбрать формат преобразования для этого файла" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M5 4h8l4 4v4M13 4v4h4M7 13h8m-3-3 3 3-3 3M6 20h12"/></svg></button><button class="att-remove" title="Убрать это вложение из сообщения" aria-label="Убрать вложение">×</button>`;
+    const actions = `<button class="att-convert" type="button" title="Выбрать формат и преобразовать это вложение локально; результат появится сверху и сохранится в задаче" aria-label="Выбрать формат преобразования для этого файла" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M5 4h8l4 4v4M13 4v4h4M7 13h8m-3-3 3 3-3 3M6 20h12"/></svg></button><button class="att-open" type="button" title="Открыть файл для редактирования в приложении macOS по умолчанию" aria-label="Открыть файл для редактирования"><svg viewBox="0 0 24 24"><path d="m14 5 5 5M4 20l4.2-.8L19 8.4 15.6 5 4.8 15.8 4 20z"/></svg></button><button class="att-remove" title="Убрать это вложение из сообщения" aria-label="Убрать вложение">×</button>`;
     d.innerHTML = a.kind === "image" ? `<img alt=""><span></span>${actions}` : `<i class="ic"></i><span></span>${actions}`;
     if (a.kind === "image") d.querySelector("img").src = a.url; else d.querySelector(".ic").textContent = ext || "ФАЙЛ";
     d.querySelector("span").textContent = a.name;
+    d.querySelector(".att-open").onclick = ev => { ev.stopPropagation(); openAttachedFile(a, "open").catch(showErr); };
+    const previewable = /\.(pdf|png|jpe?g|tiff?)$/i.test(a.name);
+    if (previewable) { const p = document.createElement("button"); p.className="att-preview"; p.type="button"; p.title="Открыть в Просмотре macOS"; p.setAttribute("aria-label","Открыть в Просмотре macOS"); p.innerHTML='<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.5"/></svg>'; p.onclick=ev=>{ev.stopPropagation();openAttachedFile(a,"preview").catch(showErr);}; d.querySelector(".att-open").after(p); }
     d.querySelector(".att-remove").onclick = (ev) => { ev.stopPropagation(); atts.splice(i, 1); renderAtts(); };
     const convertButton = d.querySelector(".att-convert"), picker = document.createElement("div");
     picker.className = "att-format-picker"; picker.hidden = true;
@@ -2437,27 +2544,25 @@ function renderAtts() {
       picker.hidden = !show; convertButton.setAttribute("aria-expanded", String(show));
       if (show) requestAnimationFrame(() => {
         const r = convertButton.getBoundingClientRect(), menu = picker.getBoundingClientRect(), gap = 6;
-        const left = Math.max(6, Math.min(r.right - menu.width, innerWidth - menu.width - 6));
+        const rightSide = r.right + gap + menu.width <= innerWidth - 6;
+        const left = rightSide ? r.right + gap : Math.max(6, r.left - menu.width - gap);
         const below = innerHeight - r.bottom, above = r.top;
         const top = below >= menu.height + gap || below >= above ? Math.min(innerHeight - menu.height - 6, r.bottom + gap) : Math.max(6, r.top - menu.height - gap);
         picker.style.left = `${left}px`; picker.style.top = `${top}px`;
       }); };
     d.append(picker);
     if (a.kind === "image") {
-      const taskOcr = document.createElement("button"); taskOcr.type = "button"; taskOcr.className = "image-extract-task";
-      taskOcr.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM7 8h10M7 11h7M7 14h10M7 17h6"/><path d="M17 15v4m-2-2h4"/></svg>`;
-      taskOcr.title = "Распознать текст на оригинале картинки локальным OCR и показать результат сверху"; taskOcr.setAttribute("aria-label", taskOcr.title);
-      taskOcr.onclick = async ev => { ev.stopPropagation();
-        const data = a.ocrData || a.b64;
-        if (!data) { showErr(new Error("Для фонового OCR нужен оригинал картинки размером до 10 МБ.")); return; }
-        try {
-          const task = await core.call("text_extract", {files:[{name:a.name,b64:data}]});
-          const current = tasks[task.id] || task;
-          if (current.status === "done" || current.status === "failed") showNativeTaskResult(current);
-          else showCap("", `Распознаю текст из «${a.name}» локально. Результат появится здесь, в верхней карточке.`);
-        } catch (err) { showErr(err); }
-      };
-      d.querySelector(".att-remove").before(taskOcr);
+      const extractMenu = document.createElement("details"); extractMenu.className = "image-extract-menu";
+      const summary = document.createElement("summary"); summary.textContent = "Извлечь"; summary.title = "Извлечь контакт или текст с картинки";
+      const options = document.createElement("div"); options.className = "image-extract-options";
+      const insertExtracted = value => { const input = $("askin"); input.value = [input.value.trimEnd(), value].filter(Boolean).join("\n\n"); input.dispatchEvent(new Event("input", {bubbles:true})); input.focus(); };
+      [["Извлечь контакт", window.extractImageContacts], ["Распознать текст", window.extractImageText]].forEach(([label, extract]) => {
+        const action = document.createElement("button"); action.type = "button"; action.textContent = label;
+        action.onclick = async ev => { ev.stopPropagation(); extractMenu.open = false; action.disabled = true;
+          try { await extract(a, insertExtracted); } catch (err) { showErr(err); } finally { action.disabled = false; }
+        }; options.append(action);
+      });
+      extractMenu.append(summary, options); d.querySelector(".att-remove").before(extractMenu);
     }
     box.appendChild(d);
   });
@@ -2476,6 +2581,23 @@ async function convertAttachment(index, target) {
     if (current.status === "done" || current.status === "failed") showNativeTaskResult(current);
     else showCap("", `Преобразую «${a.name}» → ${target.toUpperCase()}. Готовый результат появится здесь, в верхней карточке.`);
   } catch (err) { showErr(err); }
+}
+async function openAttachedFile(a, action) {
+  const file = a.sourceFile;
+  if (!file) throw new Error("Исходный файл недоступен. Прикрепите его заново.");
+  const started = await core.call("attachment_open_begin", {name:a.name, size:file.size, action});
+  try {
+    const step = started.chunk_bytes || 2 * 1024 * 1024;
+    for (let offset=0; offset<file.size; offset+=step) {
+      const chunk = file.slice(offset, Math.min(file.size, offset+step));
+      const data = await b64of(chunk);
+      await core.call("attachment_open_chunk", {upload_id:started.upload_id, b64:data});
+    }
+    return await core.call("attachment_open_finish", {upload_id:started.upload_id});
+  } catch (error) {
+    core.call("attachment_open_abort", {upload_id:started.upload_id}).catch(()=>{});
+    throw error;
+  }
 }
 async function uploadConversionFile(file, target, goal = "") {
   let upload;
@@ -2523,27 +2645,43 @@ $("att-files").onclick = () => { attMenu.classList.remove("on"); $("a-file").cli
 $("att-folder").onclick = () => { attMenu.classList.remove("on"); $("a-folder").click(); };
 $("a-file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
 $("a-folder").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
-const screenshotCards = new Map();
-function screenshotLayout() { $('card').classList.toggle('has-screenshots', screenshotCards.size > 0); requestAnimationFrame(fitCap); }
+let latestScreenshot = null, screenshotRequest = 0;
+const screenshotPanel = $('screenshot-messages');
+screenshotPanel.addEventListener('keydown', event => {
+  const menu = screenshotPanel.querySelector('.ss-text-menu[open]');
+  if (event.key !== 'Escape' || !menu) return;
+  event.preventDefault(); event.stopPropagation();
+  menu.open = false; menu.querySelector('summary').focus();
+});
+document.addEventListener('click', event => {
+  const menu = screenshotPanel.querySelector('.ss-text-menu[open]');
+  if (menu && !menu.contains(event.target)) menu.open = false;
+});
 function showScreenshotMessage(value) {
-  if (screenshotCards.has(value.id)) return;
-  const card = DewiarScreenshots.card(value, {copyText:writeClipboardText, removed:id=>{screenshotCards.delete(id);screenshotLayout();}});
-  screenshotCards.set(value.id, card); $('screenshot-messages').append(card);
-  $('screenshot-messages').scrollTop = $('screenshot-messages').scrollHeight; screenshotLayout();
+  if (latestScreenshot === value?.id && screenshotPanel.contains(document.activeElement)) return;
+  const card = value ? DewiarScreenshots.card(value, {
+    latest:true, copyText:writeClipboardText, assistantName:current?.name || 'Лира'
+  }) : null;
+  latestScreenshot = value?.id ?? null;
+  screenshotPanel.replaceChildren(...(card ? [card] : []));
+  $('card').classList.toggle('has-screenshots', !!card);
+  requestAnimationFrame(() => { fitCap(); fitAsk(); });
 }
 async function loadScreenshotMessages() {
+  const request = ++screenshotRequest;
   try {
     const rows = await core.call('screenshot_messages');
-    if (!Array.isArray(rows)) return;
-    screenshotCards.clear(); $('screenshot-messages').replaceChildren(); rows.forEach(showScreenshotMessage); screenshotLayout();
+    if (request !== screenshotRequest || !Array.isArray(rows)) return;
+    showScreenshotMessage(rows.at(-1));
   } catch (_) { /* A reconnect will retry; do not replace an in-progress reply with an error. */ }
 }
-core.on('screenshot_message', e=>showScreenshotMessage(e.screenshot))
-  .on('screenshot_removed', e=>{screenshotCards.get(e.id)?.remove();screenshotCards.delete(e.id);screenshotLayout();})
+core.on('screenshot_message', e=>{ ++screenshotRequest; showScreenshotMessage(e.screenshot); })
+  .on('screenshot_removed', e=>{
+    if (e.id === latestScreenshot) { showScreenshotMessage(null); loadScreenshotMessages(); }
+  })
   .on('hello', loadScreenshotMessages).on('chat_changed', loadScreenshotMessages);
 // The bridge can receive hello while the remaining UI scripts are still loading.
 if (core.snapshot) loadScreenshotMessages();
-new ResizeObserver(()=>requestAnimationFrame(fitCap)).observe($('screenshot-messages'));
 let quickMeetingDialog = null, quickMeetingSource = "screen", quickMeetingRegion = null, quickMeetingAppsLoaded = false;
 function quickMeetingStatus(text, error = false) {
   const status = $("qm-status"); if (!status) return;
@@ -2708,9 +2846,10 @@ function fitAsk() {
   window.DewiarLinks?.refresh(t);
   const scrollTop = t.scrollTop;
   t.style.height = "24px";
-  const available = Math.max(120, Math.min(260, Math.floor(innerHeight * .36)));
+  const hasScreenshot = $("card").classList.contains("has-screenshots");
+  const available = Math.max(24, Math.min(260, Math.floor(innerHeight * (hasScreenshot ? .16 : .36))));
   const longText = $("card").classList.contains("long") || t.value.length > 60 || t.value.includes("\n");
-  const lim = Math.min(available, longText ? 260 : 120);
+  const lim = Math.min(available, hasScreenshot && innerHeight <= 330 ? 26 : longText ? 260 : 120);
   const h = Math.min(t.scrollHeight, lim); t.style.height = Math.max(24, h) + "px";
   $("askbox").classList.toggle("has", !!t.value.trim() || atts.length > 0);
   updateDraftActions();

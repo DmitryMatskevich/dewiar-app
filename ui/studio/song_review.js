@@ -4,6 +4,7 @@
 window.SongReview = (() => {
   const drafts = new Map(), timers = new Map();
   let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null, setPitchPlayback = null;
+  let spacePlaybackHandler = null, spacePlaybackBound = false;
   const speedBySong = new Map(), pitchBySong = new Map();
   window.addEventListener('beforeunload', event => {
     if (drafts.size) { event.preventDefault(); event.returnValue = ''; }
@@ -14,6 +15,25 @@ window.SongReview = (() => {
   const notes = [['', 'Без пометки'], ['unclear', 'Неразборчиво'], ['sung_differently', 'Спето иначе'], ['vocalization', 'Вокализ'], ['sustain', 'Предполагаемый распев']];
   const parts = [['continue','Продолжение части'],['verse','Начало куплета'],['chorus','Начало припева'],['prechorus','Предприпев'],['bridge','Бридж'],['unknown','Новая часть']];
   const key = (song, phrase) => `${song}:${phrase}`;
+  async function playAudio(audio) {
+    try {
+      return await audio.play();
+    } catch (error) {
+      // Loading the selected original/karaoke track is asynchronous.  On
+      // WebKit/Chromium that can outlive the click gesture and reject an
+      // otherwise valid play() with NotAllowedError.  A muted retry is the
+      // standard autoplay recovery; unmute immediately after it starts so the
+      // user still hears the selected track.
+      if (error?.name !== 'NotAllowedError') throw error;
+      const muted = audio.muted;
+      audio.muted = true;
+      try {
+        return await audio.play();
+      } finally {
+        audio.muted = muted;
+      }
+    }
+  }
   function evidenceHtml(row) {
     const evidence = row.review_evidence || {};
     const issues = evidence.issues || [];
@@ -96,6 +116,19 @@ window.SongReview = (() => {
     let speed = speedBySong.get(row.song_id) || 1;
     let pitch = pitchBySong.has(row.song_id) ? pitchBySong.get(row.song_id) : (SongSheet.offset(row) || 0);
     pitchBySong.set(row.song_id, pitch);
+    spacePlaybackHandler = () => togglePlayback?.(true);
+    if (!spacePlaybackBound && typeof document !== 'undefined') {
+      document.addEventListener('keydown', event => {
+        if (event.code !== 'Space' || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+        const target = event.target;
+        if (target?.matches?.('input, textarea, select, [contenteditable="true"]') || target?.closest?.('button, a, [role="button"]')) return;
+        const audio = document.getElementById('song-review-audio');
+        if (!audio?.isConnected || !spacePlaybackHandler) return;
+        event.preventDefault();
+        Promise.resolve(spacePlaybackHandler()).catch(() => {});
+      }, true);
+      spacePlaybackBound = true;
+    }
     const speedSteps = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5];
     const speedText = value => `×${Number(value).toFixed(2)}`;
     function applyAudioSettings() {
@@ -220,7 +253,7 @@ window.SongReview = (() => {
           });
         };
         player.onended = null;
-        if (autoplay) await player.play();
+        if (autoplay) await playAudio(player);
         if (request === audioRequest) message('');
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
@@ -237,7 +270,10 @@ window.SongReview = (() => {
       followSheet = true;
       // Clicking the already selected transport button pauses/resumes in place.
       if (previous === next && active && wasPlaying) { player.pause(); return; }
-      return playFull(false, wasPlaying, position);
+      // A direct press on either transport button is an explicit request to
+      // start/resume playback.  The old code passed `wasPlaying` here, which
+      // meant an idle player only loaded the source and never started it.
+      return playFull(false, true, position);
     }
     full.onclick = () => switchFullVariant('original');
     if (instrumentalPlay) instrumentalPlay.onclick = () => switchFullVariant('instrumental');
@@ -246,12 +282,12 @@ window.SongReview = (() => {
       variant=variantSelect.value=value;
       return true;
     };
-    selectPlaybackVariant = value => {
+    selectPlaybackVariant = (value, follow=true) => {
       if (!setPlaybackVariant(value)) return Promise.resolve();
-      followSheet=true;
+      followSheet=follow;
       const position=player.dataset.session && !player.dataset.phraseId ? player.currentTime : null;
       const wasPlaying=!player.paused&&!player.ended;
-      return playFull(false,wasPlaying,position);
+      return playFull(false,true,position);
     };
     if (variantSelect) variantSelect.onchange = async () => {
       const wasPlaying = !player.paused && !player.ended;
@@ -365,7 +401,7 @@ window.SongReview = (() => {
         liveLoopTimer = null;
         liveLoopEnabled = true;
         liveAudio.currentTime = 0;
-        await liveAudio.play().catch(()=>{});
+        await playAudio(liveAudio).catch(()=>{});
         if (liveStatus) liveStatus.textContent='Фраза воспроизводится по кругу…';
         return;
       }
@@ -401,12 +437,12 @@ window.SongReview = (() => {
             liveLoopTimer=null;
             if (!liveLoopEnabled || request !== audioRequest || !liveAudio.isConnected) return;
             liveAudio.currentTime=0;
-            try { await liveAudio.play(); }
+            try { await playAudio(liveAudio); }
             catch(error) { liveLoopEnabled=false; if (liveStatus) liveStatus.textContent=error.message||'Не удалось повторить фразу'; sync(); }
           },1000);
         };
         liveAudio.onpause=()=>sync();
-        await liveAudio.play();
+        await playAudio(liveAudio);
         if (liveStatus) liveStatus.textContent='Фраза воспроизводится…';
       } catch(error) {
         if(request===audioRequest && liveStatus) liveStatus.textContent=error.message||'Не удалось воспроизвести фразу';
@@ -783,7 +819,7 @@ window.SongReview = (() => {
             player.dataset.idle = '1';
             sync();
           };
-          await player.play();
+          await playAudio(player);
           playStatus.textContent = 'Фраза с небольшим контекстом';
         } catch (error) { playStatus.textContent = error.message || 'Не удалось воспроизвести'; }
         finally { button.disabled = false; if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
@@ -795,5 +831,5 @@ window.SongReview = (() => {
     const status=state==='ready' ? `Минусовка готова${row.karaoke.quality_status==='acceptable'?' и проверена на слух':row.karaoke.quality_status==='defects'?' · есть замечания':' · ожидает оценки качества'}` : state==='failed' ? `Ошибка подготовки: ${row.karaoke.error||'см. состояние этапа'}` : busy ? 'Идёт отдельный этап подготовки минусовки…' : 'Минусовка ещё не подготовлена';
     return `<section class="song-instrumental-stage" aria-label="Воспроизведение и минусовка"><h3>Воспроизведение</h3><div class="song-player"><audio id="song-review-audio" controls preload="none" aria-label="Прослушивание песни"></audio><div class="song-player-actions"><label>Дорожка <select id="song-play-variant"><option value="original">Оригинал</option><option value="instrumental" ${state==='ready'?'':'disabled'}>Минусовка</option></select></label><button class="btn small" id="song-play-full">Слушать всю песню</button><label><input id="song-review-loop" type="checkbox"> Повторять фрагмент</label></div><span id="song-play-status" role="status">${esc(status)}</span></div></section>`;
   }
-  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:value=>selectPlaybackVariant?.(value), setVariant:value=>setPlaybackVariant?.(value), setPitch:(songId,value)=>setPitchPlayback?.(songId,value)};
+  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:(value,follow=true)=>selectPlaybackVariant?.(value,follow), setVariant:value=>setPlaybackVariant?.(value), setPitch:(songId,value)=>setPitchPlayback?.(songId,value)};
 })();

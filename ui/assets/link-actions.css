@@ -5,12 +5,21 @@
 .link-actions .la-close{border:0;font-size:22px;padding:0 6px;background:none}
 .la-source{font-size:.8em;opacity:.7;overflow-wrap:anywhere;margin:5px 0 9px}
 .la-buttons{display:flex;flex-wrap:wrap;gap:6px}.link-actions .la-mode{border:0;font-size:.8em;opacity:.75}
+.link-actions .la-menu{position:relative;display:inline-block}
+.link-actions .la-menu-toggle{cursor:pointer}
+.link-actions .la-menu-toggle:hover,.link-actions .la-menu-toggle[aria-expanded=true]{background:#ffffff38}
+.link-actions .la-menu-toggle.icon{display:grid;place-items:center;width:34px;height:34px;padding:5px}
+.link-actions .la-menu-toggle svg{width:21px;height:21px;overflow:visible}
+.link-actions .la-menu-options{position:fixed;z-index:5;display:grid;width:min(240px, calc(100vw - 12px));overflow:auto;padding:6px;border:1px solid #8193b15e;border-radius:15px;background:var(--skin-bg,#171a25);box-shadow:0 15px 35px #0006}
+.link-actions .la-menu-options button{display:block;width:100%;min-height:38px;border:0;background:transparent;text-align:left}
+.link-actions .la-menu-options button:hover{background:#ffffff20}
+.link-actions .la-menu-options[hidden]{display:none}
 .la-status{font-size:.8em;overflow-wrap:anywhere;margin-top:6px}.la-status:empty{display:none}
 .link-draft-actions:empty,#link-messages:empty{display:none}#link-messages{max-height:34vh;overflow:auto;padding:0 12px;flex-shrink:1}
 .link-draft-actions{max-height:32vh;overflow:auto}
+#card.has-screenshots .link-draft-actions{max-height:min(90px, 16vh)}
 #card.has-links #orb,#card.has-link-draft #orb{width:calc(84px * var(--ok,1));height:calc(84px * var(--ok,1))}
 #card.has-links #mid{overflow-y:auto;scrollbar-width:thin}
 #card.has-links #mid>*{flex-shrink:0}
 #card.has-links #link-messages{flex:0 0 auto;max-height:none;overflow:visible}
-#card.has-links #ask{position:sticky;bottom:0;z-index:2;background:var(--skin-bg,#0a0a0f);border-radius:18px}
 #card.has-link-draft #link-messages{display:none}

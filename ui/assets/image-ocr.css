@@ -16,6 +16,14 @@ body.light .image-ocr-panel { background:#f1f5fa; color:#192b40; }
 body.light .image-ocr-panel textarea { background:white; }
 body.light .image-ocr-panel #image-ocr-error { color:#9b1a29; }
 .att,.ch-chip { flex-wrap:wrap; }
+.image-extract-menu { position:relative; flex:none; font:inherit; }
+.image-extract-menu summary { list-style:none; cursor:pointer; padding:6px 8px; border-radius:8px; color:inherit; }
+.image-extract-menu summary::-webkit-details-marker { display:none; }
+.image-extract-menu summary:hover,.image-extract-menu[open] summary { background:rgba(128,140,180,.18); }
+.image-extract-options { position:absolute; z-index:20; right:0; top:calc(100% + 4px); display:grid; min-width:155px; padding:5px; border:1px solid var(--line,rgba(128,140,180,.35)); border-radius:10px; background:var(--panel,#202838); box-shadow:0 8px 24px #0004; }
+.image-extract-options button { border:0; padding:8px 10px; border-radius:6px; background:transparent; color:inherit; text-align:left; font:inherit; cursor:pointer; }
+.image-extract-options button:hover { background:rgba(128,140,180,.2); }
+.image-extract-options button:disabled { opacity:.55; }
 .att button.image-ocr-action,.ch-chip button.image-ocr-action { display:grid; place-items:center; width:28px; height:28px; padding:3px; border:0; border-radius:50%; color:inherit; background:transparent; flex:none; font-size:0; }
 .att button.image-ocr-action:hover,.ch-chip button.image-ocr-action:hover { color:var(--ink); background:rgba(255,255,255,.1); }
 .att button.image-ocr-action svg,.ch-chip button.image-ocr-action svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }

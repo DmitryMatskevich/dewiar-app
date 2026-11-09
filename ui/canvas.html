@@ -2,6 +2,17 @@
 <header><strong>Холст и схемы</strong><select id="documents" aria-label="Сохранённые холсты"><option value="">Выберите холст</option></select><button id="canvas-chat-toggle" aria-expanded="true" aria-controls="canvas-assistant">Чат холста</button><button id="new">Новый холст</button><input id="title" aria-label="Название холста" maxlength="120" placeholder="Название"></header>
 <nav id="actions" aria-label="Действия с холстом"><button id="images">Добавить картинки</button><button id="paste-image">Вставить картинку</button><button id="import">Открыть .excalidraw</button><button id="mermaid">Схема Mermaid</button><button id="instruction" title="Красные линии одной толщины и ровные фигуры">Стиль «Инструкция»</button><button id="number">Следующий номер</button><select id="annotations" hidden aria-label="Изменить пометки исходного снимка"><option value="">Пометки исходного снимка…</option></select></nav>
 <nav id="outputs"><button id="copy">Скопировать PNG</button><button id="save-as">Сохранить PNG</button><button id="document" title="Редактируемая сцена с исходными картинками; для передачи готового изображения используйте PNG">Исходник .excalidraw</button><button id="note">В заметки</button><button id="task">В задачу…</button></nav>
+<details id="canvas-palette"><summary>Цвет и палитры</summary>
+<div id="palette-controls">
+<label>Набор <select id="palette-set"></select></label><label>Применить к <select id="palette-target"><option value="stroke">Линия и текст</option><option value="fill">Заливка фигуры</option></select></label>
+<div id="palette-swatches" role="group" aria-label="Цвета палитры"></div>
+<label>Спектр <input id="palette-picker" type="color" value="#1e1e1e"></label>
+<div id="palette-rgb" role="group" aria-label="RGB">
+<label>R <input id="palette-r" aria-label="Красный (R)" type="number" min="0" max="255" value="30"></label>
+<label>G <input id="palette-g" aria-label="Зелёный (G)" type="number" min="0" max="255" value="30"></label>
+<label>B <input id="palette-b" aria-label="Синий (B)" type="number" min="0" max="255" value="30"></label>
+</div><label>HEX <input id="palette-hex" maxlength="7" size="8" value="#1e1e1e" spellcheck="false"></label><button id="palette-apply" type="button">Применить цвет</button>
+</div></details>
 <div id="canvas-workspace"><main id="canvas-root"><p>Вставьте картинку (⌘V / Ctrl+V), перетащите её сюда или нажмите «Добавить картинки». Холст создастся автоматически. Можно также выбрать сохранённый холст.</p></main><aside id="canvas-assistant" aria-label="Чат управления холстом">
 <div class="canvas-chat-heading"><strong>Чат холста</strong><span>Команды и ИИ</span></div>
 <button id="canvas-model-settings" type="button" hidden>Проверить модели Художника</button>

@@ -146,6 +146,7 @@ class Store:
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS sites(id TEXT PRIMARY KEY, rev INTEGER NOT NULL, created INTEGER NOT NULL, due INTEGER NOT NULL, config TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS current(site TEXT NOT NULL, probe TEXT NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, until_min INTEGER NOT NULL, reason TEXT NOT NULL, detail TEXT NOT NULL, latency INTEGER, failures INTEGER NOT NULL, successes INTEGER NOT NULL, PRIMARY KEY(site,probe));
+            CREATE TABLE IF NOT EXISTS port_diagnostics(site TEXT NOT NULL, probe TEXT NOT NULL CHECK(probe IN ('ssh','ftp')), state TEXT NOT NULL, at INTEGER NOT NULL, until_min INTEGER NOT NULL, reason TEXT NOT NULL, detail TEXT NOT NULL, latency INTEGER, PRIMARY KEY(site,probe));
             CREATE TABLE IF NOT EXISTS spans(id INTEGER PRIMARY KEY, site TEXT NOT NULL, probe TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL CHECK(end>=start), state TEXT NOT NULL, rev INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS span_lookup ON spans(site,probe,start);
             CREATE TABLE IF NOT EXISTS incidents(id TEXT PRIMARY KEY, site TEXT NOT NULL, probe TEXT NOT NULL, start INTEGER NOT NULL, confirmed INTEGER NOT NULL, recovered INTEGER, closed INTEGER, reason TEXT NOT NULL);
@@ -158,6 +159,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS renewal_alerts(site TEXT NOT NULL, kind TEXT NOT NULL, deadline TEXT NOT NULL, threshold INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY(site,kind,deadline,threshold));
             CREATE TABLE IF NOT EXISTS server_assets(id TEXT PRIMARY KEY, name TEXT NOT NULL, address TEXT NOT NULL UNIQUE, provider TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, rev INTEGER NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL, config TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS provider_diagnostics(provider TEXT PRIMARY KEY, rev INTEGER NOT NULL, state TEXT NOT NULL, at INTEGER NOT NULL, until_min INTEGER NOT NULL, reason TEXT NOT NULL, detail TEXT NOT NULL, latency INTEGER);
             CREATE TABLE IF NOT EXISTS provider_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
             PRAGMA user_version=1;
             ''')
@@ -174,8 +176,8 @@ class Store:
                 {'type':'phone','label':'Россия, бесплатно','value':'8 (800) 700-06-08'}, {'type':'phone','label':'Москва','value':'+7 (495) 721-80-88'}, {'type':'phone','label':'Санкт-Петербург','value':'+7 (812) 385-41-36'}, {'type':'email','label':'Техническая поддержка','value':'support@beget.com'}, {'type':'ticket','label':'Тикет в панели','value':'Открыть поддержку','url':'https://cp.beget.com/support'}, {'type':'telegram','label':'Telegram-бот техподдержки','value':'@begetbot','url':'https://t.me/begetbot'}, {'type':'news','label':'Официальный новостной канал Beget','value':'@beget_official','url':'https://t.me/beget_official'}, {'type':'status','label':'Telegram-бот статуса Beget (ссылка указана пользователем)','value':'@BegetStatus_Bot','url':'https://t.me/BegetStatus_Bot'}, {'type':'feedback','label':'Отзывы о работе сотрудников / жалоба на оператора','value':'feedback@beget.com'}, {'type':'abuse','label':'Обработка жалоб на нарушения (abuse)','value':'abuse@beget.com'}, {'type':'complaint','label':'Претензии по услугам (e-mail для дублирования письменной претензии)','value':'abuse@beget.com'}]},
             {'id':'firstvds','name':'FirstVDS','website_url':'https://firstvds.ru','panel_url':'https://my.firstvds.ru','panel_name':'Личный кабинет FirstVDS · VMmanager','source_url':'https://firstvds.ru/company/contacts','contacts':[
                 {'type':'phone','label':'Россия, круглосуточно','value':'8 800 775-38-37'}, {'type':'phone','label':'Международный','value':'+7 495 663-73-72'}, {'type':'ticket','label':'Поддержка в личном кабинете','value':'Войти в кабинет','url':'https://my.firstvds.ru'}, {'type':'chat','label':'Онлайн-чат','value':'FirstVDS','url':'https://firstvds.ru'}]},
-            {'id':'timeweb-cloud','name':'Timeweb Cloud','website_url':'https://timeweb.cloud','panel_url':'https://timeweb.cloud/my','panel_name':'Панель управления Timeweb Cloud','source_url':'https://timeweb.cloud/docs/account-management/contact-support','contacts':[
-                {'type':'phone','label':'Россия, ежедневно 08:00–20:00 МСК','value':'8 800 700-32-92'}, {'type':'phone','label':'Санкт-Петербург, ежедневно 08:00–20:00 МСК','value':'8 812 470-71-92'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'info@timeweb.cloud'}, {'type':'ticket','label':'Тикет в панели, круглосуточно','value':'Поддержка → Центр поддержки','url':'https://timeweb.cloud/my'}, {'type':'chat','label':'Онлайн-чат, круглосуточно','value':'Чат Timeweb Cloud','url':'https://timeweb.cloud'}, {'type':'telegram','label':'Telegram сообщества','value':'@twcloud_chat','url':'https://t.me/twcloud_chat'}]},
+            {'id':'timeweb-cloud','name':'Timeweb Cloud','website_url':'https://timeweb.cloud','panel_url':'https://timeweb.cloud/my/login','panel_name':'Панель управления Timeweb Cloud','source_url':'https://timeweb.cloud/docs/account-management/contact-support','contacts':[
+                {'type':'phone','label':'Россия, ежедневно 08:00–20:00 МСК','value':'8 800 700-32-92'}, {'type':'phone','label':'Санкт-Петербург, ежедневно 08:00–20:00 МСК','value':'8 812 470-71-92'}, {'type':'email','label':'Техническая поддержка, круглосуточно','value':'info@timeweb.cloud'}, {'type':'ticket','label':'Тикет в панели, круглосуточно','value':'Поддержка → Центр поддержки','url':'https://timeweb.cloud/my/login'}, {'type':'chat','label':'Онлайн-чат, круглосуточно','value':'Чат Timeweb Cloud','url':'https://timeweb.cloud'}, {'type':'telegram','label':'Telegram сообщества','value':'@twcloud_chat','url':'https://t.me/twcloud_chat'}]},
             {'id':'timeweb','name':'Timeweb','website_url':'https://timeweb.com','panel_url':'https://hosting.timeweb.ru','panel_name':'Панель управления хостингом Timeweb','source_url':'https://timeweb.com/ru/contacts/','contacts':[
                 {'type':'phone','label':'Россия','value':'8 (800) 700-10-81'}, {'type':'email','label':'Поддержка клиентов','value':'info@timeweb.ru'}, {'type':'ticket','label':'Тикеты в панели','value':'Поддержка → Написать в поддержку','url':'https://hosting.timeweb.ru'}, {'type':'chat','label':'Онлайн-чат','value':'Чат Timeweb','url':'https://timeweb.com'}]}
             ,{'id':'sweb','name':'Sweb','website_url':'https://sweb.ru','panel_url':'https://mcp.sweb.ru/main/auth/','panel_name':'Панель управления SpaceWeb','source_url':'https://sweb.ru/contactinfo/','contacts':[
@@ -214,6 +216,27 @@ class Store:
                         c.execute('UPDATE providers SET rev=?,updated=?,config=? WHERE id=?',
                                   (old['rev'] + 1, now, json.dumps(current, ensure_ascii=False), old['id']))
                 c.execute("INSERT INTO provider_meta VALUES ('contact_categories_v2','1')")
+            # Correct the previously seeded Timeweb Cloud login address while
+            # preserving any panel URL the user has already customized.
+            panel_migration = c.execute("SELECT value FROM provider_meta WHERE key='timeweb_cloud_login_panel_v1'").fetchone()
+            if not panel_migration:
+                provider_id = resolved_ids.get('timeweb-cloud', 'timeweb-cloud')
+                row = c.execute('SELECT * FROM providers WHERE id=?', (provider_id,)).fetchone()
+                if row:
+                    current = json.loads(row['config'])
+                    changed = False
+                    if current.get('panel_url') == 'https://timeweb.cloud/my':
+                        current['panel_url'] = 'https://timeweb.cloud/my/login'
+                        changed = True
+                    for contact in current.get('contacts', []):
+                        if contact.get('url') == 'https://timeweb.cloud/my':
+                            contact['url'] = 'https://timeweb.cloud/my/login'
+                            changed = True
+                    if changed:
+                        c.execute('UPDATE providers SET rev=?,updated=?,config=? WHERE id=?',
+                                  (row['rev']+1, now, json.dumps(current, ensure_ascii=False), provider_id))
+                        c.execute('DELETE FROM provider_diagnostics WHERE provider=?', (provider_id,))
+                c.execute("INSERT INTO provider_meta VALUES ('timeweb_cloud_login_panel_v1','1')")
             # Link earlier free-text entries to their matching directory records.
             provider_ids = {json.loads(r['config'])['name'].strip().casefold():r['id'] for r in c.execute('SELECT id,config FROM providers').fetchall()}
             aliases = {'beget':provider_ids.get('beget','beget'), 'firstvds':provider_ids.get('firstvds','firstvds'), 'timeweb':provider_ids.get('timeweb','timeweb'), 'timeweb cloud':provider_ids.get('timeweb cloud','timeweb-cloud'), 'nic.ru':provider_ids.get('nic.ru','nic-ru'), 'nic.ru / ru-center':provider_ids.get('nic.ru','nic-ru'), 'ru-center':provider_ids.get('nic.ru','nic-ru')}
@@ -306,7 +329,12 @@ class Store:
 
     def providers(self):
         with self.db() as c:
-            return [dict(json.loads(r['config']), id=r['id'], rev=r['rev'], created=r['created'], updated=r['updated']) for r in c.execute('SELECT * FROM providers ORDER BY created,id')]
+            items = [dict(json.loads(r['config']), id=r['id'], rev=r['rev'], created=r['created'], updated=r['updated']) for r in c.execute('SELECT * FROM providers ORDER BY created,id')]
+            diagnostics = {r['provider']:dict(r) for r in c.execute('SELECT * FROM provider_diagnostics')}
+            for item in items:
+                result = diagnostics.get(item['id'])
+                item['panel_check'] = result if result and result['rev'] == item['rev'] else None
+            return items
 
     def provider(self, provider_id):
         return next((x for x in self.providers() if x['id'] == provider_id), None)
@@ -326,11 +354,25 @@ class Store:
                 raise ValueError('Провайдер с таким названием уже есть')
             rev = old['rev'] + 1 if old else 1
             if old:
+                previous = json.loads(old['config'])
                 c.execute('UPDATE providers SET rev=?,updated=?,config=? WHERE id=?', (rev, now, json.dumps(cfg, ensure_ascii=False), pid))
+                if previous.get('panel_url') != cfg.get('panel_url'):
+                    c.execute('DELETE FROM provider_diagnostics WHERE provider=?', (pid,))
             else:
                 c.execute('INSERT INTO providers VALUES (?,?,?,?,?)', (pid, rev, now, now, json.dumps(cfg, ensure_ascii=False)))
             c.execute('INSERT INTO audit(at,action) VALUES (?,?)', (now, 'provider_saved'))
         return self.provider(pid)
+
+    def save_provider_diagnostic(self, provider_id, result, now=None, ttl=15, rev=None):
+        now = minute() if now is None else now
+        with self.db() as c:
+            row = c.execute('SELECT rev FROM providers WHERE id=?', (provider_id,)).fetchone()
+            if not row or (rev is not None and row['rev'] != rev):
+                return
+            c.execute('INSERT OR REPLACE INTO provider_diagnostics VALUES (?,?,?,?,?,?,?,?)',
+                      (provider_id, row['rev'], result['state'], now, now+ttl,
+                       result.get('reason',''), json.dumps(result.get('detail',{}),ensure_ascii=False)[:1024],
+                       result.get('latency')))
 
     def get(self, sid):
         return next((s for s in self.all() if s['id'] == sid), None)
@@ -367,7 +409,32 @@ class Store:
 
     def results(self, sid):
         with self.db() as c:
-            return [dict(r) for r in c.execute('SELECT * FROM current WHERE site=? ORDER BY probe', (sid,))]
+            current = [dict(r) for r in c.execute('SELECT * FROM current WHERE site=? ORDER BY probe', (sid,))]
+            diagnostics = [dict(r) | {'diagnostic': True, 'failures': 0, 'successes': 0} for r in
+                           c.execute('SELECT * FROM port_diagnostics WHERE site=?', (sid,))]
+            by_probe = {r['probe']: r for r in current}
+            for result in diagnostics:
+                old = by_probe.get(result['probe'])
+                # Scheduled checks remain authoritative when newer; diagnostic results
+                # fill in unconfigured services and refresh stale scheduled results.
+                if old is None or result['at'] > old['at']:
+                    by_probe[result['probe']] = result
+            return sorted(by_probe.values(), key=lambda r: r['probe'])
+
+    def save_port_diagnostics(self, sid, results, now=None, ttl=15, rev=None):
+        now = minute() if now is None else now
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row = c.execute('SELECT rev FROM sites WHERE id=?', (sid,)).fetchone()
+            if not row or (rev is not None and row['rev'] != rev):
+                return
+            for result in results:
+                if result.get('probe') not in ('ssh', 'ftp'):
+                    continue
+                c.execute('INSERT OR REPLACE INTO port_diagnostics VALUES (?,?,?,?,?,?,?,?)',
+                          (sid, result['probe'], result['state'], now, now + ttl,
+                           result.get('reason', ''), json.dumps(result.get('detail', {}), ensure_ascii=False)[:1024],
+                           result.get('latency')))
 
     def ingest(self, site, results, run_id, now=None):
         now = minute() if now is None else now

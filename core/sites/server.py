@@ -93,7 +93,7 @@ class App:
                 if site['state'] in ('DOWN','PENDING'):
                     reasons.append('Сайт '+('недоступен' if site['state']=='DOWN' else 'перепроверяется'))
                 for result in site['results']:
-                    if result['state']=='DOWN' and result['until_min']>now:
+                    if not result.get('diagnostic') and result['state']=='DOWN' and result['until_min']>now:
                         reasons.append('Сбой '+str(result['probe']))
                 for key,label in (('hosting_expires_in_days','Оплата хостинга'),('domain_expires_in_days','Оплата домена')):
                     days=site.get(key)
@@ -130,6 +130,8 @@ class App:
             if not site:
                 raise ValueError('Сайт не найден')
             return {'job_id': self.runtime.submit(site, True)}
+        if path == '/api/scan-ports':
+            return self.runtime.scan_ports()
         if path == '/api/settings':
             return {'settings': self.store.save_settings(data)}
         if path == '/api/reveal':
@@ -277,6 +279,7 @@ def main():
     finally:
         app.runtime.stop.set()
         app.runtime.pool.shutdown(wait=True, cancel_futures=True)
+        app.runtime.port_pool.shutdown(wait=True, cancel_futures=True)
         server.server_close()
         lock.close()
 

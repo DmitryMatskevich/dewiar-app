@@ -261,7 +261,7 @@
     <div class="cl-chat ch-chat" id="ch-box">
       <div class="ch-search"><label for="ch-search">Поиск по переписке</label><input id="ch-search" type="search" placeholder="Слово или фраза…"><button class="btn small" id="ch-search-clear">Сбросить</button></div>
       <div class="ch-search"><label for="ch-scope">Показать</label><select id="ch-scope"><option value="active">Переписка</option><option value="archive">Архив</option></select><label for="ch-thread">Беседа</label><select id="ch-thread"></select><button class="btn small" id="ch-new">Новый чат</button></div>
-      <div class="ch-bar"><span class="hint" id="ch-res" role="status" style="margin:0;flex:1"></span><button class="btn small" id="ch-archive" data-chat-action="archive">В архив</button><button class="btn small" id="ch-restore" data-chat-action="restore" hidden>Восстановить</button><button class="btn small danger" id="ch-clear" data-chat-action="delete">Удалить чат</button></div>
+      <div class="ch-bar"><span class="hint" id="ch-res" role="status" style="margin:0;flex:1"></span><details class="ch-manage" id="ch-manage"><summary class="btn small" aria-haspopup="menu" aria-label="Управление беседой">⋯ Управление</summary><div class="ch-manage-options" role="menu"><button class="btn small" id="ch-archive" data-chat-action="archive" role="menuitem">Перенести в архив</button><button class="btn small" id="ch-restore" data-chat-action="restore" role="menuitem" hidden>Восстановить беседу</button><button class="btn small danger" id="ch-clear" data-chat-action="delete" role="menuitem">Удалить беседу</button></div></details></div>
       <div class="cl-empty" id="ch-empty"><b>Здесь будет ваша переписка</b><span>Скажите «Лира, …» или напишите ниже — разговор появится в ленте.</span></div>
       <div class="cl-msgs" id="ch-msgs"></div>
       <div class="ch-atts" id="ch-atts"></div>
@@ -926,11 +926,11 @@
       <button id="ct-import" class="btn primary" disabled>Импортировать выбранные (0)</button>
     </div>
     <h2>Карточки Dewiar</h2><p id="ct-count" class="hint"></p>
-    <div class="actions"><button id="ct-new" class="btn primary">Создать контакт</button><input id="ct-local-search" type="search" placeholder="Поиск в Dewiar…" aria-label="Найти локальный контакт"></div>
+    <div class="actions"><button id="ct-new" class="btn primary">Создать контакт</button><label class="btn">Добавить из файла .vcf<input id="ct-vcf-file" type="file" accept=".vcf,text/vcard" hidden></label><input id="ct-local-search" type="search" placeholder="Поиск в Dewiar…" aria-label="Найти локальный контакт"></div>
     <form id="ct-form" hidden><h2 id="ct-form-title">Новая карточка</h2><div class="row">
       <label class="f">Фамилия<input data-ct="family_name" maxlength="300"></label><label class="f">Имя<input data-ct="given_name" maxlength="300"></label><label class="f">Отчество<input data-ct="middle_name" maxlength="300"></label>
       <label class="f">Организация<input data-ct="organization" maxlength="300"></label><label class="f">Дата рождения (необязательно)<input data-ct="birthday" type="date"></label>
-      <label class="f">Телефоны, по одному в строке<textarea data-ct="phones"></textarea></label><label class="f">Почта, по одному адресу в строке<textarea data-ct="emails"></textarea></label>
+      <label class="f">Телефоны, по одному в строке<textarea data-ct="phones"></textarea></label><label class="f">Почта, по одному адресу в строке<textarea data-ct="emails"></textarea></label><label class="f">Сайты, по одному адресу в строке<textarea data-ct="websites"></textarea></label>
       <label class="f">Telegram (имя пользователя или ссылка)<input data-ct="telegram" placeholder="@username или t.me/username"></label><label class="f">WhatsApp (номер телефона)<input data-ct="whatsapp" placeholder="+7 900 123-45-67"></label>
     </div><label class="f"><span><input id="ct-to-mac" type="checkbox" checked> Сохранить также в Контактах macOS</span><span class="hint">По умолчанию новая карточка создаётся в обоих приложениях. Системная адресная книга может синхронизировать её через ваши учётные записи.</span></label>
       <div class="actions"><button class="btn primary" type="submit">Проверить и создать</button><button id="ct-form-cancel" class="btn" type="button">Отмена</button></div>
@@ -2022,6 +2022,7 @@
 <script src="assets/dewiar.js"></script>
 <script src="assets/calendar-badge.js"></script>
 <script src="assets/dialog.js"></script>
+<script src="assets/contact-create.js"></script>
 <script src="assets/qrcode.js"></script>
 <script src="assets/help.js"></script>
 <script src="assets/help-current.js"></script>

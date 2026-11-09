@@ -20,7 +20,8 @@ class LinksTest(unittest.TestCase):
         task=SimpleNamespace(public=lambda:dict(id='task123',status='running'))
         return SimpleNamespace(toolbox=SimpleNamespace(policy=Mock(return_value=policy)),
             tasks=SimpleNamespace(create=Mock(return_value=task),create_transcription=Mock(return_value=task),
-                                  create_link_download=Mock(return_value=task)),_say_quick=Mock())
+                                  create_link_download=Mock(return_value=task),
+                                  create_webpage_extraction=Mock(return_value=task)),_say_quick=Mock())
 
     def test_description_is_local_and_plain_links_only(self):
         self.assertEqual(links.urls_only('https://example.org/\nhttps://example.org/'),['https://example.org/'])
@@ -39,10 +40,15 @@ class LinksTest(unittest.TestCase):
             title,goal=e.tasks.create.call_args.args
             self.assertIn(url,goal)
             self.assertIn('seo-web-audit' if action.startswith('seo-') else 'link-text',goal)
-        links.start(e,dict(urls=['https://youtu.be/fixture'],action='text'))
+        self.assertEqual([x['id'] for x in links.describe(['https://example.org'])['actions'][:3]],['text','html','contacts'])
+        links.start(e,dict(urls=[url],action='html'))
+        e.tasks.create_webpage_extraction.assert_called_once_with([url],'html')
+        links.start(e,dict(urls=[url],action='contacts'))
+        e.tasks.create_webpage_extraction.assert_called_with([url],'contacts')
+        links.start(e,dict(urls=['https://youtu.be/fixture'],action='transcribe'))
         e.tasks.create_transcription.assert_called_once()
-        links.start(e,dict(urls=['https://youtu.be/fixture'],action='audio'))
-        e.tasks.create_link_download.assert_called_once_with(['https://youtu.be/fixture'],'audio')
+        links.start(e,dict(urls=['https://example.org/audio.mp3'],action='audio'))
+        e.tasks.create_link_download.assert_called_once_with(['https://example.org/audio.mp3'],'audio')
         # Unknown video host can be explicitly identified by the user.
         links.start(e,dict(urls=[url],action='video',media=True))
         with self.assertRaises(ValueError):links.start(e,dict(urls=[url],action='audio'))

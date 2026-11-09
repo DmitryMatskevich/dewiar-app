@@ -21,7 +21,7 @@ class MacContacts:
         if not permission()['granted']:raise PermissionError('Разрешите Dewiar доступ к Контактам macOS в системных настройках.')
         import Contacts as C
         keys=[C.CNContactIdentifierKey,C.CNContactGivenNameKey,C.CNContactMiddleNameKey,C.CNContactFamilyNameKey,
-              C.CNContactOrganizationNameKey,C.CNContactPhoneNumbersKey,C.CNContactEmailAddressesKey,C.CNContactBirthdayKey]
+              C.CNContactOrganizationNameKey,C.CNContactPhoneNumbersKey,C.CNContactEmailAddressesKey,C.CNContactUrlAddressesKey,C.CNContactBirthdayKey]
         request=C.CNContactFetchRequest.alloc().initWithKeysToFetch_(keys)
         request.setUnifyResults_(True)
         if identifiers is not None:request.setPredicate_(C.CNContact.predicateForContactsWithIdentifiers_(identifiers))
@@ -41,7 +41,8 @@ class MacContacts:
                          'middle_name':str(contact.middleName() or ''),'family_name':str(contact.familyName() or ''),
                          'organization':str(contact.organizationName() or ''),
                          'phones':[str(x.value().stringValue()) for x in contact.phoneNumbers()],
-                         'emails':[str(x.value()) for x in contact.emailAddresses()],'birthday':birthday})
+                         'emails':[str(x.value()) for x in contact.emailAddresses()],
+                         'websites':[str(x.value()) for x in contact.urlAddresses()],'birthday':birthday})
         result,error=C.CNContactStore.alloc().init().enumerateContactsWithFetchRequest_error_usingBlock_(request,None,receive)
         if not result:raise ValueError('Не удалось прочитать Контакты macOS. Проверьте разрешение и повторите.')
         if overflow:raise ValueError('Доступно больше 20 000 карточек. Импорт остановлен, данные не изменены.')
@@ -66,6 +67,8 @@ def build_contact(row):
     contact.setOrganizationName_(row['organization'])
     contact.setPhoneNumbers_([C.CNLabeledValue.labeledValueWithLabel_value_(C.CNLabelPhoneNumberMain,C.CNPhoneNumber.phoneNumberWithStringValue_(x)) for x in row['phones']])
     contact.setEmailAddresses_([C.CNLabeledValue.labeledValueWithLabel_value_(C.CNLabelHome,x) for x in row['emails']])
+    if row.get('websites'):
+        contact.setUrlAddresses_([C.CNLabeledValue.labeledValueWithLabel_value_(C.CNLabelURLAddressHome,x) for x in row['websites']])
     if row.get('birthday'):
         from Foundation import NSDateComponents
         b=row['birthday'];date=NSDateComponents.alloc().init();date.setMonth_(b['month']);date.setDay_(b['day'])

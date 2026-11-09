@@ -229,6 +229,7 @@ async function openFile(path) {
     // при быстром А → Б → А старый ответ А иначе перекрыл бы новый)
     if (req !== fReq || fCur !== path) return;
     const name = path.split("/").pop(), kind = fkind(name), url = fileUrl(path);
+    const inPreview = /^Mac/.test(navigator.platform) && /\.pdf$/i.test(name);
     const when = new Date(f.mtime * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
     const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " МБ" : f.size > 1024 ? Math.round(f.size / 1024) + " КБ" : (f.size || 0) + " Б";
     const code = () => `<pre class="code">${escH(kind === "json" ? prettyJson(f.text || "") : f.text || "")}</pre>`;
@@ -246,7 +247,7 @@ async function openFile(path) {
     };
     const media = ["img", "audio", "video"].includes(kind), canCode = !f.binary && ["page", "svg", "table", "md"].includes(kind);
     const canEdit = !f.binary && editableFile(name) && !f.truncated;
-    const body = f.binary && !media ? `<div class="fempty">Этот файл открывается в своей программе — нажмите «Открыть».</div>` : views[kind]();
+    const body = f.binary && !media ? `<div class="fempty">Этот файл открывается в своей программе — нажмите «${inPreview ? "Открыть в Просмотре" : "Открыть"}».</div>` : views[kind]();
     const page = kind === "page", printable = page || /\.(md|txt)$/i.test(name);
     // «Удалить» нет у файлов, которые ядро ведёт само (README, «Обо мне», «Напоминания»), и у результатов задач
     fEdit = canEdit ? { path, original: f.text || "", text: f.text || "", mode: "view", textarea: null } : null;
@@ -254,14 +255,14 @@ async function openFile(path) {
       <div class="fbtns">${canEdit ? '<div class="seg" id="f-mode"><button class="on" data-m="view">Вид</button><button data-m="code">Код</button></div>' : canCode ? `<div class="seg" id="f-mode"><button class="on" data-m="view">${page ? "Страница" : "Вид"}</button><button data-m="code">Код</button></div>` : ""}
       ${canEdit ? '<span class="f-edit-state" id="f-edit-state">Изменения сохранены</span><button class="btn small primary" id="f-save" title="Записать изменения в текущий файл рабочей папки. До сохранения исходный файл не меняется." hidden disabled>Сохранить</button><button class="btn small" id="f-save-as" title="Сохранить копию текущего текста в любую папку через системный диалог macOS. Исходный файл останется на месте." hidden disabled>Сохранить как</button>' : ""}
       ${["page", "img", "svg", "video"].includes(kind) ? '<button class="btn small" id="f-full" title="На весь экран">⛶</button>' : ""}
-      <button class="btn small" id="f-app">Открыть</button>${["README.md", "Память/Обо мне.md", "Напоминания.md"].includes(path) || path.startsWith("Задачи/") ? "" : '<button class="btn small" id="f-del" title="В корзину">Удалить</button>'}<button class="btn small primary" id="f-dl">${page ? "Скачать HTML" : "Скачать"}</button>
+      <button class="btn small" id="f-app">${inPreview ? "Открыть в Просмотре" : "Открыть"}</button>${["README.md", "Память/Обо мне.md", "Напоминания.md"].includes(path) || path.startsWith("Задачи/") ? "" : '<button class="btn small" id="f-del" title="В корзину">Удалить</button>'}<button class="btn small primary" id="f-dl">${page ? "Скачать HTML" : "Скачать"}</button>
       ${printable ? '<button class="btn small primary" id="f-pdf">PDF</button>' : ""}</div></div><div id="f-body">${body}</div>`;
     $("#f-view .fhead b").textContent = name;
     // файл встречи — полоса переходов: итог ↔ текст записи ↔ прослушать ↔ кадры ↔ папка (studio/links.js)
     if (typeof prMeetingBar === "function" && path.startsWith("Встречи/")) prMeetingBar(path).then(bar => {
       if (bar && req === fReq && fCur === path) $("#f-view .fhead").after(bar);
     }).catch(() => {});
-    $("#f-app").onclick = () => core.call("ws_open", { path }).catch(e => toast(e.message));
+    $("#f-app").onclick = () => core.call("ws_open", { path, ...(inPreview ? {in_preview:true} : {}) }).catch(e => toast(e.message));
     if (canEdit) {
       $("#f-save").onclick = fSave;
       $("#f-save-as").onclick = fSaveAs;

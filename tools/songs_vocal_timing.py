@@ -17,6 +17,9 @@ writes with a revision check, so a card edited meanwhile is skipped.
                          song models; run with .songs-venv/bin/python)
   ... --placeholders     an editable «???» line where somebody sings and no
                          text was recognized («Пение — текст не распознан»)
+  ... --realign-gaps     lines around a pause in which somebody sings while no
+                         text is there (a line packed too short); kept only if
+                         less singing stays without text (worker.realign_voiced_gaps)
   ... --realign-grid     lines whose recognizer times were a whole-second grid
                          (30–32, 32–34 … s) are aligned again as one passage
                          (worker.realign_grid_runs; needs the song models)
@@ -110,18 +113,19 @@ def _wav(audio, tmp):
     return wav
 
 
-def realign_grid(audio, phrases, activity, hypotheses, title, vocals=None):
-    """Run the worker's joint alignment for passages timed on a whole-second grid."""
-    from songs.worker import realign_grid_runs
+def realign_grid(audio, phrases, activity, hypotheses, title, vocals=None, gaps=False):
+    """Run the worker's joint alignment: whole-second grid passages, or voiced pauses."""
+    from songs.worker import realign_grid_runs, realign_voiced_gaps
+    run, key = (realign_voiced_gaps, 'gap_realignment') if gaps else (realign_grid_runs, 'grid_realignment')
     with tempfile.TemporaryDirectory(prefix='dewiar-grid-') as tmp:
         hypothesis = {'phrases': copy.deepcopy(phrases)}
         try:
-            changed = realign_grid_runs(_wav(audio, tmp), hypothesis, activity, hypotheses,
-                                        lambda label: print(f'  … {title}: {label}', flush=True), vocals=vocals)
+            changed = run(_wav(audio, tmp), hypothesis, activity, hypotheses,
+                          lambda label: print(f'  … {title}: {label}', flush=True), vocals=vocals)
         except Exception as exc:
             print(f'  ! {title}: повторное выравнивание не выполнено — {exc}', flush=True)
             return 0, phrases, {'error': str(exc)[:300]}
-    return changed, hypothesis['phrases'], hypothesis.get('grid_realignment')
+    return changed, hypothesis['phrases'], hypothesis.get(key)
 
 
 def sections_for(sections, phrases):
@@ -145,6 +149,7 @@ def main():
     parser.add_argument('--recover-text', action='store_true')
     parser.add_argument('--realign-grid', action='store_true')
     parser.add_argument('--placeholders', action='store_true')
+    parser.add_argument('--realign-gaps', action='store_true')
     parser.add_argument('--root', type=Path, default=ROOT)
     parser.add_argument('--report', type=Path,
                         default=APP / 'work' / f'vocal-timing-{dt.datetime.now():%Y%m%d-%H%M%S}.json')
@@ -214,6 +219,21 @@ def main():
                                                 duration):
             added, fitted, recovery = recover_text(audio, fitted, activity, hypotheses, title)
             item['text_recovery'] = recovery
+        if args.realign_gaps:
+            lexical = vt.unrecognized_windows(fitted, hypotheses)
+            if vt.voiced_gap_groups(fitted, dict(activity, lexical=lexical), duration):
+                moved, fitted, gaps = realign_grid(audio, fitted, activity, hypotheses, title, vocals, gaps=True)
+                item['gap_realignment'] = gaps
+                regridded += moved
+                for run in (gaps or {}).get('runs', []):
+                    lines = [p for p in fitted if p.get('phrase_id') in run.get('phrase_ids', [])]
+                    if run.get('applied'):
+                        for p in lines:
+                            print(f"    {str(p.get('text'))[:48]!r}: {seconds(p.get('grid_source_ms', [None])[0])} → "
+                                  f"{seconds(p.get('start_ms'))}–{seconds(p.get('end_ms'))}", flush=True)
+                    else:
+                        print(f"  — {title}: пауза {seconds(run['window_ms'][0])}–{seconds(run['window_ms'][1])} "
+                              f"не переставлена: {run.get('reason')}", flush=True)
         placed = 0
         if args.placeholders:
             fitted, placed = vt.insert_placeholders(
@@ -227,7 +247,7 @@ def main():
               f"текст без голоса {len(after['unvoiced_lyrics'])}; правок времени {len(changed)}"
               + (f"; пропущено несогласованных строк {fit['skipped']}" if fit.get('skipped') else '')
               + (f"; добавлено строк по двум распознавателям {added}" if added else '')
-              + (f"; заново выровнено отрывков с сеточным временем {regridded}" if regridded else '')
+              + (f"; заново выровнено отрывков {regridded}" if regridded else '')
               + (f"; строк «???» для пения без текста {placed}" if placed else ''), flush=True)
         if not args.apply:
             continue

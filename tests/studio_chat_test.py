@@ -146,7 +146,7 @@ try:
         days = pg.evaluate("() => [...document.querySelectorAll('#ch-msgs .ch-day')].map(x => x.textContent.trim())")
         ok(n == 158 and not pg.is_visible("#ch-older") and len(days) == 2 and days[1] == "Сегодня" and "Патрик" in pg.inner_text("#ch-msgs"),
            f"«Показать раньше» — вся лента, разделитель дня, имя Патрика: {n} {days}")
-        pg.click("#ch-clear"); pg.wait_for_timeout(300)
+        pg.click("#ch-manage summary"); pg.click("#ch-clear"); pg.wait_for_timeout(300)
         ok(pg.locator(".dwq").count() == 1 and pg.inner_text(".dwq .yes") == "Удалить" and "danger" in pg.get_attribute(".dwq .yes", "class"), "удаление всей выбранной беседы: подтверждение красной кнопкой «Удалить»")
         pg.click(".dwq .yes"); pg.wait_for_timeout(500)
         ok(pg.evaluate("() => document.querySelectorAll('#ch-msgs .cl-m').length") == 0 and pg.is_visible("#ch-empty"), "«Очистить» — пусто")

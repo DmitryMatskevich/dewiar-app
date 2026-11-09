@@ -77,6 +77,12 @@ class ContactsTest(unittest.TestCase):
         self.assertEqual(a,b);self.assertTrue(a['saved_mac']);self.assertEqual(len(self.native.writes),1);self.assertEqual(len(self.book.records()),1)
         self.assertEqual(os.stat(self.path).st_mode&0o777,0o600)
         loaded=ContactBook(self.path,self.native);self.assertEqual(loaded.create(row,True,'request-000000001'),a);self.assertEqual(len(self.native.writes),1)
+    def test_websites_are_preserved_in_both_contact_books(self):
+        row=dict(ROW,family_name='Веб',websites=['https://example.test'])
+        result=self.book.create(row,True,'request-website-0001')
+        self.assertEqual(self.book.records()[0]['websites'],['https://example.test'])
+        self.assertEqual(self.native.writes[0]['websites'],['https://example.test'])
+        self.assertTrue(result['saved_mac'])
     def test_duplicate_mac_card_and_no_permission_do_not_write(self):
         with self.assertRaises(ValueError):self.book.create(ROW,True,'request-000000002')
         self.native.granted=False

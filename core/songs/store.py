@@ -139,9 +139,14 @@ class SongStore:
                     chunks.append(value)
         return " ".join(chunks).casefold()
 
-    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False, tag: str = "", lyrics_query: str = "", rating: int | str = "") -> list[dict]:
+    def list(self, query: str = "", status: str = "", limit: int = 100, compact: bool = False, tag: str | list[str] = "", lyrics_query: str = "", rating: int | str = "", tags: list[str] | None = None) -> list[dict]:
         query = _clean(query, 120).casefold()
-        tag = _clean(tag, 40)
+        raw_tags = tags if tags is not None else tag
+        if isinstance(raw_tags, (list, tuple, set)):
+            tag_filter = {_clean(item, 40) for item in raw_tags if _clean(item, 40)}
+        else:
+            cleaned_tag = _clean(raw_tags, 40)
+            tag_filter = {cleaned_tag} if cleaned_tag else set()
         lyrics_query = _clean(lyrics_query, 240).casefold()
         rating_filter = None
         if rating not in (None, "", 0, "0"):
@@ -179,7 +184,7 @@ class SongStore:
                 }.get(status, {status})
                 if status and row.get("status") not in selected_statuses:
                     continue
-                if tag and tag not in (row.get("tags") or []):
+                if tag_filter and not tag_filter.intersection(row.get("tags") or []):
                     continue
                 if rating_filter is not None and int(row.get("rating") or 0) != rating_filter:
                     continue

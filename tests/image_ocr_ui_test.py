@@ -32,8 +32,9 @@ core.sendLater=async(cmd,args)=>{__sent.push({cmd,args});};core.call=async(cmd,a
         # A real pasted image retains original data for OCR despite its smaller chat preview.
         page.evaluate('''async ({url,add})=>{const bytes=Uint8Array.from(atob(url.split(',')[1]),c=>c.charCodeAt(0));
 const file=new File([bytes],'pasted.png',{type:'image/png'});await window[add]([file]);}''',{'url':URL,'add':add})
-        assert page.locator(chips+' .image-ocr-action').count()==1
-        page.locator(chips+' .image-ocr-action').click()
+        assert page.locator(chips+' .image-extract-menu button').count()==2
+        page.locator(chips+' .image-extract-menu summary').click()
+        page.locator(chips+' .image-extract-menu button').nth(1).click()
         assert page.locator('#image-ocr-insert').is_disabled()
         assert page.evaluate('__calls[0].image')==URL
         result='Распознанный текст 42\n<script>window.__injected=true</script>'
@@ -47,16 +48,21 @@ const file=new File([bytes],'pasted.png',{type:'image/png'});await window[add]([
         assert page.locator(text).input_value()=='Мой черновик\n\nПроверенный текст 42'
         assert page.evaluate(count)==1
         assert page.evaluate('__sent.length')==0
-        page.locator(chips+' .image-ocr-action').click();page.evaluate('__ocrReply({status:"empty",text:""})')
+        if not page.locator(chips+' details').get_attribute('open'):page.locator(chips+' .image-extract-menu summary').click()
+        page.locator(chips+' .image-extract-menu button').nth(1).click();page.evaluate('__ocrReply({status:"empty",text:""})')
         page.wait_for_function("document.querySelector('#image-ocr-status').textContent.includes('не найден')")
         assert page.locator('#image-ocr-insert').is_disabled()
         page.locator('#image-ocr-close').click()
-        page.locator(chips+' .image-ocr-action').click();page.evaluate('__ocrReply({status:"error",error:"OCR недоступен"})')
+        if not page.locator(chips+' details').get_attribute('open'):page.locator(chips+' .image-extract-menu summary').click()
+        page.locator(chips+' .image-extract-menu button').nth(1).click();page.evaluate('__ocrReply({status:"error",error:"OCR недоступен"})')
         page.wait_for_function("document.querySelector('#image-ocr-error').textContent==='OCR недоступен'")
         assert page.locator('#image-ocr-insert').is_disabled()
         page.locator('#image-ocr-close').click()
-        page.locator(chips+' .image-ocr-action').click();page.evaluate('window.__old=__ocrReply')
-        page.locator('#image-ocr-close').click();page.locator(chips+' .image-ocr-action').click()
+        if not page.locator(chips+' details').get_attribute('open'):page.locator(chips+' .image-extract-menu summary').click()
+        page.locator(chips+' .image-extract-menu button').nth(1).click();page.evaluate('window.__old=__ocrReply')
+        page.locator('#image-ocr-close').click()
+        if not page.locator(chips+' details').get_attribute('open'):page.locator(chips+' .image-extract-menu summary').click()
+        page.locator(chips+' .image-extract-menu button').nth(1).click()
         page.evaluate('__old({status:"done",text:"stale"})')
         assert page.locator('#image-ocr-text').input_value()==''
         page.evaluate('__ocrReply({status:"done",text:"Новый результат 123",engine:"fixture"})')

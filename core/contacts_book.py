@@ -16,7 +16,7 @@ from pathlib import Path
 def norm(value):return ' '.join(re.findall(r'[\w]+',unicodedata.normalize('NFC',str(value)).casefold().replace('ё','е')))
 def name(row):return ' '.join(row.get(k,'').strip() for k in ('family_name','given_name','middle_name') if row.get(k,'').strip()) or row.get('organization','').strip()
 def phone(value):return re.sub(r'\D','',value)
-def fingerprint(row):return (norm(name(row)),tuple(sorted(phone(x) or x.casefold().strip() for x in row['phones'])),tuple(sorted(x.casefold() for x in row['emails'])),norm(row.get('organization','')),json.dumps(row.get('birthday'),sort_keys=True))
+def fingerprint(row):return (norm(name(row)),tuple(sorted(phone(x) or x.casefold().strip() for x in row['phones'])),tuple(sorted(x.casefold() for x in row['emails'])),tuple(sorted(x.casefold() for x in row.get('websites',[]))),norm(row.get('organization','')),json.dumps(row.get('birthday'),sort_keys=True))
 
 def clean(row,imported=False):
     out={}
@@ -29,12 +29,17 @@ def clean(row,imported=False):
         values=row.get(key,[])
         if not isinstance(values,list) or len(values)>50 or any(not isinstance(v,str) or len(v)>300 for v in values):raise ValueError('Некорректные телефоны или адреса')
         out[key]=list(dict.fromkeys(v.strip() for v in values if v.strip()))
+    values=row.get('websites',[])
+    if isinstance(row.get('website'),str) and row['website'].strip(): values=list(values)+[row['website']]
+    if not isinstance(values,list) or len(values)>50 or any(not isinstance(v,str) or len(v)>2000 for v in values):raise ValueError('Некорректные ссылки на сайты')
+    out['websites']=list(dict.fromkeys(v.strip() for v in values if v.strip()))
     for key in ('telegram','whatsapp'):
         value=row.get(key,'')
         if not isinstance(value,str) or len(value)>300:raise ValueError('Проверьте ссылки Telegram и WhatsApp')
         out[key]=unicodedata.normalize('NFC',value.strip())
     if not imported and any(not phone(v) or len(phone(v))<3 for v in out['phones']):raise ValueError('Проверьте телефон')
     if not imported and any(not re.fullmatch(r'[^\s@]+@[^\s@]+',v) for v in out['emails']):raise ValueError('Проверьте адрес электронной почты')
+    if not imported and any(not re.match(r'^https?://',v,re.I) for v in out['websites']):raise ValueError('Ссылка на сайт должна начинаться с http:// или https://')
     out['birthday']=None
     if row.get('birthday'):
         b=row['birthday']

@@ -36,11 +36,16 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     ui=root/'ui';shutil.copytree(ROOT/'ui',ui)
     (ui/'assets/dewiar.js').write_text('''
       window.opens=[];window.copiedImages=[];window.copiedTexts=[];window.screenGranted=false;window.screenSettings=0;
+      window.resizes=[];
       window.api=()=>({async open_settings(...args){opens.push(args);return true;},
+        async card_size(){return [innerWidth,innerHeight]},
+        async resize_card(...args){resizes.push(args);},
         async screen_capture_permission(){if(window.permissionError)throw Error('Unavailable');return {granted:screenGranted}},
         async open_screen_settings(){screenSettings++;return true},
         async copy_image_data(url){copiedImages.push(url);return true;}});
       window.core={snapshot:{},_on:{},on(k,f){(this._on[k]??=[]).push(f);return this},async call(cmd,args={}){
+        if(cmd==='chat_threads')return {active:'fixture'};
+        if(cmd==='chat_list')return {items:window.layoutHistory||[]};
         if(!['screenshot_attach','screenshot_messages','screenshot_image','screenshot_text','screenshot_text_save','screenshot_to_note','screenshot_dismiss','screenshot_sources','screenshot_window_preview','screenshot_prepare','screenshot_draft','screenshot_draft_cancel'].includes(cmd))return {};
         if(cmd==='screenshot_text_save') {
           if(window.failSave)throw Error('Диск недоступен');
@@ -95,7 +100,61 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     item=engine.chatlog.page()['items'][0]
     assert item['role']=='assistant' and item['att'][0]['capture']['text']==text
     assert not any(kind=='note_saved' for kind,_ in events)
-    assert not card.locator('details,summary,pre').count()
+    assert card.locator('details.ss-text-menu summary').count()==1 and not card.locator('pre').count()
+    # A full history and a long draft must yield space to the latest screenshot and its toolbar.
+    page.evaluate("""async () => {
+      window.layoutHistory = Array.from({length:30}, (_,i)=>({
+        id:'fixture-'+i, ts:1794222000+i, role:i%2?'assistant':'user', who:'Лира',
+        text:(i%2?'Ответ для проверки прокрутки. ':'Вопрос для проверки прокрутки. ').repeat(5)+i
+      }));
+      await refreshRecentActivity();
+    }""")
+    for skin in ('neusky', 'neudark'):
+        page.evaluate('(skin)=>applyLook({skin})',skin)
+        for width,height in ((760,800),(420,600),(360,420),(280,274)):
+            page.set_viewport_size({'width':width,'height':height})
+            page.locator('#askin').fill('Длинный черновик сообщения.\n' * 18)
+            for shown in (True,False):
+                page.evaluate('(shown)=>setOrbVisible(shown, true)',shown)
+                geometry=page.evaluate("""async () => {
+                  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+                  return Object.fromEntries(['orb','screenshot-messages','hud-workspace','ask','bar'].map(
+                    id=>[id,document.getElementById(id).getBoundingClientRect().toJSON()]));
+                }""")
+                p,h,a,b=(geometry[k] for k in ('screenshot-messages','hud-workspace','ask','bar'))
+                assert (geometry['orb']['width'] > 0)==shown and h['height'] > 0 and (
+                    h['bottom'] <= p['top']+1 and p['bottom'] <= a['top']+1 and
+                    a['bottom'] <= b['top']+1 and b['bottom'] <= height+1
+                ),(skin,width,height,shown,geometry)
+                if shown:
+                    assert geometry['orb']['top'] >= h['top']-1 and geometry['orb']['bottom'] <= h['bottom']+1
+                feed=page.locator('.activity-scroll').evaluate("""e=>({
+                    height:e.clientHeight, scroll:e.scrollTop,
+                    end:e.querySelector('.activity-row:last-child').getBoundingClientRect().bottom,
+                    bottom:e.getBoundingClientRect().bottom
+                })""")
+                assert feed['height']>0 and abs(feed['scroll'])<=2 and feed['end']<=feed['bottom']+2, (
+                    skin,width,height,shown,'latest chat position after resize',feed,geometry
+                )
+                # A box can exist outside a clipped parent. Hit testing catches that regression.
+                hidden_controls=card.locator('button:visible,summary').evaluate_all("""buttons => buttons
+                  .filter(b=>{const r=b.getBoundingClientRect();return !b.contains(
+                    document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}).map(b=>b.title)""")
+                assert not hidden_controls,(skin,width,height,shown,hidden_controls)
+                assert card.locator('.ss-image').bounding_box()['height']>=48
+            card.locator('.ss-text-menu summary').click()
+            card.locator('[data-ss-action="ocr"]').click(trial=True)
+            card.locator('.ss-text-menu summary').focus()
+            page.keyboard.press('Escape')
+            assert card.locator('.ss-text-options').is_hidden()
+    assert page.evaluate('resizes')==[], 'Toggling the avatar must keep the native window size'
+    page.locator('.activity-scroll').evaluate('e=>e.scrollTop=-60')
+    page.set_viewport_size({'width':390,'height':520})
+    page.evaluate('async()=>{await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));}')
+    assert page.locator('.activity-scroll').evaluate('e=>e.scrollTop')<-50, 'Resizing should not jump away from older messages'
+    page.locator('#askin').fill('')
+    page.set_viewport_size({'width':420,'height':850})
+    page.evaluate("window.layoutHistory=[];refreshRecentActivity();applyLook({skin:'neusky'})")
     assert card.locator('.ss-status').is_hidden()
     assert 'Текст распознан локально' not in card.inner_text()
     card.locator('[data-ss-open]').click()
@@ -105,7 +164,10 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     card.locator('[data-ss-action="image"]').click()
     page.wait_for_function('copiedImages.length===1')
     assert base64.b64decode(page.evaluate('copiedImages[0]').split(',',1)[1])==png
-    card.locator('[data-ss-action="text"]').click()
+    def open_text_menu():
+        menu=card.locator('details.ss-text-menu')
+        menu.evaluate('(e)=>{e.open=true}')
+    open_text_menu();card.locator('[data-ss-action="text"]').click()
     editor=page.get_by_role('dialog',name='Редактирование текста снимка')
     field=editor.get_by_role('textbox',name='Текст снимка')
     assert field.input_value()==text
@@ -132,7 +194,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     # A native bridge may receive hello before HUD subscribes; history must still load.
     page.reload();card.wait_for()
     page.evaluate("screenGranted=true;window.dispatchEvent(new Event('focus'))")
-    card.locator('[data-ss-action="text"]').click()
+    open_text_menu();card.locator('[data-ss-action="text"]').click()
     assert field.input_value()==edited_text, 'Edits must survive reloading the stored history'
     # A failed save leaves the editor/draft open; retry is explicit and recoverable.
     page.evaluate('failSave=true')
@@ -153,7 +215,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page.evaluate('releaseSave()');editor.wait_for(state='detached')
     assert engine.chatlog.screenshot(item['id'])['att'][0]['capture']['text']==edited_text
     # Debounced autosave works without a Save/Close click, including narrow windows.
-    card.locator('[data-ss-action="text"]').click()
+    open_text_menu();card.locator('[data-ss-action="text"]').click()
     edited_text += '\nАвтосохранение.'
     field.fill(edited_text)
     page.wait_for_function("document.querySelector('.ss-text-dialog [role=status]').textContent==='Сохранено'")
@@ -181,7 +243,8 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
         for width in [340,420,640]:
             page.set_viewport_size({'width':width,'height':850})
             for b in card.locator('button').all():
-                box=b.bounding_box();assert 0<=box['x'] and box['x']+box['width']<=width
+                if b.is_visible():
+                    box=b.bounding_box();assert box and 0<=box['x'] and box['x']+box['width']<=width
     shot=ROOT/'work/screenshot-message-card.png';page.screenshot(path=str(shot))
     card.locator('[data-ss-action="close"]').click();card.wait_for(state='detached')
     assert not engine.chatlog.page()['items']
@@ -227,13 +290,22 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
     page.locator('#screenshot-messages .ss-card').wait_for()
     assert any(cmd=='screenshot_attach' and args.get('window_id')==42 for cmd,args in calls)
     # Saving empty text removes the icon; neither OCR disclosure nor success line returns.
-    card.locator('[data-ss-action="text"]').click()
+    open_text_menu();card.locator('[data-ss-action="text"]').click()
     field.fill('');editor.get_by_role('button',name='Закрыть',exact=True).click()
     editor.wait_for(state='detached')
     assert card.locator('[data-ss-action="text"]').is_hidden()
     engine.chatlog=ChatLog(root/'chat.jsonl');page.evaluate('loadScreenshotMessages()')
-    page.wait_for_function("document.querySelector('#screenshot-messages [data-ss-action=text]').hidden")
-    assert not card.locator('details,summary,pre').count()
+    page.wait_for_function("document.querySelector('#screenshot-messages .ss-card')")
+    page.wait_for_function("[...document.querySelectorAll('#screenshot-messages [data-ss-action=text]')].every(button=>button.offsetParent===null)")
+    assert card.locator('details.ss-text-menu summary').count()==1 and not card.locator('pre').count()
+    previous_id=card.get_attribute('data-screenshot-id')
+    page.locator('#a-shot').click()
+    page.locator('[data-ss-source="screen"]').click()
+    page.wait_for_function("id=>document.querySelector('#screenshot-messages .ss-card')?.dataset.screenshotId!==id",arg=previous_id)
+    assert card.count()==1 and card.get_attribute('data-screenshot-id')!=previous_id
+    assert engine.chatlog.screenshot(previous_id)['id']==previous_id, 'Earlier screenshots stay in chat'
+    page.evaluate('loadScreenshotMessages()')
+    assert card.count()==1 and card.get_attribute('data-screenshot-id')!=previous_id
     assert not errors,errors
     browser.close()
 print('ALL OK: assistant message, no auto-note, PNG/text clipboard, explicit idempotent transfer, restart persistence, dismissal and layout')

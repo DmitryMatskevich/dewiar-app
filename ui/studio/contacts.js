@@ -9,7 +9,7 @@
   }
   async function operation(fn){if(busy){message('Предыдущее действие с контактами ещё выполняется. Дождитесь результата.');return;}busy=true;section.setAttribute('aria-busy','true');try{return await fn();}catch(e){message(e.message||String(e),true);}finally{busy=false;section.removeAttribute('aria-busy');}}
   const fullName=r=>[r.family_name,r.given_name,r.middle_name].filter(Boolean).join(' ')||r.organization||'Без имени';
-  const details=r=>[...(r.phones||[]),...(r.emails||[]),r.organization,r.birthday?`День рождения: ${String(r.birthday.day).padStart(2,'0')}.${String(r.birthday.month).padStart(2,'0')}${r.birthday.year?'.'+r.birthday.year:''}`:''].filter(Boolean).join('\n');
+  const details=r=>[...(r.phones||[]),...(r.emails||[]),...(r.websites||[]),r.organization,r.birthday?`День рождения: ${String(r.birthday.day).padStart(2,'0')}.${String(r.birthday.month).padStart(2,'0')}${r.birthday.year?'.'+r.birthday.year:''}`:''].filter(Boolean).join('\n');
   const icon=(name)=>name==='edit'?'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6"/></svg>';
   function socialUrl(kind,value){const v=String(value||'').trim();if(!v)return'';if(kind==='telegram'){const m=v.match(/^(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.me)\/([A-Za-z0-9_]{5,32})\/?$/i);const user=m?m[1]:v.replace(/^@/,'');return /^[A-Za-z0-9_]{5,32}$/.test(user)?'https://t.me/'+user:'';}const digits=v.replace(/\D/g,'');return digits.length>=7&&digits.length<=15?'https://wa.me/'+digits:'';}
   function setPermission(s){
@@ -74,7 +74,7 @@
   function openForm(draft={},id=null){
     editingId=id;$c('#ct-form-title').textContent=id?'Редактировать контакт':'Новая карточка';$c('#ct-form').querySelector('[type="submit"]').textContent=id?'Сохранить изменения':'Проверить и создать';$c('#ct-form').hidden=false;
     for(const key of ['given_name','family_name','middle_name','organization'])$c(`[data-ct="${key}"]`).value=draft[key]||'';
-    for(const key of ['phones','emails'])$c(`[data-ct="${key}"]`).value=(draft[key]||[]).join('\n');for(const key of ['telegram','whatsapp'])$c(`[data-ct="${key}"]`).value=draft[key]||'';
+    for(const key of ['phones','emails','websites'])$c(`[data-ct="${key}"]`).value=(draft[key]||[]).join('\n');for(const key of ['telegram','whatsapp'])$c(`[data-ct="${key}"]`).value=draft[key]||'';
     const b=draft.birthday;$c('[data-ct=birthday]').value=b?`${b.year||2000}-${String(b.month).padStart(2,'0')}-${String(b.day).padStart(2,'0')}`:'';$c('#ct-to-mac').checked=true;$c('#ct-to-mac').closest('label').hidden=!!id;
     $c('#ct-form').scrollIntoView({block:'nearest'});$c('[data-ct=family_name]').focus();
   }
@@ -101,9 +101,10 @@
   $c('#ct-local-next').onclick=()=>operation(async()=>{localOffset+=100;await loadLocal();});
   $c('#ct-suggest').onchange=e=>operation(async()=>{try{await core.call('contacts_suggest_set',{enabled:e.target.checked});}catch(error){e.target.checked=!e.target.checked;throw error;}});
   $c('#ct-new').onclick=()=>openForm();$c('#ct-form-cancel').onclick=()=>{$c('#ct-form').hidden=true;editingId=null;};
+  $c('#ct-vcf-file').onchange=async e=>{const file=e.target.files?.[0];e.target.value='';if(!file)return;try{const cards=window.DewiarContactCreate.parseVCard(await file.text());if(!cards.length)throw Error('Файл не содержит карточек vCard.');if(cards.length>1&&!await ask(`В файле найдено ${cards.length} карточек. Создавать их по одной с проверкой каждой?`,{ok:'Продолжить'}))return;for(let i=0;i<cards.length;i++){const saved=await window.DewiarContactCreate.open(cards[i],{title:cards.length>1?`Контакт ${i+1} из ${cards.length}`:'Контакт из файла .vcf',source:`Проверьте данные файла «${file.name}». Они ещё не сохранены.`});if(!saved)break;}}catch(error){message(error.message||String(error),true);}};
   $c('#ct-form').onsubmit=e=>{e.preventDefault();return operation(async()=>{
     const row={};for(const key of ['given_name','family_name','middle_name','organization','telegram','whatsapp'])row[key]=$c(`[data-ct="${key}"]`).value.trim();
-    for(const key of ['phones','emails'])row[key]=$c(`[data-ct="${key}"]`).value.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean);
+    for(const key of ['phones','emails','websites'])row[key]=$c(`[data-ct="${key}"]`).value.split(/[\n;,]+/).map(x=>x.trim()).filter(Boolean);
     const birth=$c('[data-ct=birthday]').value;if(birth){const [year,month,day]=birth.split('-').map(Number);row.birthday={year,month,day};}
     if(!row.given_name&&!row.family_name&&!row.organization)throw Error('Укажите имя, фамилию или организацию');
     if(editingId){if(!await ask(`Сохранить изменения контакта «${fullName(row)}» в Dewiar?`,{ok:'Сохранить'}))return;await core.call('contacts_update',{id:editingId,contact:row,confirmed:true});$c('#ct-form').hidden=true;editingId=null;await load();message('Контакт обновлён в Dewiar. Контакты macOS не изменены.');return;}
