@@ -2,7 +2,7 @@
    Markdown, звук, видео, текст документа), удаление в корзину, «Скачать» и PDF.
    Здесь же escH и md() — общие для всей студии: ими рисуют задачи, заметки, справку, обновления.
    Команды ядра: ws_tree, ws_read (текст до 300 000 знаков, PDF/Word — извлечённым текстом), ws_open, ws_export,
-   ws_delete, ws_delete_dir. Для Markdown/TXT/HTML есть ws_write и редактор с режимами «Вид»/«Код».
+   ws_delete, ws_delete_dir. Для Markdown/TXT/HTML есть ws_write и редактор с режимами «Вид»/«Разметка».
    Картинки, страницы и медиа показываются прямо с диска по file:// (fileUrl).
    Файлы студии подключаются по порядку из ui/settings.html и делят одну глобальную область; при загрузке здесь
    ничего не вызывается — только объявления (OUT_ICON из tasks.js, openExt из links.js нужны при отрисовке). */
@@ -123,7 +123,7 @@ function fMountEditor(mode) {
   const body = $("#f-body"); if (!body) return;
   body.innerHTML = "";
   const note = document.createElement("p"); note.className = "hint f-edit-note";
-  note.textContent = mode === "code" ? "Код: редактируется исходный Markdown/HTML/TXT. Сохранение проверит размер и путь файла." : "Вид: простой текстовый режим без панели разметки. Для точного форматирования используйте «Код».";
+  note.textContent = mode === "code" ? "Разметка: редактируется исходный Markdown/HTML/TXT." : "Вид: простой текстовый режим без панели форматирования. Для точной правки Markdown используйте «Разметка».";
   body.appendChild(note);
   const ta = editorBox(fEdit.text, mode); body.appendChild(ta); fEdit.textarea = ta;
   ta.addEventListener("input", () => { fEdit.text = ta.value; fUpdateButtons(); });
@@ -135,8 +135,11 @@ async function fSave() {
   if (fileBytes(text) > 2 * 1024 * 1024) return toast("Файл больше 2 МБ — сохранение отменено", 5000);
   const b = $("#f-save"); if (b) { b.disabled = true; b.textContent = "Сохраняю…"; }
   try {
-    const r = await core.call("ws_write", { path: fEdit.path, text });
+    const r = fEdit.external
+      ? await (window.api && window.api()).save_markdown_file(fEdit.doc_id, text, fEdit.mtime_ns, fEdit.size)
+      : await core.call("ws_write", { path: fEdit.path, text });
     fEdit.original = text; fEdit.text = text;
+    if (fEdit.external) { fEdit.mtime_ns = r.mtime_ns; fEdit.size = r.size; }
     const st = r && r.mtime ? new Date(r.mtime * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "только что";
     toast(`Сохранено: ${fEdit.path} · ${st}`, 3500); fUpdateButtons(); loadFolder();
   } catch (e) { toast(e.message, 6000); }
@@ -213,7 +216,16 @@ async function changeWorkspaceFolder() {
   }
 }
 $("#f-change").onclick = changeWorkspaceFolder;
-async function openFile(path) {
+async function openMarkdownFile() {
+  const a = window.api && window.api();
+  if (!a || typeof a.pick_markdown_file !== "function") return toast("Выбор файла Markdown доступен в приложении Dewiar", 4000);
+  try {
+    const f = await a.pick_markdown_file();
+    if (f) await openFile(f.path, { external: true, loaded: f });
+  } catch (e) { toast(e.message || "Не удалось открыть файл Markdown", 6000); }
+}
+$("#f-open-md").onclick = openMarkdownFile;
+async function openFile(path, options = {}) {
   if (fEdit && fEdit.path !== path && fEdit.text !== fEdit.original) {
     const choice = await ask("В текущем файле есть несохранённые изменения. Открыть другой файл без сохранения?");
     if (!choice) return;
@@ -221,19 +233,19 @@ async function openFile(path) {
   const req = ++fReq;
   fCur = path; $$("#f-tree .node").forEach(n => n.classList.toggle("cur", n.title === path));
   try {
-    const f = await core.call("ws_read", { path });
+    const f = options.loaded || await core.call("ws_read", { path });
     // из «Календаря» и «Памяти» файл открывают сразу после переключения на «Папку»: дерево ещё грузится, а без
     // корня (#f-root) ссылки file:// для страницы, картинки и звука получаются неверными — дожидаемся
     if (fTree) await fTree.catch(() => {});
     // пока читали, выбрали другой файл или этот же ещё раз — рисует только последний запрос (по номеру, не по пути:
     // при быстром А → Б → А старый ответ А иначе перекрыл бы новый)
     if (req !== fReq || fCur !== path) return;
-    const name = path.split("/").pop(), kind = fkind(name), url = fileUrl(path);
+    const name = f.name || path.split(/[\\/]/).pop(), kind = fkind(name), url = options.external ? "" : fileUrl(path);
     const inPreview = /^Mac/.test(navigator.platform) && /\.pdf$/i.test(name);
     const when = new Date(f.mtime * 1000).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
     const size = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + " МБ" : f.size > 1024 ? Math.round(f.size / 1024) + " КБ" : (f.size || 0) + " Б";
     const code = () => `<pre class="code">${escH(kind === "json" ? prettyJson(f.text || "") : f.text || "")}</pre>`;
-    const views = {                                            // вид → разметка; «Код» — исходный текст
+    const views = {                                            // вид → разметка; кнопка «Разметка» открывает исходный текст
       page: () => `<iframe class="fpage" src="${url}" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"></iframe>`,
       svg: () => `<div class="fpic"><img src="${url}" alt=""></div>`,
       img: () => `<div class="fpic"><img src="${url}" alt=""></div>`,
@@ -250,19 +262,20 @@ async function openFile(path) {
     const body = f.binary && !media ? `<div class="fempty">Этот файл открывается в своей программе — нажмите «${inPreview ? "Открыть в Просмотре" : "Открыть"}».</div>` : views[kind]();
     const page = kind === "page", printable = page || /\.(md|txt)$/i.test(name);
     // «Удалить» нет у файлов, которые ядро ведёт само (README, «Обо мне», «Напоминания»), и у результатов задач
-    fEdit = canEdit ? { path, original: f.text || "", text: f.text || "", mode: "view", textarea: null } : null;
+    fEdit = canEdit ? { path, external: !!options.external, doc_id: f.doc_id, mtime_ns: f.mtime_ns, size: f.size,
+      original: f.text || "", text: f.text || "", mode: "view", textarea: null } : null;
     $("#f-view").innerHTML = `<div class="fhead"><div class="t"><b></b><span>${escH(path)} · ${when} · ${size}${f.truncated ? " · показано начало" : ""}</span></div>
-      <div class="fbtns">${canEdit ? '<div class="seg" id="f-mode"><button class="on" data-m="view">Вид</button><button data-m="code">Код</button></div>' : canCode ? `<div class="seg" id="f-mode"><button class="on" data-m="view">${page ? "Страница" : "Вид"}</button><button data-m="code">Код</button></div>` : ""}
-      ${canEdit ? '<span class="f-edit-state" id="f-edit-state">Изменения сохранены</span><button class="btn small primary" id="f-save" title="Записать изменения в текущий файл рабочей папки. До сохранения исходный файл не меняется." hidden disabled>Сохранить</button><button class="btn small" id="f-save-as" title="Сохранить копию текущего текста в любую папку через системный диалог macOS. Исходный файл останется на месте." hidden disabled>Сохранить как</button>' : ""}
+      <div class="fbtns">${canEdit ? '<div class="seg" id="f-mode"><button class="on" data-m="view">Вид</button><button data-m="code">Разметка</button></div>' : canCode ? `<div class="seg" id="f-mode"><button class="on" data-m="view">${page ? "Страница" : "Вид"}</button><button data-m="code">Разметка</button></div>` : ""}
+      ${canEdit ? `<span class="f-edit-state" id="f-edit-state">Изменения сохранены</span><button class="btn small primary" id="f-save" title="${options.external ? "Записать изменения в выбранный внешний файл Markdown." : "Записать изменения в текущий файл рабочей папки."} До сохранения исходный файл не меняется." hidden disabled>Сохранить</button><button class="btn small" id="f-save-as" title="Сохранить копию текущего текста в любую папку через системный диалог macOS. Исходный файл останется на месте." hidden disabled>Сохранить как</button>` : ""}
       ${["page", "img", "svg", "video"].includes(kind) ? '<button class="btn small" id="f-full" title="На весь экран">⛶</button>' : ""}
-      <button class="btn small" id="f-app">${inPreview ? "Открыть в Просмотре" : "Открыть"}</button>${["README.md", "Память/Обо мне.md", "Напоминания.md"].includes(path) || path.startsWith("Задачи/") ? "" : '<button class="btn small" id="f-del" title="В корзину">Удалить</button>'}<button class="btn small primary" id="f-dl">${page ? "Скачать HTML" : "Скачать"}</button>
-      ${printable ? '<button class="btn small primary" id="f-pdf">PDF</button>' : ""}</div></div><div id="f-body">${body}</div>`;
+      ${options.external ? "" : `<button class="btn small" id="f-app">${inPreview ? "Открыть в Просмотре" : "Открыть"}</button>`}${options.external || ["README.md", "Память/Обо мне.md", "Напоминания.md"].includes(path) || path.startsWith("Задачи/") ? "" : '<button class="btn small" id="f-del" title="В корзину">Удалить</button>'}${options.external ? "" : `<button class="btn small primary" id="f-dl">${page ? "Скачать HTML" : "Скачать"}</button>`}
+      ${printable && !options.external ? '<button class="btn small primary" id="f-pdf">PDF</button>' : ""}</div></div><div id="f-body">${body}</div>`;
     $("#f-view .fhead b").textContent = name;
     // файл встречи — полоса переходов: итог ↔ текст записи ↔ прослушать ↔ кадры ↔ папка (studio/links.js)
     if (typeof prMeetingBar === "function" && path.startsWith("Встречи/")) prMeetingBar(path).then(bar => {
       if (bar && req === fReq && fCur === path) $("#f-view .fhead").after(bar);
     }).catch(() => {});
-    $("#f-app").onclick = () => core.call("ws_open", { path, ...(inPreview ? {in_preview:true} : {}) }).catch(e => toast(e.message));
+    if (!options.external) $("#f-app").onclick = () => core.call("ws_open", { path, ...(inPreview ? {in_preview:true} : {}) }).catch(e => toast(e.message));
     if (canEdit) {
       $("#f-save").onclick = fSave;
       $("#f-save-as").onclick = fSaveAs;

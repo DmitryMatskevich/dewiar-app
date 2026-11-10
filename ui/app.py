@@ -638,6 +638,7 @@ class Api:
         self.token = token
         self._hud = None
         self._studio = None
+        self._markdown_files = {}
         self.wins = {}
         self.mode = "card"
         self.auto = False
@@ -1424,6 +1425,80 @@ class Api:
         if not res:
             return ""
         return res if isinstance(res, str) else res[0]
+
+    def pick_markdown_file(self):
+        """Выбрать внешний Markdown и передать его текст существующему редактору Студии."""
+        import webview
+        kind = getattr(getattr(webview, "FileDialog", None), "OPEN", None) or webview.OPEN_DIALOG
+        result = (self._studio or self._hud).create_file_dialog(
+            kind, directory=str(Path.home()),
+            file_types=("Markdown (*.md;*.markdown)", "Все файлы (*.*)"))
+        if not result:
+            return None
+        path = result if isinstance(result, str) else result[0]
+        doc = self._read_markdown_file(path)
+        import secrets
+        doc_id = secrets.token_urlsafe(24)
+        self._markdown_files[doc_id] = {"path": doc["path"], "mtime_ns": doc["mtime_ns"], "size": doc["size"]}
+        # Keep a small window of active selections; the editor has only one open file at a time.
+        while len(self._markdown_files) > 8:
+            self._markdown_files.pop(next(iter(self._markdown_files)))
+        doc["doc_id"] = doc_id
+        return doc
+
+    @staticmethod
+    def _markdown_path(path):
+        p = Path(str(path or "")).expanduser().resolve(strict=True)
+        if p.suffix.lower() not in (".md", ".markdown") or not p.is_file():
+            raise ValueError("Выберите существующий файл .md или .markdown")
+        return p
+
+    def _read_markdown_file(self, path):
+        """Открыть выбранный пользователем Markdown, с лимитом размера редактора."""
+        p = self._markdown_path(path)
+        stat = p.stat()
+        if stat.st_size > 2 * 1024 * 1024:
+            raise ValueError("Файл больше 2 МБ — открыть в редакторе нельзя")
+        try:
+            text = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Файл не является текстом UTF-8") from exc
+        return {"path": str(p), "name": p.name, "text": text,
+                "mtime_ns": stat.st_mtime_ns, "mtime": stat.st_mtime,
+                "size": stat.st_size}
+
+    def save_markdown_file(self, doc_id, text, expected_mtime_ns, expected_size):
+        """Сохранить выбранный Markdown только если его версия на диске не изменилась."""
+        selected = self._markdown_files.get(str(doc_id or ""))
+        if not selected:
+            raise ValueError("Сначала выберите файл Markdown через кнопку «Открыть Markdown…»")
+        path = selected["path"]
+        p = self._markdown_path(path)
+        content = str(text or "")
+        encoded = content.encode("utf-8")
+        if len(encoded) > 2 * 1024 * 1024:
+            raise ValueError("Файл больше 2 МБ — сохранение отменено")
+        current = p.stat()
+        if current.st_mtime_ns != int(expected_mtime_ns) or current.st_size != int(expected_size):
+            raise ValueError("Файл изменился на диске после открытия. Откройте его заново, чтобы не затереть правки.")
+        import tempfile
+        fd, temporary = tempfile.mkstemp(prefix=".dewiar-md-", dir=str(p.parent))
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, current.st_mode & 0o777)
+            os.replace(temporary, p)
+        finally:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+        saved = p.stat()
+        selected.update(mtime_ns=saved.st_mtime_ns, size=saved.st_size)
+        return {"path": str(p), "mtime_ns": saved.st_mtime_ns,
+                "mtime": saved.st_mtime, "size": saved.st_size}
 
     def install_update(self, path):
         """Поставить обновление, которое ядро скачало и проверило. Путь приходит со страницы, поэтому принимаем
