@@ -53,7 +53,7 @@ ok('id="a-stop"' in src and 'core.call("stop")' in src and '#cap.running #a-stop
    "кнопка «Стоп» появляется во время ответа и отменяет текущую работу")
 ok('Я ${name}, жду ваше задание' in src and 'Я ${name}, говорите, я слушаю' in src,
    "placeholder объясняет ожидание задания и продолжение голосового диалога")
-ok('addEventListener("resize", () => { orbScale(); requestAnimationFrame(fitAsk); })' in src and 'const available = Math.max(24' in src,
+ok('addEventListener("resize", () => requestAnimationFrame(fitAsk))' in src and 'const available = Math.max(24' in src,
    "высота поля пересчитывается при изменении ширины и ограничена доступным окном")
 ok('new ResizeObserver(entries =>' in src and '.observe($("askbox"))' in src,
    "изменение ширины карточки через уголок тоже пересчитывает высоту поля")

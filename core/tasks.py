@@ -421,6 +421,84 @@ class TaskManager:
             self.start(tid)
         return t
 
+    def create_project_backup(self, project_id):
+        """Create a visible task and run the registered backup script without involving an LLM."""
+        from project_backups import PROJECT_BACKUPS
+        spec = PROJECT_BACKUPS.get(str(project_id or ""))
+        if not spec:
+            raise ValueError("Сценарий бэкапа для этого проекта не зарегистрирован.")
+        title = "Бэкап " + spec["title"]
+        goal = f"Создать резервную копию проекта {spec['title']} по зарегистрированному сценарию."
+        with self._lock:
+            task = self.create(title, goal, start=False)
+            task.data.update(workflow="project-backup", backup_project_id=project_id,
+                             progress=[0, 1], activity="Подготовка сценария бэкапа…", finished=False)
+            (task.dir / "план.md").write_text(
+                f"# {title}\n\n**Цель:** {goal}\n\n- [x] Создать задачу и проверить зарегистрированный сценарий\n"
+                "- [ ] Создать архив и проверить результат\n- [ ] Записать путь, состав и контрольную сумму в итог\n",
+                encoding="utf-8")
+            task.journal(f"▶ Запущен зарегистрированный сценарий бэкапа проекта {spec['title']}.")
+            task.save()
+            self.start(task.id)
+            self.host.emit("tasks", tasks=self.list())
+            return task
+
+    def _run_project_backup(self, task):
+        """Long-running local project backup; status and final report are visible in Tasks and chat."""
+        from project_backups import PROJECT_BACKUPS, describe_result, run_project_backup
+        project_id = str(task.data.get("backup_project_id") or "")
+        spec = PROJECT_BACKUPS.get(project_id)
+        project_title = spec["title"] if spec else project_id or "неизвестный проект"
+        try:
+            if not spec:
+                raise ValueError("Сценарий бэкапа удалён из реестра.")
+            task.data.update(activity="Сценарий собирает исходники и создаёт ZIP…", progress=[0, 1], finished=False)
+            task.journal("⏳ Сценарий запущен; проверка состава и ZIP выполняется внутри него.")
+            task.save(); self._beat(task, "backup script"); self._emit(task)
+
+            def progress(seconds):
+                if task.cancel.is_set():
+                    return
+                mins, secs = divmod(seconds, 60)
+                task.data.update(activity=f"Создаю архив… прошло {mins} мин {secs} с", progress=[0, 1])
+                task.save(); self._beat(task, "backup script"); self._emit(task)
+
+            run = run_project_backup(project_id, cancel=task.cancel, on_progress=progress)
+            if run["returncode"] != 0:
+                raise RuntimeError(f"Код завершения {run['returncode']}.\n{run['output'][-2500:]}")
+            facts = describe_result(project_id, run["output"])
+            archive = Path(facts["archive"]) if facts["archive"] else None
+            manifest = Path(facts["manifest"]) if facts["manifest"] else None
+            if not archive or not archive.is_file() or not manifest or not manifest.is_file() or not facts["sha256"]:
+                raise RuntimeError("Сценарий завершился без подтверждённого архива, manifest или SHA-256.\n" + run["output"][-2500:])
+            summary = (f"Бэкап проекта {spec['title']} завершён.\n"
+                       f"Архив: {archive}\nФайлов в архиве: {facts['included'] or 'не указано'}; "
+                       f"исключённых путей: {facts['excluded'] or 'не указано'}; размер: {facts['size'] or 'не указан'}.\n"
+                       f"SHA-256: {facts['sha256']}\nОпись: {manifest}\n{facts['scope_note']}")
+            task.data.update(status="done", finished=True, result=summary, error="", activity="", progress=[1, 1], outputs=[])
+            task.journal("✅ " + summary.replace("\n", " · "))
+            task.data["updated"] = _now()
+            (task.dir / "итог.md").write_text(summary + "\n", encoding="utf-8")
+            (task.dir / "план.md").write_text(
+                f"# {task.title}\n\n**Цель:** {task.goal}\n\n- [x] Создать задачу и проверить зарегистрированный сценарий\n"
+                "- [x] Создать архив и проверить результат\n- [x] Записать путь, состав и контрольную сумму в итог\n",
+                encoding="utf-8")
+            task.save(); self._beat(task); self._emit(task)
+            self.host.announce(f"Бэкап {spec['title']} завершён. В архиве {facts['included']} файлов; ZIP проверен.\n"
+                               f"Архив: {archive}\nSHA-256: {facts['sha256']}\nИтог и manifest — в задаче «{task.title}».")
+        except InterruptedError as exc:
+            summary = str(exc).strip() or "Создание бэкапа остановлено пользователем."
+            task.data.update(status="stopped", finished=False, result=summary, error="", activity="")
+            task.journal("⏹ " + summary)
+            task.save(); self._beat(task); self._emit(task)
+            self.host.announce(f"Задача «{task.title}» остановлена. Полный архив не подтверждён; подробности — в разделе «Задачи».")
+        except Exception as exc:  # noqa: BLE001 — status must be persisted and announced even for script/IO errors
+            summary = f"Бэкап {project_title} не подтверждён: {exc}"
+            task.data.update(status="failed", finished=False, result=summary, error=str(exc)[:2500], activity="")
+            task.journal("❌ " + summary)
+            task.save(); self._beat(task); self._emit(task)
+            self.host.announce(f"Задача «{task.title}» завершилась с ошибкой. Бэкап не подтверждён; подробности — в задаче.")
+
     def create_link_download(self, urls, action):
         from media_transcription import unique_sources
         urls = unique_sources(urls)
@@ -1340,6 +1418,7 @@ class TaskManager:
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
         runner = (self._run_link_download if t.data.get('workflow') == 'link-download' else
+                  self._run_project_backup if t.data.get('workflow') == 'project-backup' else
                   self._run_media if t.data.get('workflow') == 'media-transcription' else
                   self._run_media_translation if t.data.get('workflow') == 'video-translation' else
                   self._run_file_conversion if t.data.get('workflow') == 'file-conversion' else

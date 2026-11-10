@@ -4,6 +4,7 @@
   if (!box) return;
   const byId = id => document.getElementById('mac-access-' + id);
   let timer = 0, busy = false, started = false, mic = {}, screen = {}, files = {};
+  let requestedPage = '';
   const api = () => window.api && window.api();
   const labels = {workspace:'Рабочая папка', documents:'Документы', desktop:'Рабочий стол', downloads:'Загрузки', selected:'Выбранная папка'};
   function render() {
@@ -84,7 +85,8 @@
     byId('files-startup').checked = settings?.ui?.mac_files_request_at_startup !== false;
     if (!settings?.ui || started || new URLSearchParams(location.search).get('mac_access_setup') !== '1') return;
     // A Sites alert should stay on the requested monitoring page, not be redirected to Security.
-    if (new URLSearchParams(location.search).has('sites')) return;
+    const params = new URLSearchParams(location.search);
+    if (params.has('sites') || params.has('task') || (requestedPage && requestedPage !== 'safety')) return;
     started = true;
     document.querySelector('nav button[data-p="safety"]')?.click();
     byId('setup').hidden = false;
@@ -94,6 +96,7 @@
       if (typeof S !== 'undefined') S = result;
     } catch (error) { byId('result').textContent = 'Не удалось сохранить показ настройки: ' + (error.message || error); }
   }
+  window.addEventListener('dewiar:studio-page', event => { requestedPage = event.detail?.page || ''; });
   core.on('hello', data => start(data.settings));
   window.addEventListener('pywebviewready', () => start(typeof S !== 'undefined' ? S : null));
   window.addEventListener('focus', refresh);

@@ -1213,6 +1213,20 @@ def t_run_command(a, ctx):
     return f"код выхода {r.returncode}\n{out[-3000:]}"
 
 
+def t_backup_project(a, ctx):
+    """Create a tracked background task for a registered project backup."""
+    from project_backups import resolve_project
+    try:
+        project_id = resolve_project(a.get("project"))
+        task = _tm(ctx).create_project_backup(project_id)
+    except (ValueError, OSError) as exc:
+        raise ToolError(str(exc)) from exc
+    except KeyError as exc:
+        raise ToolError(f"Не удалось создать задачу бэкапа: {exc}") from exc
+    return (f"Задача «{task.title}» запущена в фоне. Текущий статус и журнал доступны в разделе «Задачи»; "
+            "по завершении напишу в этот чат, создан ли архив, где он находится и прошла ли проверка.")
+
+
 # sudo там, где начинается команда (не внутри аргументов); sudo -A/-S/-n уже со своим способом пароля — не трогаем
 SUDO_AT = re.compile(r"(^\s*|[;&|(]\s*|\b(?:then|do|else)\s+)sudo\s+(?!-[ASn]\b)")
 # безопасность: пароль в самой команде (echo … | sudo -S, sudo -S <<< …) остался бы в истории и журналах
@@ -2998,6 +3012,7 @@ TOOLS = {
                    S({"server": {"type": "string"}, "command": {"type": "string"}, "timeout": {"type": "integer"}}, ["server", "command"]),
                    "confirm", t_server_run, "Команды на сервере"),
     "run_command": (("Выполнить команду в PowerShell (Windows)" if WIN else "Выполнить команду в терминале macOS/Linux (bash; можно запустить явно названный shell-скрипт)") + " и вернуть вывод. Только если пользователь явно просит; перед запуском требуется подтверждение.", S({"command": {"type": "string"}}, ["command"]), "confirm", t_run_command, "Команды и скрипты терминала"),
+    "backup_project": ("Создать фоновую задачу резервного копирования зарегистрированного проекта по его фиксированному сценарию. Вызывай, когда пользователь явно просит «бэкапировать», «создай бэкап», «резервировать» или «создай резерв» проекта. Задача появится в разделе «Задачи», а по завершении ассистент сообщит в чат итог, путь архива, число файлов и SHA-256. Сейчас подключён CMMS-rus; названия проекта: cmms-rus, cmms, dc master, дсмастер. Не вызывай для вопросов о том, как устроен бэкап. Если проект не назван и не очевиден из контекста — уточни. Сценарий фиксирован; никогда не подставляй произвольные пути или shell-команды.", S({"project": {"type": "string", "description": "Название проекта: cmms-rus, cmms, dc master или дсмастер"}}, ["project"]), "confirm", t_backup_project, "Бэкап проекта CMMS-rus"),
 }
 # Этим умениям нужен интернет из самого Dewiar — при стоп-кране (студия → «Безопасность») модель о них не узнаёт.
 # Открыть сайт, музыку или карту в браузере человека — можно: это его браузер и его просьба.
@@ -3070,8 +3085,8 @@ class Toolbox:
                 return False, False
         if name in NET_TOOLS and (self.s.get("privacy") or {}).get("local_only"):
             return False, False                 # стоп-кран «Ничего не уходит в интернет»: этим нужен интернет (off_note скажет модели)
-        if name == "run_command" and (self.s.get("privacy") or {}).get("files") == "folder":
-            return False, False                 # замок «Файлы: только папка Dewiar» (студия → «Безопасность»): терминал может всё
+        if name in ("run_command", "backup_project") and (self.s.get("privacy") or {}).get("files") == "folder":
+            return False, False                 # замок «Файлы: только папка Dewiar» ограничивает внешние пути
         t = self.s.get("tools") or {}
         on = t.get("enabled", {}).get(name, name not in DEFAULT_OFF)
         conf = t.get("confirm", {}).get(name, TOOLS[name][2] == "confirm")
@@ -3099,7 +3114,7 @@ class Toolbox:
             out += ("\n\nВыключено пользователем в студии («Руки» → «Умения»; камера и экран — ещё и в «Безопасности»): " + names
                     + ". Просят это — не говори «не умею»: скажи одной фразой, что это умение выключено в настройках, и где его включить.")
         if pv.get("files") == "folder":
-            out += ("\n\nВ «Безопасности» стоит замок «Файлы: только папка Dewiar»: команды терминала выключены, удалять и отправлять "
+            out += ("\n\nВ «Безопасности» стоит замок «Файлы: только папка Dewiar»: команды терминала и бэкап внешних проектов выключены, удалять и отправлять "
                     "можно только файлы из папки ассистента. Просят другое — скажи об этом одной фразой и где снять замок.")
         if pv.get("local_only"):
             out += ("\n\nВключён стоп-кран «Ничего не уходит в интернет» (студия → «Безопасность»): поиск, погода, сайты, почта, "
@@ -3151,6 +3166,9 @@ class Toolbox:
             try:proposal = pending(engine, (args or {}).get('proposal_id'))
             except ValueError as error:return str(error), False, None
             return None, True, proposal['summary'] + '? Остальные команды и разрешения останутся прежними.'
+        if name == "backup_project":
+            project = str((args or {}).get("project") or "CMMS-rus")
+            return None, True, f"Создать резервную копию проекта «{project}» по зарегистрированному сценарию? Будут применены его правила исключения файлов."
         if name in ("delete_files", "close_send") and s is not None and (s.get("privacy") or {}).get("files") == "folder":
             # замок «Файлы: только папка Dewiar»: удалять и отправлять можно только то, что лежит в папке ассистента
             roots = [Path(w).expanduser().resolve() for w in guard.WORKSPACE]
@@ -3235,6 +3253,8 @@ class Toolbox:
                 args.get("action"), "Питание компьютера") + "?"
         if name == "run_command":
             return f"Выполнить команду: {args.get('command', '')}?"
+        if name == "backup_project":
+            return f"Создать резервную копию проекта «{args.get('project', 'CMMS-rus')}»?"
         if name == "server_run":
             return f"На сервере «{args.get('server', '')}» выполнить: {args.get('command', '')}?"
         if name == "look_through_camera":

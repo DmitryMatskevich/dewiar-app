@@ -150,6 +150,13 @@ class StoreTests(unittest.TestCase):
             validate({'name':'Почтовый узел','enabled':True,'dns':False,'mail':True})
     def test_bare_site_name_gets_https(self):
         self.assertEqual(validate({'url':'example.org'})['url'],'https://example.org')
+    def test_site_and_health_urls_keep_browser_fragments(self):
+        site=validate({'url':'https://dcmms.ru/#contact','health_url':'https://dcmms.ru/#contact'})
+        self.assertEqual(site['url'],'https://dcmms.ru/#contact')
+        self.assertEqual(site['health_url'],'https://dcmms.ru/#contact')
+        checks={row['id']:row for row in specs(site)}
+        self.assertEqual(checks['http']['target'],'https://dcmms.ru/#contact')
+        self.assertEqual(checks['health']['target'],'https://dcmms.ru/#contact')
     def test_provider_edit_revision_and_validation(self):
         provider=self.store.provider('firstvds')
         changed=self.store.save_provider(dict(provider,name='FirstVDS Updated'))
@@ -186,11 +193,13 @@ class ProbeTests(unittest.TestCase):
     def setUpClass(cls):
         class Fixture(BaseHTTPRequestHandler):
             def do_GET(self):
+                type(self).last_path=self.path
                 if self.path=='/redirect':self.send_response(302);self.send_header('Location','http://169.254.169.254/');self.end_headers();return
                 self.send_response(503 if self.path=='/down' else 200);self.end_headers();self.wfile.write(b'fixture healthy')
             def do_HEAD(self):
                 self.send_response(503 if self.path=='/down' else 302);self.end_headers()
             def log_message(self,*a):pass
+        cls.Fixture=Fixture
         cls.http=HTTPServer(('127.0.0.1',0),Fixture)
         cls.thread=threading.Thread(target=cls.http.serve_forever,daemon=True);cls.thread.start()
         cls.url='http://127.0.0.1:'+str(cls.http.server_port)
@@ -198,6 +207,9 @@ class ProbeTests(unittest.TestCase):
     def tearDownClass(cls):cls.http.shutdown();cls.http.server_close();cls.thread.join()
     def probe(self,path='',marker='',test=True):return execute(dict(id='http',kind='http',target=self.url+path,marker=marker),test)
     def test_http(self):self.assertEqual(self.probe()['state'],'UP')
+    def test_http_fragment_is_not_sent_to_server(self):
+        self.assertEqual(self.probe('/#contact')['state'],'UP')
+        self.assertEqual(ProbeTests.Fixture.last_path,'/')
     def test_provider_console_http_response_without_following_login_redirect(self):
         spec=dict(provider_console_spec({'panel_url':self.url+'/login'}),id='console')
         result=execute(spec,test=True)

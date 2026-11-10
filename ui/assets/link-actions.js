@@ -59,7 +59,7 @@
       try {
         const task=await core.call('link_action',{urls:value.urls,action,media:isMedia});
         launched.set(action,task);status.textContent=task.status==='done' ? 'Результат уже готов.' : 'Задача создана. Ход выполнения и файлы — в задачах.';
-        options.started?.(task); const open=document.createElement('button');open.type='button';open.textContent='Открыть задачу';
+        options.started?.(task); const open=document.createElement('button');open.type='button';open.className='la-open-task';open.title='Открыть задачу с ходом выполнения и результатами';open.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg><span>Открыть задачу</span>';
         open.onclick=()=>openTask(task.id);status.append(' ',open);
       } catch(error) {status.textContent=error.message || String(error);}
       finally {busy=false;render();}

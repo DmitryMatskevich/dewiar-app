@@ -2,6 +2,7 @@
 .link-actions header{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .link-actions button{font:inherit;color:inherit;cursor:pointer;border:1px solid #8193b15e;border-radius:9px;background:#ffffff22;padding:7px 10px;line-height:1.3}
 .link-actions button:disabled{opacity:.5;cursor:default}.link-actions button:focus-visible{outline:2px solid #7376ff;outline-offset:2px}
+.link-actions .la-open-task{display:inline-flex;align-items:center;gap:6px}.link-actions .la-open-task svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .link-actions .la-close{border:0;font-size:22px;padding:0 6px;background:none}
 .la-source{font-size:.8em;opacity:.7;overflow-wrap:anywhere;margin:5px 0 9px}
 .la-buttons{display:flex;flex-wrap:wrap;gap:6px}.link-actions .la-mode{border:0;font-size:.8em;opacity:.75}
@@ -18,7 +19,6 @@
 .link-draft-actions:empty,#link-messages:empty{display:none}#link-messages{max-height:34vh;overflow:auto;padding:0 12px;flex-shrink:1}
 .link-draft-actions{max-height:32vh;overflow:auto}
 #card.has-screenshots .link-draft-actions{max-height:min(90px, 16vh)}
-#card.has-links #orb,#card.has-link-draft #orb{width:calc(84px * var(--ok,1));height:calc(84px * var(--ok,1))}
 #card.has-links #mid{overflow-y:auto;scrollbar-width:thin}
 #card.has-links #mid>*{flex-shrink:0}
 #card.has-links #link-messages{flex:0 0 auto;max-height:none;overflow:visible}

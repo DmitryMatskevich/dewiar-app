@@ -76,6 +76,24 @@ def find_browser():
                 if r and p.is_file():
                     return str(p)
         return None
+    if sys.platform == "darwin":
+        # GUI browsers are usually installed as .app bundles and do not add a
+        # command-line shim to PATH. Dewiar's headless export launches the
+        # bundle's Chromium executable directly, using its own temporary profile.
+        roots = (Path("/Applications"), Path.home() / "Applications", Path("/System/Applications"))
+        bundles = (
+            ("Google Chrome.app", "Contents/MacOS/Google Chrome"),
+            ("Chromium.app", "Contents/MacOS/Chromium"),
+            ("Microsoft Edge.app", "Contents/MacOS/Microsoft Edge"),
+            ("Yandex.app", "Contents/MacOS/Yandex"),
+            ("Yandex Browser.app", "Contents/MacOS/Yandex Browser"),
+            ("Brave Browser.app", "Contents/MacOS/Brave Browser"),
+        )
+        for root in roots:
+            for bundle, executable in bundles:
+                candidate = root / bundle / executable
+                if candidate.is_file():
+                    return str(candidate)
     for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge", "microsoft-edge-stable",
                  "brave-browser", "yandex-browser", "yandex-browser-stable"):
         p = shutil.which(name)
@@ -128,7 +146,8 @@ def html_to_pdf(src, dst, timeout=90):
 def _html_to_pdf(src, dst, timeout=90):
     br = find_browser()
     if not br:
-        raise ExportError("для PDF нужен браузер Chrome, Chromium или Edge — его нет. Откройте страницу и выберите "
+        raise ExportError("не удалось найти Chrome, Chromium, Edge, Brave или Яндекс Браузер для создания PDF. "
+                          "Проверьте установку браузера или задайте DEWIAR_PDF_BROWSER. Откройте страницу и выберите "
                           "«Печать → Сохранить как PDF»")
     src, dst = Path(src).resolve(), Path(dst)
     prof = tempfile.mkdtemp(prefix="dewiar-pdf-")              # свой профиль: не мешаем открытому браузеру человека

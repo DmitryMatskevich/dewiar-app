@@ -2126,6 +2126,22 @@ class CommandsMixin:
                     if row.get('att') and row['att'][0].get('kind') == 'link_actions'][-1:]
         if cmd == "task_get":
             return self.tasks.detail(a.get("id"))
+        if cmd == "task_convert_result":
+            task = self.tasks.get(a.get("id"))
+            rel = str(a.get("path") or "")
+            allowed = {str(o.get("path") or "") for o in (task.data.get("outputs") or [])}
+            src = (task.dir / rel).resolve()
+            output_root = (task.dir / "outputs").resolve()
+            if rel not in allowed or output_root not in src.parents or not src.is_file():
+                raise ValueError("Такого файла результата у задачи нет")
+            from file_converter import normalise_target, targets_for
+            target = normalise_target(a.get("target") or "")
+            if target not in targets_for(src):
+                raise ValueError(f"Файл .{src.suffix.lstrip('.')} нельзя преобразовать в .{target}")
+            converted = self.tasks.create_file_conversion_from_paths(
+                [{"name": src.name, "path": src}], target,
+                goal=f"Преобразовать результат задачи «{task.title}» в {target.upper()}")
+            return converted.public()
         if cmd == "task_create":
             t = self.tasks.create(a.get("title", ""), a.get("goal", ""), a.get("project", ""), start=a.get("start", True),team=a.get('team'))
             return t.public()
@@ -2202,7 +2218,7 @@ class CommandsMixin:
             allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
             src = (t.dir / rel).resolve()
             outdir = (t.dir / 'outputs').resolve()
-            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription'} or rel not in allowed or outdir not in src.parents:
+            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription', 'webpage-extraction'} or rel not in allowed or outdir not in src.parents:
                 raise ValueError('Такого текстового результата у задачи нет')
             if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
                 raise ValueError('Этот результат нельзя показать как текст')
@@ -2214,7 +2230,7 @@ class CommandsMixin:
             allowed = {str(o.get('path') or '') for o in (t.data.get('outputs') or [])}
             src = (t.dir / rel).resolve()
             outdir = (t.dir / 'outputs').resolve()
-            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription'} or rel not in allowed or outdir not in src.parents:
+            if t.data.get('workflow') not in {'text-extraction', 'contact-extraction', 'file-conversion', 'media-transcription', 'webpage-extraction'} or rel not in allowed or outdir not in src.parents:
                 raise ValueError('Такого текстового результата у задачи нет')
             if src.suffix.lower() not in {'.txt', '.md', '.html', '.csv', '.tsv'} or not src.is_file():
                 raise ValueError('Этот тип результата нельзя редактировать здесь')

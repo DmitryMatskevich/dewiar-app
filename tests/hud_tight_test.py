@@ -2,8 +2,8 @@
 строка «…— готово» обрезалась посередине, а ответ сжимался в ноль). ui/hud.html в Chromium размером виджета, ядро —
 заглушка:
 — «Ход работы (3) и ответ» — строкой внутри карточки ответа, а не отдельной плашкой;
-— тесно: сначала облик меньше; не хватает — вопрос в одну строку, «…— готово» прячется (о задаче говорит её карточка);
-  ответ виден хотя бы двумя строками;
+— облик остаётся слева и сохраняет круглую форму;
+— тесно: ответ остаётся читаемым рядом с обликом;
 — ничего не обрезано посередине: содержимое карточки ответа помещается в неё; карточки не наезжают друг на друга и на панель;
 — просторно — всё как раньше: вопрос в две строки и «…— готово» видно;
 — готовая задача с кнопками и вопрос «Да/Нет» не уезжают на панель кнопок."""
@@ -34,11 +34,12 @@ SETUP = """() => { tlReset('На рабочем столе у меня есть 
   renderTask(); showCap(null, 'Запустила расшифровку в фоне — займёт несколько минут. Скажу, когда будет готово.'); }"""
 GEOM = """() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), cap = document.querySelector('#cap'), bot = document.querySelector('#bot');
   return { more_in_cap: !!document.querySelector('#cap > #more.on'), tight: cap.classList.contains('tight'), crowd: document.querySelector('#card').classList.contains('crowd'),
+    orb_at_side: r('#orb').right <= r('#mid').left && Math.abs(r('#orb').width - r('#orb').height) <= 1,
     you_lines: Math.round(document.querySelector('#you').getBoundingClientRect().height / 17.8), act: getComputedStyle(document.querySelector('#act')).display,
     fits: cap.scrollHeight <= cap.clientHeight + 1, bot_h: bot.clientHeight, cap_b: r('#cap').bottom, task_t: r('#task').top, task_b: r('#task').bottom, bar_t: r('#bar').top }; }"""
 with sync_playwright() as p:
     b = p.chromium.launch(); errs = []
-    for h, tight in ((431, True), (600, False)):
+    for h in (431, 600):
         pg = b.new_page(viewport={"width": 331, "height": h}); pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.goto((tmp / "hud.html").as_uri()); pg.wait_for_timeout(500)
         pg.evaluate(SETUP); pg.wait_for_timeout(400)
@@ -46,9 +47,8 @@ with sync_playwright() as p:
         ok(g["more_in_cap"], f"{h}: «Ход работы (3) и ответ» — внутри карточки ответа")
         ok((g["fits"] or g["bot_h"] == 0) and g["bot_h"] >= 17 and g["cap_b"] <= g["task_t"] and g["task_b"] <= g["bar_t"] + 1,
            f"{h}: ничего не обрезано, ответ виден, карточки не наезжают: {g}")
-        if tight:
-            ok(g["crowd"], f"{h}: тесно — облик меньше, карточки помещаются целиком: {g}")
-        else:
+        ok(g["orb_at_side"], f"{h}: круглый облик слева от ответа: {g}")
+        if h == 600:
             ok(not g["tight"] and not g["crowd"] and g["act"] != "none" and g["you_lines"] >= 2, f"{h}: просторно — как раньше: {g}")
         pg.close()
     # задача готова — карточка с кнопками «Посмотреть / HTML / PDF» не уезжает на панель; вопрос «Да/Нет» — тоже

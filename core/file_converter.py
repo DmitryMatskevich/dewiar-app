@@ -1090,12 +1090,13 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
             else:
                 content = "<!doctype html><meta charset=utf-8><body><pre>" + html.escape(_read_text(src)) + "</pre></body>"
             html_temp.write_text(content, encoding="utf-8")
-            generated = _office_convert(html_temp, "pdf", outdir, cancel)
-            if generated != dest:
-                _move_office_result(generated, dest)
+            if cancel is not None and cancel.is_set():
+                raise ConversionError("Преобразование отменено")
+            from export import html_to_pdf
+            html_to_pdf(html_temp, dest)
         finally:
             html_temp.unlink(missing_ok=True)
-        backend = "LibreOffice"
+        backend = "Chromium"
     elif target in {"pdf", "html", "txt", "docx", "xlsx", "csv"} and ext in (OFFICE_EXTS | {"pdf"}):
         if ext == "pdf" and target == "pdf":
             raise ConversionError("Файл уже PDF")

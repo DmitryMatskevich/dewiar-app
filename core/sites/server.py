@@ -121,8 +121,12 @@ class App:
         if path == '/api/sites':
             saved = self.store.save(data)
             return {'item': saved}
+        if path == '/api/sites/delete':
+            return self.store.delete_site(data.get('id'), data.get('rev'))
         if path == '/api/providers':
             return {'item': self.store.save_provider(data)}
+        if path == '/api/providers/delete':
+            return self.store.delete_provider(data.get('id'), data.get('rev'))
         if path == '/api/assets':
             return {'item':self.store.save_asset(data.get('name'),data.get('address'),data.get('provider',''))}
         if path == '/api/check':

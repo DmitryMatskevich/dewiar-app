@@ -144,6 +144,7 @@ function renderPlan(text, live, activity) {
 }
 const OUT_ICON = { html: "🌐", htm: "🌐", pdf: "📕", png: "🖼", jpg: "🖼", jpeg: "🖼", webp: "🖼", gif: "🖼", bmp: "🖼", tif: "🖼", tiff: "🖼", svg: "🖼", md: "📝", txt: "📝", srt: "💬",
                    csv: "📊", tsv: "📊", xlsx: "📊", docx: "📄", odt: "📄", pptx: "📽", mp3: "🎵", mpeg: "🎵", wav: "🎵", flac: "🎵", ogg: "🎵", opus: "🎵", m4a: "🎵", aac: "🎵", mp4: "🎬", zip: "🗜" };
+const TASK_CONVERT_TARGETS = {html:['md','txt','pdf','docx','csv','xlsx'],htm:['md','txt','pdf','docx','csv','xlsx'],md:['html','txt','pdf','docx','csv','xlsx'],markdown:['html','txt','pdf','docx','csv','xlsx'],txt:['md','html','pdf','docx','csv','xlsx'],pdf:['md','txt','html','docx'],docx:['md','txt','html','pdf'],csv:['md','txt','html','pdf','xlsx'],tsv:['md','txt','html','pdf','xlsx'],xlsx:['md','txt','html','pdf','csv','tsv']};
 /* Результат показывается прямо с диска (file://): # и ? в имени файла иначе читаются как якорь и строка запроса;
    t.dir — абсолютный путь ядра, в Windows с буквой диска и «\» -> file:///C:/… */
 function outUrl(t, rel) { const p = (t.dir + "/" + rel).replace(/\\/g, "/"); return "file://" + (p.startsWith("/") ? "" : "/") + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F"); }
@@ -157,9 +158,11 @@ function renderOutputs(t) {
   if (!outs.find(o => o.path === tOutSel)) tOutSel = (preferred || outs[outs.length - 1] || {}).path || "";
   const shown = t.workflow === 'media-transcription' ? outs.slice() : outs.slice().reverse();
   return `<div class="outs${stages ? " stages" : ""}">${shown.map(o => { const ext = o.path.split(".").pop().toLowerCase();
-      const textFile = ["md", "txt", "srt", "csv", "tsv", "json"].includes(ext);
-      const editable = ["media-transcription", "text-extraction", "contact-extraction"].includes(t.workflow) && ["md", "txt", "srt", "csv", "tsv"].includes(ext);
-      return `<div class="oi-row"><button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>${stages && textFile ? `<div class="oi-actions"><button class="btn small icon task-output-icon" data-out-copy="${escH(o.path)}" title="Скопировать текст этапа" aria-label="Скопировать текст этапа">${TASK_COPY_ICON}</button>${editable ? `<button class="btn small icon task-output-icon" data-out-edit="${escH(o.path)}" title="Редактировать файл этапа" aria-label="Редактировать файл этапа">${TASK_EDIT_ICON}</button>` : ""}${t.workflow==='contact-extraction'&&o.path.endsWith('contacts.md')?'<button class="btn small" data-out-contacts title="Создать карточки из найденных контактов">Создать контакты</button>':''}</div>` : ""}</div>`; }).join("")}</div>
+      const textFile = ["md", "txt", "srt", "csv", "tsv", "json", "html", "htm"].includes(ext);
+      const editable = ["media-transcription", "text-extraction", "contact-extraction", "file-conversion", "webpage-extraction"].includes(t.workflow) && ["md", "txt", "srt", "csv", "tsv", "html", "htm"].includes(ext);
+      const targets = TASK_CONVERT_TARGETS[ext] || [];
+      const convert = targets.length ? `<div class="task-convert"><select aria-label="Преобразовать ${escH(o.title || o.path)}" data-out-convert="${escH(o.path)}"><option value="">Преобразовать…</option>${targets.map(fmt=>`<option value="${fmt}">${fmt.toUpperCase()}</option>`).join("")}</select></div>` : "";
+      return `<div class="oi-row"><button class="oi${o.path === tOutSel ? " on" : ""}" data-p="${escH(o.path)}"><b>${OUT_ICON[ext] || "📎"}</b><span>${escH(o.title || o.path)}<small>${escH(o.path)}</small></span></button>${textFile ? `<div class="oi-actions"><button class="btn small icon task-output-icon" data-out-copy="${escH(o.path)}" title="Скопировать текст результата" aria-label="Скопировать текст результата">${TASK_COPY_ICON}</button>${editable ? `<button class="btn small icon task-output-icon" data-out-edit="${escH(o.path)}" title="Редактировать файл результата" aria-label="Редактировать файл результата">${TASK_EDIT_ICON}</button>` : ""}${t.workflow==='contact-extraction'&&o.path.endsWith('contacts.md')?'<button class="btn small" data-out-contacts title="Создать карточки из найденных контактов">Создать контакты</button>':''}${convert}</div>` : convert}</div>`; }).join("")}</div>
     <div class="opane"><div class="obar"><span id="o-name"></span><span style="flex:1"></span>
       <button class="btn small" id="o-full">На весь экран</button><button class="btn small" id="o-open">Открыть</button><button class="btn small" id="o-dir">Папка</button>
       <button class="btn small primary" id="o-dl">Скачать</button><button class="btn small primary" id="o-pdf">PDF</button></div>
@@ -169,6 +172,15 @@ async function wireOutputs(t) {
   const rel = tOutSel; if (!rel) return;
   const dirRel = "Задачи/" + t.dir.replace(/\\/g, "/").split("/Задачи/").pop();   // ws_* принимают пути от корня папки ассистента
   $$("#t-view .oi").forEach(b => b.onclick = () => { tOutSel = b.dataset.p; openTask(t.id); });
+  $$("#t-view [data-out-convert]").forEach(select => select.onchange = async () => {
+    const target = select.value; if (!target) return;
+    select.disabled = true;
+    try {
+      const child = await core.call('task_convert_result', {id:t.id,path:select.dataset.outConvert,target});
+      tCur = child.id; tOpenedFor = ''; tTab = 'plan';
+      await openTask(child.id); loadTasks();
+    } catch (error) { toast(error.message || 'Не удалось запустить конвертер', 6000, 'bad'); select.disabled = false; select.value = ''; }
+  });
   $$("#t-view [data-out-contacts]").forEach(b => b.onclick = async () => {
     b.disabled = true;
     try {

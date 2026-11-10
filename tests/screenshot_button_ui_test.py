@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
                 page.evaluate('(shown)=>setOrbVisible(shown, true)',shown)
                 geometry=page.evaluate("""async () => {
                   await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-                  return Object.fromEntries(['orb','screenshot-messages','hud-workspace','ask','bar'].map(
+                  return Object.fromEntries(['orb','mid','screenshot-messages','hud-workspace','ask','bar'].map(
                     id=>[id,document.getElementById(id).getBoundingClientRect().toJSON()]));
                 }""")
                 p,h,a,b=(geometry[k] for k in ('screenshot-messages','hud-workspace','ask','bar'))
@@ -127,7 +127,11 @@ with tempfile.TemporaryDirectory() as folder,sync_playwright() as pw:
                     a['bottom'] <= b['top']+1 and b['bottom'] <= height+1
                 ),(skin,width,height,shown,geometry)
                 if shown:
-                    assert geometry['orb']['top'] >= h['top']-1 and geometry['orb']['bottom'] <= h['bottom']+1
+                    orb,mid=geometry['orb'],geometry['mid']
+                    assert orb['top'] >= h['top']-1 and orb['bottom'] <= h['bottom']+1
+                    assert orb['right'] <= mid['left'] and abs(orb['width']-orb['height'])<=1, geometry
+                else:
+                    assert abs(geometry['mid']['width']-h['width'])<=1, geometry
                 feed=page.locator('.activity-scroll').evaluate("""e=>({
                     height:e.clientHeight, scroll:e.scrollTop,
                     end:e.querySelector('.activity-row:last-child').getBoundingClientRect().bottom,

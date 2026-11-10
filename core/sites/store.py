@@ -17,13 +17,14 @@ def minute():
     return int(time.time() // 60)
 
 
-def web_url(value):
+def web_url(value, allow_fragment=False):
     value = str(value).strip()
     if '://' not in value:
         value = 'https://' + value
     u = urlsplit(value)
-    if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password or u.fragment:
-        raise ValueError('Нужен HTTP(S) адрес без пароля и фрагмента')
+    if (u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password
+            or (u.fragment and not allow_fragment)):
+        raise ValueError('Нужен HTTP(S) адрес без логина и пароля' + ('' if allow_fragment else ' и фрагмента'))
     if len(value) > 2048:
         raise ValueError('Адрес слишком длинный')
     try:
@@ -85,7 +86,9 @@ def validate(data):
         if not isinstance(v, str) or len(v) > (2000 if k == 'notes' else 2048):
             raise ValueError('Некорректное поле ' + k)
         d[k] = v.strip()
-    d['url'] = web_url(d['url']) if d['url'] else ''
+    # Browser fragments such as /#contact are part of a valid page URL. Keep
+    # them in the record; the HTTP probe sends only path and query to the host.
+    d['url'] = web_url(d['url'], allow_fragment=True) if d['url'] else ''
     hostname = urlsplit(d['url']).hostname if d['url'] else ''
     d['name'] = (d['name'] or hostname)[:160]
     if not d['name']:
@@ -99,7 +102,9 @@ def validate(data):
     for k in ('dns_host', 'ssh_host', 'mail_host', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'server_ip'):
         if d[k]:
             d[k] = network_host(d[k], k)
-    for k in ('hoster_url', 'panel_url', 'dns_provider_url', 'dns_panel_url', 'health_url', 'console_url'):
+    if d['health_url']:
+        d['health_url'] = web_url(d['health_url'], allow_fragment=True)
+    for k in ('hoster_url', 'panel_url', 'dns_provider_url', 'dns_panel_url', 'console_url'):
         if d[k]:
             d[k] = web_url(d[k])
     for k, default, lo, hi in [('period', 5, 1, 1440), ('ssh_port', 22, 1, 65535), ('ftp_port', 21, 1, 65535), ('mail_port', 993, 1, 65535), ('mail_smtp_port', 587, 1, 65535)]:
@@ -190,6 +195,10 @@ class Store:
             resolved_ids = {}
             for item in seed:
                 cfg = validate_provider(item)
+                deleted = c.execute('SELECT 1 FROM provider_meta WHERE key=?',
+                                    ('deleted_provider:' + item['id'],)).fetchone()
+                if deleted:
+                    continue
                 old = c.execute('SELECT * FROM providers WHERE id=?', (item['id'],)).fetchone()
                 if not old:
                     old = c.execute("SELECT * FROM providers WHERE lower(json_extract(config, '$.name'))=lower(?)", (item['name'],)).fetchone()
@@ -240,11 +249,13 @@ class Store:
             # Link earlier free-text entries to their matching directory records.
             provider_ids = {json.loads(r['config'])['name'].strip().casefold():r['id'] for r in c.execute('SELECT id,config FROM providers').fetchall()}
             aliases = {'beget':provider_ids.get('beget','beget'), 'firstvds':provider_ids.get('firstvds','firstvds'), 'timeweb':provider_ids.get('timeweb','timeweb'), 'timeweb cloud':provider_ids.get('timeweb cloud','timeweb-cloud'), 'nic.ru':provider_ids.get('nic.ru','nic-ru'), 'nic.ru / ru-center':provider_ids.get('nic.ru','nic-ru'), 'ru-center':provider_ids.get('nic.ru','nic-ru')}
+            deleted_ids = {r['key'].removeprefix('deleted_provider:') for r in
+                           c.execute("SELECT key FROM provider_meta WHERE key LIKE 'deleted_provider:%'")}
             for row in c.execute('SELECT id,config FROM sites').fetchall():
                 cfg = json.loads(row['config'])
                 if not cfg.get('hosting_provider_id'):
                     key = str(cfg.get('hoster') or '').strip().casefold()
-                    if key in aliases:
+                    if key in aliases and aliases[key] not in deleted_ids:
                         cfg['hosting_provider_id'] = aliases[key]
                         c.execute('UPDATE sites SET config=? WHERE id=?', (json.dumps(cfg, ensure_ascii=False), row['id']))
 
@@ -363,6 +374,39 @@ class Store:
             c.execute('INSERT INTO audit(at,action) VALUES (?,?)', (now, 'provider_saved'))
         return self.provider(pid)
 
+    def delete_provider(self, provider_id, rev):
+        """Remove a provider and preserve its name/link on sites as a snapshot."""
+        provider_id = str(provider_id or '')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', provider_id):
+            raise ValueError('Неверный идентификатор провайдера')
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row = c.execute('SELECT * FROM providers WHERE id=?', (provider_id,)).fetchone()
+            if not row:
+                raise ValueError('Провайдер уже удалён или не найден')
+            if not isinstance(rev, int) or rev != row['rev']:
+                raise ValueError('Карточка провайдера изменилась. Обновите список перед удалением')
+            cfg = json.loads(row['config'])
+            linked = c.execute('SELECT id,rev,config FROM sites').fetchall()
+            count = 0
+            for site in linked:
+                site_cfg = json.loads(site['config'])
+                if site_cfg.get('hosting_provider_id') != provider_id:
+                    continue
+                site_cfg['hosting_provider_id'] = ''
+                site_cfg['hoster'] = cfg['name']
+                site_cfg['hoster_url'] = cfg['website_url']
+                c.execute('UPDATE sites SET config=?,rev=? WHERE id=?',
+                          (json.dumps(site_cfg, ensure_ascii=False), site['rev'] + 1, site['id']))
+                count += 1
+            c.execute('DELETE FROM provider_diagnostics WHERE provider=?', (provider_id,))
+            c.execute('DELETE FROM providers WHERE id=?', (provider_id,))
+            # Built-in providers are seeded on startup; remember explicit deletion.
+            c.execute('INSERT OR REPLACE INTO provider_meta(key,value) VALUES (?,?)',
+                      ('deleted_provider:' + provider_id, json.dumps(minute())))
+            c.execute('INSERT INTO audit(at,action) VALUES (?,?)', (minute(), 'provider_deleted'))
+        return {'deleted': True, 'unlinked_sites': count, 'name': cfg['name']}
+
     def save_provider_diagnostic(self, provider_id, result, now=None, ttl=15, rev=None):
         now = minute() if now is None else now
         with self.db() as c:
@@ -406,6 +450,30 @@ class Store:
                 self._exclude(c, sid, 'global_pause', True, now)
             c.execute('INSERT INTO audit(at,action,site) VALUES (?,?,?)', (now, 'site_saved', sid))
         return self.get(sid)
+
+    def delete_site(self, site_id, rev):
+        site_id = str(site_id or '')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', site_id):
+            raise ValueError('Неверный идентификатор сайта')
+        with self.db() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row = c.execute('SELECT rev FROM sites WHERE id=?', (site_id,)).fetchone()
+            if not row:
+                raise ValueError('Сайт уже удалён или не найден')
+            if not isinstance(rev, int) or rev != row['rev']:
+                raise ValueError('Карточка сайта изменилась. Обновите список перед удалением')
+            # Stop queued incident/renewal notifications from being sent after
+            # the monitored record has been removed. Preserve sent delivery history.
+            c.execute("UPDATE outbox SET state='superseded',error='Сайт удалён' WHERE site=? AND state='pending'",
+                      (site_id,))
+            for table, column in (('current','site'), ('port_diagnostics','site'),
+                                  ('spans','site'), ('incidents','site'),
+                                  ('exclusions','site'), ('renewal_alerts','site')):
+                c.execute(f'DELETE FROM {table} WHERE {column}=?', (site_id,))
+            c.execute('DELETE FROM sites WHERE id=?', (site_id,))
+            c.execute('INSERT INTO audit(at,action,site) VALUES (?,?,?)',
+                      (minute(), 'site_deleted', site_id))
+        return {'deleted': True}
 
     def results(self, sid):
         with self.db() as c:

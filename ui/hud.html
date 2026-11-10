@@ -93,8 +93,9 @@
   body.neu #yn button:not(.yes) { background: var(--glass); box-shadow: 3px 3px 7px var(--neu-dark), -3px -3px 7px var(--neu-light); }
   body.neu #team { background: var(--glass); box-shadow: 8px 8px 20px var(--neu-dark), -8px -8px 20px var(--neu-light); }
 
-  #orb { position: relative; width: calc(228px * var(--ok, 1)); height: calc(228px * var(--ok, 1)); flex: none; margin-top: 38px; cursor: pointer; transition: width .35s ease, height .35s ease, opacity .2s; }
-  #card.busy #orb { width: calc(150px * var(--ok, 1)); height: calc(150px * var(--ok, 1)); }        /* есть текст — сфера уступает место */
+  #orb { --orb-size: min(clamp(38px, 15cqw, var(--orb-max, 112px)), 100cqh);
+         position: relative; width: var(--orb-size); height: var(--orb-size); align-self: center; flex: none;
+         cursor: pointer; transition: width .35s ease, height .35s ease, opacity .2s; }
   #card.no-orb #orb { display: none; }
   #orb canvas { width: 100%; height: 100%; display: block; }
 
@@ -128,7 +129,7 @@
   #bubble b { font-family: "Unbounded", "Ubuntu", sans-serif; font-weight: 600; font-size: 14px; letter-spacing: .03em; }
 
   /* Only the conversation yields space. The latest result and composer have their own rows. */
-  #hud-workspace { display:flex; flex:1 1 0; flex-direction:column; align-items:center; width:100%; min-height:0; }
+  #hud-workspace { display:flex; flex:1 1 0; align-items:stretch; gap:8px; width:100%; min-height:0; container-type:size; }
   #mid { flex: 1 1 0; min-width:0; min-height: 0; width: 100%; display: flex; flex-direction: column; gap: 8px; padding: 2px 0 8px; overflow: auto; scrollbar-width:thin; overscroll-behavior:contain; }
   #recent-activity { display:none; }
   #recent-activity:not(:empty) { display:flex; flex:1 1 0; flex-direction:column; gap:5px; min-height:0; overflow:hidden; padding:4px 6px; }
@@ -137,19 +138,8 @@
   #recent-activity .activity-scroll:focus-visible { outline:2px solid var(--accent, currentColor); outline-offset:-2px; border-radius:9px; }
   #recent-activity .activity-list { display:flex; flex:none; flex-direction:column; gap:5px; margin-bottom:auto; }
   #recent-activity .activity-row { flex:none; }
-  #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb {
-    width:clamp(52px, 14vw, 86px); height:auto; aspect-ratio:1; margin:0 0 5px;
-  }
-  @media (min-width:480px), (max-height:440px) {
-    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #hud-workspace {
-      flex-direction:row; align-items:stretch; gap:8px; container-type:size;
-    }
-    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb {
-      align-self:center; width:min(clamp(44px, 15vw, 112px), 100cqh); margin:0;
-    }
-  }
   @media (max-height:440px) {
-    #card:not(.no-orb):is(.has-screenshots, :has(#recent-activity:not(:empty))) #orb { width:min(clamp(38px, 12vw, 60px), 100cqh); }
+    #orb { --orb-max:60px; }
   }
   #recent-activity .activity-heading { flex:none; padding:3px 7px 5px; color:var(--muted); font-size:10.5px; letter-spacing:.03em; }
   #recent-activity .activity-row { display:block; width:100%; min-width:0; padding:7px 9px; border:0; border-radius:11px; background:var(--glass,rgba(128,140,180,.10)); color:var(--ink); font:inherit; text-align:left; }
@@ -307,6 +297,7 @@
                        background: rgba(255,255,255,.12); color: var(--ink); }
   #task .tbtn button:first-child { background: var(--brand); }
   #task .tbtn button:hover { filter: brightness(1.15); } #task .tbtn button:disabled { opacity: .6; }
+  #task .tbtn button svg { width: 14px; height: 14px; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
   #task .spin { width: 11px; height: 11px; border-radius: 50%; border: 2px solid rgba(214,228,240,.3); border-top-color: #D6E4F0; animation: tspin .9s linear infinite; flex: none; }
   #bar #b-tasks { position: relative; color: var(--muted); }
   #b-tasks[hidden] { display: none; }
@@ -490,11 +481,7 @@
   .ab.send { width: 30px; height: 30px; border-radius: 50%; color: rgba(255,255,255,.45); background: rgba(255,255,255,.07); transition: background .2s, color .2s; }
   .askbox.has .ab.send { background: var(--brand); color: #fff; }
   .ab.send svg { width: 15px; height: 15px; }
-  #card.crowd #orb { width: calc(92px * var(--ok, 1)); height: calc(92px * var(--ok, 1)); margin-top:24px; }
-  @media (max-height:440px) {
-    #card.crowd #orb { width:76px; height:76px; margin-top:12px; }
-  }
-  #card.long #orb { width: calc(84px * var(--ok, 1)); height: calc(84px * var(--ok, 1)); }          /* длинный текст — сфера уступает место полю */
+  #card.crowd #orb { --orb-max:56px; }
   #card.long #bubble, #card.long #note, #card.long #cap { display: none; }
   #card.long #cap.show, #card.long #cap.running { display: flex; }
   .ab { flex: none; width: 32px; height: 32px; border: 0; border-radius: 10px; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
@@ -628,8 +615,8 @@
 
   /* ---------- значок ---------- */
   body.mini #card { padding: 0; justify-content: center; }     /* значок — в той же теме, что и карточка */
-  body.mini #hud-workspace { flex:none; align-items:center; }
-  body.mini #orb { width: 92px; height: 92px; margin:0; }
+  body.mini #hud-workspace { flex:none; align-items:center; justify-content:center; container-type:normal; }
+  body.mini #orb { width: 92px; height: 92px; }
   body.mini #bubble, body.mini #mid, body.mini #ask, body.mini #screenshot-messages, body.mini #bar, body.mini #ask-model, body.mini #model-menu { display: none; }
   #grow { display: none; position: absolute; left: 62px; top: 62px; width: 24px; height: 24px; border-radius: 50%; border: 0;
           background: rgba(40,40,52,.92); color: #E6E7F2; place-items: center; cursor: pointer; opacity: 0; transition: opacity .2s; }
@@ -2087,7 +2074,7 @@ async function refreshRecentActivity() {
       actions.append(copy);
       if(row.kind==='task'){
         const open=document.createElement('button');open.type='button';open.className='activity-copy';open.title='Открыть обработку';open.setAttribute('aria-label','Открыть обработку');
-        open.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6l2 2h8v12H4z"/><path d="M4 9h16"/></svg>';
+        open.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg>';
         open.onclick=()=>{const a=api();a?.open_settings?.('tasks','&task='+encodeURIComponent(row.id));};actions.append(open);
       }
       meta.append(actions);list.append(item);
@@ -2115,12 +2102,13 @@ function renderDone(el, t) {
       : 'Обработка завершена. Проверьте итог и журнал задачи.';
     el.innerHTML = `<div class="tl">✅ <b>${esc(t.title)}</b><button class="tx" title="Скрыть готовый результат">×</button></div>`
       + `<div class="tsub">${statusText}</div>`
-      + `<div class="tbtn">${summary ? `<button data-a="results" title="Открыть задачу с ходом обработки, итогом и всеми файлами">Вся обработка и файлы</button><button data-a="ready" title="Открыть краткое резюме">Открыть резюме</button>` : `${result ? `<button data-a="ready" title="Открыть сохранённый текст результата. Видео повторно не скачивается.">${'Открыть расшифровку'}</button>` : ''}<button data-a="results" title="Открыть задачу со всеми сохранёнными файлами, журналом и итогом">${result ? 'Все файлы' : 'Открыть задачу'}</button>`}</div>`;
+      + `<div class="tbtn">${summary ? `<button data-a="task" title="Открыть задачу и все результаты"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg> Задача</button><button data-a="ready" title="Открыть краткое резюме">Открыть резюме</button>` : `${result ? `<button data-a="ready" title="Открыть сохранённый текст результата. Видео повторно не скачивается.">${'Открыть расшифровку'}</button>` : ''}<button data-a="task" title="Открыть задачу со всеми файлами, журналом и итогом"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg> ${result ? 'Задача' : 'Открыть задачу'}</button>`}</div>`;
     el.querySelector('.tx').onclick = e => { e.stopPropagation(); dismissed.add(t.id); renderTask(); };
     el.querySelectorAll('.tbtn button').forEach(b => b.onclick = async e => {
       e.stopPropagation(); b.disabled = true;
       try {
-        if (b.dataset.a === 'ready') await core.call('task_open_result', {id:t.id,path:result.path});
+        if (b.dataset.a === 'task') { const a = api(); if (a?.open_settings) await a.open_settings('tasks','&task='+encodeURIComponent(t.id)); else showCap('', 'Откройте раздел «Задачи», чтобы посмотреть обработку и файлы.'); }
+        else if (b.dataset.a === 'ready') await core.call('task_open_result', {id:t.id,path:result.path});
         else { const a = api(); if (a?.open_settings) await a.open_settings('tasks','&task=' + encodeURIComponent(t.id));
                else showCap('', 'Готовые файлы находятся в разделе «Задачи»: ' + t.title); }
       } catch (error) { showCap('', error.message); hideCapLater(8000); }
@@ -2138,7 +2126,8 @@ function renderDone(el, t) {
     ev.stopPropagation();
     const a = b.dataset.a, was = b.textContent; b.disabled = true;
     try {
-      if (a === "view") await core.call("task_open_result", { id: t.id, path: o.path });
+      if (a === "task") { const apiRef = api(); if (apiRef?.open_settings) await apiRef.open_settings('tasks','&task='+encodeURIComponent(t.id)); else showCap('', 'Откройте раздел «Задачи», чтобы посмотреть обработку и файлы.'); }
+      else if (a === "view") await core.call("task_open_result", { id: t.id, path: o.path });
       else { b.textContent = a === "pdf" ? "PDF…" : "…"; const r = await core.call("task_export", { id: t.id, path: o.path, fmt: a });
              showCap("", `Сохранено в «${r.dir.split(/[\\/]/).pop()}»: ${r.name}`); hideCapLater(6000); }
     } catch (e) { showCap("", e.message); hideCapLater(8000); }
@@ -2210,11 +2199,12 @@ async function showNativeTaskResult(t) {
         });
       } catch (error) { const note = document.createElement("div"); note.textContent = `Не удалось показать текст: ${error.message}`; box.append(note); }
     }
-    addButton("Результаты задачи", `Открыть задачу «${t.title}» и вкладку с файлами результата`, async () => {
+    const taskButton = addButton("Задача", `Открыть задачу «${t.title}» и вкладку с файлами результата`, async () => {
       const a = api();
       if (a?.open_settings) { await a.open_settings("tasks", "&task=" + encodeURIComponent(t.id)); status.textContent = "Открыта задача с результатами."; }
       else status.textContent = "Откройте вкладку «Задачи» — там находится этот результат.";
     });
+    taskButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px;vertical-align:-2px;fill:none;stroke:currentColor;stroke-width:1.7"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg> Задача';
     addButton("Открыть файл", `Открыть результат ${output.title || output.path}`, async () => {
       try { await core.call("task_open_result", {id:t.id,path:output.path}); status.textContent = `Открыт файл «${output.title || output.path}».`; }
       catch (error) { status.textContent = error.message || String(error); }
@@ -2335,14 +2325,7 @@ function showUpd(u) {
 /* карточка ↔ значок: это два окна; эта страница живёт в одном из них */
 const mode = new URLSearchParams(location.search).get("mode") === "mini" ? "mini" : "card";
 if (new URLSearchParams(location.search).get("tw") === "1") document.documentElement.classList.add("tw");
-// растянутая карточка — и портрет крупнее (--ok: во сколько раз карточка больше обычной 300×420, 1…1,6)
-function orbScale() {
-  const z = (window.DewiarZoom && DewiarZoom.get().zoom) || 1;
-  const k = Math.max(1, Math.min(1.6, Math.min(innerWidth / z / 300, innerHeight / z / 420)));
-  document.documentElement.style.setProperty("--ok", k.toFixed(3));
-}
-addEventListener("resize", () => { orbScale(); requestAnimationFrame(fitAsk); });
-orbScale();
+addEventListener("resize", () => requestAnimationFrame(fitAsk));
 /* Растянуть карточку за правый нижний угол: окно меняет размер на лету (Api.resize_card), отпустили — размер в
    настройки (ui.hud_w, ui.hud_h — при масштабе 100 %, так он переживает смену масштаба). Двойной щелчок — по умолчанию. */
 (() => {
