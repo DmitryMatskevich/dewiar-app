@@ -1461,7 +1461,8 @@ card.addEventListener("pointerdown", async (ev) => {
   // большая картинка (#lightbox) — тоже: захват указателя уводил щелчок «закрыть» на карточку, и картинка закрывала
   // виджет намертво (отчёт 70: «при картинке виснет виджет — нужно перезапускать»)
   // строки «ИИ-баланс…» и объявления — тоже кнопки (24.10: щелчок по #cloudlow уходил в перетаскивание и студия не открывалась)
-  if (ev.button !== 0 || ev.target.closest("button, input, textarea, select, option, summary, a, [role=button], #assistant-topbar, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb")) return;
+  if (ev.button !== 0 || ev.target.closest("button, input, textarea, select, option, summary, a, #assistant-topbar, #askin, #cap, #note, #upd, #task, #yn, #lightbox, #cloudlow, #annb, #clb") ||
+      (ev.target.closest("[role=button]") && !ev.target.closest("#orb"))) return;
   card.setPointerCapture(ev.pointerId);
   drag = { sx: ev.screenX, sy: ev.screenY, moved: false, pos: null, orb: !!ev.target.closest("#orb") };
   if (drag.orb) holdBegin("mouse");
