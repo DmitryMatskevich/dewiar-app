@@ -100,6 +100,8 @@ class FileConverterTest(unittest.TestCase):
         self.assertTrue(FC.is_text_extraction_command("распознай текст"))
         self.assertTrue(FC.is_text_extraction_command("Лира, получить текст"))
         self.assertIsNone(FC.requested_target("Расскажи про PDF"))
+        self.assertEqual(FC.requested_target("Преобразуй картинку в SVG"), "svg")
+        self.assertEqual(FC.requested_target("Конвертируй изображение в JPEG"), "jpg")
 
     def test_local_ocr_background_task_saves_text_without_model(self):
         import base64
@@ -290,6 +292,19 @@ class FileConverterTest(unittest.TestCase):
         with Image.open(gif) as image:
             self.assertEqual(image.format, "GIF")
             self.assertEqual(image.size, (12, 8))
+
+    def test_raster_svg_container_and_jpeg_output(self):
+        from PIL import Image
+        source = self.root / "transparent.png"
+        Image.new("RGBA", (36, 24), (220, 30, 40, 128)).save(source)
+        self.assertIn("svg", FC.targets_for(source))
+        svg = FC.convert(source, "svg", self.out)["path"].read_text(encoding="utf-8")
+        self.assertIn('viewBox="0 0 36 24"', svg)
+        self.assertIn("data:image/png;base64,", svg)
+        jpeg = FC.convert(source, "JPEG", self.out)["path"]
+        with Image.open(jpeg) as image:
+            self.assertEqual(image.format, "JPEG")
+            self.assertEqual(image.size, (36, 24))
 
     def test_audio_mp3_wav_roundtrip(self):
         wav_path = self.root / "tone.wav"
