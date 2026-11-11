@@ -798,6 +798,10 @@ def yandex_music_installed():
 
 def t_yandex_music(a, ctx):
     """Открыть в Яндекс Музыке поиск (жанр, исполнитель, песня) — в приложении, если оно стоит, иначе на сайте."""
+    guard=ctx.get('local_music_guard')
+    if callable(guard):
+        result=guard('search',a)
+        if result is not None:return result
     q = (a.get("query") or "").strip()
     path = "search?text=" + urllib.parse.quote(q) if q else ""
     app = yandex_music_installed()
@@ -985,6 +989,10 @@ def media_track_info():
 
 
 def t_media(a, ctx):
+    guard=ctx.get('local_music_guard')
+    if callable(guard):
+        result=guard('media',a)
+        if result is not None:return result
     action = a.get("action", "play_pause")
     r = ctx.get("radio")
     prefer = (ctx.get("music_pref") or (lambda: ""))()          # недавно открыта Яндекс Музыка — управляем ею
@@ -1053,6 +1061,10 @@ def t_media(a, ctx):
 
 
 def t_play_music(a, ctx):
+    guard=ctx.get('local_music_guard')
+    if callable(guard):
+        result=guard('search',a)
+        if result is not None:return result
     q = (a.get("query") or "").strip()
     url = "https://music.youtube.com/search?q=" + urllib.parse.quote(q) if q else "https://music.youtube.com/"
     launch(browser_cmd(url))
@@ -2761,7 +2773,7 @@ TOOLS = {
                         "tag":{"type":"string"},"song_id":{"type":"string"},
                         "title":{"type":"string"},"artist":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}},["action"]),
                      "safe", t_song_library, "Локальная библиотека песен"),
-    "media_control": ("Нажать кнопку плеера, который уже открыт (Яндекс Музыка, браузер, Spotify…): play — играть, pause — "
+    "media_control": ("Управлять текущим проигрывателем. После поиска или выбора локальной песни команды относятся к локальному проигрывателю Dewiar; не открывай внешний сервис. play — играть, pause — "
                       "пауза, next/previous — трек вперёд/назад. Всегда этим, а не кликами по экрану и не командами терминала.", S({"action": {"type": "string", "enum": ["play", "pause", "play_pause", "next", "previous", "stop"]}}, ["action"]), "safe", t_media, "Управление плеером"),
     "set_volume": ("Громкость системы: percent (0–150), или change (+/-), или mute (true/false).", S({"percent": {"type": "integer"}, "change": {"type": "integer"}, "mute": {"type": "boolean"}}), "safe", t_volume, "Громкость"),
     "system_status": ("Состояние компьютера: батарея, память, диск, нагрузка и какие программы занимают больше всего памяти. "

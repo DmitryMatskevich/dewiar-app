@@ -765,6 +765,13 @@
     await playCard(assistantSongQueue.shift());
   }
   async function runAssistantSongs(event) {
+    if(['pause','stop','play_pause'].includes(event.action)) {
+      if(event.songs?.[0]?.song_id!==cardPlayback.songId)return;
+      if(event.action==='stop')stopCard();
+      else if(event.action==='play_pause'||cardPlayback.playing)await SongReview.toggleFull(false);
+      return;
+    }
+    if(event.action==='play' && event.songs?.length===1 && cardPlayback.songId===event.songs[0].song_id && cardPlayback.playing)return;
     document.querySelector('nav button[data-p="tasks"]')?.click();
     document.getElementById('tasks-songs-tab')?.click();
     await load();

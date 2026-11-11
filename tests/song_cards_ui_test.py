@@ -29,7 +29,8 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
     start = html.index('const core=')
     end = html.index('</script>', start)
     mock = '''window.calls=[];window.rows=ROWS;window.audioData=AUDIO;
-const core={on(){},async call(cmd,a){calls.push([cmd,a]);
+window.handlers={};
+const core={on(name,fn){handlers[name]=fn;},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='songs_list')return structuredClone(rows);
  if(cmd==='songs_tags_list')return ['Любовь','Грусть'];
  if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
@@ -136,6 +137,12 @@ const core={on(){},async call(cmd,a){calls.push([cmd,a]);
     tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
     tab.wait_for_function("document.querySelector('[data-song-play=\"1\"]').ariaLabel.startsWith('Приостановить')")
     assert stop.is_visible() and play.get_attribute('aria-label').startswith('Приостановить')
+    tab.evaluate("handlers.song_library_action({action:'play',songs:[{song_id:'1'}]})")
+    assert not tab.locator('#song-review-audio').evaluate('(a)=>a.paused'), 'Repeated assistant play must not pause'
+    tab.evaluate("handlers.song_library_action({action:'pause',songs:[{song_id:'1'}]})")
+    tab.wait_for_function("document.querySelector('#song-review-audio').paused")
+    tab.evaluate("handlers.song_library_action({action:'play',songs:[{song_id:'1'}]})")
+    tab.wait_for_function("!document.querySelector('#song-review-audio').paused")
     assert tab.evaluate('window.scrollY') == 0, 'Card playback must not jump into the editor'
     tab.locator('[data-song-karaoke="1"]').click()
     tab.wait_for_function("!document.querySelector('#song-review-audio').paused && calls.some(([cmd,args])=>cmd==='song_full_audio'&&args.variant==='instrumental')")

@@ -193,6 +193,8 @@ class AnswerMixin:
         не голосом (Telegram/MAX, см. Turn.via); raw — без быстрых путей и передачи специалисту (дела по расписанию);
         shown — что показать вместо текста; report(ok, text) — чем кончился ход (дела по расписанию: повтор при сбое)."""
         text = text.strip()
+        if not raw and not quiet and self._explicit_external_music(text):
+            self._song_context=None
         if not via and not raw and not images:
             from canvas_scope import submit
             if submit(self, text):

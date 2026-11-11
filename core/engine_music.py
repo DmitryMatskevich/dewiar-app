@@ -7,6 +7,71 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 
 
 class MusicMixin:
+    @staticmethod
+    def _explicit_external_music(text):
+        source=r'(?:яндекс|yandex|youtube|ютуб|spotify|радио)'
+        low=text.casefold().strip(' .!?')
+        if not re.search(source,low) or re.search(r'(?:не|без)\b.{0,35}'+source,low):return False
+        return bool(re.fullmatch(source+r'(?:\s+(?:музыка|музыке|music))?',low) or
+                    re.search(r'\b(?:найди|ищи|поищи|открой|включи|поставь|играй|запусти|переключи|искать)\b.*'+source,low))
+
+    def _local_song_context(self):
+        context=getattr(self,'_song_context',None)
+        scope=getattr(getattr(self,'chatlog',None),'active','legacy')
+        if context and context['scope']==scope and time.monotonic()<context['until']:
+            return context
+        return None
+
+    def _remember_local_songs(self, rows, action):
+        self._song_context={'ids':[r['song_id'] for r in rows], 'action':action,
+                            'scope':getattr(getattr(self,'chatlog',None),'active','legacy'),
+                            'until':time.monotonic()+1800}
+
+    def _local_song_control(self, action='play'):
+        context=self._local_song_context()
+        if not context:return None
+        ids=context['ids']
+        if len(ids)!=1:
+            return 'В локальном сборнике найдено несколько песен. Назовите песню или её номер в списке.'
+        if action=='play':return self._song_library_action({'action':'play','song_id':ids[0]})
+        if action in ('pause','stop','play_pause'):
+            self.emit('song_library_action',action=action,songs=[{'song_id':ids[0]}])
+            return 'Команда передана локальному проигрывателю.'
+        return 'Уточните, какую песню локального сборника включить.'
+
+    def _guard_local_music(self, kind, args):
+        if not self._local_song_context():return None
+        if kind=='media':return self._local_song_control(args.get('action','play'))
+        query=str(args.get('query') or '').strip()
+        if query:return self._song_library_action({'action':'play','query':query})
+        return self._local_song_control('play')
+
+    def _local_song_followup(self, text):
+        context=self._local_song_context()
+        if not context:return False
+        low=text.casefold().strip(' .!?')
+        if re.search(r'яндекс|yandex|youtube|ютуб|spotify|радио',low):return False
+        from music import control
+        action=control(text)
+        if not action and re.search(r'\b(?:играй|плей|play)\b',low) and not re.search(r'\b(?:песню|трек)\s+\S+|\bне\s+(?:играй|включай|запускай|нажимай)',low):
+            action='play'
+        if action:
+            self._say_quick(self._local_song_control(action),text)
+            return True
+        if len(context['ids'])>1:
+            ordinals={'первую':0,'первая':0,'вторую':1,'вторая':1,'третью':2,'третья':2,'четвертую':3,'четвёртую':3,'пятую':4}
+            choice=ordinals.get(low)
+            if low.isdigit():choice=int(low)-1
+            if choice is not None and 0<=choice<len(context['ids']):
+                result=self._song_library_action({'action':context['action'] if context['action'] in ('play','open') else 'open','song_id':context['ids'][choice]})
+                self._say_quick(result,text);return True
+            # A short title following a list is a selection within that list.
+            if not getattr(self,'_music_source_pending',None) and len(low.split())<=8 and low not in ('да','нет','спасибо','отмена','хорошо') and not re.search(r'найди|открой|покажи|включи|поставь|напомни|погода|сколько|почему',low):
+                result=self._song_library_action({'action':context['action'] if context['action'] in ('play','open') else 'open','query':text,'candidate_ids':context['ids']})
+                if result.startswith('Не нашёл'):return False
+                self._say_quick(re.sub(r'\s*\[id:[^\]]+\]','',result),text);return True
+        return False
+
     def _song_library_action(self, args):
         """Run a guarded, fuzzy lookup against the user's own saved song cards."""
         import difflib
@@ -15,6 +80,7 @@ class MusicMixin:
         search_in=str(args.get('search_in') or 'auto')
         store=self.song_store
         query=str(args.get('query') or '').strip()
+        query=re.sub(r'^(?:по\s+(?:словам|тексту|фразе)|со\s+словами|где\s+поется)\s*[:—-]?\s*','',query,flags=re.I)
         def norm(value):
             value=unicodedata.normalize('NFKD',str(value or '').casefold().replace('ё','е'))
             return ' '.join(''.join(ch for ch in value if not unicodedata.combining(ch)).split())
@@ -36,6 +102,8 @@ class MusicMixin:
             self.emit('song_library_action',action='playlist',tag=tag,songs=[{'song_id':r['song_id'],'title':r['title'],'artist':r.get('artist','')} for r in rows])
             return f'Запускаю подборку «{tag}»: {len(rows)} песен.'
         rows=store.list(limit=500,compact=True)
+        if args.get('candidate_ids'):
+            rows=[r for r in rows if r['song_id'] in args['candidate_ids']]
         exact=next((r for r in rows if args.get('song_id') and r['song_id']==args['song_id']),None)
         if action=='edit':
             target=exact
@@ -72,11 +140,21 @@ class MusicMixin:
                     score=max(score,max((difflib.SequenceMatcher(None,nq,part).ratio()
                                          for part in tokens(hay) if len(part)>=5),default=0))
                 if nq in hay:score=max(score,.88)
+                if search_in in ('auto','lyrics') and lyrics:
+                    meaningful=[t for t in query_tokens if t not in {'и','а','но','в','на','у','с','по','что','как','из','не','я','ты'}]
+                    for index,phrase in enumerate(lyric_phrases):
+                        window=norm(' '.join(lyric_phrases[index:index+2]))
+                        if nq in window:score=max(score,.95)
+                        if len(meaningful)>=2:
+                            words=tokens(window)
+                            coverage=sum(any(t==w or (len(t)>=5 and difflib.SequenceMatcher(None,t,w).ratio()>=.8) for w in words) for t in meaningful)/len(meaningful)
+                            if coverage>=.65:score=max(score,.9*coverage)
                 if search_in=='meaning':score=max(score,.01)
                 if score>=.34 or search_in=='meaning':scored.append((score,r))
             scored.sort(key=lambda x:(-x[0],norm(x[1].get('title'))))
             if not scored:return f'Не нашёл «{query}». Уточни название или исполнителя.'
             if search_in=='meaning':
+                self._remember_local_songs([r for _,r in scored[:25]],action)
                 choices=[]
                 for _,r in scored[:25]:
                     snippets=[str(p.get('text') or '').strip() for p in r.get('phrases',[]) if isinstance(p,dict) and str(p.get('text') or '').strip()]
@@ -90,8 +168,10 @@ class MusicMixin:
             # can ask the user instead of silently opening the wrong song.
             if scored[0][0]<.56 or (len(scored)>1 and scored[1][0]>=scored[0][0]-.08):
                 options=[item for item in scored if item[0]>=scored[0][0]-.12][:5]
+                self._remember_local_songs([r for _,r in options],action)
                 return 'Неоднозначное название. Возможные варианты: '+ '; '.join(f'{r["title"]}'+(f' — {r["artist"]}' if r.get('artist') else '')+f' [id:{r["song_id"]}]' for _,r in options)+'. Какую песню выбрать?'
             exact=scored[0][1]
+        self._remember_local_songs([exact],action)
         if action=='search':return f'Нашёл: «{exact["title"]}» — {exact.get("artist") or "исполнитель не указан"} [id:{exact["song_id"]}].'
         if action not in ('open','play'):return 'Неизвестное действие с библиотекой песен.'
         if action=='play' and not exact.get('audio',{}).get('path'):return f'У «{exact["title"]}» пока нет сохранённой аудиозаписи.'
@@ -260,10 +340,15 @@ class MusicMixin:
         self.set_state("idle")
         return True
 
-    def _yandex_cmd(self, query, text, exact=False):
+    def _yandex_cmd(self, query, text, exact=False, authorize_external=False):
         """Открыть поиск в Яндекс Музыке (приложение или сайт) и ответить без модели. Пустой query — просто открыть.
         Из запроса убираются лишние слова, а «электронную музыку» превращаем в «электронная музыка» — как жанр."""
         import tools as _tools
+        if authorize_external or self._explicit_external_music(text):
+            self._song_context=None
+        elif self._local_song_context():
+            self._say_quick(self._guard_local_music('search',{'query':query}),text)
+            return True
         words = query.split()
         q = " ".join(re.sub(r"(\w{3,})ую$", r"\1ая", w) for w in words       # «электронную» → «электронная»
                      if w not in ("музыку", "музыка", "музычку", "мне", "пожалуйста", "что-нибудь", "какую-нибудь", "*"))
@@ -315,7 +400,7 @@ class MusicMixin:
             return self._run_local_song_choice(pending['query'],text)
         if pending.get('kind')=='local_miss' and re.fullmatch(r'\s*(?:да|ага|давай|ищи|поищи|хорошо|ок(?:ей)?)[.! ]*',low):
             self._music_source_pending=None
-            return self._yandex_cmd(pending['query'],text)
+            return self._yandex_cmd(pending['query'],text,authorize_external=True)
         if pending.get('kind')=='local_miss' and re.fullmatch(r'\s*(?:нет|не надо|не ищи|только локально|отмена)[.! ]*',low):
             self._music_source_pending=None
             self._say_quick('Хорошо, останусь в локальной библиотеке.',text)
@@ -687,6 +772,7 @@ class MusicMixin:
         from media_intent import protected
         if protected(text):
             return False
+        if getattr(self,'_local_song_followup',lambda _:False)(text):return True
         import tools as _tools
         from voice_commands import parse as parse_voice
         settings = getattr(self, 's', None)
