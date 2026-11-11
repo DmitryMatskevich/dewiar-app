@@ -272,6 +272,50 @@ class MusicMixin:
         self._say_quick(msg, text)
         return True
 
+    def _run_local_song_choice(self, query, text):
+        result=self._song_library_action({'action':'play','query':query})
+        if result.startswith('Включаю'):
+            self._say_quick(result,text)
+            return True
+        if result.startswith('Неоднозначное название'):
+            self._say_quick(result,text)
+            return True
+        self._music_source_pending={'kind':'local_miss','query':query,'until':time.monotonic()+180}
+        reason=(f'В локальной библиотеке у песни «{result.split("«",1)[1].split("»",1)[0]}» нет аудиозаписи. '
+                if result.startswith('У «') and 'нет сохранённой аудиозаписи' in result else
+                f'Не нашёл «{query}» в локальной библиотеке. ')
+        self._say_quick(reason+'Искать в Яндекс Музыке?',text)
+        return True
+
+    def _music_source_followup(self, text):
+        pending=getattr(self,'_music_source_pending',None)
+        if not pending:
+            return False
+        if time.monotonic()>pending.get('until',0):
+            self._music_source_pending=None
+            return False
+        low=text.casefold().replace('ё','е')
+        if re.search(r'яндекс\s*[- ]?музык|yandex\s*music|в\s+яндекс|^яндекс[.! ]*$',low):
+            self._music_source_pending=None
+            return self._yandex_cmd(pending['query'],text)
+        if re.search(r'локал|сборник|библиотек|сохраненн|мои\s+песн|моя\s+коллекц',low):
+            self._music_source_pending=None
+            return self._run_local_song_choice(pending['query'],text)
+        if pending.get('kind')=='local_miss' and re.fullmatch(r'\s*(?:да|ага|давай|ищи|поищи|хорошо|ок(?:ей)?)[.! ]*',low):
+            self._music_source_pending=None
+            return self._yandex_cmd(pending['query'],text)
+        if pending.get('kind')=='local_miss' and re.fullmatch(r'\s*(?:нет|не надо|не ищи|отмена)[.! ]*',low):
+            self._music_source_pending=None
+            self._say_quick('Хорошо, останусь в локальной библиотеке.',text)
+            return True
+        if pending.get('kind')=='source' and re.fullmatch(r'\s*(?:да|нет|не знаю|без разницы|все равно)[.! ]*',low):
+            self._music_source_pending=pending
+            self._say_quick('Выберите источник: локальная библиотека песен или Яндекс Музыка?',text)
+            return True
+        # A new unrelated request must not inherit a stale song/source question.
+        self._music_source_pending=None
+        return False
+
     def _music_cmd(self, text):
         """«Включи музыку» → спросим жанр; «поставь джаз», «что-нибудь спокойное», «дальше», «выключи музыку».
         «Играй», «пауза», «следующий трек» — кнопки открытого плеера; «… в Яндекс Музыке» — там."""
@@ -279,6 +323,8 @@ class MusicMixin:
         from media_intent import protected
         if protected(text):
             return False
+        if self._music_source_followup(text):
+            return True
         # Explicit playlist/tag requests refer to the user's curated song library,
         # not to a radio station. Keep station requests on the existing radio path.
         low=text.casefold().replace('ё','е')
@@ -296,6 +342,26 @@ class MusicMixin:
                 result=self._song_library_action({'action':'playlist','tag':tag})
                 self._say_quick(result,text)
                 return True
+        asked=time.monotonic()<self._music_asked
+        failed_recently=time.monotonic()-getattr(self,'_music_failed',-1e9)<120
+        c=parse(text,active=self.radio.playing or bool(self.radio.paused) or failed_recently,asked=asked)
+        if c and c.get('op')=='play' and c.get('query') not in ('','*') and not re.search(r'радио|станци|волн',low):
+            query=re.sub(r'^(?:(?:песню|песня|песни|трек|треки|композицию|композиция)\s+)+','',c['query'],flags=re.I).strip()
+            query=re.sub(r'^(?:пожалуйста|мне)\s+','',query,flags=re.I).strip()
+            query=re.sub(r'\s+(?:(?:в|из|на)\s+)?(?:мо[её]й\s+|мо[её]м\s+)?(?:локальн\w*\s+)?(?:библиотек\w*|сборник\w*|коллекци\w*|сохраненн\w*)\s*$','',query,flags=re.I).strip()
+            query=re.sub(r'\s+(?:локально|в\s+локальном)\s*$','',query,flags=re.I).strip()
+            if query and query not in ('музыку','музыка','песни','песню') and not genre_tag(query):
+                local_source=bool(re.search(r'локал|сборник|библиотек|сохраненн|мои\s+песн|моя\s+коллекц',low))
+                yandex_source=bool(re.search(r'яндекс\s*[- ]?музык|yandex\s*music|в\s+яндекс',low))
+                other_source=bool(re.search(r'youtube\s*music|ютуб\s*музык|spotify|спотиф|вк\s*музык',low))
+                if local_source:
+                    return self._run_local_song_choice(query,text)
+                if yandex_source:
+                    return self._yandex_cmd(query,text)
+                if not other_source:
+                    self._music_source_pending={'kind':'source','query':query,'until':time.monotonic()+180}
+                    self._say_quick(f'Где искать «{query}» — в вашей локальной библиотеке песен или в Яндекс Музыке?',text)
+                    return True
         act = control(text)
         if act == "play" and self.radio.playing and not self.radio.sounding and time.monotonic() - self.radio.last_at > 8:
             last = self.radio.station or self.radio.last         # «играет», а звука нет — станция зависла: включаем заново
@@ -330,9 +396,6 @@ class MusicMixin:
                 self._music_asked = time.monotonic() + 45
                 self._say_quick("Что включить? Например: " + ", ".join(g) + " — или скажите название станции.", text)
                 return True
-        asked = time.monotonic() < self._music_asked
-        failed_recently = time.monotonic() - getattr(self, "_music_failed", -1e9) < 120     # «другую» после неудачи — тоже про радио
-        c = parse(text, active=self.radio.playing or bool(self.radio.paused) or failed_recently, asked=asked)
         if not c:
             return False
         op = c["op"]
@@ -341,7 +404,8 @@ class MusicMixin:
         if op == "play" and not self.radio.playing and (c.get("service") or self._music_service()) in ("yandex", "youtube"):
             sv = c.get("service") or self._music_service()
             if sv == "yandex":
-                return self._yandex_cmd(c["query"], text)
+                query=re.sub(r'^(?:(?:песню|песня|песни|трек|треки|композицию|композиция)\s+)+','',c["query"],flags=re.I).strip()
+                return self._yandex_cmd(query, text)
             if not c["strict"] and not re.search(r"радио|станц|волн", text.lower()):
                 import tools as _tools
                 q = " ".join(w for w in c["query"].split() if w not in ("музыку", "музыка", "музычку"))
