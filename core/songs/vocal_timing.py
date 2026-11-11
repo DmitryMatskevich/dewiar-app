@@ -346,6 +346,8 @@ def _fit_word(word, vocal, is_first, is_last, previous_end, next_start, notes):
 
 
 HELD_MS = 3000
+ISOLATED_MS = 3000
+ISOLATED_VOICE_MS = 500
 
 
 def _held_end(vocal, end, next_start=None, notes=None, limit=None):
@@ -405,7 +407,13 @@ def fit_phrase(phrase, vocal, previous_end=None, next_start=None):
         return out, notes
     span = (int(words[0]['start_ms']), int(words[-1]['end_ms'])) if words else (start, end)
     weak = vocal.get('weak') if isinstance(vocal, dict) and vocal.get('weak') is not None else rows
-    if span[1] - span[0] >= 800 and voiced_ms(weak, *span) < .1 * (span[1] - span[0]):
+    # A short line far from any voice is not sung either: two words glued
+    # to the start of a crop over a long intro («Ты мне улыбнулась», 0.5 s,
+    # voice from 21 s). A short line in a breath next to singing is kept.
+    # A blip of the stem (0.2 s at 8.8 s in «Капелька») is not singing.
+    isolated = (span[1] - span[0] < 800
+                and voiced_ms(weak, span[0] - ISOLATED_MS, span[1] + ISOLATED_MS) < ISOLATED_VOICE_MS)
+    if isolated or (span[1] - span[0] >= 800 and voiced_ms(weak, *span) < .1 * (span[1] - span[0])):
         # Text where the stem is silent: a recognizer's invention over the
         # music (credits, names) or a line placed into a break. Keep it for
         # review; the sheet shows it apart from the sung lines.
@@ -759,10 +767,14 @@ def _coverage(text, other):
     return sum(x.size for x in SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks()) / len(a)
 
 
-def _grid_protected(phrase):
+def _user_timed(phrase):
     return bool(phrase.get('timing_quality') == 'manual_phrase' or phrase.get('timing_locked')
-                or phrase.get('recovered') or phrase.get('manual_edited')
+                or phrase.get('manual_edited')
                 or any(w.get('method') == 'manual' or w.get('manual') for w in phrase.get('words') or []))
+
+
+def _grid_protected(phrase):
+    return bool(_user_timed(phrase) or phrase.get('recovered'))
 
 
 def grid_groups(phrases, segments, slack=500):
@@ -961,6 +973,116 @@ def voiced_gap_groups(phrases, vocal, duration_ms=None):
                 break
     groups.sort()
     return [(g, (int(phrases[g[0]].get('start_ms') or 0), int(phrases[g[-1]].get('end_ms') or 0))) for g in groups]
+
+
+# ---------------------------------------------------------------- silent lines
+#
+# «Благодать»: Whisper put «Ты мне улыбнулась» at 0 s (a false start over the
+# 21-second intro), the aligner glued two of its words to 0.5 s, and the line
+# stood above the intro chords. Both Whisper views heard it at 19–23 s and Qwen
+# heard it in its first chunk; the voice there was sung without this line,
+# and the recovery later added only «рано утром, чуть опухшая сосна».
+
+SILENT_LINE_SHARE = .1
+SILENT_LINE_HEARD = .6
+SILENT_LINE_LEADS = (1500, 400)
+HEARD_LEAD_MS = 500
+HEARD_TAIL_MS = 1500
+
+
+def _heard_tokens(text):
+    return [t for t in (re.sub(r'[^\w]+', '', w.casefold().replace('ё', 'е'))
+                        for w in str(text or '').split()) if t]
+
+
+def heard_near(text, hypotheses, onset):
+    """Share of a line's words a recognizer heard in a passage around ``onset``.
+
+    The passage must hold the voice onset well inside it: a 25-second Qwen
+    chunk that only touches it at its edge is the passage the line came from
+    («Но я не могу.», invented by Qwen over the intro of «Капелька» and of
+    «Ответы», chunk 0–25 s, singing from 25 s).
+    """
+    from difflib import SequenceMatcher
+    want = _heard_tokens(text)
+    best = 0.0
+    for hypothesis in hypotheses or []:
+        for candidate in hypothesis.get('phrases') or []:
+            x, y = candidate.get('start_ms'), candidate.get('end_ms')
+            if not (finite(x) and finite(y)) or x > onset - HEARD_LEAD_MS or y < onset + HEARD_TAIL_MS:
+                continue
+            heard = _heard_tokens(candidate.get('text'))
+            matched = sum(block.size for block in
+                          SequenceMatcher(None, want, heard, autojunk=False).get_matching_blocks())
+            best = max(best, matched / max(1, len(want)))
+    return best
+
+
+def line_voiced_share(phrase, vocal):
+    """Share of a line's measured span (as the sheet shows it) inside the voice, quiet singing included."""
+    from .chord_layout import _vocal_bounds
+    s, e = _vocal_bounds(phrase)
+    rows = vocal.get('weak') if isinstance(vocal, dict) and vocal.get('weak') is not None else _intervals(vocal)
+    return voiced_ms(rows, s, e) / max(1, e - s)
+
+
+def silent_line_groups(phrases, vocal, hypotheses=(), duration_ms=None):
+    """``[(indexes, span, windows)]``: a sung line placed where nobody sings,
+    and later in the song the voice that sang it.
+
+    Either nobody's text is over that voice (the line alone goes there), or
+    the next line took it (both are aligned again together). Only when another
+    recognizer heard this line's words there: an invention over the music
+    («Валерий Курас») is not moved into the singing.
+    """
+    from .chord_layout import _vocal_bounds
+    if _intervals(vocal) is None:
+        return []
+    def short_silent(p):
+        s, e = _vocal_bounds(p)
+        return e - s < 800
+    # A short line already called «not sung» may still be a misplaced lyric;
+    # a long one is an invention over the music and is never moved.
+    lines = [i for i, p in enumerate(phrases or []) if str(p.get('text') or '').strip()
+             and (p.get('vocal_evidence') != 'none' or short_silent(p))
+             and str(p.get('text') or '').strip() != PLACEHOLDER]
+    out = []
+    for k, i in enumerate(lines):
+        p = phrases[i]
+        # A recovered line may move: it was placed in the voice this line lost.
+        if _user_timed(p) or any(i in g for g, _, _ in out):
+            continue
+        s, e = _vocal_bounds(p)
+        if e <= s or line_voiced_share(p, vocal) > SILENT_LINE_SHARE:
+            continue
+        previous = _vocal_bounds(phrases[lines[k - 1]])[1] if k else 0
+        j = lines[k + 1] if k + 1 < len(lines) else None
+        if j is not None and _user_timed(phrases[j]):
+            continue
+        js, je = _vocal_bounds(phrases[j]) if j is not None else (int(duration_ms or e), int(duration_ms or e))
+        onset = first_voice(vocal, e, je if j is not None else js)
+        if onset is None:
+            continue
+        if uncovered_voice(phrases, vocal, e, js, duration_ms) >= GAP_VOICE_MIN:
+            # Singing without text before the next line: this line goes there.
+            group, end = [i], js
+            stop = next((y for x, y in _intervals(vocal) if x <= onset < y), js)
+            end = min(js, stop + 1500)
+        elif j is not None and onset < je:
+            after = [q for q in lines if q > j]
+            group, end = [i, j], je + 500
+            if after:
+                end = min(end, _vocal_bounds(phrases[after[0]])[0])
+        else:
+            continue
+        if duration_ms:
+            end = min(end, int(duration_ms))
+        windows = [(max(previous, onset - lead), end) for lead in SILENT_LINE_LEADS]
+        windows = [w for n, w in enumerate(windows) if w[1] > w[0] and w not in windows[:n]]
+        if not windows or heard_near(p.get('text'), hypotheses, onset) < SILENT_LINE_HEARD:
+            continue
+        out.append((group, (windows[0][0], end), windows))
+    return out
 
 
 def grid_edge_words(words, window, vocal):

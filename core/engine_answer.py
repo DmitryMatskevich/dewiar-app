@@ -207,6 +207,22 @@ class AnswerMixin:
                                     request_scope(via, getattr(getattr(self, 'chatlog', None), 'active', 'legacy')), time.monotonic())
         if via:
             quiet = False
+        if not raw and not quiet and not via and not images and '\n\nВложения:' not in text:
+            from project_backups import configured_projects, recognize_backup
+            projects = recognize_backup(text, configured_projects(self.s))
+            if projects:
+                tool = 'backup_project' if len(projects) == 1 else 'backup_projects'
+                if not self.toolbox.policy(tool)[0]:
+                    self._say_quick('Резервирование проектов отключено в настройках Dewiar.', text)
+                    return
+                try:
+                    task = (self.tasks.create_project_backup(projects[0]) if len(projects) == 1
+                            else self.tasks.create_project_backups(projects))
+                    answer = f'Запустил задачу «{task.title}». Ход и итог появятся в разделе «Задачи».'
+                except (ValueError, OSError) as exc:
+                    answer = str(exc)
+                self._say_quick(answer, text)
+                return
         # 24.10 (владелец: «попросил обновиться — нет; „а теперь“ — она что-то не связанное»): короткое «а теперь?»,
         # «ещё раз», «проверь ещё раз» сразу после быстрой команды без модели — та же команда ещё раз
         lq = getattr(self, "_last_quick", None)
@@ -599,7 +615,10 @@ class AnswerMixin:
                      " Пароли, пин-коды и ключи пользователя хранятся в его сейфе — ты их не видишь и не записываешь в "
                      "заметки; спрашивают пароль — подскажи сказать: «какой пароль от …», запомнить — «запомни пароль от …: …».")
             sv = self._music_service()
-            base += ("\n\nМУЗЫКА: " + {"yandex": "пользователь слушает Яндекс Музыку — музыку включай там (yandex_music), не открывай YouTube.",
+            base += ("\n\nМУЗЫКА: сохранённые песни ищи, открывай и включай инструментом song_library. Ищи по имени/исполнителю, неточному названию, строке текста или смыслу описания. "
+                     "Для поиска по смыслу передай action=search, search_in=meaning и сопоставь возвращённые фрагменты с описанием. Подборку из своей библиотеки запускай action=playlist с тегом. "
+                     "Если найдено несколько похожих названий — попроси уточнить, не выбирай наугад. "
+                     + {"yandex": "пользователь слушает Яндекс Музыку — музыку включай там (yandex_music), не открывай YouTube.",
                                          "youtube": "музыку включай в YouTube Music (play_music).",
                                          "radio": "жанры и настроение включай своим радио (play_radio) — оно играет сразу; "
                                                   "Яндекс Музыка — yandex_music, если о ней просят."}[sv]

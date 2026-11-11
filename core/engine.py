@@ -163,6 +163,7 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         from songs import SongStore
         from songs.capture import SongCaptureManager
         self.song_store = SongStore(STATE_DIR / "songs")
+        self.toolbox.hooks["song_library"] = lambda args: self._song_library_action(args)
         self.song_store.recover_interrupted()
         self.song_capture = SongCaptureManager(STATE_DIR / "songs", self.song_store, self.emit,
                                                on_complete=self._song_capture_finished)

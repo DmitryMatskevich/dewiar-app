@@ -212,7 +212,7 @@ window.SongReview = (() => {
     player.addEventListener('seeked', () => { followWords(followSheet && !player.paused); sync(); });
     player.onplay = () => { delete player.dataset.idle; delete player.dataset.sheetStopped; delete player.dataset.sheetHold; player.dataset.session = '1'; followWords(followSheet); sync(); };
     player.onpause = () => { player.dataset.idle = '1'; followWords(false); sync(); };
-    player.addEventListener('ended', () => { delete player.dataset.session; delete player.dataset.phraseId; delete player.dataset.clipStart; player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync(); });
+    player.addEventListener('ended', () => { delete player.dataset.session; delete player.dataset.phraseId; delete player.dataset.clipStart; player.dataset.idle = '1'; clearHighlights(); SongSheet.updatePlayback(row.song_id,-1,false); message(''); sync(); window.onSongPlayback?.(row.song_id,{playing:false,active:false,ended:true}); });
     player.addEventListener('error', () => { delete player.dataset.session; delete player.dataset.loading; player.dataset.idle = '1'; message('Не удалось воспроизвести запись. Попробуйте ещё раз.'); sync(); });
     document.getElementById('song-review-loop').onchange = e => { player.loop = e.target.checked; };
     async function playFull(restart=false, autoplay=true, seekTo=null) {
@@ -315,6 +315,10 @@ window.SongReview = (() => {
       if (songId !== row.song_id) return;
       pitch = Math.max(-12,Math.min(12,Number(value)||0));
       pitchBySong.set(songId,pitch);
+      if(liveTarget&&!liveEditor.hidden) {
+        liveChordDraft=liveChordDraft.map((draft,index)=>({...readLiveChord(draft,index),original_start_ms:draft.original_start_ms}));
+        liveKeyShift=pitch;renderLiveChords();
+      }
       if (player.dataset.session && !player.dataset.phraseId) {
         const position=player.currentTime;
         playFull(false,!player.paused,position);
@@ -344,6 +348,9 @@ window.SongReview = (() => {
     const liveClose=document.getElementById('song-live-edit-close');
     const liveOriginal=document.getElementById('song-live-edit-play-original');
     let liveTarget=null, livePhraseText='', liveChordDraft=[], liveSavedSnapshot='';
+    let livePreviewRequest=0;
+    let liveKeyShift=window.SongSheet.offset(row);
+    let livePreviewText='', livePreviewSourceText='', livePreviewEvents=[];
     function liveSnapshot() {
       return JSON.stringify({text:liveText?.value,reviewed:document.getElementById('song-live-reviewed')?.checked,
         chords:liveChordDraft.map((draft,index)=>({draft,
@@ -375,6 +382,10 @@ window.SongReview = (() => {
     }
     function clearLiveHighlights() {
       document.querySelectorAll('.song-phrase.playing, .song-phrase .song-word.current-word').forEach(el => el.classList.remove('playing','current-word'));
+      livePreviewChords?.querySelectorAll('.current-chord').forEach(el=>el.classList.remove('current-chord'));
+      liveChords?.querySelectorAll('.is-playing,[data-live-chord-context] .current-word').forEach(el=>el.classList.remove('is-playing','current-word'));
+      livePreview?.classList.remove('song-live-preview-word','current-word');
+      livePreview?.querySelectorAll('.song-live-preview-word.current-word').forEach(el=>el.classList.remove('current-word'));
     }
     function updateLivePhraseWords(position) {
       const ids=new Set(liveTarget?.phraseIds||[]);
@@ -388,6 +399,7 @@ window.SongReview = (() => {
       // Phrase playback is local to the editor: update highlights without
       // moving the full-song sheet or switching the main player to the song.
       SongSheet.updatePlayback(row.song_id,position,false);
+      updateLiveChordPlayback(position);
     }
     async function playLivePhrase() {
       if (!liveTarget || !liveAudio) return;
@@ -443,6 +455,7 @@ window.SongReview = (() => {
         };
         liveAudio.onpause=()=>sync();
         await playAudio(liveAudio);
+        updateLivePhraseWords(Number(clip.start_ms)+liveAudio.currentTime*1000);
         if (liveStatus) liveStatus.textContent='Фраза воспроизводится…';
       } catch(error) {
         if(request===audioRequest && liveStatus) liveStatus.textContent=error.message||'Не удалось воспроизвести фразу';
@@ -463,8 +476,37 @@ window.SongReview = (() => {
       return chords.filter(c=>c.name!=='N' && (ids.has(c.anchor?.phrase_id) ||
         (Number(c.start_ms)>=gapStart && Number(c.start_ms)<end)));
     }
-    function updateLivePreview() {
+    function readLiveChord(chord,index) {
+      const element=liveChords.querySelector(`[data-live-chord="${index}"]`);
+      const displayName=element?.querySelector('[data-live-chord-name]')?.value.trim()??window.SongSheet.transpose(chord.name,liveKeyShift);
+      const name=displayName===window.SongSheet.transpose(chord.name,liveKeyShift)?chord.name:window.SongSheet.transpose(displayName,-liveKeyShift);
+      const timeValue=element?.querySelector('[data-live-chord-time]')?.value;
+      const seconds=timeValue===''?NaN:Number(timeValue);
+      const event={...chord,name,start_ms:Number.isFinite(seconds)?Math.round(seconds*1000):chord.start_ms};
+      if(event.start_ms!==Number(chord.original_start_ms??chord.start_ms)) {
+        // An old explicit word anchor cannot follow a newly selected time.
+        delete event.anchor;
+        delete event.end_ms;
+      }
+      delete event.original_start_ms;
+      return event;
+    }
+    function displayedPosition(chord) {
+      for(const line of getCurrent()?.guitar_sheet||[]) {
+        const mark=line.chords?.find(c=>!c.continued&&c.start_ms===chord.start_ms&&c.name===chord.name);
+        if(!mark)continue;
+        const span=line.source_spans?.find(s=>s.display_char_start<=mark.char_index&&mark.char_index<s.display_char_end);
+        if(span)return {phrase_id:span.phrase_id,char_index:span.phrase_char_start+mark.char_index-span.display_char_start,quality:mark.anchor_quality};
+        return {phrase_id:line.source_phrase_ids?.[0]||line.phrase_id,char_index:mark.char_index,quality:mark.anchor_quality};
+      }
+      return null;
+    }
+    function captureLiveChords() {
+      liveChordDraft=liveChordDraft.map((draft,index)=>({...readLiveChord(draft,index),original_start_ms:draft.original_start_ms}));
+    }
+    async function updateLivePreview() {
       if(!livePreview||!liveTarget)return;
+      const request=++livePreviewRequest;
       let text=livePhraseText;
       if(liveMode.value==='phrase') text=liveText.value;
       else if(liveMode.value==='word') {
@@ -472,43 +514,61 @@ window.SongReview = (() => {
         text=livePhraseText.slice(0,start)+liveText.value+livePhraseText.slice(end);
       }
       text=(text||'').trim();
-      livePreview.textContent=text||'…';
       if(!livePreviewChords)return;
-      const events=liveChordDraft.map((chord,index)=>{
-        const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
-        const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim()||chord.name||'';
-        const fingering=rowElement?.querySelector('[data-live-chord-fingering]');
-        const evidence={...chord,...window.SongSheet.voicingAtShift(chord,0),song_id:row.song_id};
-        const shape=window.SongSheet?.chordFingering(name,evidence)||'';
-        if(fingering) {
-          fingering.textContent=shape?`1→6 ${shape}`:'—';
-          fingering.title=window.SongSheet?.chordTooltip(name,evidence)||'Позиция на грифе не определена';
+      const events=liveChordDraft.map((chord,index)=>({...readLiveChord(chord,index),draft_index:index}));
+      const positions=liveChordDraft.map(displayedPosition);
+      renderLivePreview(text,events,positions);
+      const old=phraseChords(targetPhrase()),keep=(getCurrent()?.chords||[]).filter(c=>!old.includes(c));
+      try {
+        await new Promise(resolve=>setTimeout(resolve,100));
+        if(request!==livePreviewRequest||!liveEditor.isConnected)return;
+        const result=await core.call('song_preview_chords',{song_id:row.song_id,chords:[...keep,...events],
+          ...(liveTarget.phraseIds.length===1?{phrase_id:liveTarget.phraseId,text}:{})});
+        if(request!==livePreviewRequest||!liveEditor.isConnected)return;
+        renderLivePreview(text,events,events.map((_,index)=>result.positions?.[keep.length+index]||null));
+      } catch(error) {
+        if(request===livePreviewRequest)liveChords.querySelectorAll('[data-live-chord-context]').forEach(el=>{
+          el.textContent='Положение не обновлено';el.title=error.message||'Не удалось получить положение аккорда';
+        });
+      }
+    }
+    function renderLivePreview(text,drafts,positions) {
+      const events=drafts.map((chord,index)=>{
+        const position=positions[index];
+        const span=liveTarget.sourceSpans?.find(s=>s.phrase_id===position?.phrase_id&&s.phrase_char_start<=position.char_index&&position.char_index<s.phrase_char_end);
+        const at=span?span.display_char_start+position.char_index-span.phrase_char_start:
+          position?.phrase_id===liveTarget.phraseId?position.char_index:null;
+        return {...chord,...window.SongSheet.voicingAtShift(chord,liveKeyShift),name:window.SongSheet.transpose(chord.name,liveKeyShift),char_index:at,position_quality:position?.quality};
+      });
+      for(const chord of events) {
+        const context=liveChords.querySelector(`[data-live-chord="${chord.draft_index}"] [data-live-chord-context]`);
+        if(!context)continue;
+        if(chord.char_index===null) {
+          context.innerHTML=`<span class="song-live-context-active"><b>${esc(chord.name)}</b><span>Без слов</span></span>`;
+          context.title='В этой позиции нет привязки к словам';continue;
         }
-        const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
-        const startMs=Number.isFinite(seconds)&&seconds>=0?Math.round(seconds*1000):Number(chord.start_ms)||0;
-        const phraseId=chord.anchor?.phrase_id;
-        const span=liveTarget.sourceSpans?.find(item=>item.phrase_id===phraseId &&
-          Number(chord.anchor?.grapheme_index)>=Number(item.phrase_char_start) &&
-          Number(chord.anchor?.grapheme_index)<=Number(item.phrase_char_end));
-        const anchorIndex=span
-          ? Number(span.display_char_start)+Number(chord.anchor.grapheme_index)-Number(span.phrase_char_start)
-          : liveTarget.phraseIds?.includes(phraseId)?Number(chord.anchor?.grapheme_index):null;
-        const changedTime=startMs!==Number(chord.original_start_ms??chord.start_ms);
-        const ratio=(startMs-liveTarget.startMs)/Math.max(1,liveTarget.endMs-liveTarget.startMs);
-        const charIndex=changedTime||!Number.isFinite(anchorIndex)
-          ? Math.round(Math.max(0,Math.min(1,ratio))*Math.max(0,text.length-1))
-          : anchorIndex;
-        return {...chord,draft_index:index,name,char_index:Math.max(0,Math.min(Math.max(0,text.length-1),charIndex)),start_ms:startMs};
-      }).filter(chord=>chord.name);
+        const start=Math.max(0,Math.min(text.length-1,chord.char_index));
+        const next=events.filter(c=>c.start_ms>chord.start_ms&&c.char_index>start).sort((a,b)=>a.start_ms-b.start_ms)[0];
+        const end=next?Math.min(text.length,next.char_index):text.length;
+        context.innerHTML=`<span>${esc(text.slice(0,start))}</span><span class="song-live-context-active"><b>${esc(chord.name)}</b><mark>${esc(text.slice(start,end))}</mark></span><span>${esc(text.slice(end))}</span>`;
+        context.title=String(chord.position_quality).startsWith('estimated')?'Приблизительное положение по времени фразы':'Положение аккорда в тексте';
+        const active=context.querySelector('.song-live-context-active');
+        context.scrollLeft=Math.max(0,active.offsetLeft-context.offsetLeft-context.clientWidth/3);
+      }
       const width=Math.max(42,text.length+Math.max(1,...events.map(chord=>chord.name.length)));
-      const placed=window.SongSheet?.compactChords({text,start_ms:liveTarget.startMs,end_ms:liveTarget.endMs,chords:events},0,width)||[];
+      const layout=window.SongSheet.layoutChordLine({text,chords:events.filter(c=>c.char_index!==null)},0,width);
+      livePreviewText=layout.text||'…';
+      livePreviewSourceText=text;
+      livePreviewEvents=events;
+      livePreview.textContent=livePreviewText;
+      const placed=layout.chords;
       let chordLine='',cursor=0;
       for(const chord of placed) {
         const at=Math.max(cursor,chord.at);
         const evidence={...chord,song_id:row.song_id};
         const tooltip=window.SongSheet.chordTooltip(chord.name,evidence);
         const shape=window.SongSheet.chordFingering(chord.name,evidence);
-        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(tooltip)}" role="button" tabindex="0" aria-label="${esc(tooltip)}" aria-expanded="false" data-chord-name="${esc(chord.name)}" data-chord-fingering="${esc(shape)}" data-live-chord-index="${chord.draft_index}" data-song-id="${esc(row.song_id||'')}">${esc(chord.name)}</span>`;
+        chordLine+=esc(' '.repeat(at-cursor))+`<span class="song-chord-tip" title="${esc(tooltip)}" role="button" tabindex="0" aria-label="${esc(tooltip)}" aria-expanded="false" data-chord-name="${esc(chord.name)}" data-chord-fingering="${esc(shape)}" data-live-chord-index="${chord.draft_index}" data-start-ms="${chord.start_ms}"${Number.isFinite(Number(chord.end_ms))?` data-end-ms="${chord.end_ms}"`:''} data-song-id="${esc(row.song_id||'')}">${esc(chord.name)}</span>`;
         cursor=at+chord.name.length;
       }
       livePreviewChords.innerHTML=chordLine;
@@ -520,13 +580,37 @@ window.SongReview = (() => {
           const input=liveChords.querySelector(`[data-live-chord="${index}"] [data-live-chord-name]`);
           if(!input)throw Error('Редактор фразы уже закрыт.');
           input.value=symbol;
-          Object.assign(draft,{name:symbol,voicing_fingering:shape,voicing_key_shift:0,voicing_source:'manual'});
+          Object.assign(draft,{name:window.SongSheet.transpose(symbol,-liveKeyShift),voicing_fingering:shape,voicing_key_shift:liveKeyShift,voicing_source:'manual'});
           delete draft.voicing_probability;
           input.title=window.SongSheet.chordTooltip(symbol,draft);
           updateLivePreview();
           if(!await saveLiveEdit())throw Error(liveStatus.textContent);
         };
       });
+      if(liveAudio&&!liveAudio.paused&&liveAudio.dataset.clipStart)
+        updateLiveChordPlayback(Number(liveAudio.dataset.clipStart)+liveAudio.currentTime*1000);
+    }
+    function updateLiveChordPlayback(position) {
+      const active=livePreviewEvents.filter(chord=>{
+        const start=Number(chord.start_ms),end=Number(chord.end_ms);
+        return Number.isFinite(start)&&start<=position&&(!Number.isFinite(end)||position<end);
+      }).sort((a,b)=>Number(b.start_ms)-Number(a.start_ms))[0];
+      livePreviewChords?.querySelectorAll('[data-live-chord-index]').forEach(el=>
+        el.classList.toggle('current-chord',!!active&&Number(el.dataset.liveChordIndex)===active.draft_index));
+      liveChords?.querySelectorAll('[data-live-chord]').forEach(rowEl=>{
+        const chord=livePreviewEvents.find(item=>item.draft_index===Number(rowEl.dataset.liveChord));
+        const playing=!!chord&&chord===active;
+        rowEl.classList.toggle('is-playing',playing);
+        rowEl.querySelector('[data-live-chord-context] mark')?.classList.toggle('current-word',playing);
+      });
+      const preview=livePreview;
+      if(!preview)return;
+      const start=active?.char_index;
+      if(!Number.isInteger(start)||start<0||start>=livePreviewSourceText.length) { preview.textContent=livePreviewSourceText;return; }
+      const next=livePreviewEvents.filter(chord=>chord.start_ms>active.start_ms&&Number.isInteger(chord.char_index)&&chord.char_index>start)
+        .sort((a,b)=>Number(a.start_ms)-Number(b.start_ms))[0];
+      const end=next?Math.min(livePreviewSourceText.length,next.char_index):livePreviewSourceText.length;
+      preview.innerHTML=`${esc(livePreviewSourceText.slice(0,start))}<mark class="song-live-preview-word current-word">${esc(livePreviewSourceText.slice(start,end))}</mark>${esc(livePreviewSourceText.slice(end))}`;
     }
     function renderLiveChords() {
       liveChords.innerHTML=liveChordDraft.map((chord,index)=>{
@@ -534,19 +618,23 @@ window.SongReview = (() => {
         const original=Number(chord.start_ms)||0;
         const min=Math.min(rangeStart,original), max=Math.max(rangeEnd,original);
         return `<div class="song-live-chord" data-live-chord="${index}">
-        <label class="f">Аккорд<input data-live-chord-name value="${esc(chord.name||'')}" maxlength="6" placeholder="Am, D7" aria-label="Аккорд ${index+1}"></label>
+        <label class="f">Аккорд<input data-live-chord-name value="${esc(window.SongSheet.transpose(chord.name||'',liveKeyShift))}" maxlength="24" placeholder="Am, D7" aria-label="Аккорд ${index+1}"></label>
         <label class="f">Секунда<input data-live-chord-time type="number" min="${(min/1000).toFixed(3)}" max="${(max/1000).toFixed(3)}" step="0.001" value="${(original/1000).toFixed(3)}" aria-label="Время аккорда ${index+1}, в пределах фразы"></label>
-        <span class="song-live-chord-fingering" data-live-chord-fingering aria-label="Аппликатура аккорда ${index+1}"></span>
+        <span class="song-live-chord-context" data-live-chord-context aria-label="Слова аккорда ${index+1}"></span>
         <button type="button" class="btn small" data-live-chord-remove="${index}" aria-label="Убрать аккорд ${index+1}" title="Убрать аккорд">×</button>
       </div>`;
       }).join('') || '<p class="hint">В этой фразе пока нет аккордов.</p>';
       liveChords.querySelectorAll('[data-live-chord-remove]').forEach(button=>button.onclick=()=>{
+        captureLiveChords();
         liveChordDraft.splice(Number(button.dataset.liveChordRemove),1);renderLiveChords();
       });
       liveChords.querySelectorAll('[data-live-chord-name]').forEach((input,index)=>{
         const chord=liveChordDraft[index]||{};
         input.title=window.SongSheet?.chordTooltip(input.value,chord)||'Название аккорда';
-        input.addEventListener('input',()=>{input.title=window.SongSheet?.chordTooltip(input.value,chord)||'Название аккорда';updateLivePreview();});
+        input.addEventListener('input',()=>{
+          for(const key of ['voicing_fingering','voicing_probability','voicing_key_shift','voicing_source','fingering','voicing'])delete chord[key];
+          input.title=window.SongSheet?.chordTooltip(input.value,chord)||'Название аккорда';updateLivePreview();
+        });
       });
       liveChords.querySelectorAll('[data-live-chord-time]').forEach(input=>input.addEventListener('input',updateLivePreview));
       updateLivePreview();
@@ -569,6 +657,7 @@ window.SongReview = (() => {
         startMs:Math.min(...sourcePhrases.map(item=>Number(item.start_ms)||0)),
         endMs:Math.max(...sourcePhrases.map(item=>Number(item.end_ms)||0))};
       liveMode.value=mode;
+      liveKeyShift=window.SongSheet.offset(current);
       livePhraseText=liveTarget.text;
       liveText.value=liveTarget.text;
       document.getElementById('song-live-edit-target').textContent=`${(liveTarget.startMs/1000).toFixed(3)}–${(liveTarget.endMs/1000).toFixed(3)} с · ${mode==='chords'?'Аккорды фразы':displayLine?'Текст строки':'Текст фразы'}`;
@@ -607,6 +696,7 @@ window.SongReview = (() => {
     liveText?.addEventListener('input',updateLivePreview);
     document.getElementById('song-live-chord-add')?.addEventListener('click',()=>{
       const phrase=targetPhrase();if(!phrase)return;
+      captureLiveChords();
       liveChordDraft.push({name:'',start_ms:liveTarget?.startMs ?? phrase.start_ms,original_start_ms:liveTarget?.startMs ?? phrase.start_ms,
         anchor:liveTarget?{kind:'manual',phrase_id:phrase.phrase_id,grapheme_index:liveTarget.charStart}:null,
         method:'manual',verified:true});renderLiveChords();
@@ -675,13 +765,18 @@ window.SongReview = (() => {
         const newPhraseEvents=liveChordDraft.map((draft,index)=>{
           const rowElement=liveChords.querySelector(`[data-live-chord="${index}"]`);
           const name=rowElement?.querySelector('[data-live-chord-name]')?.value.trim();
-          const seconds=Number(rowElement?.querySelector('[data-live-chord-time]')?.value);
+          const timeValue=rowElement?.querySelector('[data-live-chord-time]')?.value;
+          const seconds=timeValue===''?NaN:Number(timeValue);
           if(!name)throw Error(`Введите название аккорда ${index+1}`);
           if(!Number.isFinite(seconds)||seconds<0)throw Error(`Проверьте время аккорда ${index+1}`);
           const timeField=rowElement?.querySelector('[data-live-chord-time]');
           if(seconds<Number(timeField?.min)-0.0005||seconds>Number(timeField?.max)+0.0005)
             throw Error(`Время аккорда ${index+1} должно находиться в границах текущей фразы: ${formatSeconds(liveTarget.startMs)}–${formatSeconds(liveTarget.endMs)}`);
-          return {...draft,name,start_ms:Math.round(seconds*1000),verified:true,method:draft.method||'manual'};
+          const event=readLiveChord(draft,index);
+          // Text edits may have invalidated an old anchor in the store.
+          const latest=oldPhraseEvents.find(c=>c.start_ms===draft.original_start_ms);
+          if(latest&&!latest.anchor)delete event.anchor;
+          return {...event,verified:true,method:'manual'};
         });
         const signature=events=>JSON.stringify(events.map(({name,start_ms,anchor,voicing_fingering,voicing_key_shift})=>({name,start_ms,anchor,voicing_fingering,voicing_key_shift})));
         if(signature(oldPhraseEvents)!==signature(newPhraseEvents)) {

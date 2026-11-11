@@ -31,6 +31,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as pw:
     mock = '''window.calls=[];window.rows=ROWS;window.audioData=AUDIO;
 const core={on(){},async call(cmd,a){calls.push([cmd,a]);
  if(cmd==='songs_list')return structuredClone(rows);
+ if(cmd==='songs_tags_list')return ['Любовь','Грусть'];
  if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
  if(cmd==='song_transcribe')return structuredClone(rows.find(r=>r.song_id===a.song_id));
  if(cmd==='song_patch'){const r=rows.find(item=>item.song_id===a.song_id);Object.assign(r,a.changes);r.revision+=1;return structuredClone(r);}

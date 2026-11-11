@@ -542,11 +542,12 @@ class CommandsMixin:
                                 a.get("knowledge", False), a.get("keep_text", False), a.get("place", "online"), a.get("nudge", True),
                                 a.get("participants", ""), a.get("topics", ""), a.get("record", False), a.get("deferred", True),
                                 a.get("source", "system"), a.get("consent", False), a.get("auto_frames", False),
-                                a.get("auto_interval", 0.5), a.get("frame_quality", 85), a.get("frame_video", False),
+                                a.get("auto_interval", 1.0), a.get("frame_quality", 85), a.get("frame_video", False),
                                 a.get("auto_first_frame", True), a.get("capture_source", "screen"),
                                 a.get("capture_region"), a.get("capture_application", ""), a.get("scheduled_end"),
                                 a.get("record_source"), record_me=a.get("record_me"),
-                                speaker_mode=a.get("speaker_mode"), expected_speakers=a.get("expected_speakers"))
+                                speaker_mode=a.get("speaker_mode"), expected_speakers=a.get("expected_speakers"),
+                                frame_max_dimension=a.get("frame_max_dimension", 2560))
             if cmd == "prompter_audio_apps":
                 from audio_io import audio_tap_supported, list_audio_apps
                 return {"supported": audio_tap_supported(), "apps": list_audio_apps()}
@@ -666,6 +667,10 @@ class CommandsMixin:
             if cmd == "prompter_meetings":                 # итоги прошлых встреч — студия, «Встречи»
                 from prompter import meetings_index
                 return meetings_index(self.workspace.ensure() / "Встречи")
+            if cmd == "prompter_interrupted":
+                return pr.interrupted_meetings()
+            if cmd == "prompter_recover":
+                return pr.recover_interrupted(a.get("id", ""))
             if cmd == "prompter_meeting_player":           # «Прошлые встречи» → ▶: дорожки, кадры и текст по времени
                 from meeting_media import MediaServer, player_data
                 root = self.workspace.ensure() / "Встречи"
@@ -1894,6 +1899,20 @@ class CommandsMixin:
             return self.updater.public()
         if cmd == "tasks_list":
             return self.tasks.list()
+        if cmd == 'project_backups_get':
+            from project_backups import backup_settings
+            return backup_settings(self.s)
+        if cmd == 'project_backups_save':
+            from project_backups import save_profile
+            return save_profile(self.s, a.get('id') or '', a.get('profile'))
+        if cmd == 'project_backups_run':
+            from project_backups import configured_projects, resolve_projects
+            ids = resolve_projects(a.get('projects'), configured_projects(self.s))
+            tool = 'backup_project' if len(ids) == 1 else 'backup_projects'
+            if not self.toolbox.policy(tool)[0]:
+                raise ValueError('Резервирование проектов отключено в настройках Dewiar.')
+            task = self.tasks.create_project_backup(ids[0]) if len(ids) == 1 else self.tasks.create_project_backups(ids)
+            return {'id': task.id, 'title': task.title}
         if cmd == "songs_list":
             songs = self.song_store.list(a.get("q", ""), a.get("status", ""), a.get("limit", 100), compact=True,
                                          tags=a.get("tags", a.get("tag", "")), lyrics_query=a.get("lyrics_q", ""), rating=a.get("rating", ""))
@@ -1901,6 +1920,12 @@ class CommandsMixin:
                 song["karaoke"] = self.song_instrumental.summary(song["song_id"])
                 song["processing"] = self.song_processing.describe(song)
             return songs
+        if cmd == "songs_tags_list":
+            from songs.store import TAG_OPTIONS
+            tags = set(TAG_OPTIONS)
+            for song in self.song_store.list(limit=500, compact=True):
+                tags.update(tag for tag in song.get("tags", []) if isinstance(tag, str) and tag.strip())
+            return sorted(tags, key=str.casefold)
         if cmd == "song_get":
             song = self.song_store.get(str(a.get("song_id") or ""))
             if not song:
@@ -1953,7 +1978,7 @@ class CommandsMixin:
             if a.get("base_revision") is None:
                 raise ValueError("Для сохранения нужна ревизия карточки")
             return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
-        if cmd in {"song_edit_phrase", "song_edit_display_line", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_finish_review"}:
+        if cmd in {"song_edit_phrase", "song_edit_display_line", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_preview_chords", "song_finish_review"}:
             if cmd == "song_full_audio" and a.get("variant") == "instrumental":
                 from songs.review import instrumental_audio_command
                 return instrumental_audio_command(self.song_store, self.song_instrumental, a)
@@ -2126,6 +2151,18 @@ class CommandsMixin:
                     if row.get('att') and row['att'][0].get('kind') == 'link_actions'][-1:]
         if cmd == "task_get":
             return self.tasks.detail(a.get("id"))
+        if cmd in {"task_html_editor_load", "task_html_editor_save"}:
+            import html_editor
+            task = self.tasks.get(a.get("id"))
+            if task.data.get("workflow") not in {"webpage-extraction", "text-extraction", "file-conversion", "media-transcription"}:
+                raise ValueError("Редактор доступен для HTML-файлов в результатах задач")
+            if cmd == "task_html_editor_load":
+                return html_editor.load_task_html(self.tasks, a.get("id"), a.get("path"))
+            return html_editor.save_task_html(self.tasks, a.get("id"), a.get("path"),
+                                              str(a.get("revision") or ""), a.get("html"))
+        if cmd == "html_editor_suggest":
+            import html_editor
+            return html_editor.suggest(self, a)
         if cmd == "task_convert_result":
             task = self.tasks.get(a.get("id"))
             rel = str(a.get("path") or "")

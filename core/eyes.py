@@ -170,7 +170,7 @@ def _win_screen():
     return out.getvalue()
 
 
-def capture_screen(env, source="screen", region=None, application="", exclude_dewiar=False):
+def capture_screen(env, source="screen", region=None, application="", exclude_dewiar=False, max_dimension=0, quality=85):
     """Снимок всего экрана -> байты PNG; EyesError со списком неудавшихся способов. env — окружение графического
     сеанса пользователя (DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS); DEWIAR_NO_PORTAL — без портала;
     DEWIAR_FAKE_SCREEN — файл-картинка вместо экрана (проверки без графического сеанса)."""
@@ -179,7 +179,8 @@ def capture_screen(env, source="screen", region=None, application="", exclude_de
     if MAC:
         from macsys import screen_capture
         try:
-            return screen_capture(source=source, region=region, application=application, exclude_dewiar=exclude_dewiar)
+            return screen_capture(source=source, region=region, application=application, exclude_dewiar=exclude_dewiar,
+                                  max_dimension=max_dimension, quality=quality)
         except Exception as exc:  # noqa: BLE001 — native permission or capture failure
             raise EyesError(f"Снимок экрана Mac не сделан: {exc}") from exc
     if exclude_dewiar:

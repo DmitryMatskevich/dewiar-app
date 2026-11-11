@@ -7,6 +7,92 @@ from engine_base import *  # noqa: F401,F403 — общие импорты и п
 
 
 class MusicMixin:
+    def _song_library_action(self, args):
+        """Run a guarded, fuzzy lookup against the user's own saved song cards."""
+        import difflib
+        import unicodedata
+        action=str(args.get('action') or 'search')
+        search_in=str(args.get('search_in') or 'auto')
+        store=self.song_store
+        query=str(args.get('query') or '').strip()
+        def norm(value):
+            value=unicodedata.normalize('NFKD',str(value or '').casefold().replace('ё','е'))
+            return ' '.join(''.join(ch for ch in value if not unicodedata.combining(ch)).split())
+        def tokens(value):
+            return [re.sub(r'[^a-zа-я0-9]','',part) for part in norm(value).split() if re.sub(r'[^a-zа-я0-9]','',part)]
+        if action=='playlist':
+            tag=str(args.get('tag') or query).strip()
+            aliases={'шансон':'Шансон','шансончик':'Шансон','мужчинам':'Мужская','мужская':'Мужская',
+                     'для мужчин':'Мужская','любовь':'Любовь','грустное':'Грусть','веселое':'Юмор'}
+            tag=aliases.get(norm(tag),tag)
+            available=self.song_store.list(limit=500,compact=True)
+            known=list(dict.fromkeys(item for row in available for item in row.get('tags',[])))
+            if tag not in known:
+                near=sorted(((difflib.SequenceMatcher(None,norm(tag),norm(item)).ratio(),item) for item in known),reverse=True)
+                if near and near[0][0]>=.72:tag=near[0][1]
+            rows=store.list(limit=100,compact=True,tag=tag)
+            rows=[r for r in rows if r.get('audio',{}).get('path')]
+            if not rows:return f'В библиотеке нет песен с тегом «{tag}» и доступной записью.'
+            self.emit('song_library_action',action='playlist',tag=tag,songs=[{'song_id':r['song_id'],'title':r['title'],'artist':r.get('artist','')} for r in rows])
+            return f'Запускаю подборку «{tag}»: {len(rows)} песен.'
+        rows=store.list(limit=500,compact=True)
+        exact=next((r for r in rows if args.get('song_id') and r['song_id']==args['song_id']),None)
+        if action=='edit':
+            target=exact
+            if target is None and query:
+                target=next((r for r in rows if norm(r.get('title'))==norm(query)),None)
+            if not target:return 'Не удалось однозначно определить песню. Сначала найди её и уточни название.'
+            changes={k:args[k] for k in ('title','artist','tags') if k in args}
+            if not changes:return 'Назови, что изменить: название, исполнителя или теги.'
+            saved=store.patch(target['song_id'],changes,target['revision'])
+            self.emit('song_library_updated',song_id=target['song_id'])
+            return f'Обновил карточку «{saved["title"]}».'
+        if not exact:
+            if not query:return 'Назови песню или исполнителя.'
+            nq=norm(query);query_tokens=tokens(query);scored=[]
+            for r in rows:
+                identity=norm(r.get('title','')+' '+r.get('artist',''))
+                lyric_phrases=[str(p.get('text') or '').strip() for p in r.get('phrases',[]) if isinstance(p,dict) and p.get('text')]
+                lyrics=norm(' '.join(lyric_phrases))
+                hay=(norm(r.get('title','')) if search_in=='title' else
+                     norm(r.get('artist','')) if search_in=='artist' else
+                     lyrics if search_in=='lyrics' else identity+' '+lyrics if search_in=='meaning' else identity)
+                row_tokens=tokens(hay)
+                token_coverage=0.0
+                if len(query_tokens)>1:
+                    matched=sum(any(token==candidate or (len(token)>=5 and difflib.SequenceMatcher(None,token,candidate).ratio()>=.82)
+                                    for candidate in row_tokens) for token in query_tokens)
+                    token_coverage=.9*matched/len(query_tokens)
+                field_scores=([difflib.SequenceMatcher(None,nq,norm(r.get(k,''))).ratio() for k in ('title','artist')]
+                              if search_in=='auto' else [])
+                score=max([token_coverage,difflib.SequenceMatcher(None,nq,hay).ratio(),*field_scores])
+                if nq in hay:score=max(score,.88)
+                if search_in=='meaning':score=max(score,.01)
+                if score>=.34 or search_in=='meaning':scored.append((score,r))
+            scored.sort(key=lambda x:(-x[0],norm(x[1].get('title'))))
+            if not scored:return f'Не нашёл «{query}». Уточни название или исполнителя.'
+            if search_in=='meaning':
+                choices=[]
+                for _,r in scored[:25]:
+                    snippets=[str(p.get('text') or '').strip() for p in r.get('phrases',[]) if isinstance(p,dict) and str(p.get('text') or '').strip()]
+                    if len(snippets)>3:
+                        excerpts=[snippets[0],snippets[len(snippets)//2],snippets[-1]]
+                    else:excerpts=snippets
+                    excerpt=' … '.join(p[:75] for p in excerpts)
+                    choices.append(f'{r["title"]} — {r.get("artist") or "исполнитель не указан"} [id:{r["song_id"]}]'+(f': «{excerpt[:220]}»' if excerpt else ''))
+                return 'Кандидаты для поиска по смыслу (сверь описание пользователя с фрагментами; пока ничего не включай): '+'; '.join(choices)
+            # A weak single hit is still uncertain. Return candidates to the model so it
+            # can ask the user instead of silently opening the wrong song.
+            if scored[0][0]<.56 or (len(scored)>1 and scored[1][0]>=scored[0][0]-.08 and scored[0][0]<.88):
+                options=scored[:5]
+                return 'Неоднозначное название. Возможные варианты: '+ '; '.join(f'{r["title"]} — {r.get("artist") or "исполнитель не указан"} [id:{r["song_id"]}]' for _,r in options)+'. Уточни у пользователя, какую песню выбрать.'
+            exact=scored[0][1]
+        if action=='search':return f'Нашёл: «{exact["title"]}» — {exact.get("artist") or "исполнитель не указан"} [id:{exact["song_id"]}].'
+        if action not in ('open','play'):return 'Неизвестное действие с библиотекой песен.'
+        if action=='play' and not exact.get('audio',{}).get('path'):return f'У «{exact["title"]}» пока нет сохранённой аудиозаписи.'
+        self.emit('song_library_action',action=action,songs=[{'song_id':exact['song_id'],'title':exact['title'],'artist':exact.get('artist','')}])
+        return f'{"Открываю" if action=="open" else "Включаю"} «{exact["title"]}».'
+
     # ---------- дела по расписанию и утренняя сводка ----------
 
     def _job_cmd(self, text, via=None):
@@ -193,6 +279,23 @@ class MusicMixin:
         from media_intent import protected
         if protected(text):
             return False
+        # Explicit playlist/tag requests refer to the user's curated song library,
+        # not to a radio station. Keep station requests on the existing radio path.
+        low=text.casefold().replace('ё','е')
+        wants_playlist=bool(re.search(r"плейлист|подборк|включи музыку|поставь музыку|включи песни",low))
+        if wants_playlist and not re.search(r"радио|станци|волн",low):
+            tag=''
+            for pattern,value in ((r"шансон",'Шансон'),(r"для мужчин|мужчин|мужская",'Мужская'),
+                                  (r"любов",'Любовь'),(r"груст",'Грусть'),(r"юмор|весел",'Юмор')):
+                if re.search(pattern,low):tag=value;break
+            if not tag:
+                for row in self.song_store.list(limit=500,compact=True):
+                    tag=next((item for item in row.get('tags',[]) if item.casefold().replace('ё','е') in low), '')
+                    if tag:break
+            if tag:
+                result=self._song_library_action({'action':'playlist','tag':tag})
+                self._say_quick(result,text)
+                return True
         act = control(text)
         if act == "play" and self.radio.playing and not self.radio.sounding and time.monotonic() - self.radio.last_at > 8:
             last = self.radio.station or self.radio.last         # «играет», а звука нет — станция зависла: включаем заново

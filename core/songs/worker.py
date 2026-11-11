@@ -612,12 +612,14 @@ def _joint_realign(audio, rows, groups, activity, report, progress, align, vocal
     if align is None:
         align = _aligner(audio, vocals)
     changed = 0
-    for indexes, span in groups:
+    for group in groups:
+        indexes, span = group[0], group[1]
         # The crop without the previous line's held word, and the plain one:
-        # the aligner is sensitive to where a crop begins.
-        windows = [vocal_timing.grid_window(rows, indexes, span, duration, activity)]
+        # the aligner is sensitive to where a crop begins. A group may bring
+        # its own crops (a line moved to a voice far from where it stands).
+        windows = list(group[2]) if len(group) > 2 else [vocal_timing.grid_window(rows, indexes, span, duration, activity)]
         plain = vocal_timing.grid_window(rows, indexes, span, duration)
-        if plain != windows[0]:
+        if len(group) <= 2 and plain != windows[0]:
             windows.append(plain)
         text = ' '.join(str(rows[i].get('text') or '') for i in indexes)
         count = len(text.split())
@@ -703,6 +705,47 @@ def realign_voiced_gaps(audio, hypothesis, activity, context, progress, align=No
                 + vocal_timing.covered_silence(new, activity, a, b))
     rows, changed = _joint_realign(audio, rows, groups, activity, report, progress, align, vocals,
                                    'в паузе поют, а текста нет', improves, cost)
+    hypothesis['phrases'] = rows
+    report['applied'] = changed
+    return changed
+
+
+def realign_silent_lines(audio, hypothesis, activity, context, progress, align=None, vocals=None):
+    """A line placed where nobody sings goes to the voice that sang it.
+
+    «Благодать»: «Ты мне улыбнулась» at 0.5 s over a 21-second intro, above
+    the intro chords; the voice at 21 s had «рано утром, чуть опухшая сосна»
+    only. The line (with the next one, if that took its voice) is aligned
+    again over that voice. Kept only if the line is then sung (≥ 60 % of it
+    in the voice), no more text lies over silence and no singing is left
+    without text that had text before.
+    """
+    from songs import vocal_timing
+    rows = hypothesis.get('phrases') or []
+    report = {'method': 'joint_alignment_of_silent_line', 'runs': []}
+    hypothesis['silent_line_realignment'] = report
+    if not activity:
+        report['reason'] = 'no_vocal_activity'
+        return 0
+    import soundfile as sf
+    duration = round(sf.info(str(audio)).duration * 1000)
+    groups = vocal_timing.silent_line_groups(rows, activity, context, duration)
+
+    def improves(old, new, indexes, window):
+        a, b = window
+        lo = min(a, min(int(old[i].get('start_ms') or 0) for i in indexes))
+        return (vocal_timing.line_voiced_share(new[indexes[0]], activity) >= .6
+                and vocal_timing.covered_silence(new, activity, lo, b)
+                <= vocal_timing.covered_silence(old, activity, lo, b) + vocal_timing.GAP_SILENCE_SLACK
+                and vocal_timing.uncovered_voice(new, activity, a, b, duration)
+                <= vocal_timing.uncovered_voice(old, activity, a, b, duration) + 300)
+
+    def cost(new, window):
+        a, b = window
+        return (vocal_timing.uncovered_voice(new, activity, a, b, duration)
+                + vocal_timing.covered_silence(new, activity, a, b))
+    rows, changed = _joint_realign(audio, rows, groups, activity, report, progress, align, vocals,
+                                   'строка стоит там, где не поют', improves, cost)
     hypothesis['phrases'] = rows
     report['applied'] = changed
     return changed
@@ -1063,6 +1106,11 @@ def main():
                         except Exception as exc:
                             # Optional: a failed recheck never loses the aligned text.
                             timed['sung_gap_recovery'] = {'applied': False, 'error': str(exc)[:300]}
+                        try:
+                            realign_silent_lines(args.input,timed,activity,context,progress,
+                                                 vocals=vocals_for_timing())
+                        except Exception as exc:
+                            timed['silent_line_realignment'] = {'applied': False, 'error': str(exc)[:300]}
                         if activity:
                             # What nobody recognized becomes an editable «???» line.
                             from songs import vocal_timing

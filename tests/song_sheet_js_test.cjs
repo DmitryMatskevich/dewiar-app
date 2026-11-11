@@ -110,20 +110,23 @@ assert.ok(editable.indexOf('song-paper-edit-chords')<editable.indexOf('song-pape
 assert.ok(editable.indexOf('song-paper-edit-lyrics')<editable.indexOf('song-paper-lyrics'));
 console.log('Inline phrase and chord edit controls: OK');
 
-// Dense candidates become one row by sounding duration; source/editor is intact.
+// Dense candidates keep every change; space between words grows instead of
+// silently selecting the longest chord and losing the user's corrections.
 const dense={text:'First words, then more words.',chords:[
  {name:'F6',char_index:0,start_ms:0,end_ms:100},
  {name:'Fdim',char_index:0,start_ms:100,end_ms:220},
  {name:'F',char_index:0,start_ms:220,end_ms:2200},
  {name:'Dm',char_index:18,start_ms:2200,end_ms:3600}]};
 const denseBefore=JSON.stringify(dense);
-assert.deepEqual(s.compactChords(dense,0).map(c=>c.name),['F','Dm']);
+assert.deepEqual(s.compactChords(dense,0).map(c=>c.name),['F6','Fdim','F','Dm']);
 assert.equal(JSON.stringify(dense),denseBefore);
 assert.equal(s.sheetRows({guitar_sheet:[dense]}).filter(r=>r.kind==='chords').length,1);
 for(let shift=-12;shift<=12;shift++) {
  const cs=s.compactChords(dense,shift,24);
  assert.ok(cs.every((c,i)=>i===0 || cs[i-1].at+cs[i-1].name.length<c.at));
- assert.ok(cs.every(c=>c.at+c.name.length<=24));
+ assert.deepEqual(cs.map(c=>c.name),dense.chords.map(c=>s.transpose(c.name,shift)));
+ const layout=s.layoutChordLine(dense,shift,24);
+ assert.equal(layout.text.replace(/\s+/g,' '),dense.text);
 }
 const narrow={text:'One little word and another final word',chords:[{name:'Am',char_index:0},{name:'E7',char_index:28}],display_words:[{word_id:'last',char_start:34,char_end:38,start_ms:5000,end_ms:6000}]};
 const wrapped=s.wrapLine(narrow,20);
@@ -132,7 +135,17 @@ assert.ok(wrapped.every(l=>l.text.length<=20));
 assert.equal(wrapped.flatMap(l=>l.chords).length,2);
 const last=wrapped.find(l=>l.display_words.length);
 assert.equal(last.text.slice(last.display_words[0].char_start,last.display_words[0].char_end),'word');
-console.log('Single chord row, duration dominance, transpose fit and responsive cues: OK');
+console.log('All chord changes, spaced words, transposition and responsive cues: OK');
+
+const denseWords={...dense,display_words:[{word_id:'first',phrase_char_start:0,char_start:0,char_end:5},{word_id:'words',phrase_char_start:6,char_start:6,char_end:12}]};
+const spaced=s.layoutChordLine(denseWords);
+assert.equal(spaced.text.slice(spaced.display_words[1].char_start,spaced.display_words[1].char_end),'words,');
+assert.equal(spaced.display_words[1].phrase_char_start,6);
+for(const width of [12,20,42]) {
+ const parts=s.wrapLine(spaced,width);
+ assert.deepEqual(parts.flatMap(l=>l.chords.map(c=>c.name)),['F6','Fdim','F','Dm']);
+ assert.equal(parts.map(l=>l.text).join(' ').replace(/\s+/g,' '),dense.text);
+}
 
 // Real regression shape: a change in a short vocal gap was a separate API row,
 // then the next lyric had its own changes. Per-row compaction left a staircase.

@@ -811,6 +811,13 @@ def t_yandex_music(a, ctx):
             "или скажите «играй», и я нажму воспроизведение.")
 
 
+def t_song_library(a, ctx):
+    """Поиск и действия с локальной библиотекой песен Dewiar."""
+    handler=ctx.get('song_library')
+    if not callable(handler):raise ToolError('Библиотека песен сейчас недоступна')
+    return handler(a)
+
+
 def t_play_radio(a, ctx):
     from radio import RadioError, pick, search
     r = ctx.get("radio")
@@ -1215,16 +1222,30 @@ def t_run_command(a, ctx):
 
 def t_backup_project(a, ctx):
     """Create a tracked background task for a registered project backup."""
-    from project_backups import resolve_project
+    from project_backups import configured_projects, resolve_project
     try:
-        project_id = resolve_project(a.get("project"))
-        task = _tm(ctx).create_project_backup(project_id)
+        manager = _tm(ctx)
+        project_id = resolve_project(a.get("project"), configured_projects(manager.host.s))
+        task = manager.create_project_backup(project_id)
     except (ValueError, OSError) as exc:
         raise ToolError(str(exc)) from exc
     except KeyError as exc:
         raise ToolError(f"Не удалось создать задачу бэкапа: {exc}") from exc
     return (f"Задача «{task.title}» запущена в фоне. Текущий статус и журнал доступны в разделе «Задачи»; "
             "по завершении напишу в этот чат, создан ли архив, где он находится и прошла ли проверка.")
+
+
+def t_backup_projects(a, ctx):
+    """Create one tracked background task for several registered project backups."""
+    from project_backups import configured_projects, resolve_projects
+    try:
+        manager = _tm(ctx)
+        project_ids = resolve_projects(a.get("projects"), configured_projects(manager.host.s))
+        task = manager.create_project_backups(project_ids)
+    except (ValueError, OSError) as exc:
+        raise ToolError(str(exc)) from exc
+    return (f"Задача «{task.title}» запущена в фоне для {len(project_ids)} проектов. "
+            "Ход выполнения и итог будут в разделе «Задачи» и появятся в этом чате.")
 
 
 # sudo там, где начинается команда (не внутри аргументов); sudo -A/-S/-n уже со своим способом пароля — не трогаем
@@ -2727,6 +2748,18 @@ TOOLS = {
                      "установлено, иначе на сайте. Когда просят музыку в Яндекс Музыке или пользователь только что открыл её. "
                      "Запустить/остановить воспроизведение потом — media_control.",
                      S({"query": {"type": "string"}}), "safe", t_yandex_music, "Яндекс Музыка"),
+    "song_library": ("Локальная библиотека Dewiar. Используй для запросов найти/открыть/включить/изменить сохранённую песню. "
+                     "При ошибке в названии сначала action=search; учитывай, что пользователь может назвать фрагмент названия и исполнителя вместе. "
+                     "Ищи также по имени исполнителя (search_in=artist) и строке из текста (search_in=lyrics); если описывают сюжет или смысл песни, "
+                     "используй search_in=meaning: он вернёт карточки с фрагментами текста, сравни их с описанием и предложи подходящие варианты. "
+                     "Если ответ содержит несколько кандидатов или слабое совпадение — задай короткий вопрос с названиями и исполнителями, затем передай выбранный song_id. "
+                     "action=open откроет карточку песни в приложении; для правок текста или аккордов открой карточку, а edit меняет название, исполнителя и теги. "
+                     "play включит сохранённую аудиозапись; playlist запускает все записи по тегу из личной библиотеки. Не угадывай песню и не подменяй библиотечный запрос радио.",
+                     S({"action":{"type":"string","enum":["search","open","play","playlist","edit"]},
+                        "query":{"type":"string"},"search_in":{"type":"string","enum":["auto","title","artist","lyrics","meaning"]},
+                        "tag":{"type":"string"},"song_id":{"type":"string"},
+                        "title":{"type":"string"},"artist":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}}},["action"]),
+                     "safe", t_song_library, "Локальная библиотека песен"),
     "media_control": ("Нажать кнопку плеера, который уже открыт (Яндекс Музыка, браузер, Spotify…): play — играть, pause — "
                       "пауза, next/previous — трек вперёд/назад. Всегда этим, а не кликами по экрану и не командами терминала.", S({"action": {"type": "string", "enum": ["play", "pause", "play_pause", "next", "previous", "stop"]}}, ["action"]), "safe", t_media, "Управление плеером"),
     "set_volume": ("Громкость системы: percent (0–150), или change (+/-), или mute (true/false).", S({"percent": {"type": "integer"}, "change": {"type": "integer"}, "mute": {"type": "boolean"}}), "safe", t_volume, "Громкость"),
@@ -3012,7 +3045,8 @@ TOOLS = {
                    S({"server": {"type": "string"}, "command": {"type": "string"}, "timeout": {"type": "integer"}}, ["server", "command"]),
                    "confirm", t_server_run, "Команды на сервере"),
     "run_command": (("Выполнить команду в PowerShell (Windows)" if WIN else "Выполнить команду в терминале macOS/Linux (bash; можно запустить явно названный shell-скрипт)") + " и вернуть вывод. Только если пользователь явно просит; перед запуском требуется подтверждение.", S({"command": {"type": "string"}}, ["command"]), "confirm", t_run_command, "Команды и скрипты терминала"),
-    "backup_project": ("Создать фоновую задачу резервного копирования зарегистрированного проекта по его фиксированному сценарию. Вызывай, когда пользователь явно просит «бэкапировать», «создай бэкап», «резервировать» или «создай резерв» проекта. Задача появится в разделе «Задачи», а по завершении ассистент сообщит в чат итог, путь архива, число файлов и SHA-256. Сейчас подключён CMMS-rus; названия проекта: cmms-rus, cmms, dc master, дсмастер. Не вызывай для вопросов о том, как устроен бэкап. Если проект не назван и не очевиден из контекста — уточни. Сценарий фиксирован; никогда не подставляй произвольные пути или shell-команды.", S({"project": {"type": "string", "description": "Название проекта: cmms-rus, cmms, dc master или дсмастер"}}, ["project"]), "confirm", t_backup_project, "Бэкап проекта CMMS-rus"),
+    "backup_project": ("Создать фоновую задачу резервирования зарегистрированного проекта по настройкам Dewiar. Вызывай по явной просьбе «бэкапировать», «создай бэкап», «резервировать», «создай резерв». Dewiar проверяет ZIP и копирует его в назначения из профиля. Для облачных дисков используются подключения из сейфа. Задача показывает в чате, где находятся архив и проверенные копии. Не вызывай для вопроса о том, как устроен бэкап. Не подставляй пути или shell-команды.", S({"project": {"type": "string", "description": "Название или псевдоним проекта, например CMMS-rus, сайт DCNT, сайт ОСКС, site_cmms, site_soveriaz, site_xok или china_search"}}, ["project"]), "confirm", t_backup_project, "Бэкап проекта"),
+    "backup_projects": ("Создать одну фоновую задачу резервирования нескольких зарегистрированных проектов. Вызывай только по явной просьбе. Для каждого проекта создаётся отдельный ZIP по его настройкам; задача показывает прогресс и публикует в чат пути, SHA-256 и результаты выгрузки. Не подставляй пути или команды.", S({"projects": {"type": "array", "items": {"type": "string"}, "description": "Названия или псевдонимы зарегистрированных проектов"}}, ["projects"]), "confirm", t_backup_projects, "Бэкапы нескольких проектов"),
 }
 # Этим умениям нужен интернет из самого Dewiar — при стоп-кране (студия → «Безопасность») модель о них не узнаёт.
 # Открыть сайт, музыку или карту в браузере человека — можно: это его браузер и его просьба.
@@ -3085,7 +3119,7 @@ class Toolbox:
                 return False, False
         if name in NET_TOOLS and (self.s.get("privacy") or {}).get("local_only"):
             return False, False                 # стоп-кран «Ничего не уходит в интернет»: этим нужен интернет (off_note скажет модели)
-        if name in ("run_command", "backup_project") and (self.s.get("privacy") or {}).get("files") == "folder":
+        if name in ("run_command", "backup_project", "backup_projects") and (self.s.get("privacy") or {}).get("files") == "folder":
             return False, False                 # замок «Файлы: только папка Dewiar» ограничивает внешние пути
         t = self.s.get("tools") or {}
         on = t.get("enabled", {}).get(name, name not in DEFAULT_OFF)
@@ -3166,9 +3200,20 @@ class Toolbox:
             try:proposal = pending(engine, (args or {}).get('proposal_id'))
             except ValueError as error:return str(error), False, None
             return None, True, proposal['summary'] + '? Остальные команды и разрешения останутся прежними.'
-        if name == "backup_project":
-            project = str((args or {}).get("project") or "CMMS-rus")
-            return None, True, f"Создать резервную копию проекта «{project}» по зарегистрированному сценарию? Будут применены его правила исключения файлов."
+        if name in ('backup_project', 'backup_projects'):
+            from project_backups import PROVIDERS, configured_projects, resolve_projects
+            profiles = configured_projects(self.s)
+            arguments = args or {}
+            try:
+                ids = resolve_projects(arguments.get('project') if name == 'backup_project' else arguments.get('projects'), profiles)
+            except ValueError as exc:
+                return str(exc), False, None
+            targets = []
+            for key in ids:
+                profile = profiles[key]
+                locations = [profile['output_dir'], *(f"{PROVIDERS[row['provider']]}: {row['target']}" for row in profile['destinations'])]
+                targets.append(f"«{profile['title']}» → " + ', '.join(locations))
+            return None, True, 'Запустить резервирование?\n' + '\n'.join(targets)
         if name in ("delete_files", "close_send") and s is not None and (s.get("privacy") or {}).get("files") == "folder":
             # замок «Файлы: только папка Dewiar»: удалять и отправлять можно только то, что лежит в папке ассистента
             roots = [Path(w).expanduser().resolve() for w in guard.WORKSPACE]

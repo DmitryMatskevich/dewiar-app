@@ -8,7 +8,7 @@ SongSheet.lineStarts=()=>[0,10000,20000];
 SongSheet.updatePlayback=(id,ms,scroll)=>follows.push({id,ms,scroll});
 function setup() {
  elements=new Map();requests=0;pending=null;follows=[];
- global.document={activeElement:null,getElementById:id=>elements.get(id),querySelectorAll:()=>[],querySelector:selector=>selector==='#song-review-audio'?player:null};
+ global.document={activeElement:null,addEventListener(){},getElementById:id=>elements.get(id),querySelectorAll:()=>[],querySelector:selector=>selector==='#song-review-audio'?player:null};
  for(const id of ['song-sheet-play','song-sheet-stop','song-sheet-previous','song-sheet-next','song-play-full','song-play-status','song-sheet-play-status','song-review-loop']) elements.set(id,{setAttribute(n,v){this[n]=v}});
  player={dataset:{},src:'',paused:true,ended:false,currentTime:0,isConnected:true,listeners:{},
  addEventListener(n,fn){this.listeners[n]=fn},

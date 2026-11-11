@@ -74,6 +74,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-live-editor-ui-') as temp, sync_
     mock = '''window.calls=[];window.row=ROW;window.audioData=AUDIO;
 window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,args){calls.push([cmd,args]);
  if(cmd==='songs_list')return [structuredClone(row)];
+ if(cmd==='songs_tags_list')return ['Тест'];
  if(cmd==='song_get')return structuredClone(row);
  if(cmd==='song_full_audio')return {data:audioData};
  if(cmd==='song_phrase_audio'){const p=row.phrases.find(p=>p.phrase_id===args.phrase_id);if(window.deferClip)await new Promise(resolve=>window.releaseClip=resolve);return {data:audioData,start_ms:p.start_ms,end_ms:p.end_ms,phrase_start_ms:p.start_ms,phrase_end_ms:p.end_ms};}
@@ -85,6 +86,7 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
    p.review_state=args.reviewed?'verified':'needs_review';row.revision++;return structuredClone(row);
  }
  if(cmd==='song_edit_chords'){row.chords=args.chords;row.revision++;return structuredClone(row);}
+ if(cmd==='song_preview_chords')return {positions:Object.fromEntries(args.chords.map((c,i)=>[i,{phrase_id:'phrase-1',char_index:c.anchor?.grapheme_index||0,quality:'manual'}]))};
  if(cmd==='song_edit_display_line'){
    if(args.line_id!=='joined-line-1')throw Error('Unexpected display line: '+args.line_id);
    row.phrases.find(x=>x.phrase_id==='phrase-2').text='цельной четверта.';
@@ -117,10 +119,11 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
     def cue_at(seconds):
         player.evaluate("(a,t)=>{a.currentTime=t;a.dispatchEvent(new Event('timeupdate'))}", seconds)
         page.wait_for_function("document.querySelector('.song-paper-instrumental.playing-instrumental')")
-        return page.locator('.song-paper-cue-part.countdown-lit').inner_text()
-    assert cue_at(0.1) == 'Всту'
-    assert cue_at(0.45) == 'пле'
-    assert cue_at(0.8) == 'ние'
+        return ''.join(page.locator('.song-paper-cue-part.countdown-lit').all_inner_texts())
+    # A cue shorter than three seconds highlights the whole label.
+    assert cue_at(0.1) == 'Вступление'
+    assert cue_at(0.45) == 'Вступление'
+    assert cue_at(0.8) == 'Вступление'
     assert not page.locator('.song-paper-countdown').count()
     assert not page.locator('.song-paper-instrumental').inner_text().startswith('До ')
     player.evaluate("a=>{a.currentTime=3.2;a.dispatchEvent(new Event('timeupdate'))}")
@@ -149,6 +152,13 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
     page.locator('#song-live-edit-audio').evaluate("(a)=>{a.currentTime=1.5;a.dispatchEvent(new Event('timeupdate'))}")
     assert page.locator('.song-phrase[data-phrase-id="phrase-1"] .song-word.current-word').text_content() == 'молчу'
     assert page.locator('.song-paper-word.current-word').inner_text() == 'молчу'
+    assert page.locator('#song-live-edit-preview-chords .current-chord').inner_text() == 'Am'
+    assert page.locator('[data-live-chord="1"]').evaluate("e=>e.classList.contains('is-playing')")
+    assert page.locator('[data-live-chord="1"] [data-live-chord-context] mark.current-word').inner_text() == 'Я молчу и '
+    assert page.locator('#song-live-edit-preview .song-live-preview-word.current-word').text_content() == 'Я молчу и ', page.locator('#song-live-edit-preview').inner_html()
+    page.locator('#song-live-edit-audio').evaluate("(a)=>{a.currentTime=3.2;a.dispatchEvent(new Event('timeupdate'))}")
+    assert page.locator('#song-live-edit-preview-chords .current-chord').inner_text() == 'E7'
+    assert page.locator('[data-live-chord="2"] [data-live-chord-context] mark.current-word').inner_text() == 'улыбаюсь.'
     assert 'Приостановить' in live_play.get_attribute('aria-label')
     live_play.click()
     page.wait_for_function("document.querySelector('#song-live-edit-audio').paused")
@@ -160,18 +170,19 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
     assert '\n' not in chord_preview.inner_text()
     assert '1→6:' in chord_preview.locator('.song-chord-tip').first.get_attribute('title')
     assert '1→6:' in page.locator('[data-live-chord-name]').first.get_attribute('title')
-    assert page.locator('[data-live-chord-name]').first.get_attribute('maxlength') == '6'
+    assert page.locator('[data-live-chord-name]').first.get_attribute('maxlength') == '24'
     assert page.locator('[data-live-chord-time]').first.get_attribute('step') == '0.001'
     assert page.locator('[data-live-chord-time]').first.get_attribute('min') == '0.000'
     assert page.locator('[data-live-chord-time]').first.get_attribute('max') == '8.000'
-    assert page.locator('[data-live-chord-fingering]').first.inner_text().startswith('1→6 ')
+    assert page.locator('[data-live-chord-fingering]').count() == 0
+    assert page.locator('[data-live-chord-context]').first.locator('mark').count() == 1
 
     page.locator('#song-live-edit-text').fill('Я тихо смеюсь.')
-    assert page.locator('#song-live-edit-preview').inner_text() == 'Я тихо смеюсь.'
+    assert ' '.join(page.locator('#song-live-edit-preview').inner_text().split()) == 'Я тихо смеюсь.'
     page.locator('#song-live-chord-add').click()
     page.locator('[data-live-chord="3"] [data-live-chord-name]').fill('C')
     page.locator('[data-live-chord="3"] [data-live-chord-time]').fill('8.0')
-    assert 'C' in chord_preview.inner_text(), chord_preview.inner_text()
+    page.wait_for_function("document.querySelector('#song-live-edit-preview-chords').textContent.includes('C')")
     page.locator('[data-live-chord-remove="3"]').click()
     assert 'C' not in chord_preview.inner_text()
     page.locator('#song-live-edit-save').click()
@@ -198,9 +209,9 @@ window.handlers={};const core={on(name,fn){handlers[name]=fn},async call(cmd,arg
 
     page.locator('.song-paper-edit-lyrics[data-song-edit-line="joined-line-1"]').click()
     assert page.locator('#song-live-edit-text').input_value() == 'улыбаюсь. цельный четвертак.'
-    assert page.locator('#song-live-edit-preview').inner_text() == 'улыбаюсь. цельный четвертак.'
+    assert ' '.join(page.locator('#song-live-edit-preview').inner_text().split()) == 'улыбаюсь. цельный четвертак.'
     page.locator('#song-live-edit-text').fill('улыбаюсь. цельной четверта.')
-    assert page.locator('#song-live-edit-preview').inner_text() == 'улыбаюсь. цельной четверта.'
+    assert ' '.join(page.locator('#song-live-edit-preview').inner_text().split()) == 'улыбаюсь. цельной четверта.'
     page.locator('#song-live-edit-save').click()
     page.wait_for_function("calls.some(([cmd])=>cmd==='song_edit_display_line')")
     args=page.evaluate("calls.find(([cmd])=>cmd==='song_edit_display_line')[1]")

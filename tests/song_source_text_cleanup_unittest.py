@@ -68,5 +68,50 @@ class SourceTextTests(unittest.TestCase):
         self.assertEqual(loose, [])
 
 
+class MandelstamEndingTests(unittest.TestCase):
+    """«Мандельштам» (Котляр): the ending stayed dirty although the source was right.
+    The Qwen chunk boundary cut «преподаватели» in two lines, and the last
+    words had one equal word after them («Мандельштам») and a «Да.» over silence."""
+
+    REF = ('Но мне себя ни чуточки не жалко\nБыть может в этом виноват я только сам,\n'
+           'А может быть преподаватели филфака\nА может Осип, блять, Эмильич Мандельштам')
+
+    def rows(self):
+        return [dict(phrase_id='a', text='Но мне себя ни чуточки не жалко. Быть может в этом виноват я только сам, а может быть при',
+                     start_ms=125000, end_ms=149960),
+                dict(phrase_id='b', text='Подавателей в Галфака, а может Босе, Блядимельич, Мандельштам.', start_ms=150000, end_ms=155200),
+                dict(phrase_id='c', text='Да.', start_ms=175000, end_ms=175621, vocal_evidence='none')]
+
+    def test_cut_word_across_lines_and_the_last_words(self):
+        found = reference_candidates(self.rows(), [dict(plain_lyrics=self.REF, url='https://amdm.ru/x')])
+        got = [(c['current']['phrase_id'], c['current']['text'], c['alternative']['text'],
+                [(a['phrase_id'], a['text']) for a in c['current'].get('also', [])]) for c in found]
+        self.assertIn(('b', 'Подавателей в Галфака', 'преподаватели филфака', [('a', ' при')]), got)
+        self.assertIn(('b', 'Босе, Блядимельич', 'Осип, блять, Эмильич', []), got)
+        self.assertTrue(all(not c['auto_apply'] for c in found))
+
+    def test_applying_clears_the_cut_off_piece(self):
+        import tempfile
+        from songs.store import SongStore
+        from songs.text_sources import command
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SongStore(Path(tmp))
+            row = store.create('Мандельштам')
+            row = store.patch(row['song_id'], dict(phrases=self.rows(), selected_source_id='recording', audio={'path': 'x.wav'}))
+            row = command(store, 'add', dict(song_id=row['song_id'], base_revision=row['revision'], lyrics=self.REF))
+            ref = row['text_reference']['suggested_sources'][0]['candidate_id']
+            row = command(store, 'confirm', dict(song_id=row['song_id'], base_revision=row['revision'], candidate_id=ref))
+            row = command(store, 'apply_all', dict(song_id=row['song_id'], base_revision=row['revision']))
+            texts = [p['text'] for p in row['phrases']]
+            self.assertEqual(texts[0], 'Но мне себя ни чуточки не жалко. Быть может в этом виноват я только сам, а может быть')
+            self.assertEqual(texts[1], 'преподаватели филфака, а может Осип, блять, Эмильич, Мандельштам.')
+            self.assertEqual(texts[2], 'Да.')
+
+    def test_spacing_alone_still_needs_two_words_on_each_side(self):
+        rows = [dict(phrase_id='p', text='Он любил весь мир в разнос гулять', start_ms=0, end_ms=1000)]
+        found = reference_candidates(rows, [dict(plain_lyrics='Он любил весь мир вразнос гулять', url='x')])
+        self.assertEqual([c for c in found if c.get('match_method') != 'repeated_line'], [])
+
+
 if __name__ == '__main__':
     unittest.main()

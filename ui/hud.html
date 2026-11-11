@@ -538,6 +538,8 @@
      «в сети / не в сети» (тестировщик 14.10), а лицо в 20 px — как пятно рядом с большим портретом (14.10) */
   .gi { display: grid; place-items: center; flex: none; }
   .gi svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .gi img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+  #b-team .gi { width: 20px; height: 20px; overflow: hidden; border-radius: 50%; }
   #b-team svg.chev { width: 13px; height: 13px; opacity: .7; }
   /* Выбор помощника — отдельное плавающее модальное окно. Оно не отодвигает чат и не зависит от
      количества персонажей: список прокручивается внутри панели, фокус остаётся в окне. */
@@ -555,7 +557,10 @@
                  background: none; color: var(--ink); cursor: pointer; text-align: left; font: inherit; }
   #team-list button:hover, #team-list button:focus-visible { background: rgba(255,255,255,.07); outline: none; }
   #team-list button.cur { background: rgba(255,255,255,.1); }
-  #team-list .gi { width: 22px; color: var(--muted); } #team-list button.cur .gi { color: var(--ink); }
+  #team-list .gi { width: 32px; height: 32px; overflow: hidden; border-radius: 50%; color: var(--muted); }
+  #team-list .gi svg { width: 22px; height: 22px; }
+  #team-list .gi.initial { color: #fff; background: var(--avatar-color, var(--persona)); font-size: 14px; font-weight: 700; }
+  #team-list button.cur .gi { color: var(--ink); }
   #team-list b { font-weight: 600; font-size: 13px; }
   #team-list span { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
   #team-list::-webkit-scrollbar { width: 6px; } #team-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
@@ -948,6 +953,18 @@ const GENDER_SVG = {
 };
 GENDER_SVG[""] = GENDER_SVG.male;
 function paintAv(el, p) {
+  if (p && p.avatar_url) {
+    el.className = "gi"; el.style.backgroundImage = ""; el.dataset.g = "photo";
+    const img = document.createElement("img"); img.alt = ""; img.src = p.avatar_url;
+    img.onerror = () => paintAv(el, {...p, avatar_url: ""});
+    el.replaceChildren(img); return;
+  }
+  if (el.closest("#team-list") && p && p.name) {
+    el.className = "gi initial"; el.dataset.g = "initial";
+    el.style.setProperty("--avatar-color", p.color || "var(--persona)");
+    el.textContent = Array.from(p.name.trim())[0]?.toLocaleUpperCase("ru") || "?";
+    return;
+  }
   const g = p && (p.gender === "female" || p.gender === "male") ? p.gender : "";
   el.className = "gi"; el.style.backgroundImage = ""; el.dataset.g = g || "none";
   el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${GENDER_SVG[g]}</svg>`;
@@ -1217,6 +1234,7 @@ function updateAudioMode(mode) {
 }
 window.addEventListener("pywebviewready", () => updateAudioMode(audioMode));
 core.on("audio_mode", e => updateAudioMode(e.mode));
+let quickMeetingPrefs = {frame_interval: 1, frame_quality: 85, frame_max_dimension: 2560};
 core.on("hello", d => {
   updateAudioMode(d.audio_mode || "voice");
   tmrSet(d.reminders);
@@ -1224,6 +1242,7 @@ core.on("hello", d => {
   featuresSet(d.settings.features);
   setLocal(d.settings.privacy && d.settings.privacy.local_only);
   setModelSettings(d.settings.llm); refreshModelHint();
+  quickMeetingPrefs = {...quickMeetingPrefs, ...(d.settings.prompter || {})};
   personas = d.personas; muted = d.muted; $("b-mic").classList.toggle("on", muted); setTextOnly(d.settings.tts && d.settings.tts.text_only);
   applyPersona(d.persona); setRadio(d.radio); setState(d.state); note(d.status); selectedMic = (d.settings.audio && d.settings.audio.input) || ""; setAskModel(d.status && d.status.model);
   if (!d.settings.llm.active && (d.settings.ui || {}).intro !== "") { showCap("", "Чтобы я могла отвечать, меня нужно один раз подключить — бесплатно: студия → «Модели» → «Подключить бесплатно».", true); }
@@ -2178,6 +2197,38 @@ async function showNativeTaskResult(t) {
           try { await navigator.clipboard.writeText(result.text || ""); status.textContent = "Текст скопирован."; }
           catch (_) { status.textContent = "Не удалось записать в буфер обмена. Выделите текст выше и скопируйте вручную."; }
         });
+        if (ext === "html" || ext === "htm") {
+          addButton("✎", "Открыть визуальный HTML-редактор в отдельном окне", async () => {
+            try {
+              const native = api();
+              if (!native?.open_html_editor) throw new Error("Визуальный HTML-редактор доступен в приложении Dewiar");
+              await native.open_html_editor(t.id, output.path);
+              status.textContent = "HTML открыт в отдельном окне редактора. Исходный результат сохранён без изменений.";
+            } catch (error) { status.textContent = error.message || String(error); }
+          });
+          addButton("⇄", "Преобразовать полный HTML в Markdown, Word, PDF или TXT", () => {
+            if (box.querySelector(".html-convert-options")) return;
+            const choices = document.createElement("div"); choices.className = "native-operation-actions html-convert-options";
+            const label = document.createElement("span"); label.textContent = "Формат:"; choices.append(label);
+            for (const [target, title] of [["md", "MD"], ["docx", "Word"], ["pdf", "PDF"], ["txt", "TXT"]]) {
+              const option = document.createElement("button"); option.type = "button"; option.textContent = title;
+              option.onclick = async () => {
+                option.disabled = true; status.textContent = `Преобразую полный HTML в ${title}…`;
+                try {
+                  const task = await core.call("task_convert_result", {id:t.id,path:output.path,target});
+                  status.textContent = `Создана задача конвертации «${task.title || title}».`;
+                  const open = document.createElement("button"); open.type = "button"; open.textContent = "Открыть задачу";
+                  open.onclick = async () => { const native=api(); if(native?.open_settings) await native.open_settings("tasks", "&task="+encodeURIComponent(task.id)); };
+                  status.append(" ", open);
+                } catch (error) { status.textContent = error.message || String(error); }
+                finally { option.disabled = false; }
+              };
+              choices.append(option);
+            }
+            const close=document.createElement("button");close.type="button";close.textContent="Отмена";close.onclick=()=>choices.remove();choices.append(close);
+            box.insertBefore(choices, actions);
+          });
+        }
         if (!result.truncated && ["txt", "md", "html", "csv", "tsv"].includes(ext)) addButton("✎", `Редактировать ${output.title || output.path}`, async () => {
           const editor = document.createElement("textarea"); editor.className = "native-operation-editor";
           editor.setAttribute("aria-label", `Текст файла ${output.title || output.path}`); editor.value = result.text || "";
@@ -2702,8 +2753,9 @@ function openQuickMeeting() {
         <button type="button" class="qm-source" data-source="screen">Весь экран</button><button type="button" class="qm-source" data-source="region">Часть</button><button type="button" class="qm-source" data-source="application">Приложение</button></div>
       <label class="qm-field" id="qm-app-wrap" hidden><span>Окно приложения</span><select id="qm-app"><option value="">Обновите список окон</option></select></label>
       <div class="qm-field" id="qm-region-wrap" hidden><span>Область экрана</span><button type="button" id="qm-region-pick">Выбрать область…</button><span id="qm-region-label" class="hint"></span></div>
-      <div class="qm-settings"><label class="qm-field"><span>Кадр каждые</span><select id="qm-interval"><option value="0.5" selected>0,5 с</option><option value="1">1 с</option><option value="2">2 с</option><option value="5">5 с</option></select></label>
-        <label class="qm-field"><span>Качество кадров</span><select id="qm-quality"><option value="100" selected>Максимум · 100%</option><option value="95">95%</option></select></label></div>
+      <div class="qm-settings"><label class="qm-field"><span>Кадр каждые</span><select id="qm-interval"><option value="0.5">0,5 с</option><option value="1" selected>1 с</option><option value="2">2 с</option><option value="5">5 с</option></select></label>
+        <label class="qm-field"><span>Качество кадров</span><select id="qm-quality"><option value="60">Экономно · 60%</option><option value="75">Обычно · 75%</option><option value="85" selected>Хорошо · 85%</option><option value="95">95%</option><option value="100">Максимум · 100%</option></select></label>
+        <label class="qm-field"><span>Разрешение кадров</span><select id="qm-size"><option value="1920">1920 px · экономно</option><option value="2560" selected>2560 px · обычно</option><option value="3840">3840 px · крупный экран</option><option value="5120">5120 px · полное</option></select></label></div>
       <div class="qm-audio-info">Аудио: звук приложений + микрофон · две дорожки</div>
       <label class="qm-consent"><input type="checkbox" id="qm-consent"><span>Я предупредил участников и получил согласие на запись звука и экрана.</span></label>
       <p class="qm-status" id="qm-status" role="status" aria-live="polite"></p>
@@ -2729,7 +2781,10 @@ function openQuickMeeting() {
   }
   quickMeetingSource = "screen"; quickMeetingRegion = null; quickMeetingAppsLoaded = false;
   $("qm-consent").checked = false; $("qm-app").replaceChildren(new Option("Выберите окно", ""));
-  $("qm-region-label").textContent = ""; $("qm-interval").value = "0.5"; $("qm-quality").value = "100";
+  $("qm-region-label").textContent = "";
+  $("qm-interval").value = String(quickMeetingPrefs.frame_interval ?? 1);
+  $("qm-quality").value = String(quickMeetingPrefs.frame_quality ?? 85);
+  $("qm-size").value = String(quickMeetingPrefs.frame_max_dimension ?? 2560);
   quickMeetingStatus(""); quickMeetingReady(); quickMeetingDialog.showModal(); document.querySelector("#qm-capture .qm-source")?.focus();
 }
 async function startQuickMeeting() {
@@ -2742,7 +2797,7 @@ async function startQuickMeeting() {
     }
     await core.call("prompter_start", {title:"Встреча", goal:"", mode:"manual", them:true, me:false, knowledge:false,
       keep_text:true, place:"online", nudge:false, record:true, deferred:true, consent:$("qm-consent").checked,
-      auto_frames:true, auto_interval:Number($("qm-interval").value), frame_quality:Number($("qm-quality").value),
+      auto_frames:true, auto_interval:Number($("qm-interval").value), frame_quality:Number($("qm-quality").value), frame_max_dimension:Number($("qm-size").value),
       frame_video:true, auto_first_frame:true, capture_source:quickMeetingSource, capture_region:quickMeetingRegion || {},
       capture_application:quickMeetingSource === "application" ? $("qm-app").value : "",
       record_source:"system", record_me:true});

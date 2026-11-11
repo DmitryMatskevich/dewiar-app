@@ -2,8 +2,8 @@
    Правки сохраняются с контролем ревизий; рабочие настройки не изменяются. */
 (function () {
   "use strict";
-  const state = { rows: [], query: "", lyricsQuery: "", status: "", tags: [], rating: "", current: null, transcribeSongId: "" };
-  let cardPlayback = {}, openRequest = 0, cardRequest = 0;
+  const state = { rows: [], query: "", lyricsQuery: "", status: "", tags: [], tagOptions: [], rating: "", current: null, transcribeSongId: "" };
+  let cardPlayback = {}, openRequest = 0, cardRequest = 0, assistantSongQueue = [], assistantQueueRunning = false;
   const processingSongs = new Set();
   const stoppingCaptures = new Set();
   function liveCapture(row) {
@@ -18,11 +18,21 @@
   const TAG_OPTIONS = ["Компания", "Мужская", "Любовь", "Шансон", "Бард", "Грусть", "Юмор", "Дворовые", "Народные", "Рок"];
   function tagAddMenu(row) {
     const selected = new Set(row.tags || []);
-    return `<div class="song-tag-add-menu" data-song-tag-menu hidden role="menu" aria-label="Добавить тег к песне">${TAG_OPTIONS.filter(tag => !selected.has(tag)).map(tag => `<button type="button" class="song-tag-option" data-song-tag-option="${esc(tag)}" data-song-tag-song="${esc(row.song_id)}" role="menuitem">${esc(tag)}</button>`).join("") || '<span class="hint">Все доступные теги уже добавлены</span>'}</div>`;
+    const options = [...new Set([...TAG_OPTIONS, ...state.tagOptions, ...(row.tags || [])])].filter(tag => !selected.has(tag));
+    return `<div class="song-tag-add-menu" data-song-tag-menu hidden aria-label="Добавить тег к песне"><div class="song-tag-options">${options.map(tag => `<button type="button" class="song-tag-option" data-song-tag-option="${esc(tag)}" data-song-tag-song="${esc(row.song_id)}">${esc(tag)}</button>`).join("")}</div><form class="song-tag-custom-form" data-song-tag-custom-form="${esc(row.song_id)}"><input type="text" maxlength="40" placeholder="Новый тег" aria-label="Новый тег для песни"><button type="submit" class="btn small">Добавить</button></form></div>`;
   }
   function ratingMarkup(row) {
     const rating = Math.max(0, Math.min(5, Number(row.rating) || 0));
-    return `<div class="song-rating" role="group" aria-label="Оценка песни: ${rating ? `${rating} из 5 звёзд` : 'не оценена'}">${[1,2,3,4,5].map(value => `<button type="button" class="song-rating-star ${value <= rating ? 'on' : ''}" data-song-rating-value="${value}" aria-label="${value} ${value === 1 ? 'звезда' : value < 5 ? 'звезды' : 'звёзд'}" aria-pressed="${value === rating}">${value <= rating ? '★' : '☆'}</button>`).join('')}</div>`;
+    return `<div class="song-rating" data-song-rating-song="${esc(row.song_id)}" role="group" aria-label="Оценка песни: ${rating ? `${rating} из 5 звёзд` : 'не оценена'}">${[1,2,3,4,5].map(value => `<button type="button" class="song-rating-star ${value <= rating ? 'on' : ''}" data-song-rating-value="${value}" aria-label="${value} ${value === 1 ? 'звезда' : value < 5 ? 'звезды' : 'звёзд'}" aria-pressed="${value === rating}">${value <= rating ? '★' : '☆'}</button>`).join('')}</div>`;
+  }
+  function renderTagFilters() {
+    const container = $s("songs-tag-filters");
+    if (!container) return;
+    const tags = [...new Set([...TAG_OPTIONS, ...state.tagOptions])].sort((a, b) => {
+      const ai = TAG_OPTIONS.indexOf(a), bi = TAG_OPTIONS.indexOf(b);
+      return ai >= 0 || bi >= 0 ? (ai < 0 ? 1 : bi < 0 ? -1 : ai - bi) : a.localeCompare(b, "ru");
+    });
+    container.innerHTML = `<button class="chip ${state.tags.length ? "" : "on"}" aria-pressed="${!state.tags.length}" data-song-tag="">Все</button>${tags.map(tag => `<button class="chip ${state.tags.includes(tag) ? "on" : ""}" aria-pressed="${state.tags.includes(tag)}" data-song-tag="${esc(tag)}">${esc(tag)}</button>`).join("")}`;
   }
   const allStages = [["identify", "Определяем"], ["sources", "Ищем источники"], ["record", "Записываем"], ["lyrics", "Распознавание слов с аудио"], ["text_reference", "Сверка с источником текста"], ["structure", "Размечаем части"], ["chords", "Подбираем аккорды"], ["karaoke", "Минусовка"], ["review", "Проверяем"]];
   const stagesFor=()=>allStages;
@@ -37,14 +47,77 @@
     return `<div class="song-confirmed-sources">${groups.map(([kind,label,refs])=>`<div class="song-source" data-confirmed-source="${kind}"><h4>${label}</h4>${refs.length?refs.map(ref=>`<p><a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title||label)}</a><br><span class="hint">${ref.user_confirmed?'Источник подтверждён вами':`Подтверждено по ${(ref.text_confirmation?.hits||[]).length} фразам`}</span></p>`).join(''):`<p class="hint">${row.text_reference?'Подтверждённая страница пока не найдена.':'Запустите пятый этап «Сверка с источником текста».'}</p>`}</div>`).join('')}</div>`;
   }
   function textCandidatePreview(row, candidate) {
-    const current = candidate.current || {}, phrase = (row.phrases || []).find(item => item.phrase_id === current.phrase_id);
-    const source = phrase?.text || current.text || "";
-    const start = Math.max(0, Math.min(source.length, Number(current.char_start) || 0));
-    const end = Math.max(start, Math.min(source.length, Number(current.char_end) || start));
-    const replacement = candidate.alternative?.text || "";
-    const original = `${esc(source.slice(0, start))}<mark>${esc(source.slice(start, end))}</mark>${esc(source.slice(end))}`;
-    const corrected = `${esc(source.slice(0, start))}<mark>${esc(replacement)}</mark>${esc(source.slice(end))}`;
+    const phrases = row.phrases || [];
+    const index = id => phrases.findIndex(item => item.phrase_id === id);
+    // A correction across a line boundary: the cut-off piece in the
+    // neighbouring line is cleared, the publication's words go here.
+    const parts = [{...(candidate.current || {}), replacement: candidate.alternative?.text || ""},
+      ...((candidate.current?.also) || []).map(part => ({...part, replacement: ""}))]
+      .sort((a, b) => index(a.phrase_id) - index(b.phrase_id));
+    const line = (part, corrected) => {
+      const source = phrases[index(part.phrase_id)]?.text || part.text || "";
+      const start = Math.max(0, Math.min(source.length, Number(part.char_start) || 0));
+      const end = Math.max(start, Math.min(source.length, Number(part.char_end) || start));
+      const middle = corrected ? (part.replacement ? `<mark>${esc(part.replacement)}</mark>` : "") : `<mark>${esc(source.slice(start, end))}</mark>`;
+      return `${esc(source.slice(0, start))}${middle}${esc(source.slice(end))}`;
+    };
+    const original = parts.map(part => line(part, false)).join(" <span class=\"hint\">/</span> ");
+    const corrected = parts.map(part => line(part, true)).join(" <span class=\"hint\">/</span> ");
     return `<div class="song-reference-candidate"><div class="song-reference-line"><span class="hint">Исходная фраза</span><p>${original}</p></div><div class="song-reference-line song-reference-line--alternative"><span class="hint">Фраза после подтверждения</span><p>${corrected}</p></div></div>`;
+  }
+  // Time span of a correction in the recording: its words with one word of
+  // context on each side; without word times, by the character position in
+  // the line.
+  function textCandidateRange(row, candidate) {
+    const parts = [candidate.current || {}, ...(candidate.current?.also || [])];
+    let lo = Infinity, hi = -Infinity;
+    for (const part of parts) {
+      const phrase = (row.phrases || []).find(item => item.phrase_id === part.phrase_id);
+      if (!phrase) continue;
+      const a = Number(part.char_start) || 0, b = Math.max(a, Number(part.char_end) || a);
+      const words = (phrase.words || []).filter(w => Number.isFinite(w.start_ms) && Number.isFinite(w.end_ms) && w.end_ms > w.start_ms)
+        .sort((x, y) => x.char_start - y.char_start);
+      const inside = words.filter(w => w.char_end > a && w.char_start < b);
+      let from, to;
+      if (inside.length) { from = inside[0].start_ms; to = inside.at(-1).end_ms; }
+      else {
+        const length = Math.max(1, (phrase.text || "").length), ps = Number(phrase.start_ms) || 0, pe = Math.max(ps, Number(phrase.end_ms) || ps);
+        from = ps + (pe - ps) * a / length; to = ps + (pe - ps) * b / length;
+      }
+      const before = words.filter(w => w.char_end <= a).at(-1), after = words.find(w => w.char_start >= b);
+      if (before && from - before.start_ms < 2500) from = Math.min(from, before.start_ms);
+      if (after && after.end_ms - to < 2500) to = Math.max(to, after.end_ms);
+      lo = Math.min(lo, from); hi = Math.max(hi, to);
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+    const start = Math.max(0, Math.round(lo - 400));
+    return {start_ms: start, end_ms: Math.min(start + 28000, Math.round(hi + 400))};
+  }
+  let correctionAudio = null, correctionButton = null;
+  function stopCorrectionAudio() {
+    correctionAudio?.pause();
+    if (correctionButton) { correctionButton.textContent = "▶"; correctionButton.setAttribute("aria-pressed", "false"); }
+    correctionAudio = null; correctionButton = null;
+  }
+  async function playCorrection(button, row, candidate) {
+    if (correctionButton === button) { stopCorrectionAudio(); return; }
+    stopCorrectionAudio();
+    const range = textCandidateRange(row, candidate);
+    if (!range) { toast("Для этого места нет времени в записи"); return; }
+    window.SongReview?.stop?.();
+    correctionButton = button; button.disabled = true; button.textContent = "…";
+    try {
+      const clip = await call("song_phrase_audio", {song_id: row.song_id, phrase_id: candidate.current.phrase_id, ...range});
+      if (correctionButton !== button) return;
+      const audio = new Audio(clip.data);
+      correctionAudio = audio;
+      audio.onended = () => { if (correctionAudio === audio) stopCorrectionAudio(); };
+      button.disabled = false; button.textContent = "■"; button.setAttribute("aria-pressed", "true");
+      await audio.play();
+    } catch (error) {
+      button.disabled = false; stopCorrectionAudio();
+      toast(error.message || "Не удалось проиграть фрагмент");
+    }
   }
   function textReferencePanel(row) {
     const report=row.text_reference, refs=report?.references||[];
@@ -58,7 +131,7 @@
       <div class="song-text-source-form"><label class="f">Ссылка на источник текста<input id="song-text-source-url" type="url" value="${esc(report?.state==='source_unavailable'?report.suggested_sources?.at(-1)?.url:'')}" maxlength="2048" placeholder="https://genius.com/…"></label><details><summary>Вставить текст песни вручную</summary><label class="f">Текст источника<textarea id="song-text-source-lyrics" rows="6" maxlength="50000"></textarea></label></details><button type="button" class="btn" id="song-text-source-add" ${busy?'disabled':''}>Загрузить текст и сверить</button><p id="song-text-source-result" class="hint" role="status"></p></div>
       ${refs.map(ref=>`<details class="song-reference-diff"><summary>${esc(ref.title)} · ${ref.user_confirmed?'подтверждено вами':`подтверждено по ${ref.text_confirmation?.hits?.length||0} фразам`}</summary>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}<ul>${(ref.text_confirmation?.hits||[]).map(hit=>`<li>${esc(hit.anchor)}</li>`).join('')}</ul><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre><button class="btn small" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Сверить с этим источником</button></details>`).join('')}
       ${(report?.suggested_sources||[]).filter(ref=>!refs.some(r=>r.candidate_id===ref.candidate_id)).map(ref=>`<div class="song-reference-diff"><h4>${esc(ref.title)}</h4>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}${ref.plain_lyrics?`<details><summary>Посмотреть полученный текст · совпадений: ${ref.text_confirmation?.hits?.length||0}</summary><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre></details><button class="btn" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Подтвердить источник и сверить</button>`:`<p class="hint">${esc(ref.source_check?.error||'Не удалось извлечь текст. Вставьте его вручную.')}</p>`}</div>`).join('')}
-      ${(report?.candidates||[]).some(c=>!c.auto_apply&&c.status!=='user_applied')?`<details id="song-text-corrections" open><summary>Исправления по источнику — выберите подходящие</summary><div class="actions song-reference-bulk"><button type="button" class="btn small" data-text-select-all>Выбрать все</button><span class="hint">Выделенный фрагмент показан в исходной и подтверждаемой фразе. Любую правку можно изменить в любой момент.</span></div>${report.candidates.map((c,i)=>c.auto_apply||c.status==='user_applied'?'':`<div class="song-reference-candidate-choice"><label><input type="checkbox" data-text-correction="${i}"><span>Применить это исправление</span></label>${textCandidatePreview(row,c)}</div>`).join('')}<button class="btn primary" id="song-text-source-apply" ${busy?'disabled':''}>Применить выбранные исправления</button><p class="hint">Повторы и времена фраз сохраняются. Различия исполнения проверяйте по записи.</p></details>`:''}
+      ${(report?.candidates||[]).some(c=>!c.auto_apply&&c.status!=='user_applied')?`<details id="song-text-corrections" open><summary>Исправления по источнику — выберите подходящие</summary><div class="actions song-reference-bulk"><button type="button" class="btn small" data-text-select-all>Выбрать все</button><span class="hint">Выделенный фрагмент показан в исходной и подтверждаемой фразе. Любую правку можно изменить в любой момент.</span></div>${report.candidates.map((c,i)=>c.auto_apply||c.status==='user_applied'?'':`<div class="song-reference-candidate-choice"><div class="song-reference-candidate-head"><label><input type="checkbox" data-text-correction="${i}"><span>Применить это исправление</span></label><button type="button" class="btn small song-reference-play" data-text-correction-play="${i}" aria-pressed="false" title="Прослушать это место записи">▶</button></div>${textCandidatePreview(row,c)}</div>`).join('')}<button class="btn primary" id="song-text-source-apply" ${busy?'disabled':''}>Применить выбранные исправления</button><p class="hint">Повторы и времена фраз сохраняются. Различия исполнения проверяйте по записи.</p></details>`:''}
       ${(report?.chord_sources||[]).length?`<p>Источники аккордов: ${report.chord_sources.map(ref=>`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title)}</a>`).join(' · ')}</p>`:''}</section>`;
   }
   const esc = (v) => escH(v == null ? "" : v);
@@ -156,7 +229,7 @@
     return '';
   }
   function card(row) {
-    const artist = row.artist ? `<span class="song-artist">${esc(row.artist)}</span>` : `<span class="song-artist">Исполнитель пока не определён</span>`;
+    const artist = row.artist ? `<span class="song-artist">${esc(row.artist)}</span>` : "";
     const ks = row.karaoke?.state;
     const canProcessSelected=!!row.processing?.can_resume;
     const processing=processingSongs.has(row.song_id);
@@ -164,7 +237,7 @@
     const karaokeBadge = ["queued", "preparing", "separating", "checking"].includes(ks) ? '<span class="song-karaoke-status" data-state="busy">Минусовка готовится</span>' : ks === "failed" || ks === "interrupted" ? '<span class="song-karaoke-status" data-state="failed">Минусовка: повторить</span>' : "";
     return `<article class="song-card" data-song-id="${esc(row.song_id)}">
       <div class="song-card-main" data-song-open="${esc(row.song_id)}" tabindex="0" role="button" aria-label="Открыть ${esc(row.title)}">
-        <div class="song-heading"><div class="song-title">${esc(row.title)}</div>${artist}</div>
+        <div class="song-heading"><button type="button" class="song-title song-title-edit" data-song-title-edit="${esc(row.song_id)}" aria-label="Изменить название песни «${esc(row.title)}»">${esc(row.title)}</button>${artist}</div>
         ${ratingMarkup(row)}
         <div class="song-meta"><span class="song-status" data-status="${esc(row.status)}">${esc(currentStatus(row))}</span>${karaokeBadge}</div><div class="song-tags" aria-label="Теги песни"><button type="button" class="song-tag-add" data-song-tag-add="${esc(row.song_id)}" aria-label="Добавить тег к песне «${esc(row.title)}»" title="Добавить тег к этой песне">+</button>${tags}</div>${tagAddMenu(row)}
       </div>
@@ -183,29 +256,54 @@
     </article>`;
   }
   async function setRating(button) {
-    const songId = button.dataset.songRatingSong;
+    const songId = button.closest(".song-rating")?.dataset.songRatingSong;
     const rating = Number(button.dataset.songRatingValue);
     const row = state.rows.find(item => item.song_id === songId);
     if (!row || !Number.isInteger(rating) || rating < 1 || rating > 5) return;
+    const group = button.closest(".song-rating");
+    const siblings = [...(group?.querySelectorAll("button") || [])];
+    siblings.forEach(item => item.disabled = true);
     try {
-      const saved = await call('song_patch', {song_id: songId, base_revision: row.revision, changes: {rating}});
+      let saved;
+      try {
+        saved = await call('song_patch', {song_id: songId, base_revision: row.revision, changes: {rating}});
+      } catch (error) {
+        if (!/уже изменилась/i.test(error.message || "")) throw error;
+        const fresh = await call("song_get", {song_id: songId});
+        saved = await call('song_patch', {song_id: songId, base_revision: fresh.revision, changes: {rating}});
+      }
       const index = state.rows.findIndex(item => item.song_id === songId);
       if (index >= 0) state.rows[index] = {...state.rows[index], ...saved};
+      if (state.current?.song_id === songId) state.current = {...state.current, ...saved};
       renderList();
+      const detailRating = $s("songs-detail")?.querySelector(".song-rating");
+      if (detailRating && state.current?.song_id === songId) detailRating.outerHTML = ratingMarkup(saved);
+      const detail = $s("songs-detail");
+      detail?.querySelectorAll(".song-rating button").forEach(item => item.addEventListener("click", event => {
+        event.stopPropagation();
+        setRating(item);
+      }));
       toast(`Оценка сохранена: ${rating} из 5`);
-    } catch (error) { toast(error.message || 'Не удалось сохранить оценку', 4000, 'bad'); }
+    } catch (error) {
+      siblings.forEach(item => item.disabled = false);
+      toast(error.message || 'Не удалось сохранить оценку', 4000, 'bad');
+    }
   }
-  async function addSongTag(button) {
-    const songId = button.dataset.songTagSong;
-    const tag = button.dataset.songTagOption;
+  async function addSongTag(button, customTag) {
+    const songId = customTag ? button.dataset.songTagCustomForm : button.dataset.songTagSong;
+    const tag = String(customTag || button.dataset.songTagOption || "").trim().replace(/\s+/g, " ").slice(0, 40);
     const row = state.rows.find(item => item.song_id === songId);
-    if (!row || !TAG_OPTIONS.includes(tag)) return;
+    if (!row || !tag || (row.tags || []).some(existing => existing.toLocaleLowerCase() === tag.toLocaleLowerCase())) return;
     button.disabled = true;
     try {
       const tags = [...new Set([...(row.tags || []), tag])];
       const saved = await call('song_patch', {song_id: songId, base_revision: row.revision, changes: {tags}});
       const index = state.rows.findIndex(item => item.song_id === songId);
       if (index >= 0) state.rows[index] = {...state.rows[index], ...saved};
+      if (!state.tagOptions.some(existing => existing.toLocaleLowerCase() === tag.toLocaleLowerCase())) state.tagOptions.push(tag);
+      renderTagFilters();
+      const customInput = customTag ? button.closest("form")?.querySelector("input") : null;
+      if (customInput) customInput.value = "";
       renderList();
       toast(`Тег добавлен: ${tag}`);
     } catch (error) {
@@ -217,7 +315,7 @@
     const songId = button.closest('[data-song-id]')?.dataset.songId;
     const tag = button.dataset.songCardTag;
     const row = state.rows.find(item => item.song_id === songId);
-    if (!row || !TAG_OPTIONS.includes(tag)) return;
+    if (!row || !tag) return;
     button.disabled = true;
     try {
       const tags = (row.tags || []).filter(item => item !== tag);
@@ -241,9 +339,16 @@
     empty.hidden = state.rows.length > 0;
     list.hidden = state.rows.length === 0;
     list.querySelectorAll("[data-song-open]").forEach((el) => {
-      el.addEventListener("click", () => openSong(el.dataset.songOpen));
-      if (el.tagName !== "BUTTON") el.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openSong(el.dataset.songOpen); } });
+      el.addEventListener("click", event => {
+        if (el.tagName !== "BUTTON" && event.target.closest('button,input,textarea,select,a,form')) return;
+        openSong(el.dataset.songOpen);
+      });
+      if (el.tagName !== "BUTTON") el.addEventListener("keydown", (event) => { if (event.target===el && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openSong(el.dataset.songOpen); } });
     });
+    list.querySelectorAll("[data-song-title-edit]").forEach(button => button.addEventListener("click", event => {
+      event.stopPropagation();
+      openTitleEditor(button.dataset.songTitleEdit);
+    }));
     list.querySelectorAll('[data-song-play]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songPlay)));
     list.querySelectorAll('[data-song-process-selected]').forEach(el=>el.addEventListener('click',()=>processSelectedSource(el)));
     list.querySelectorAll('[data-song-karaoke]').forEach(el=>el.addEventListener('click',()=>playCard(el.dataset.songKaraoke,'instrumental')));
@@ -257,13 +362,20 @@
       event.stopPropagation();
       addSongTag(button);
     }));
+    list.querySelectorAll('[data-song-tag-custom-form]').forEach(form=>form.addEventListener('submit', event=>{
+      event.preventDefault();
+      event.stopPropagation();
+      const input = form.querySelector("input");
+      const button = form.querySelector("button[type=submit]");
+      if (button) button.dataset.songTagCustomForm = form.dataset.songTagCustomForm;
+      if (input?.value.trim() && button) addSongTag(button, input.value);
+    }));
     list.querySelectorAll('[data-song-card-tag]').forEach(el=>el.addEventListener('click', event=>{
       event.stopPropagation();
       removeSongTag(el);
     }));
     list.querySelectorAll('[data-song-rating-value]').forEach(el=>el.addEventListener('click', event=>{
       event.stopPropagation();
-      el.dataset.songRatingSong = el.closest('[data-song-id]')?.dataset.songId || '';
       setRating(el);
     }));
     list.querySelectorAll('[data-song-copy]').forEach(el=>el.addEventListener('click', async event=>{
@@ -321,7 +433,7 @@
       .filter(r => !state.status || (state.status === 'running' ? ['queued','recording','running'].includes(r.status) : r.status === state.status));
     renderList();
     const hint = document.querySelector('.songs-detail-head .hint');
-    if (hint) hint.textContent = `${saved.artist || 'Исполнитель определяется по источникам'} · ${currentStatus(saved)}`;
+    if (hint) hint.textContent = `${saved.artist ? `${saved.artist} · ` : ""}${currentStatus(saved)}`;
     const step = document.querySelector('.song-step.on');
     if (step) step.innerHTML = `<b>${stageIndex(saved)+1}. ${esc(stagesFor(saved)[stageIndex(saved)][1])}</b>${esc(saved.stage_label)}`;
     const sheet = document.getElementById('song-guitar-content');
@@ -370,7 +482,7 @@
       return `<div class="song-source"><div class="song-source-title">${sourceTitleMarkup(c)}</div><p>${esc(c.artist||'')}${c.duration?` · ${Math.round(c.duration)} с`:''}</p>${selectedRecording?'<span class="song-source-verified">Исполнение, по которому сделан разбор</span>':''}${link}${processAction}${checkAction}${yandexAction}${note?`<p class="song-note">${esc(note)}</p>`:''}${text}</div>`;
     }).join('');
     const errors = (row.analysis_errors || []).map(e => `<p class="song-errors">${esc(e.step)}: ${esc(e.error)}</p>`).join('');
-    detail.innerHTML = `<div class="songs-detail-head"><div><h2>${esc(row.title)}</h2><p class="hint">${esc(row.artist || "Исполнитель определяется по источникам")} · ${esc(currentStatus(row))}</p></div><div class="songs-detail-head-actions">${restartBatchButton(row)}<button class="btn songs-detail-close" id="songs-detail-close">Закрыть</button></div></div>
+    detail.innerHTML = `<div class="songs-detail-head"><div><h2><button type="button" class="song-title song-title-edit" data-song-title-edit="${esc(row.song_id)}" aria-label="Изменить название песни">${esc(row.title)}</button></h2><p class="hint">${row.artist ? `${esc(row.artist)} · ` : ""}${esc(currentStatus(row))}</p>${ratingMarkup(row)}</div><div class="songs-detail-head-actions">${restartBatchButton(row)}<button class="btn songs-detail-close" id="songs-detail-close">Закрыть</button></div></div>
       ${row.status === 'recording' ? `<div class="song-recording-banner">${liveCapture(row)}<span>${row.audio?.capture_source==='microphone'?'Автостоп после 5 секунд тишины, когда запись уже началась.':'Записывается системный звук.'}</span>${stopCaptureButton(row.song_id)}</div>` : ''}
       <div class="song-steps" aria-label="Этапы разбора">${stages.map((s, i) => `<div ${s[0]==="text_reference"?'data-song-reference-stage role="button" tabindex="0" aria-label="Открыть источник сверки или запустить сверку текста"':''} class="song-step ${i < active && (s[0]!=="text_reference" || row.text_reference?.references?.length) ? "done" : ""} ${s[0]==="text_reference" && !row.text_reference?.references?.length && row.stage!=="text_reference" ? "song-step-unused" : ""} ${i === active ? "on" : ""}"><div><b>${i + 1}. ${esc(s[1])}</b>${s[0] === "text_reference" ? esc(textReferenceStatus(row)) : i < active ? "" : i === active ? esc(row.stage_label || "Выполняется") : "Ожидает"}</div>${s[0]==="text_reference"?textReferenceStageSource(row):''}<div class="song-step-actions">${stageActions(row, s[0])}${stageRestart(row, s[0])}</div></div>`).join("")}</div>
       ${row.processing?.can_resume?`<div class="actions"><button class="btn primary" id="song-resume" data-song-process-selected="${esc(row.song_id)}" title="Продолжить пакетный разбор записи; сохранить пользовательские правки">${esc(row.processing.label)}</button></div>`:''}
@@ -412,6 +524,8 @@
       boxes.forEach(box=>{box.checked=select;});
       button.textContent=select?'Снять выделение':'Выбрать все';
     }));
+    detail.querySelectorAll('[data-text-correction-play]').forEach(button=>button.addEventListener('click',()=>
+      playCorrection(button,row,(row.text_reference?.candidates||[])[Number(button.dataset.textCorrectionPlay)]||{})));
     $s('song-text-source-apply')?.addEventListener('click',event=>textSourceAction(event.currentTarget,'apply',{
       indexes:[...detail.querySelectorAll('[data-text-correction]:checked')].map(el=>Number(el.dataset.textCorrection))}));
     const referenceStage=detail.querySelector('[data-song-reference-stage]');
@@ -562,6 +676,17 @@
       catch (error) { toast(error.message, 5000, "bad"); }
     });
     $s("songs-detail-close").onclick = closeDetail;
+    detail.querySelector("[data-song-title-edit]")?.addEventListener("click", () => {
+      const properties = detail.querySelector(".song-properties");
+      const title = $s("song-edit-title");
+      if (properties) properties.open = true;
+      title?.focus();
+      title?.select();
+    });
+    detail.querySelectorAll(".song-rating button").forEach(button => button.addEventListener("click", event => {
+      event.stopPropagation();
+      setRating(button);
+    }));
     $s("song-save-meta").onclick = async () => {
       try { const saved = await call("song_patch", { song_id: row.song_id, base_revision: state.current.revision, changes: { title: $s("song-edit-title").value, search_query: $s("song-edit-search-query").value, artist: $s("song-edit-artist").value } }); state.current = saved; await load(); renderDetail(saved); toast("Карточка сохранена"); }
       catch (error) { toast(error.message || "Не удалось сохранить", 4000, "bad"); }
@@ -631,8 +756,25 @@
     });
     list.querySelectorAll('[data-song-stop]').forEach(button=>{button.hidden=!(cardPlayback.songId===button.dataset.songStop && cardPlayback.active);});
   }
-  window.onSongPlayback=(songId,status)=>{cardPlayback={songId,...status};updateCardPlayback();};
+  window.onSongPlayback=(songId,status)=>{
+    cardPlayback={songId,...status};updateCardPlayback();
+    if(status.ended&&assistantQueueRunning)playAssistantQueueNext();
+  };
+  async function playAssistantQueueNext() {
+    if(!assistantSongQueue.length){assistantQueueRunning=false;return;}
+    await playCard(assistantSongQueue.shift());
+  }
+  async function runAssistantSongs(event) {
+    document.querySelector('nav button[data-p="tasks"]')?.click();
+    document.getElementById('tasks-songs-tab')?.click();
+    await load();
+    if(event.action==='open')return openSong(event.songs?.[0]?.song_id,true);
+    assistantSongQueue=(event.songs||[]).map(song=>song.song_id);
+    assistantQueueRunning=assistantSongQueue.length>0;
+    if(assistantQueueRunning)await playAssistantQueueNext();
+  }
   function stopCard() {
+    assistantSongQueue=[];assistantQueueRunning=false;
     cardRequest++;openRequest++;SongReview.stop();cardPlayback={};updateCardPlayback();
   }
   async function processSelectedSource(button) {
@@ -678,8 +820,17 @@
       return true;
     } catch(error) { if(request===openRequest)toast(error.message || 'Песня не найдена',4000,'bad');return false; }
   }
+  async function openTitleEditor(id) {
+    if (!await openSong(id, true)) return;
+    const properties = $s("songs-detail")?.querySelector(".song-properties");
+    const title = $s("song-edit-title");
+    if (properties) properties.open = true;
+    title?.focus();
+    title?.select();
+    title?.scrollIntoView({behavior:"smooth",block:"center"});
+  }
   function closeDetail() { stopCard(); state.current = null; const detail = $s("songs-detail"); if (detail) { detail.hidden = true; detail.innerHTML = ""; } }
-  async function load() { try { state.rows = await call("songs_list", { q: state.query, lyrics_q: state.lyricsQuery, status: state.status, tags: state.tags, rating: state.rating, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
+  async function load() { try { if (!state.tagOptions.length) { state.tagOptions = await call("songs_tags_list") || []; renderTagFilters(); } state.rows = await call("songs_list", { q: state.query, lyrics_q: state.lyricsQuery, status: state.status, tags: state.tags, rating: state.rating, limit: 100 }) || []; renderList(); if (state.current) { const id = state.current.song_id; if (!SongReview.protectedView(id)) { const fresh = await call("song_get", {song_id:id}); if (state.current?.song_id === id && !SongReview.protectedView(id)) renderDetail(fresh); } } } catch (error) { toast(error.message || "Не удалось загрузить песни", 4000, "bad"); } }
   async function create(source, title, artist) { try { const row = await call("song_create", { source, title, artist }); await load(); renderDetail(row); if (source === "query") renderDetail(await call("song_find_sources", {song_id: row.song_id})); } catch (error) { toast(error.message || "Не удалось создать карточку", 4000, "bad"); } }
   async function createMicSong() {
     const title=`Запись с микрофона · ${new Date().toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}`;
@@ -780,18 +931,15 @@
     $s("songs-query")?.addEventListener("input", (event) => { state.query = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
     $s("songs-lyrics-query")?.addEventListener("input", (event) => { state.lyricsQuery = event.target.value; clearTimeout(state.timer); state.timer = setTimeout(load, 220); });
     document.querySelectorAll("[data-song-status]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-status]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.status = el.dataset.songStatus; load(); }));
-    document.querySelectorAll("[data-song-tag]").forEach((el) => el.addEventListener("click", () => {
+    $s("songs-tag-filters")?.addEventListener("click", event => {
+      const el = event.target.closest("[data-song-tag]");
+      if (!el) return;
       const requested = el.dataset.songTag || '';
       if (!requested) state.tags = [];
       else state.tags = state.tags.includes(requested) ? state.tags.filter(tag => tag !== requested) : [...state.tags, requested];
-      document.querySelectorAll('[data-song-tag]').forEach(button => {
-        const tag = button.dataset.songTag || '';
-        const active = tag ? state.tags.includes(tag) : state.tags.length === 0;
-        button.classList.toggle('on', active);
-        button.setAttribute('aria-pressed', String(active));
-      });
+      renderTagFilters();
       load();
-    }));
+    });
     document.querySelectorAll("[data-song-rating]").forEach((el) => el.addEventListener("click", () => { document.querySelectorAll("[data-song-rating]").forEach((x) => (x.classList.toggle("on", x === el), x.setAttribute("aria-pressed", String(x === el)))); state.rating = el.dataset.songRating; load(); }));
     function taskTab(songs) {
       $s('p-songs').hidden = !songs; $s('tasks-work-content').hidden = songs;
@@ -813,6 +961,11 @@
   }, 5000);
   core.on("hello", () => { if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load(); });
   core.on("song_capture", () => { if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load(); });
+  core.on("song_library_action", event => { runAssistantSongs(event).catch(error=>toast(error.message||'Не удалось выполнить действие с песнями',5000,'bad')); });
+  core.on("song_library_updated", event => {
+    if (state.current?.song_id === event.song_id) call('song_get',{song_id:event.song_id}).then(renderDetail).catch(()=>{});
+    if (document.querySelector('#p-tasks.cur') && !$s('p-songs')?.hidden) load();
+  });
   core.on("song_analysis", () => { if (document.querySelector("#p-tasks.cur") && !$s("p-songs")?.hidden) load(); });
   core.on("song_instrumental", event => {
     if (state.current?.song_id === event.song_id && !SongReview.protectedView(event.song_id)) call("song_get", {song_id:event.song_id}).then(fresh=>{

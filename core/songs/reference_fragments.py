@@ -125,12 +125,10 @@ def query_plan(selected, title='', artist='', limit=8):
         a=chosen[0]
         plain=' '.join(t['text'] for t in tokens(a['text']))
         add(plain+' site:stihi.ru','poetry_site',a)
-        if title or artist:
-            add(plain+' '+title+' '+artist,'metadata_fallback',a)
-        else:
-            add(plain+' текст песни','song_text',a)
-    elif title or artist:
-        add(title+' '+artist+' текст','no_reliable_fragment',None)
+        add(plain+' текст песни','song_text',a)
+    # Never by the title or the performer: a YouTube title names who sings
+    # («просыпаясь улыбаться ирония судьбы» — the group «Ирония судьбы»),
+    # not who wrote the words. Only the sung text finds the publication.
     return out
 
 

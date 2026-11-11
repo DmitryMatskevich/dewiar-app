@@ -107,6 +107,9 @@ def review_command(store, cmd, args):
     if cmd == 'song_edit_chords':
         from .arrangement import edit_chords
         return edit_chords(store, args)
+    if cmd == 'song_preview_chords':
+        from .arrangement import preview_chords
+        return preview_chords(store, args)
     if cmd == "song_edit_phrase":
         return store.edit_phrase(song_id, str(args.get("phrase_id") or ""), args.get("text"),
                                  args.get("note", ""), args.get("reviewed") is True,
@@ -140,6 +143,15 @@ def review_command(store, cmd, args):
         raise ValueError("Для прослушивания записи нужен ffmpeg")
     start = max(0, int(phrase["start_ms"]) - 350)
     end = int(phrase["end_ms"]) + (0 if full else 350)
+    if not full and args.get("start_ms") is not None and args.get("end_ms") is not None:
+        # A piece of the phrase (a source correction under review); the
+        # words around it may lie in the neighbouring line.
+        try:
+            start, end = max(0, int(args["start_ms"])), int(args["end_ms"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Неверные границы фрагмента") from exc
+        if end - start > 30_000:
+            raise ValueError("Фрагмент длиннее 30 секунд")
     if end <= start or end - start > (600_000 if full else 120_000):
         raise ValueError("Для длинной записи используйте прослушивание по фразам")
     # Ten minutes of PCM exceed the bridge's 16 MiB JSON frame limit.

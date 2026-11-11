@@ -5,6 +5,7 @@ intro («То», 0→13 s), a first phrase at 0 s with the voice entering at 23 
 a last word held through a break, a voiced gap called «Проигрыш», and a rerun
 which merged new timings into the card by list position.
 """
+import copy
 import sys
 import unittest
 from pathlib import Path
@@ -652,6 +653,129 @@ class HeldEndRerunTests(unittest.TestCase):
         grown = dict(once[0], end_ms=184000)
         fixed, _ = vt.fit_phrases([grown], vocal)
         self.assertEqual(fixed[0]['end_ms'], 178000)
+
+
+class SilentOpeningLineTests(unittest.TestCase):
+    """«Благодать»: Whisper put «Ты мне улыбнулась» at 0 s, the aligner glued
+    it to 0.5 s over a 21-second intro, and it stood above the intro chords."""
+
+    VOCAL = {'intervals': [[21040, 26700], [31200, 36980]], 'weak': [[21040, 26700], [31180, 37000]]}
+    QWEN = [{'model': 'Qwen3-ASR-1.7B', 'phrases': [
+        {'text': 'Ты мне улыбнулась рано утром, чуть опухшая.', 'start_ms': 0, 'end_ms': 25000},
+        {'text': 'Ушё соснова. От твоей улыбки по квартире распустилась весна.', 'start_ms': 25000, 'end_ms': 50000}]}]
+    FIRST = 'Ты мне улыбнулась'
+    SECOND = 'рано утром, Чуть опухшая сосна.'
+    THIRD = 'От твоей улыбки по квартире распустилась весна.'
+
+    def setUp(self):
+        import types
+        fake = types.ModuleType('soundfile')
+        fake.info = lambda path: types.SimpleNamespace(duration=293.0)
+        self._saved = sys.modules.get('soundfile')
+        sys.modules['soundfile'] = fake
+        import importlib
+        self.worker = importlib.import_module('songs.worker')
+        self.worker.release_qwen_model = lambda: None
+
+    def tearDown(self):
+        if self._saved is None:
+            sys.modules.pop('soundfile', None)
+        else:
+            sys.modules['soundfile'] = self._saved
+
+    def third(self):
+        return phrase('c', self.THIRD, 31200, 36720, [(31200, 31600), (31680, 32160), (32160, 33120),
+                                                       (33200, 33360), (33360, 34240), (34240, 35680), (35680, 36720)])
+
+    def card(self):
+        # After the batch: the glued first line and the recovered second one.
+        return [phrase('a', self.FIRST, 480, 720, [(480, 640), None, (640, 720)] and None),
+                dict(phrase('b', self.SECOND, 20240, 27440, [(20240, 21680), (21680, 22560), (22560, 22800),
+                                                               (22800, 25520), (25680, 27440)]),
+                     recovered={'method': 'two_model_sung_gap'}),
+                self.third()]
+
+    def glued(self, rows):
+        rows[0].update(words=[dict(text='Ты', char_start=0, char_end=2, start_ms=480, end_ms=640),
+                              dict(text='улыбнулась', char_start=7, char_end=17, start_ms=640, end_ms=720)],
+                       timing_quality='word_partial', alignment_stale=False)
+        return rows
+
+    def test_short_line_far_from_voice_is_not_sung(self):
+        rows, _ = vt.fit_phrases(self.glued(self.card()), self.VOCAL)
+        self.assertEqual(rows[0]['vocal_evidence'], 'none')
+        self.assertNotIn('vocal_evidence', rows[1])
+
+    def test_a_blip_of_the_stem_is_not_singing(self):
+        # «Капелька»: «Но я не могу.» (one word measured, 8.0–8.2 s) next to a
+        # 0.2-second blip of the stem at 8.8 s; the singing starts at 25 s.
+        row = phrase('a', 'Но я не могу.', 0, 8160)
+        row.update(words=[dict(text='я', char_start=3, char_end=4, start_ms=8000, end_ms=8160)],
+                   timing_quality='word_partial', alignment_stale=False)
+        vocal = {'intervals': [[25000, 29920]], 'weak': [[8820, 9000], [24960, 29960]]}
+        out, _ = vt.fit_phrases([row], vocal)
+        self.assertEqual(out[0]['vocal_evidence'], 'none')
+
+    def test_line_and_the_next_one_go_to_the_voice_together(self):
+        rows = self.glued(self.card())
+        groups = vt.silent_line_groups(rows, self.VOCAL, self.QWEN, 293000)
+        self.assertEqual([g[0] for g in groups], [[0, 1]])
+        sung = [(21040, 21400), (21400, 21700), (21700, 22700), (22800, 23300), (23300, 23900),
+                (24000, 24300), (24300, 25500), (25600, 26600)]
+        hyp = {'phrases': rows}
+        changed = self.worker.realign_silent_lines('x.wav', hyp, self.VOCAL, self.QWEN, lambda s: None,
+                                                   align=lambda t, a, b, source: words(t, sung))
+        self.assertEqual(changed, 1)
+        first, second = hyp['phrases'][0], hyp['phrases'][1]
+        self.assertEqual((first['start_ms'], first['text']), (21040, self.FIRST))
+        self.assertNotEqual(first.get('vocal_evidence'), 'none')
+        self.assertGreaterEqual(second['start_ms'], first['end_ms'])
+        sheet = build_guitar_sheet(hyp['phrases'], [dict(name='C', start_ms=43, end_ms=3115),
+                                                    dict(name='E7', start_ms=3115, end_ms=21077),
+                                                    dict(name='C', start_ms=21077, end_ms=26112)], 293000, self.VOCAL)
+        order = [r.get('text') or 'gap' for r in sheet]
+        self.assertEqual(order[0], 'gap')  # the intro comes first
+        self.assertEqual(order[1], self.FIRST)
+
+    def test_alone_into_singing_without_text(self):
+        rows = self.glued(self.card())
+        del rows[1]
+        groups = vt.silent_line_groups(rows, self.VOCAL, self.QWEN, 293000)
+        self.assertEqual([g[0] for g in groups], [[0]])
+        self.assertLess(groups[0][2][0][0], 21040)
+
+    def test_not_moved_without_another_recognizer_hearing_it_there(self):
+        rows = self.glued(self.card())
+        whisper_only = [{'model': 'Whisper', 'phrases': [{'text': self.FIRST, 'start_ms': 0, 'end_ms': 10000}]}]
+        self.assertEqual(vt.silent_line_groups(rows, self.VOCAL, whisper_only, 293000), [])
+        # A long invention over the music is never moved (credits).
+        credits = [phrase('x', 'Валерий Курас Светлый день', 160, 10000,
+                          [(160, 640), (640, 1600), (5280, 7840), (7840, 10000)])] + self.card()[1:]
+        credits[0]['vocal_evidence'] = 'none'
+        heard = [{'model': 'Qwen', 'phrases': [{'text': 'Валерий Курас Светлый день рано утром', 'start_ms': 0,
+                                                'end_ms': 25000}]}]
+        self.assertEqual(vt.silent_line_groups(credits, self.VOCAL, heard, 293000), [])
+        # «Капелька»: Qwen invented «Но я не могу.» in its chunk 0–25 s over
+        # the intro; the singing begins at 25 s, at the edge of that chunk.
+        vocal = {'intervals': [[25000, 29920], [32580, 37200]], 'weak': [[25000, 29920], [32580, 37200]]}
+        invented = [phrase('a', 'Но я не могу.', 0, 240, [(0, 120), (120, 240), None, None] and None),
+                    phrase('b', 'В доме напротив зашлись водосточные трубы.', 25000, 29900,
+                           [(25000, 25300), (25300, 25500), (25500, 26600), (26700, 27560), (27560, 28600), (28600, 29900)])]
+        qwen = [{'model': 'Qwen3-ASR-1.7B', 'phrases': [
+            {'text': 'Но я не могу.', 'start_ms': 0, 'end_ms': 25000},
+            {'text': 'В доме напротив зашлись водосточные трубы.', 'start_ms': 25000, 'end_ms': 50000}]}]
+        self.assertEqual(vt.silent_line_groups(invented, vocal, qwen, 200000), [])
+
+    def test_kept_when_the_aligner_leaves_it_outside_the_voice(self):
+        rows = self.glued(self.card())
+        before = copy.deepcopy(rows)
+        outside = [(19600, 19800), (19800, 20000), (20000, 20900)] + [(21040, 21400), (21400, 21700), (21700, 22700),
+                                                                     (22800, 26600)][:0] + [(22800, 23300), (23300, 23900), (24000, 24300), (24300, 25500), (25600, 26600)]
+        hyp = {'phrases': rows}
+        changed = self.worker.realign_silent_lines('x.wav', hyp, self.VOCAL, self.QWEN, lambda s: None,
+                                                   align=lambda t, a, b, source: words(t, outside))
+        self.assertEqual(changed, 0)
+        self.assertEqual(hyp['phrases'], before)
 
 
 class HeldVowelSheetTests(unittest.TestCase):

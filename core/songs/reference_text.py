@@ -54,6 +54,43 @@ def _fragment(item, part):
                 version_verified=bool(item.get('version_verified')))
 
 
+def _cleared(item, part):
+    """A fragment to delete, with the space (and a trailing mark) that joined it to its line."""
+    text = item['text']
+    a, b = part[0]['start'], part[-1]['end']
+    if not text[b:].strip(' \t,;:—–-'):
+        a, b = len(text[:a].rstrip()), len(text)      # the end of a line
+    else:
+        b = len(text) - len(text[b:].lstrip())          # the start of a line
+    return dict(_fragment(item, part), text=text[a:b], char_start=a, char_end=b)
+
+
+def _current(target, order):
+    """The recognized fragment a published one replaces.
+
+    A Qwen chunk boundary (every 25 s) can cut a line, even a word, in two:
+    «а может быть при | подавателей в галфака». The publication's words go to
+    the line holding most of the fragment; the rest is cleared from its
+    neighbour (``also``). Never across more than two neighbouring lines.
+    """
+    owners = []
+    for t in target:
+        if not owners or owners[-1] is not t['phrase']:
+            owners.append(t['phrase'])
+    if len(owners) == 1:
+        return _fragment(owners[0], target)
+    if len(owners) > 2 or abs(order.get(id(owners[0]), 0) - order.get(id(owners[1]), 0)) != 1:
+        return None
+    parts = [[t for t in target if t['phrase'] is owner] for owner in owners]
+    main = max((0, 1), key=lambda k: sum(len(t['text']) for t in parts[k]))
+    if len(parts[1 - main]) == len(tokens(owners[1 - main].get('text', ''))):
+        return None  # a whole line, not a cut-off piece of one
+    one = _fragment(owners[main], parts[main])
+    one['also'] = [_cleared(owners[1 - main], parts[1 - main])]
+    one['context'] = ' '.join(t['text'] for t in target)
+    return one
+
+
 def boundary_candidates(phrases, references=(), max_tokens=6000):
     """Find identical letter sequences with different word boundaries.
 
@@ -118,8 +155,12 @@ def boundary_candidates(phrases, references=(), max_tokens=6000):
 def reference_candidates(phrases, references):
     """Short anchored differences, not wholesale substitution of a publication."""
     import difflib
+    # Text over silence (credits, «Да.» after the last chord) is not sung and
+    # is not compared: it would break the anchor at the end of the song.
+    sung = [p for p in phrases if p.get('vocal_evidence') != 'none']
+    order = {id(p): k for k, p in enumerate(sung)}
     current = []
-    for p in phrases:
+    for p in sung:
         current.extend(dict(t, phrase=p) for t in tokens(p.get('text', '')))
     if not current or len(current) > 6000:
         return []
@@ -130,25 +171,45 @@ def reference_candidates(phrases, references):
             continue
         blocks = difflib.SequenceMatcher(None, [t['norm'] for t in current],
                                         [t['norm'] for t in pub], autojunk=False).get_opcodes()
+
+        def anchor(block, start, edges=True):
+            # Equal words next to the difference; the start or the end of
+            # both texts pins it like two more words («… Мандельштам»).
+            if block is None:
+                return 2
+            if block[0] != 'equal':
+                return 0
+            edge = edges and ((block[1] == 0 and block[3] == 0) if start else
+                              (block[2] == len(current) and block[4] == len(pub)))
+            return block[2] - block[1] + (2 if edge else 0)
         for n, (tag, i, j, c, d) in enumerate(blocks):
-            if tag != 'replace' or max(j-i, d-c) > 8 or not n or n+1 == len(blocks):
-                continue
-            before, after = blocks[n-1], blocks[n+1]
-            if before[0] != 'equal' or after[0] != 'equal' or min(before[2]-before[1], after[2]-after[1]) < 2:
+            if tag != 'replace' or max(j-i, d-c) > 8:
                 continue
             target = current[i:j]
-            if any(t['phrase'] is not target[0]['phrase'] for t in target):
-                continue
             left = ''.join(t['norm'] for t in target)
             right = ''.join(t['norm'] for t in pub[c:d])
+            # Only spacing differs («в разнос» / «вразнос»): a publication's
+            # habit, it needs two equal words on each side, the text edge
+            # does not count.
+            edges = left != right
+            before = anchor(blocks[n-1] if n else (None if i == 0 and c == 0 and edges else ('x',)), True, edges)
+            after = anchor(blocks[n+1] if n+1 < len(blocks) else
+                           (None if j == len(current) and d == len(pub) and edges else ('x',)), False, edges)
+            if min(before, after) < 2:
+                continue
             similarity = difflib.SequenceMatcher(None, left, right, autojunk=False).ratio()
             # A misheard phrase («Кто повторит?» for «И если не лень, то
             # повторим») shares few letters; firm anchors on both sides (three
             # equal words) still pin the publication's words to this place.
-            firm = min(before[2]-before[1], after[2]-after[1]) >= 3 and j - i <= 6
-            if similarity < .7 and not (firm and similarity >= .4):
+            # A short fragment that sounds alike («Босе, Блядимельич» for
+            # «Осип, блять, Эмильич») is proposed from 0.6.
+            firm = min(before, after) >= 3 and j - i <= 6
+            close = j - i <= 4 and similarity >= .6
+            if similarity < .7 and not (firm and similarity >= .4) and not close:
                 continue
-            one = _fragment(target[0]['phrase'], target)
+            one = _current(target, order)
+            if one is None:
+                continue
             two = _fragment(dict(text=ref['plain_lyrics'], origin='publication',
                                  url=ref.get('url'), version_verified=ref.get('version_verified')), pub[c:d])
             key = (one['phrase_id'], one['char_start'], one['char_end'],
@@ -184,10 +245,10 @@ def reference_candidates(phrases, references):
                 for tag,a,b,c,d in matcher.get_opcodes():
                     if tag!='replace' or max(b-a,d-c)>8:continue
                     part=target[a:b]
-                    if any(t['phrase'] is not part[0]['phrase'] for t in part):continue
                     similarity=difflib.SequenceMatcher(None,''.join(t['norm'] for t in part),''.join(pn[c:d]),autojunk=False).ratio()
                     if similarity<.65:continue
-                    one=_fragment(part[0]['phrase'],part)
+                    one=_current(part,order)
+                    if one is None:continue
                     two=_fragment(dict(text=line,origin='publication',url=ref.get('url')),pub[c:d])
                     key=(one['phrase_id'],one['char_start'],one['char_end'],tuple(pn[c:d]))
                     if key in seen:continue

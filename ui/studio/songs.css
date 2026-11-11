@@ -14,6 +14,8 @@
 .song-card:hover { border-color:color-mix(in srgb,var(--accent) 55%,var(--line)); }
 .song-card-main { min-width:0; cursor:pointer; }
 .song-title { font-size:15px; font-weight:700; overflow-wrap:anywhere; }
+.song-title-edit { display:inline; padding:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:text; }
+.song-title-edit:hover, .song-title-edit:focus-visible { text-decoration:underline; text-underline-offset:3px; outline:none; }
 .song-heading { display:flex; align-items:baseline; gap:12px; min-width:0; flex-wrap:wrap; }
 .song-artist { color:var(--muted); margin-top:0; }
 .song-rating { display:flex; align-items:center; gap:1px; margin-top:5px; }
@@ -31,8 +33,11 @@
 .song-tag:hover, .song-tag:focus-visible { color:var(--ink); background:color-mix(in srgb,var(--accent) 22%,var(--field)); outline:2px solid var(--accent); outline-offset:1px; }
 .song-tag-add-menu { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; padding:6px; border:1px solid var(--line); border-radius:10px; background:var(--glass); }
 .song-tag-add-menu .song-tag-option { border:0; font:inherit; }
+.song-tag-options { display:flex; flex-wrap:wrap; gap:5px; }
+.song-tag-custom-form { display:flex; flex:1 1 220px; gap:6px; align-items:center; }
+.song-tag-custom-form input { min-width:100px; flex:1; padding:7px 9px; border:1px solid var(--line); border-radius:9px; background:var(--field); color:var(--ink); font:inherit; }
+.songs-detail-head .song-rating { margin-top:2px; }
 .songs-tag-filters { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:8px; }
-.songs-filter-label { color:var(--muted); font-size:13px; margin-right:2px; }
 .songs-tag-filters .chip { min-height:34px; cursor:pointer; border:1px solid var(--line); }
 .songs-tag-filters .chip.on { color:#fff; background:var(--brand); border-color:transparent; }
 .song-tag-option { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border-radius:999px; background:var(--field); color:var(--muted); cursor:pointer; font-size:13px; }
@@ -150,16 +155,26 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-live-preview-chords { min-height:1.5em; margin-top:5px; color:var(--ink); font-weight:700; white-space:pre; }
 .song-live-preview-chords[hidden] { display:none; }
 .song-live-preview p { margin:0; white-space:pre; }
+.song-live-preview-word.current-word { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 28%,var(--field)); outline:2px solid var(--accent,#4d78c9); border-radius:3px; }
 .song-live-editor textarea { display:block; width:100%; min-height:64px; resize:vertical; }
 .song-live-editor select, .song-live-editor input:not([type=checkbox]) { width:100%; }
 .song-live-chord-head { margin:14px 0 8px; }
-.song-live-chord { display:grid; grid-template-columns:minmax(6ch,7ch) minmax(8ch,9ch) minmax(14ch,1fr) 44px; gap:8px; align-items:end; margin:8px 0; }
+.song-live-chord { display:grid; grid-template-columns:minmax(6ch,8ch) minmax(8ch,9ch) minmax(0,1fr) 44px; gap:8px; align-items:end; margin:12px 0; }
 .song-live-chord .f { margin:0; }
 .song-live-chord .f input { box-sizing:border-box; min-width:0; width:100%; padding:8px 9px; }
 .song-live-chord [data-live-chord-time] { text-align:right; font-variant-numeric:tabular-nums; }
-.song-live-chord-fingering { min-width:0; overflow:hidden; padding:9px 0; white-space:nowrap; text-overflow:ellipsis; font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); cursor:help; }
-.song-live-chord-fingering[title="Аппликатура не найдена"] { color:var(--muted); }
+.song-live-chord-context { display:flex; align-items:flex-end; min-width:0; overflow-x:auto; padding:4px 3px 8px; white-space:pre; font:400 15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); }
+.song-live-chord-context > span { flex-shrink:0; }
+.song-live-context-active { display:inline-grid; color:var(--ink); }
+.song-live-context-active b { font-weight:700; }
+.song-live-context-active mark { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 28%,var(--field)); outline:1px solid var(--accent,#4d78c9); border-radius:3px; }
+@media (max-width:600px) {
+  .song-live-chord { grid-template-columns:minmax(6ch,1fr) minmax(8ch,1fr) 44px; }
+  .song-live-chord-context { grid-column:1 / -1; grid-row:2; }
+}
 .song-live-chord .btn { margin-bottom:2px; }
+.song-live-chord.is-playing { background:color-mix(in srgb,var(--accent,#4d78c9) 9%,transparent); border-radius:8px; }
+.song-live-chord-context mark.current-word { color:var(--ink); background:color-mix(in srgb,var(--accent,#4d78c9) 34%,var(--field)); outline:2px solid var(--accent,#4d78c9); border-radius:3px; }
 .song-live-editor .song-save-status { margin-bottom:0; }
 .song-source-stage { margin:18px 0; padding:16px 18px; border:1px solid var(--line); border-radius:14px; background:var(--field); }
 .song-source-stage-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
@@ -168,6 +183,9 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-reference-bulk { align-items:center; margin:10px 0; }
 .song-reference-candidate-choice { margin:12px 0; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--surface); }
 .song-reference-candidate-choice > label { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px; }
+.song-reference-candidate-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.song-reference-candidate-head > label { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px; }
+.song-reference-play { min-width:36px; }
 .song-reference-candidate { display:grid; gap:8px; margin-top:8px; }
 .song-reference-line { padding:8px 10px; border-radius:9px; background:var(--field); }
 .song-reference-line--alternative { background:rgba(75,227,161,.09); }

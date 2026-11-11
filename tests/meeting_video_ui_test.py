@@ -37,12 +37,13 @@ setTimeout(()=>core._on.hello?.forEach(f=>f({})),30);
         assert not page.locator("#m-consent").is_checked(), "User's opt-out was overwritten"
         assert page.locator("#start").is_disabled()
         page.evaluate("""() => {STATE.on=true;STATE.meeting={id:'first',record:true,dual:true,started:Date.now()/1000,title:'Тест записи'};
-          STATE.recording={...STATE.recording,enabled:true,levels:{me:{peak:8000},them:{peak:12000}},underruns:2};
+          STATE.recording={...STATE.recording,enabled:true,levels:{me:{peak:8000},them:{peak:12000}},underruns:2,process_rss_mb:1229};
           core._on.prompter.forEach(f=>f({kind:'state',state:STATE}));}""")
         assert page.locator("#recording-levels").is_visible()
         assert page.locator("#track-me").evaluate("e=>e.value") == 8000
         assert page.locator("#track-them").evaluate("e=>e.value") == 12000
         assert "2" in page.locator("#recording-diagnostics").inner_text()
+        assert "память 1.2 ГБ" in page.locator("#recording-diagnostics").inner_text()
         page.screenshot(path=str(Path(tempfile.gettempdir()) / "dewiar-meeting-tracks.png"))
         page.evaluate("STATE.on=false;STATE.can_start=true;STATE.summary_busy=true;STATE.processing=true;STATE.recording.export_busy=true;core._on.prompter.forEach(f=>f({kind:'state',state:STATE}))")
         assert page.locator("#again").is_enabled(), "New meeting must not wait for video/summary"

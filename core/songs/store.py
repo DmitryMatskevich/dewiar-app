@@ -34,10 +34,20 @@ def _clean(value: object, limit: int = 240) -> str:
 
 
 def clean_tags(value: object) -> list[str]:
-    """Keep only the controlled vocabulary used by the Songs filters."""
+    """Normalize and retain built-in and user-created song tags."""
     if not isinstance(value, (list, tuple, set)):
         return []
-    return list(dict.fromkeys(tag for tag in (_clean(item, 40) for item in value) if tag in TAG_OPTIONS))
+    tags = []
+    seen = set()
+    for item in value:
+        tag = _clean(item, 40)
+        key = tag.casefold()
+        if tag and key not in seen:
+            tags.append(tag)
+            seen.add(key)
+        if len(tags) >= 32:
+            break
+    return tags
 
 
 class SongStore:
@@ -328,6 +338,7 @@ class SongStore:
                 changes.update(phrases=selected, words=[], timing_quality="phrase", selected_run_id=run_id,
                                sections=infer_sections(selected), guitar_sheet=[])
             tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))
+            tags = list(dict.fromkeys([*tags, *(tag for tag in row.get('tags', []) if tag not in TAG_OPTIONS)]))
             changes.update(tags=tags, tag_scores=tag_scores)
             return self.patch(song_id, changes)
 
@@ -398,6 +409,7 @@ class SongStore:
                                capabilities={**row.get('capabilities', {}), 'lyrics': bool(selected),
                                              'structure': bool(selected), 'chords': has_chords})
             tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))
+            tags = list(dict.fromkeys([*tags, *(tag for tag in row.get('tags', []) if tag not in TAG_OPTIONS)]))
             changes.update(tags=tags, tag_scores=tag_scores)
             return self.patch(song_id, changes)
 

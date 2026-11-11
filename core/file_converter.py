@@ -8,6 +8,7 @@ accepted and an output is always written to the caller's task output directory.
 from __future__ import annotations
 
 import csv
+import hashlib
 import html
 import io
 import ipaddress
@@ -38,12 +39,13 @@ TARGET_ALIASES = {
     "markdown": "md",
     "текст": "txt", "text": "txt", "веб-страница": "html", "вебстраница": "html",
     "изображение": "png", "картинка": "png", "фото": "png",
+    "jpeg": "jpg", "jpg": "jpg", "svg": "svg",
     "мп3": "mp3", "эмпэтри": "mp3", "мпег": "mp3", "мпэг": "mp3",
     "вэйв": "wav", "вэ-вэ": "wav",
 }
 
 TARGETS = {"txt", "md", "html", "htm", "docx", "pdf", "xlsx", "csv", "tsv",
-           "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff",
+           "png", "jpg", "jpeg", "svg", "gif", "webp", "bmp", "tif", "tiff",
            "wav", "mp3", "mpeg", "m4a", "aac", "flac", "ogg", "opus"}
 
 TEXT_EXTS = {"txt", "text", "md", "markdown", "html", "htm", "csv", "tsv", "json", "xml", "log", "srt", "vtt"}
@@ -89,7 +91,8 @@ def requested_target(text: str) -> str | None:
         "txt": ("txt", "text", "текстовый файл", "в текст", "текст"),
         "html": ("html", "htm", "html-файл", "в html"),
         "pdf": ("pdf", "пдф"), "csv": ("csv", "цсв"), "tsv": ("tsv",),
-        "png": ("png", "пнг"), "gif": ("gif", "гиф"), "jpg": ("jpg", "jpeg", "джипег", "jpeg"),
+        "png": ("png", "пнг"), "gif": ("gif", "гиф"), "jpg": ("jpg", "jpeg", "джипег", "джейпег"),
+        "svg": ("svg", "эсвэгэ", "в svg", "векторный svg"),
         "webp": ("webp",), "bmp": ("bmp",), "tiff": ("tiff", "tif"),
         "wav": ("wav", "в wav", "вэйв", "в wav-формат"), "mp3": ("mp3", "мп3", "mpeg", "мпег", "мпэг"),
         "m4a": ("m4a",), "aac": ("aac",), "flac": ("flac",), "ogg": ("ogg",), "opus": ("opus",),
@@ -173,6 +176,14 @@ def fetch_webpage(url: str, dest: str | Path, *, cancel=None) -> Path:
             except LookupError: value = data.decode("utf-8", errors="replace")
             if "<html" not in value[:20000].lower() and "<!doctype html" not in value[:20000].lower():
                 raise ConversionError("Полученный ответ не похож на HTML-страницу")
+            if not re.search(r"<base\b", value, re.I):
+                base = '<base href="' + html.escape(current, quote=True) + '">'
+                head = re.search(r"<head\b[^>]*>", value, re.I)
+                if head: value = value[:head.end()] + base + value[head.end():]
+                else:
+                    page = re.search(r"<html\b[^>]*>", value, re.I)
+                    if page: value = value[:page.end()] + "<head>" + base + "</head>" + value[page.end():]
+                    else: value = "<head>" + base + "</head>" + value
             target = Path(dest); target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(value, encoding="utf-8")
             return target
@@ -187,7 +198,7 @@ def targets_for(path: str | Path) -> list[str]:
     """Conservative target choices for a file's known extension."""
     ext = _ext(Path(path))
     if ext in IMAGE_EXTS:
-        return ["png", "jpg", "gif", "webp", "bmp", "tiff", "pdf"]
+        return ["png", "jpg", "jpeg", "svg", "gif", "webp", "bmp", "tiff", "pdf"]
     if ext in AUDIO_EXTS or ext in VIDEO_EXTS:
         return sorted(MEDIA_OUT)
     if ext == "xlsx":
@@ -309,13 +320,32 @@ def _html_to_text(value: str, markdown=False) -> str:
 def _html_to_markdown(value: str) -> str:
     parser = _HTMLBlocks()
     parser.feed(value)
-    rendered = []
-    for kind, content in parser.blocks:
+    parser.close()
+    rendered, i = [], 0
+    while i < len(parser.blocks):
+        kind, content = parser.blocks[i]
         if kind == "table": rendered.append(_rows_markdown(content))
+        elif kind == "image": rendered.append("![" + str(content.get("alt") or "Изображение").replace("]", "\\]") + "](" + str(content.get("src") or "").replace(")", "%29") + ")")
+        elif kind == "float_image":
+            side = content.get("float") if content.get("float") in {"left", "right"} else "left"
+            width = str(content.get("width") or "").strip()
+            if not re.fullmatch(r"(?:\d{1,3}(?:\.\d{1,2})?)(?:px|%|rem|em|vw|cm|mm|in)", width, re.I): width = ""
+            style = f"float:{side};margin:0 14px 10px 0;{f'width:{width};' if width else 'width:40%;max-width:280px;'}"
+            fragment = ['<div style="display:flow-root">', f'<img src="{html.escape(str(content.get("src") or ""), quote=True)}" alt="{html.escape(str(content.get("alt") or "Изображение"), quote=True)}" style="{style}">']
+            j = i + 1
+            while j < len(parser.blocks) and parser.blocks[j][0] in {"p", "li", "blockquote"}:
+                next_kind, next_content = parser.blocks[j]
+                text = html.escape(str(next_content))
+                if next_kind == "li": text = "• " + text
+                fragment.append(f"<p>{text}</p>")
+                j += 1
+            fragment.append("</div>")
+            rendered.append("\n\n".join(fragment)); i = j - 1
         elif kind.startswith("h"): rendered.append("#" * int(kind[1:]) + " " + str(content))
         elif kind == "li": rendered.append("- " + str(content))
         elif kind == "pre": rendered.append("```\n" + str(content) + "\n```")
         else: rendered.append(str(content))
+        i += 1
     return "\n\n".join(item for item in rendered if item.strip())
 
 
@@ -349,6 +379,7 @@ def _html_table_rows(value: str) -> list[list[str]]:
 
 def _markdown_html(value: str) -> str:
     """Small Markdown subset for headings, paragraphs, lists, emphasis and code."""
+    value, float_blocks = _extract_markdown_float_html(value)
     lines = value.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out, para, in_list, in_code = [], [], False, False
 
@@ -410,7 +441,9 @@ def _markdown_html(value: str) -> str:
         out.append("</ul>")
     if in_code:
         out.append("</code></pre>")
-    return "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + "Документ" + "</title></head><body>" + "\n".join(out) + "</body></html>"
+    rendered = "<!doctype html><html><head><meta charset=\"utf-8\"><title>" + "Документ" + "</title></head><body>" + "\n".join(out) + "</body></html>"
+    for token, fragment in float_blocks.items(): rendered = rendered.replace("<p>" + token + "</p>", fragment)
+    return rendered
 
 
 class _HTMLBlocks(HTMLParser):
@@ -419,6 +452,68 @@ class _HTMLBlocks(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.blocks, self.kind, self.text, self.rows, self.row, self.cell = [], "p", [], [], None, None
         self.skip = 0
+        self.base_href = ""
+        self.in_style = False
+        self.style_text = []
+        self.rules = []
+        self.ancestors = []
+
+    def close(self):
+        super().close()
+        if not self.skip and not self.in_style and self.cell is None:
+            self._flush()
+
+    @staticmethod
+    def _declarations(value):
+        result = {}
+        for item in str(value or "").split(";"):
+            if ":" not in item: continue
+            key, val = item.split(":", 1)
+            result[key.strip().lower()] = val.strip()
+        return result
+
+    @staticmethod
+    def _simple_selector_matches(selector, tag, attrs):
+        selector = re.sub(r":(?:hover|active|focus|visited|first-child|last-child|nth-child\([^)]*\))", "", selector.strip().lower())
+        if not selector or any(ch in selector for ch in ">+~*[]:"): return False
+        match = re.fullmatch(r"([a-z][a-z0-9-]*)?((?:\.[a-z0-9_-]+|#[a-z0-9_-]+)*)", selector)
+        if not match: return False
+        wanted_tag, suffix = match.groups()
+        if wanted_tag and wanted_tag != tag.lower(): return False
+        classes = set(str(attrs.get("class") or "").lower().split())
+        ids = {str(attrs.get("id") or "").lower()}
+        return all((value[1:] in classes if value.startswith(".") else value[1:] in ids)
+                   for value in re.findall(r"[.#][a-z0-9_-]+", suffix))
+
+    def _parse_style_rules(self):
+        css = re.sub(r"/\*.*?\*/", "", "".join(self.style_text), flags=re.S)
+        for selector_group, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            declarations = self._declarations(body)
+            if not declarations: continue
+            for selector in selector_group.split(","):
+                parts = [part for part in selector.strip().split() if not part.startswith("@")]
+                if not parts: continue
+                specificity = sum(100 if part.count("#") else 10 * part.count(".") + (1 if re.match(r"^[a-z]", part) else 0) for part in parts)
+                self.rules.append((specificity, len(self.rules), parts, declarations))
+
+    def _computed_style(self, tag, attrs):
+        chain = self.ancestors + [{"tag": tag, **attrs}]
+        result, priority = {}, {}
+        for specificity, order, parts, declarations in self.rules:
+            if not self._simple_selector_matches(parts[-1], tag, attrs): continue
+            cursor = len(chain) - 2
+            matched = True
+            for part in reversed(parts[:-1]):
+                while cursor >= 0 and not self._simple_selector_matches(part, chain[cursor]["tag"], chain[cursor]): cursor -= 1
+                if cursor < 0: matched = False; break
+                cursor -= 1
+            if matched:
+                for key, val in declarations.items():
+                    candidate = (specificity, order)
+                    if candidate >= priority.get(key, (-1, -1)):
+                        result[key], priority[key] = val, candidate
+        result.update(self._declarations(attrs.get("style")))
+        return result
 
     def _flush(self):
         value = " ".join("".join(self.text).split())
@@ -426,22 +521,52 @@ class _HTMLBlocks(HTMLParser):
         self.text = []; self.kind = "p"
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "noscript", "iframe", "svg"}: self.skip += 1; return
+        attrs = dict(attrs)
+        if tag == "base" and attrs.get("href"):
+            self.base_href = attrs["href"]
+            return
+        if tag == "style": self.in_style = True; self.style_text = []; return
+        if tag in {"script", "noscript", "iframe", "svg"}: self.skip += 1; return
         if self.skip: return
+        style = self._computed_style(tag, attrs)
         if tag == "table": self._flush(); self.rows = []
+        elif tag == "img" and attrs.get("src"):
+            self._flush()
+            source = urllib.parse.urljoin(self.base_href, attrs["src"]) if self.base_href else attrs["src"]
+            float_side = str(style.get("float") or "").lower()
+            if float_side not in {"left", "right"}:
+                for ancestor in reversed(self.ancestors):
+                    inherited_side = str((ancestor.get("_computed") or {}).get("float") or "").lower()
+                    if inherited_side in {"left", "right"}:
+                        float_side = inherited_side
+                        break
+            if float_side not in {"left", "right"}:
+                align = str(attrs.get("align") or "").lower()
+                float_side = align if align in {"left", "right"} else ""
+            image = {"src": source, "alt": attrs.get("alt") or "", "float": float_side,
+                     "width": style.get("width") or attrs.get("width") or "",
+                     "margin": style.get("margin") or "",
+                     "margin-left": style.get("margin-left") or "", "margin-right": style.get("margin-right") or ""}
+            self.blocks.append(("float_image" if float_side else "image", image))
         elif tag == "tr": self.row = []
         elif tag in {"td", "th"}: self.cell = []
         elif tag in {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "pre", "blockquote"}:
             self._flush(); self.kind = "li" if tag == "li" else tag
         elif tag == "br": self.text.append("\n")
+        if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+            self.ancestors.append({"tag": tag, **attrs, "_computed": style})
 
     def handle_data(self, data):
+        if self.in_style:
+            if sum(map(len, self.style_text)) < 512 * 1024: self.style_text.append(data)
+            return
         if self.skip: return
         if self.cell is not None: self.cell.append(data)
         else: self.text.append(data)
 
     def handle_endtag(self, tag):
-        if tag in {"script", "style", "noscript", "iframe", "svg"}: self.skip = max(0, self.skip - 1); return
+        if tag == "style": self._parse_style_rules(); self.in_style = False; return
+        if tag in {"script", "noscript", "iframe", "svg"}: self.skip = max(0, self.skip - 1); return
         if self.skip: return
         if tag in {"td", "th"} and self.cell is not None and self.row is not None:
             self.row.append(" ".join("".join(self.cell).split())); self.cell = None
@@ -450,6 +575,44 @@ class _HTMLBlocks(HTMLParser):
             self._flush()
             if self.rows: self.blocks.append(("table", self.rows))
         elif tag in {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "pre", "blockquote"}: self._flush()
+        for index in range(len(self.ancestors) - 1, -1, -1):
+            if self.ancestors[index]["tag"] == tag:
+                del self.ancestors[index:]
+                break
+
+
+def _parse_markdown_float_blocks(value: str):
+    parser = _HTMLBlocks(); parser.feed(value); parser.close()
+    return parser.blocks if any(kind == "float_image" for kind, _data in parser.blocks) else []
+
+
+def _render_markdown_float_block(blocks):
+    output = ['<div style="display:flow-root">']
+    for kind, data in blocks:
+        if kind == "float_image":
+            side = data.get("float") if data.get("float") in {"left", "right"} else "left"
+            width = str(data.get("width") or "")
+            if not re.fullmatch(r"(?:\d{1,3}(?:\.\d{1,2})?)(?:px|%|rem|em|vw|cm|mm|in)", width, re.I): width = "40%"
+            src = str(data.get("src") or "")
+            if urllib.parse.urlsplit(src).scheme.lower() not in {"", "http", "https", "data"}: continue
+            output.append(f'<img src="{html.escape(src, quote=True)}" alt="{html.escape(str(data.get("alt") or "Изображение"), quote=True)}" style="float:{side};width:{width};max-width:45%;margin:0 14px 10px 0">')
+        elif kind in {"p", "li", "blockquote"}:
+            text = html.escape(str(data))
+            output.append("<p>" + ("• " if kind == "li" else "") + text + "</p>")
+    output.append("</div>")
+    return "\n".join(output)
+
+
+def _extract_markdown_float_html(value: str):
+    replacements = {}
+    pattern = re.compile(r'<div\s+style=["\']display:flow-root["\']\s*>.*?</div\s*>', re.I | re.S)
+    def replace(match):
+        blocks = _parse_markdown_float_blocks(match.group(0))
+        if not blocks: return match.group(0)
+        token = f"DEWIAR_FLOAT_BLOCK_{len(replacements)}_TOKEN"
+        replacements[token] = _render_markdown_float_block(blocks)
+        return token
+    return pattern.sub(replace, value), replacements
 
 
 def _markdown_blocks(value: str) -> list[tuple[str, object]]:
@@ -459,6 +622,13 @@ def _markdown_blocks(value: str) -> list[tuple[str, object]]:
     while i < len(lines):
         if not lines[i].strip():
             i += 1; continue
+        if lines[i].strip().startswith('<div style="display:flow-root">'):
+            end = i
+            while end < len(lines) and "</div>" not in lines[end].lower(): end += 1
+            if end < len(lines):
+                parsed = _parse_markdown_float_blocks("\n".join(lines[i:end + 1]))
+                if parsed:
+                    blocks.extend(parsed); i = end + 1; continue
         if i + 1 < len(lines):
             table_rows = _markdown_table_rows(lines[i:])
             if table_rows:
@@ -519,9 +689,38 @@ def _markdown_table_rows(lines: list[str]) -> list[list[str]] | None:
 
 def _write_docx(blocks: list[tuple[str, object]], dest: Path) -> None:
     def esc(value):
-        return html.escape(str(value), quote=False)
+        # Office XML 1.0 forbids control characters that may occur in scraped pages.
+        text = str(value)
+        text = "".join(ch for ch in text if ch in "\t\n\r" or (0x20 <= ord(ch) <= 0xD7FF) or
+                       (0xE000 <= ord(ch) <= 0xFFFD) or (0x10000 <= ord(ch) <= 0x10FFFF))
+        return html.escape(text, quote=False)
     body = []
+    images = []
     for kind, value in blocks:
+        if kind in {"image", "float_image"}:
+            image_id = len(images) + 1
+            name = str(value.get("name") or f"image{image_id}.png")
+            ext = Path(name).suffix.lstrip(".").lower() or "png"
+            rel_id = f"rId{image_id + 1}"
+            cx, cy = int(value.get("cx") or 0), int(value.get("cy") or 0)
+            alt = html.escape(esc(value.get("alt") or "Изображение"), quote=True)
+            extent = f'<wp:extent cx="{cx}" cy="{cy}"/>'
+            properties = (f'<wp:docPr id="{image_id}" name="{html.escape(name, quote=True)}" descr="{alt}"/>'
+                          '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>')
+            picture = (f'<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{image_id}" name="{html.escape(name, quote=True)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic>')
+            if kind == "float_image":
+                side = "right" if value.get("float") == "right" else "left"
+                drawing = (f'<wp:anchor distT="0" distB="0" distL="{int(value.get("distL", 137160))}" distR="{int(value.get("distR", 137160))}" simplePos="0" relativeHeight="{251658240 + image_id}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">'
+                           '<wp:simplePos x="0" y="0"/>'
+                           f'<wp:positionH relativeFrom="margin"><wp:align>{side}</wp:align></wp:positionH>'
+                           '<wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>'
+                           + extent + '<wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapSquare wrapText="bothSides"/>'
+                           + properties + picture + '</wp:anchor>')
+            else:
+                drawing = f'<wp:inline distT="0" distB="0" distL="0" distR="0">{extent}{properties}{picture}</wp:inline>'
+            body.append(f'<w:p><w:r><w:drawing>{drawing}</w:drawing></w:r></w:p>')
+            images.append((rel_id, name, ext, value["data"]))
+            continue
         if kind == "table":
             rows = value
             row_xml = []
@@ -537,7 +736,7 @@ def _write_docx(blocks: list[tuple[str, object]], dest: Path) -> None:
         text = text.replace("\n", " ")
         body.append("<w:p>" + ppr + "<w:r><w:t xml:space=\"preserve\">" + esc(text) + "</w:t></w:r></w:p>")
     document = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
                 '<w:body>' + "".join(body) + '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
                 '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/>'
                 '</w:sectPr></w:body></w:document>')
@@ -545,16 +744,129 @@ def _write_docx(blocks: list[tuple[str, object]], dest: Path) -> None:
              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
              '<Default Extension="xml" ContentType="application/xml"/>'
+             + "".join(f'<Default Extension="{ext}" ContentType="{"image/jpeg" if ext in {"jpg", "jpeg"} else "image/png"}"/>' for ext in sorted({row[2] for row in images})) +
              '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
              '</Types>')
     rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
             '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
             '</Relationships>')
+    document_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+                     "".join(f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/{name}"/>' for rel_id,name,_ext_,_data in images) +
+                     '</Relationships>')
     with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", types)
         zf.writestr("_rels/.rels", rels)
+        if images: zf.writestr("word/_rels/document.xml.rels", document_rels)
         zf.writestr("word/document.xml", document)
+        for _rel_id, name, _ext_, data in images: zf.writestr("word/media/" + name, data)
+
+
+def _html_docx_blocks(src: Path, blocks: list[tuple[str, object]], cancel=None):
+    """Embed safe raster images referenced by HTML into an OOXML Word document."""
+    import base64
+    import hashlib
+    from PIL import Image, ImageOps
+
+    parser = _HTMLBlocks(); parser.feed(_read_text(src)); parser.close()
+    base = parser.base_href
+    prepared = []
+    image_count, total_bytes = 0, 0
+    image_refs = sum(1 for kind, _value in blocks if kind in {"image", "float_image"})
+    failed, limit_reached = 0, False
+    def gap_emu(value, default=137160):
+        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)(px|pt|in|cm|mm)\s*", str(value or ""), re.I)
+        if not match: return default
+        amount, unit = float(match.group(1)), match.group(2).lower()
+        result = amount * {"px":9525, "pt":12700, "in":914400, "cm":360000, "mm":36000}[unit]
+        return int(max(0, min(457200, result)))
+    for kind, value in blocks:
+        if kind not in {"image", "float_image"}:
+            prepared.append((kind, value)); continue
+        if cancel is not None and cancel.is_set(): raise ConversionError("Конвертация отменена")
+        if image_count >= 12 or total_bytes >= 30 * 1024 * 1024:
+            limit_reached = True; continue
+        raw_url = str(value.get("src") or "").strip()
+        if not raw_url: continue
+        data = b""
+        try:
+            if raw_url.startswith("data:image/"):
+                header, encoded = raw_url.split(",", 1)
+                if ";base64" not in header or len(encoded) > 11_000_000: raise ValueError("слишком большой data URL")
+                data = base64.b64decode(encoded, validate=True)
+            else:
+                resolved = urllib.parse.urljoin(base, raw_url) if base else raw_url
+                parts = urllib.parse.urlsplit(resolved)
+                if parts.scheme in {"http", "https"}:
+                    if parts.path.lower().endswith(".svg"): continue
+                    resolved = urllib.parse.urlunsplit((parts.scheme, parts.netloc,
+                        urllib.parse.quote(urllib.parse.unquote(parts.path), safe="/%:@!$&'()*+,;=-._~"),
+                        urllib.parse.quote(urllib.parse.unquote(parts.query), safe="!$&'()*+,;=:@/?%"), ""))
+                    current = _validate_public_web_url(resolved)
+                    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), type("NoRedirect", (urllib.request.HTTPRedirectHandler,), {"redirect_request": lambda self, req, fp, code, msg, headers, newurl: None})())
+                    for _ in range(4):
+                        try:
+                            response = opener.open(urllib.request.Request(current, headers={"User-Agent":"Dewiar/1.0 (document conversion)","Accept":"image/png,image/jpeg,image/webp,image/gif"}), timeout=12)
+                        except urllib.error.HTTPError as exc:
+                            if exc.code in {301,302,303,307,308} and exc.headers.get("Location"):
+                                current = _validate_public_web_url(urllib.parse.urljoin(current, exc.headers["Location"])); continue
+                            raise ValueError(f"HTTP {exc.code}")
+                        with response:
+                            if not response.headers.get_content_type().startswith("image/"): raise ValueError("ответ не изображение")
+                            data = response.read(8 * 1024 * 1024 + 1)
+                        break
+                elif not parts.scheme:
+                    local = (src.parent / urllib.parse.unquote(parts.path)).resolve()
+                    if src.parent.resolve() not in local.parents or not local.is_file(): raise ValueError("локальный путь изображения недоступен")
+                    if local.stat().st_size > 8 * 1024 * 1024: raise ValueError("изображение больше 8 МБ")
+                    data = local.read_bytes()
+                else: raise ValueError("поддерживаются только публичные HTTPS/HTTP, data URL и локальные изображения рядом с HTML")
+            if not data or len(data) > 8 * 1024 * 1024: raise ValueError("изображение больше 8 МБ или пустое")
+            with Image.open(io.BytesIO(data)) as original:
+                image = ImageOps.exif_transpose(original.copy())
+                if image.width < 16 or image.height < 16: continue
+                if image_count >= 12 or total_bytes + len(data) > 30 * 1024 * 1024:
+                    limit_reached = True; continue
+                if image.format == "JPEG" and image.mode in {"RGB", "L"}:
+                    ext, payload = "jpg", data
+                else:
+                    if image.mode not in {"RGB", "RGBA"}: image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+                    stream = io.BytesIO(); image.save(stream, format="PNG", optimize=True)
+                    ext, payload = "png", stream.getvalue()
+                if total_bytes + len(payload) > 30 * 1024 * 1024: raise ValueError("превышен общий лимит изображений")
+                max_width_emu = (2.8 if kind == "float_image" else 6.4) * 914400
+                raw_width = str(value.get("width") or "").strip()
+                requested_width = 0
+                width_match = re.fullmatch(r"(\d+(?:\.\d+)?)(px|pt|in|cm|mm|%)", raw_width, re.I)
+                if width_match:
+                    amount, unit = float(width_match.group(1)), width_match.group(2).lower()
+                    requested_width = amount * {"px":9525, "pt":12700, "in":914400, "cm":360000, "mm":36000}.get(unit, max_width_emu / 100)
+                    if unit == "%": requested_width = max_width_emu * min(amount, 100) / 100
+                desired_width_emu = min(max_width_emu, requested_width) if requested_width else max_width_emu
+                factor = min(1.0, desired_width_emu / (image.width * 9525), 6.4 * 914400 / (image.height * 9525))
+                # Each occurrence needs its own relationship and anchor, even
+                # when the source URL is reused on both sides of a product card.
+                name = hashlib.sha256(payload).hexdigest()[:12] + f"-{image_count + 1}." + ext
+                margin_parts = str(value.get("margin") or "").split()
+                if len(margin_parts) == 1: margin_left = margin_right = margin_parts[0]
+                elif len(margin_parts) == 2: margin_left = margin_right = margin_parts[1]
+                elif len(margin_parts) == 3: margin_right = margin_parts[1]; margin_left = margin_parts[1]
+                elif len(margin_parts) >= 4: margin_right, margin_left = margin_parts[1], margin_parts[3]
+                else: margin_left = margin_right = ""
+                margin_left = value.get("margin-left") or margin_left
+                margin_right = value.get("margin-right") or margin_right
+                prepared.append((kind, {"name":name, "data":payload, "alt":str(value.get("alt") or "")[:300],
+                                             "float":value.get("float") if kind == "float_image" else "",
+                                             "distL":gap_emu(margin_left), "distR":gap_emu(margin_right),
+                                             "cx":int(image.width*9525*factor), "cy":int(image.height*9525*factor)}))
+                image_count += 1; total_bytes += len(payload)
+        except Exception as exc:
+            failed += 1
+    warnings = []
+    if failed: warnings.append(f"Не удалось встроить {failed} из {image_refs} изображений; внешние SVG, трекеры и недоступные картинки пропущены.")
+    if limit_reached: warnings.append("Достигнут лимит встраивания: до 12 изображений и 30 МБ суммарно.")
+    return prepared, warnings
 
 
 def _docx_blocks(path: Path) -> list[tuple[str, object]]:
@@ -851,6 +1163,30 @@ def _image_convert(src: Path, dest: Path, target: str) -> Path:
         raise ConversionError(f"Не удалось преобразовать изображение: {exc}") from exc
 
 
+def _image_to_svg(src: Path, dest: Path) -> Path:
+    """Wrap a normalized PNG in SVG while preserving the original raster look."""
+    import base64
+    from PIL import Image, ImageOps
+    try:
+        with Image.open(src) as original:
+            image = ImageOps.exif_transpose(original.copy())
+            if image.mode not in {"RGB", "RGBA"}:
+                image = image.convert("RGBA" if "transparency" in image.info else "RGB")
+            stream = io.BytesIO()
+            image.save(stream, format="PNG", optimize=True)
+            png_bytes = stream.getvalue()
+            if len(png_bytes) > 32 * 1024 * 1024:
+                raise ConversionError("PNG внутри SVG превышает безопасный предел 32 МБ")
+            encoded = base64.b64encode(png_bytes).decode("ascii")
+            svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{image.width}" height="{image.height}" '
+                   f'viewBox="0 0 {image.width} {image.height}"><image width="{image.width}" height="{image.height}" '
+                   f'href="data:image/png;base64,{encoded}"/></svg>')
+        dest.write_text(svg, encoding="utf-8")
+        return dest
+    except Exception as exc:
+        raise ConversionError(f"Не удалось преобразовать изображение в SVG: {exc}") from exc
+
+
 def _write_text_format(src: Path, target: str, dest: Path) -> Path:
     ext = _ext(src)
     if ext in {"docx"}:
@@ -895,6 +1231,29 @@ def _write_text_format(src: Path, target: str, dest: Path) -> Path:
             dest.write_text("<!doctype html><html><head><meta charset=\"utf-8\"><title>" + html.escape(src.stem) +
                             "</title></head><body><pre>" + html.escape(text) + "</pre></body></html>", encoding="utf-8")
     else:
+        dest.write_text(text.rstrip() + "\n", encoding="utf-8")
+    if ext in {"html", "htm"} and target == "md":
+        # Keep local page images beside the Markdown document so relative
+        # references still work after conversion moves the output directory.
+        parser = _HTMLBlocks()
+        parser.feed(_read_text(src)); parser.close()
+        for kind, block in parser.blocks:
+            if kind not in {"image", "float_image"}: continue
+            source = str(block.get("src") or "")
+            parsed = urllib.parse.urlsplit(source)
+            if parsed.scheme or parsed.netloc or not parsed.path: continue
+            candidate = (src.parent / urllib.parse.unquote(parsed.path)).resolve()
+            try: candidate.relative_to(src.parent.resolve())
+            except ValueError: continue
+            if not candidate.is_file(): continue
+            name = candidate.name
+            target_file = dest.parent / name
+            if target_file.resolve() == candidate: continue
+            if target_file.exists() and target_file.read_bytes() != candidate.read_bytes():
+                name = f"{candidate.stem}-{hashlib.sha256(candidate.read_bytes()).hexdigest()[:8]}{candidate.suffix}"
+                target_file = dest.parent / name
+            if not target_file.exists(): shutil.copy2(candidate, target_file)
+            text = text.replace(f"]({source})", f"]({urllib.parse.quote(name)})")
         dest.write_text(text.rstrip() + "\n", encoding="utf-8")
     return dest
 
@@ -989,7 +1348,11 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
         dest = outdir / f"{_safe_stem(src)} ({n}).{target}"
     if cancel is not None and cancel.is_set():
         raise ConversionError("Конвертация отменена")
-    if ext in IMAGE_EXTS and target in IMAGE_FORMAT:
+    conversion_warnings = []
+    if ext in IMAGE_EXTS and target == "svg":
+        _image_to_svg(src, dest)
+        backend = "Pillow → SVG"
+    elif ext in IMAGE_EXTS and target in IMAGE_FORMAT:
         _image_convert(src, dest, target)
         backend = "Pillow"
     elif ext in IMAGE_EXTS and target == "pdf":
@@ -1062,9 +1425,13 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
         elif ext in {"csv", "tsv"}:
             blocks = [("table", _csv_rows(src)[0])]
         elif ext in {"html", "htm"}:
-            parser = _HTMLBlocks(); parser.feed(_read_text(src)); blocks = parser.blocks
+            parser = _HTMLBlocks(); parser.feed(_read_text(src)); parser.close(); blocks = parser.blocks
+            blocks, image_warnings = _html_docx_blocks(src, blocks, cancel)
+            conversion_warnings.extend(image_warnings)
         elif ext in {"md", "markdown"}:
             blocks = _markdown_blocks(_read_text(src))
+            blocks, image_warnings = _html_docx_blocks(src, blocks, cancel)
+            conversion_warnings.extend(image_warnings)
         else:
             blocks = [("p", line) for line in _read_text(src).splitlines() if line.strip()]
         _write_docx(blocks, dest)
@@ -1122,7 +1489,7 @@ def convert(src: str | Path, target: str, output_dir: str | Path, *, cancel=None
         raise ConversionError(f"Преобразование .{ext or '?'} → .{target} не поддерживается")
     if not dest.is_file() or dest.stat().st_size == 0:
         raise ConversionError("Конвертер не создал непустой результат")
-    warning = ""
+    warning = "; ".join(conversion_warnings)
     if ext == "xlsx" and target in {"csv", "tsv"}:
         warning = "В CSV сохранён только активный лист книги; форматирование и формулы не переносятся."
     if target == "jpg" and ext in IMAGE_EXTS:

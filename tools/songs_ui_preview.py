@@ -79,9 +79,12 @@ def make_server(store, capture=None, processing=None):
             if not 0 < size < 1_600_000: return self.reply(413, b'{}')
             try:
                 body = json.loads(self.rfile.read(size)); cmd = body['cmd']; a = body.get('args') or {}
-                if cmd in {'song_edit_phrase','song_phrase_audio','song_full_audio','song_edit_structure','song_edit_chords','song_finish_review'}: result = review_command(store,cmd,a)
+                if cmd in {'song_edit_phrase','song_phrase_audio','song_full_audio','song_edit_structure','song_edit_chords','song_preview_chords','song_finish_review'}: result = review_command(store,cmd,a)
                 elif cmd in {'song_upload_begin','song_upload_chunk','song_upload_finish','song_upload_cancel'}: result = importer.command(cmd,a)
                 elif cmd == 'songs_list': result = store.list(a.get('q',''),a.get('status',''))
+                elif cmd == 'songs_tags_list':
+                    from songs.store import TAG_OPTIONS
+                    result = sorted(set(TAG_OPTIONS) | {tag for row in store.list() for tag in row.get('tags', [])})
                 elif cmd == 'song_get': result = store.get(a['song_id'])
                 elif cmd == 'song_capture' and capture:
                     result = capture.start(a['song_id'],source=a.get('source','microphone')) if a.get('action')=='start' else capture.stop(a['song_id'])
@@ -97,7 +100,7 @@ def make_server(store, capture=None, processing=None):
                     result = add_manual_source(store, a['song_id'], a.get('url'), a.get('lyrics'), a.get('base_revision'))
                 elif cmd == 'song_patch':
                     changes = a.get('changes') or {}
-                    if set(changes)-{'title','artist'}: raise ValueError('Только название и исполнитель')
+                    if set(changes)-{'title','artist','tags','rating'}: raise ValueError('Только свойства карточки')
                     result = store.patch(a['song_id'],changes,a['base_revision'])
                 elif cmd == 'song_delete': result = store.delete(a['song_id'])
                 else: raise ValueError('На тестовом стенде запись и модели отключены. Здесь проверяется редактор.')

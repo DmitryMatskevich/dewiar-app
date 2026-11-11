@@ -22,7 +22,7 @@ window.SongSheet = (() => {
       if (j < tokens.length && j-i>2 && /^(не|ни|и|а|но|в|на|с|к|по|без|для|о|из|от)$/i.test(tokens[j-1][0])) j--;
       const end = j < tokens.length ? tokens[j].index : line.text.length;
       const text = line.text.slice(start,end).trimEnd();
-      const marks = chordCandidates(line).filter(c=>c.char_index>=start && c.char_index<start+text.length).map(c=>({...c,char_index:c.char_index-start}));
+      const marks = chordCandidates(line).filter(c=>c.char_index>=start && (c.char_index<end || j===tokens.length)).map(c=>({...c,char_index:c.char_index-start}));
       // A verse wider than the sheet continues on the next line of the same stanza.
       pieces.push({...line,text,chords:marks,cells:[],unplaced_chords:[],...(pieces.length?{stanza_start:false,verse_continuation:true}:{}),display_words:(line.display_words || []).filter(w=>w.char_start>=start && w.char_end<=start+text.length).map(w=>({...w,char_start:w.char_start-start,char_end:w.char_end-start}))});
       i=j;
@@ -40,31 +40,54 @@ window.SongSheet = (() => {
     if(!words.length) return {start:Number(line.start_ms)||0,end:Number(line.end_ms)||Number(line.start_ms)||0};
     return {start:Math.min(...words.map(word=>Number(word.start_ms))),end:Math.max(...words.map(word=>Number(word.end_ms)))};
   }
-  function compactChords(line, steps, width=42) {
+  function layoutChordLine(line, steps=0, width=42) {
     let candidates=chordCandidates(line);
     if (!line.text && line.unplaced_chords?.length) {
       const events=line.unplaced_chords, a=events[0].start_ms || 0;
       const b=Math.max(a+1,...events.map(c=>c.end_ms || c.start_ms+1000));
       candidates=events.map(c=>({...c,char_index:Math.floor((c.start_ms-a)/(b-a)*(width-5))}));
     }
-    const grouped=new Map();
-    for (const c of candidates) {
-      if (!c.name || c.name==='N') continue;
-      const name=transpose(c.name,steps), at=Math.max(0,Math.min(c.char_index || 0,width-name.length));
-      const weight=Math.max(1,(c.end_ms ?? ((c.start_ms || 0)+1000))-(c.start_ms || 0));
-      const key=at+':'+name, old=grouped.get(key);
-      grouped.set(key,{...c,...voicingAtShift(c,steps),source_name:c.name,name,at,end:at+name.length+1,weight:weight+(old?.weight || 0)});
+    const marks=candidates.filter(c=>c.name&&c.name!=='N').map(c=>({...c,...voicingAtShift(c,steps),
+      source_name:c.source_name||c.name,name:transpose(c.name,steps),char_index:Math.max(0,c.char_index||0)}))
+      .sort((a,b)=>a.char_index-b.char_index||(a.start_ms||0)-(b.start_ms||0));
+    // Never select a different harmony to make a row fit. Keep every change,
+    // widening the space AFTER a word when its chord labels need more room.
+    // Word spelling and source offsets stay intact; only display columns move.
+    const source=line.text||'', positions=Array.from({length:source.length},(_,i)=>i);
+    let text='',cursor=0,markIndex=0,chordEnd=0;
+    for(const token of source.matchAll(/\S+\s*/g)) {
+      const start=token.index,end=start+token[0].length;
+      text+=source.slice(cursor,start);
+      const first=marks[markIndex];
+      if(first&&first.char_index<end)text+=' '.repeat(Math.max(0,chordEnd-(text.length+first.char_index-start)));
+      const displayStart=text.length;
+      for(let i=start;i<end;i++)positions[i]=displayStart+i-start;
+      text+=token[0];
+      let crowded=false;
+      while(markIndex<marks.length&&marks[markIndex].char_index<end) {
+        const chord=marks[markIndex++];
+        chord.at=Math.max(chordEnd,displayStart+chord.char_index-start);
+        crowded ||= chord.at>displayStart+chord.char_index-start;
+        chordEnd=chord.at+chord.name.length+1;
+      }
+      if(crowded&&end<source.length)text=text.padEnd(Math.max(text.length,chordEnd),' ');
+      cursor=end;
     }
-    // Weighted interval scheduling: one chord row, maximum sounding duration.
-    const items=[...grouped.values()].sort((a,b)=>a.end-b.end || a.at-b.at);
-    const best=[{weight:0,items:[]}];
-    for(let i=0;i<items.length;i++) {
-      const c=items[i];let previous=i-1;
-      while(previous>=0 && items[previous].end>c.at) previous--;
-      const take={weight:best[previous+1].weight+c.weight,items:[...best[previous+1].items,c]};
-      best.push(take.weight>best[i].weight ? take : best[i]);
+    text+=source.slice(cursor);
+    while(markIndex<marks.length) {
+      const chord=marks[markIndex++];
+      chord.at=Math.max(chordEnd,chord.char_index+text.length-source.length);
+      chordEnd=chord.at+chord.name.length+1;
     }
-    return best[items.length].items.sort((a,b)=>a.at-b.at);
+    const words=(line.display_words||[]).map(w=>({...w,
+      phrase_char_start:w.phrase_char_start??w.char_start,
+      char_start:positions[w.char_start]??w.char_start,
+      char_end:(positions[w.char_end-1]??(w.char_end-1))+1}));
+    return {...line,text,display_words:words,cells:[],unplaced_chords:[],
+      chords:marks.map(c=>({...c,char_index:c.at})),source_positions:positions};
+  }
+  function compactChords(line,steps,width=42) {
+    return layoutChordLine(line,steps,width).chords;
   }
   function presentationLines(row, width=columns(row)) {
     // Collapse chord-only rows in the same vocal gap into one timed instrumental cue.
@@ -86,7 +109,7 @@ window.SongSheet = (() => {
       return 'Вокал';
     };
     for(let i=0;i<source.length;) {
-      if(source[i].text) { result.push(...wrapLine(source[i],width)); i++; continue; }
+      if(source[i].text) { result.push(...wrapLine(layoutChordLine(source[i],offset(row),width),width)); i++; continue; }
       // Gap rows keep their kind: a break («Вступление/Проигрыш»), singing
       // without recognized words, or a short pause between two lines.
       const gapKind=line=>line.vocal?'vocal':line.pause?'pause':'break';
@@ -170,10 +193,16 @@ window.SongSheet = (() => {
       // Stanzas come with the sheet (four verse lines where the song allows,
       // split at the longest pauses); a verified publication's own stanza
       // breaks win, with the old four-line fallback.
-      const stanza=(sourceState.hints.length || !flagged) ? stanzaLines >= 4 : !!line.stanza_start;
+      // A publication's stanza break goes before the line's chords: the chord
+      // row always stays right above its words, never above a blank line.
+      const sourceBreak=line.text ? sourceStanzaBreak(row,line.text,sourceState) && !line.verse_continuation : false;
+      // The sheet's own stanzas (verse lines, pauses) lead. A publication's
+      // breaks matched line by line made one-line stanzas where its lines
+      // and the sung ones are cut differently; they serve old sheets only.
+      const stanza=!flagged ? (sourceBreak || stanzaLines >= 4) : !!line.stanza_start;
       if (lines.length && (newPart || stanza) && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
       else if (newPart || stanza) stanzaLines=0;
-      const chords=compactChords(line,offset(row),width);
+      const chords=line.text ? line.chords.map(c=>({...c,at:c.char_index})) : compactChords(line,offset(row),width);
       let text='';
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
       const pause=!line.text && line.pause;
@@ -188,8 +217,6 @@ window.SongSheet = (() => {
       // without the word «Проигрыш» and without a countdown.
       if(pause) { if(text) lines.push({kind:'pause',text:''}); continue; }
       if(line.text) {
-        const sourceBreak=sourceStanzaBreak(row,line.text,sourceState);
-        if(sourceBreak && lines.length && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
         lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
           display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true;
       }
@@ -761,6 +788,7 @@ window.SongSheet = (() => {
       const r=rows[i];
       if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
       if(r.kind==='pause') continue;
+      const pause=r.kind==='chords'&&rows[i+1]?.kind==='pause';
       const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
       const lyric=['lyrics','instrumental'].includes(r.kind) ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
       let lyricHTMLContent='';
@@ -774,7 +802,7 @@ window.SongSheet = (() => {
       const timing=lyric?.kind==='instrumental'&&Number.isFinite(lyric.start_ms)&&Number.isFinite(lyric.end_ms)
         ? ` data-start-ms="${lyric.start_ms}" data-end-ms="${lyric.end_ms}" data-next-section="${esc(lyric.next_section_label||'вокала')}"` : '';
       const lyricEdit=lyric?.kind==='lyrics' ? editButton(lyric.phrase_id,'lyrics',lyric.display_line_id) : '';
-      blocks.push(`<div class="song-paper-line${chords?' has-chords':''}${lyricEdit?' has-lyrics-edit':''}">${chords}${lyric ? `${lyricEdit}<div class="song-paper-${lyric.kind}"${lyric.phrase_id ? ` data-phrase-id="${esc(lyric.phrase_id)}"` : ''}${timing}>${lyric.kind==='lyrics' ? lyricHTMLContent : lyric.kind==='instrumental' ? lyricHTMLContent : esc(lyric.text)}</div>` : ''}</div>`);
+      blocks.push(`<div class="song-paper-line${pause?' song-paper-pause':''}${chords?' has-chords':''}${lyricEdit?' has-lyrics-edit':''}">${chords}${lyric ? `${lyricEdit}<div class="song-paper-${lyric.kind}"${lyric.phrase_id ? ` data-phrase-id="${esc(lyric.phrase_id)}"` : ''}${timing}>${lyric.kind==='lyrics' ? lyricHTMLContent : lyric.kind==='instrumental' ? lyricHTMLContent : esc(lyric.text)}</div>` : ''}</div>`);
     }
     return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
   }
@@ -971,7 +999,7 @@ window.SongSheet = (() => {
       const lines = [`{title: ${current.title.replace(/[{}\n]/g,' ')}}`, `{artist: ${(current.artist || '').replace(/[{}\n]/g,' ')}}`,
         '{comment: Предварительный подбор Dewiar. B=си, Bb=си-бемоль.}'];
       for (const line of presentationLines(current)) {
-        const chords=compactChords(line,offset(current),columns(current));
+        const chords=line.text ? line.chords.map(c=>({...c,at:c.char_index})) : compactChords(line,offset(current),columns(current));
         let text='', cursor=0;
         for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
         lines.push(text+(line.text || '').slice(cursor));
@@ -982,5 +1010,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,inferChordName,fretNote,voicingAtShift,icon,compactChords,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
+  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,inferChordName,fretNote,voicingAtShift,icon,compactChords,layoutChordLine,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
 })();

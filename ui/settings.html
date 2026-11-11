@@ -428,6 +428,12 @@
           <option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">95%</option><option value="100">максимум · 100%</option>
         </select><span class="hint">Выше качество — крупнее файлы.</span></label>
       </div>
+      <div class="row" style="margin-top:10px">
+        <label class="f">Максимальный размер кадра<select data-k="prompter.frame_max_dimension" id="pr-frame-size" title="Кадры уменьшаются до выбранной длинной стороны перед сохранением">
+          <option value="1920">1920 px · минимум нагрузки</option><option value="2560" selected>2560 px · обычно</option><option value="3840">3840 px · крупный экран</option><option value="5120">5120 px · исходный размер</option>
+        </select><span class="hint">Уменьшение кадра сокращает память, нагрузку и размер встречи.</span></label>
+        <div class="hint" style="align-self:center">Во время записи распознавание текста с экрана не запускается. Текст можно распознать после встречи.</div>
+      </div>
       <p class="muted" style="margin-top:8px">Видео из сохранённых кадров и аудиозаписи создаётся автоматически после завершения встречи, параллельно с расшифровкой.</p>
       <p class="hint" id="pr-video-state" role="status" style="margin:6px 0 0"></p>
       <div class="row" style="margin-top:10px" id="pr-region-fields">
@@ -459,6 +465,7 @@
         <div class="actions" style="margin:12px 0 0"><button class="btn primary" id="pr-open">Открыть окно встречи</button></div>
         <p class="hint" style="margin-top:10px">Ещё: «Лира, включи режим встречи». Во время созвона виджет предложит его сам.</p></div>
     </div>
+    <div id="pr-interrupted" class="pr-list" role="status" aria-live="polite"></div>
     <h3 style="font-size:15px;margin:20px 0 8px">Прошлые встречи</h3>
     <div id="pr-list" class="pr-list"></div>
   </section>
@@ -467,7 +474,7 @@
 
   <section id="p-tasks" class="wide">
     <h1>Задачи</h1>
-<div class="actions" role="group" aria-label="Раздел задач"><button class="btn" id="tasks-work-tab" aria-pressed="true">Общие задачи</button><button class="btn" id="tasks-songs-tab" aria-pressed="false">Песни</button><button class="btn" id="tasks-sites-tab" aria-pressed="false">Сайты</button><button class="btn" id="tasks-articles-tab" data-p="articles" aria-pressed="false">Статьи</button><button class="btn" id="tasks-video-tab" data-p="video" aria-pressed="false">Видео</button></div>
+<div class="actions" role="group" aria-label="Раздел задач"><button class="btn" id="tasks-work-tab" aria-pressed="true">Общие задачи</button><button class="btn" id="tasks-projects-tab" aria-pressed="false" aria-controls="p-projects">Проекты</button><button class="btn" id="tasks-songs-tab" aria-pressed="false">Песни</button><button class="btn" id="tasks-sites-tab" aria-pressed="false">Сайты</button><button class="btn" id="tasks-articles-tab" data-p="articles" aria-pressed="false">Статьи</button><button class="btn" id="tasks-video-tab" data-p="video" aria-pressed="false">Видео</button></div>
 <section id="p-articles" class="wide" hidden><div id="content-app"></div></section><section id="p-video" class="wide" hidden><div id="video-app"></div></section><div id="tasks-work-content">
     <p class="lead">Большая работа в фоне: ассистент сам составляет план, выполняет шаги, пишет журнал и сообщает голосом, когда готово.
       Скажите «Агент, разберись…», «исправь в проекте…» — или поставьте задачу здесь. Для задач по коду он работает в копии проекта:
@@ -500,7 +507,42 @@
     <div class="switch"><div>Выполнять команды в проекте без вопроса<span>Тесты, сборка, git — в рабочей копии проекта. Выключено: ассистент спрашивает перед каждой командой.</span></div><label class="tg"><input type="checkbox" data-k="tasks.auto_run"><i></i></label></div>
     <div class="switch"><div>Самопроверка итога моделью<span>Перед «готово» итог ещё раз коротко и независимо смотрит модель: выполнена ли цель, есть ли обещанные файлы (немного расходует заряд). Готовые файлы кодом проверяются всегда — оборванный HTML, битая таблица, сломанный документ ассистент чинит сам.</span></div><label class="tg"><input type="checkbox" data-k="tasks.self_check"><i></i></label></div>
     <div class="switch"><div>Учиться на прошлых задачах<span>Раз в несколько задач ассистент делает выводы из своих ошибок — короткие правила в «Память/Уроки задач.md» (их можно править) — и соблюдает их дальше. А на ваших поправках в разговоре («нет, я же просил…») учится всегда: правила — в «Память/Уроки.md», их тоже можно править.</span></div><label class="tg"><input type="checkbox" data-k="tasks.learn"><i></i></label></div>
-  </div>  <div id="p-songs" hidden>
+  </div>
+  <div id="p-projects" hidden>
+    <h2>Проекты</h2>
+    <div class="actions"><button class="btn" id="projects-backup-tab" aria-expanded="false" aria-controls="projects-backup">Резервирование</button></div>
+    <div id="projects-backup" hidden>
+      <div class="actions">
+        <button class="btn" id="projects-add">Добавить проект</button>
+        <button class="btn primary" id="projects-run-batch" disabled>Запустить выбранные</button>
+      </div>
+      <div id="projects-list" aria-label="Проекты для резервирования"></div>
+      <p id="projects-status" class="hint" role="status"></p>
+      <form id="projects-form" class="prof on" hidden>
+        <h3 id="projects-title"></h3>
+        <div class="row">
+          <label class="f">Название проекта<input name="title" required maxlength="100"></label>
+          <label class="f">Названия и голосовые варианты<textarea name="aliases" rows="3" placeholder="По одному варианту в строке"></textarea><span class="hint">Например: dcnt.ru, DCNT, сайт DCNT, дсмастер. После слов «бэкап», «резерв» и «создай копию» Dewiar выберет проект по любому из этих вариантов.</span></label>
+        </div>
+        <label class="f">Папка проекта<input name="root" required placeholder="~/Documents/проект"></label>
+        <div class="row">
+          <label class="f">Что включать<textarea name="include" rows="4" required spellcheck="false"></textarea><span class="hint">Пути от папки проекта, по одному в строке. Точка означает весь проект.</span></label>
+          <label class="f">Что исключать<textarea name="exclude" rows="4" spellcheck="false"></textarea><span class="hint">Пути от папки проекта. Запись **/имя исключает это имя на любом уровне.</span></label>
+        </div>
+        <label class="f">Папка для ZIP и описи<input name="output_dir" required></label>
+        <h4>Куда отправлять копии</h4>
+        <div id="projects-destinations"></div>
+        <p class="hint">Для облачных дисков нужны подключения из сейфа. Для внешнего диска или папки синхронизации выберите «Локальная папка».</p>
+        <div class="actions"><button type="button" class="btn" id="projects-dest-add">Добавить назначение</button></div>
+        <div class="actions">
+          <button type="submit" class="btn primary" id="projects-save">Сохранить</button>
+          <button type="button" class="btn" id="projects-reset">По умолчанию</button>
+          <button type="button" class="btn" id="projects-run">Создать копию</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div id="p-songs" hidden>
     <div class="songs-head">
       <div><h1>Песни</h1><p class="lead">Личная библиотека песен: запись, текст по фразам, куплеты и припевы, предварительный подбор аккордов.</p></div>
       <div class="actions songs-actions"><button class="btn primary" id="songs-new-current">Разобрать текущую песню</button><button class="btn" id="songs-new-query">Найти песню</button><button type="button" class="btn song-icon-btn" id="songs-new-create" title="Создать новую песню: открыть форму названия и исполнителя" aria-label="Создать новую песню"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 4v8m-3-5h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button><button type="button" class="btn song-icon-btn" id="songs-instrumental-all" title="Караоке: запустить пакетную подготовку минусовок для всех песен с аудиозаписью" aria-label="Караоке: подготовить минусовки для всех песен"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
@@ -511,8 +553,8 @@
       <div class="songs-filters" role="group" aria-label="Фильтр песен">
         <button class="chip on" aria-pressed="true" data-song-status="">Все</button><button class="chip" aria-pressed="false" data-song-status="running">В работе</button><button class="chip" aria-pressed="false" data-song-status="batch">Пакетная обработка</button><button class="chip" aria-pressed="false" data-song-status="stopped">Остановились</button><button class="chip" aria-pressed="false" data-song-status="review">Проверить</button><button class="chip" aria-pressed="false" data-song-status="ready">Готовы</button>
       </div>
-      <div class="songs-tag-filters" role="group" aria-label="Фильтр по тегам"><span class="songs-filter-label">Теги:</span><button class="chip on" aria-pressed="true" data-song-tag="">Все</button><button class="chip" aria-pressed="false" data-song-tag="Компания">Компания</button><button class="chip" aria-pressed="false" data-song-tag="Мужская">Мужская</button><button class="chip" aria-pressed="false" data-song-tag="Любовь">Любовь</button><button class="chip" aria-pressed="false" data-song-tag="Шансон">Шансон</button><button class="chip" aria-pressed="false" data-song-tag="Бард">Бард</button><button class="chip" aria-pressed="false" data-song-tag="Грусть">Грусть</button><button class="chip" aria-pressed="false" data-song-tag="Юмор">Юмор</button><button class="chip" aria-pressed="false" data-song-tag="Дворовые">Дворовые</button><button class="chip" aria-pressed="false" data-song-tag="Народные">Народные</button><button class="chip" aria-pressed="false" data-song-tag="Рок">Рок</button></div>
-      <div class="songs-rating-filters" role="group" aria-label="Фильтр по оценке"><span class="songs-filter-label">Оценка:</span><button class="chip on" aria-pressed="true" data-song-rating="">Все</button><button class="chip" aria-pressed="false" data-song-rating="5" title="Песни с оценкой 5 звёзд">★★★★★</button><button class="chip" aria-pressed="false" data-song-rating="4" title="Песни с оценкой 4 звезды">★★★★</button><button class="chip" aria-pressed="false" data-song-rating="3" title="Песни с оценкой 3 звезды">★★★</button><button class="chip" aria-pressed="false" data-song-rating="2" title="Песни с оценкой 2 звезды">★★</button><button class="chip" aria-pressed="false" data-song-rating="1" title="Песни с оценкой 1 звезда">★</button></div>
+      <div class="songs-tag-filters" id="songs-tag-filters" role="group" aria-label="Фильтр по тегам"><button class="chip on" aria-pressed="true" data-song-tag="">Все</button></div>
+      <div class="songs-rating-filters" role="group" aria-label="Фильтр по оценке"><button class="chip on" aria-pressed="true" data-song-rating="">Все</button><button class="chip" aria-pressed="false" data-song-rating="5" title="Песни с оценкой 5 звёзд">★★★★★</button><button class="chip" aria-pressed="false" data-song-rating="4" title="Песни с оценкой 4 звезды">★★★★</button><button class="chip" aria-pressed="false" data-song-rating="3" title="Песни с оценкой 3 звезды">★★★</button><button class="chip" aria-pressed="false" data-song-rating="2" title="Песни с оценкой 2 звезды">★★</button><button class="chip" aria-pressed="false" data-song-rating="1" title="Песни с оценкой 1 звезда">★</button></div>
     </div>
     <div id="songs-empty" class="prof on songs-empty"><h2>Начните с песни</h2><p class="hint">Можно взять то, что сейчас играет в Яндекс Музыке, найти песню по названию или записать исполнение через микрофон.</p><div class="actions"><button class="btn primary" id="songs-empty-current">Разобрать текущую песню</button><button class="btn" id="songs-empty-query">Найти по названию</button><button type="button" class="btn song-icon-btn" id="songs-empty-mic" title="Создать песню и начать запись исполнения с микрофона" aria-label="Записать песню с микрофона"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0M12 16v4m-4 0h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>
     <div id="songs-list" class="songs-list" aria-live="polite"></div>
@@ -2031,6 +2073,7 @@
 <script src="assets/help-video-notes.js"></script>
 <script src="studio/core.js"></script>
 <script src="studio/tasks.js"></script>
+<script src="studio/projects.js"></script>
 <link rel="stylesheet" href="studio/songs.css">
 <script src="studio/song_sheet.js"></script>
 <script src="studio/song_review.js"></script>

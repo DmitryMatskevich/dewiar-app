@@ -43,6 +43,7 @@ def main():
         start, end = html.index('const core='), html.index('</script>', html.index('const core='))
         mock = '''window.rows=ROWS;const core={on(){},async call(cmd,a){
           if(cmd==='songs_list')return structuredClone(rows);
+          if(cmd==='songs_tags_list')return ['Тест'];
           if(cmd==='song_get')return structuredClone(rows.find(r=>r.song_id===a.song_id));
           throw Error('Unexpected command in read-only layout test: '+cmd);
         }};'''.replace('ROWS', json.dumps(rows).replace('</', '<\\/'))
@@ -74,21 +75,27 @@ def main():
                       const lyrics=es.filter(e=>e.classList.contains('song-paper-lyrics'));
                       const words=s=>s.trim().split(/\\s+/).filter(Boolean).join(' ');
                       return {
-                        no_stacks:visible.every((e,i)=>!e.classList.contains('song-paper-chords') || !visible[i-1]?.classList.contains('song-paper-chords')),
+                        no_stacks:visible.every((e,i)=>!e.classList.contains('song-paper-chords') || !visible[i-1]?.classList.contains('song-paper-chords') || !!visible[i-1]?.closest('.song-paper-pause')),
                         attached_to_lyrics:chords.every((e)=>{
                           const next=visible[visible.indexOf(e)+1];
+                          if(e.closest('.song-paper-pause'))return true;
                           return next && (next.classList.contains('song-paper-lyrics') || next.classList.contains('song-paper-instrumental')) && e.parentElement.classList.contains('song-paper-line') && e.parentElement===next.parentElement && Math.abs(next.getBoundingClientRect().top-e.getBoundingClientRect().bottom)<1;
                         }),
                         instrumental_labels:es.filter(e=>e.classList.contains('song-paper-instrumental')).length===SongSheet.sheetRows(row).filter(r=>r.kind==='instrumental').length,
                         one_visual_row:chords.every(e=>e.getBoundingClientRect().height<=parseFloat(getComputedStyle(e).lineHeight)+1),
                         fits:chords.every(e=>{const r=document.createRange();r.selectNodeContents(e);return r.getBoundingClientRect().right<=e.getBoundingClientRect().right+1}),
+                        contained:chords.every(e=>{const scroll=e.closest('.song-paper-scroll'),r=document.createRange();r.selectNodeContents(e);return scroll.getBoundingClientRect().right<=innerWidth&&r.getBoundingClientRect().right<=scroll.getBoundingClientRect().left+scroll.scrollWidth+1}),
+                        all_chords:(()=>{
+                          const raw=row.guitar_sheet.flatMap(l=>[...(l.chords?.length?l.chords:(l.cells||[]).flatMap(c=>(c.chords||[]).map(name=>({name})))),...(l.unplaced_chords||[])]).filter(c=>c.name&&c.name!=='N').map(c=>SongSheet.transpose(c.name,SongSheet.offset(row))).sort();
+                          return JSON.stringify(raw)===JSON.stringify([...document.querySelectorAll('.song-paper-body .song-chord-tip')].map(e=>e.textContent).sort());
+                        })(),
                         overflow:chords.flatMap(e=>{const r=document.createRange();r.selectNodeContents(e);const a=r.getBoundingClientRect(),b=e.getBoundingClientRect();return a.right>b.right+1?[{text:e.textContent,width:a.width,available:b.width}]:[]}),
                         all_words:words(lyrics.map(e=>e.textContent).join(' '))===words(row.guitar_sheet.map(l=>l.text).join(' ')),
                         copy_matches: (()=>{const copy=SongSheet.plainText(row), lyricText=words(row.guitar_sheet.filter(l=>l.text).map(l=>l.text).join(' ')), chordText=SongSheet.sheetRows(row).filter(r=>r.kind==='chords').flatMap(r=>r.text.split(/\\s+/)).filter(Boolean); return lyricText.split(/\\s+/).every(word=>copy.includes(word)) && chordText.every(chord=>copy.includes(chord)) && !['Проигрыш','Вступление','Окончание'].some(label=>copy.includes(label));})(),
                         chord_rows:chords.length
                       };
                     }''', row)
-                    assert all(result[k] for k in ('no_stacks', 'attached_to_lyrics', 'instrumental_labels', 'one_visual_row', 'fits', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
+                    assert all(result[k] for k in ('no_stacks', 'attached_to_lyrics', 'instrumental_labels', 'one_visual_row', 'contained', 'all_chords', 'all_words', 'copy_matches')), (row['title'], width, delta, result)
                     outcomes.append({'title': row['title'], 'width': width, 'shift': delta > 0, **result})
             assert tab.evaluate('JSON.stringify(rows)') == before
             if args.report and 'тоже есть душа' in row['title']:

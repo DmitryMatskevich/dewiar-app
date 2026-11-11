@@ -422,82 +422,113 @@ class TaskManager:
         return t
 
     def create_project_backup(self, project_id):
-        """Create a visible task and run the registered backup script without involving an LLM."""
-        from project_backups import PROJECT_BACKUPS
-        spec = PROJECT_BACKUPS.get(str(project_id or ""))
-        if not spec:
-            raise ValueError("Сценарий бэкапа для этого проекта не зарегистрирован.")
-        title = "Бэкап " + spec["title"]
-        goal = f"Создать резервную копию проекта {spec['title']} по зарегистрированному сценарию."
+        return self._create_project_backup_task([project_id], batch=False)
+
+    def create_project_backups(self, project_ids):
+        return self._create_project_backup_task(project_ids, batch=True)
+
+    def _create_project_backup_task(self, project_ids, batch):
+        from project_backups import configured_projects, resolve_projects
+
+        if self.host.s.get('privacy', 'files') == 'folder':
+            raise ValueError('Бэкап проектов недоступен при настройке «Файлы: только папка Dewiar».')
+        available = configured_projects(self.host.s)
+        ids = resolve_projects(project_ids, available)
+        profiles = {key: available[key] for key in ids}
+        names = [profile['title'] for profile in profiles.values()]
+        title = f'Бэкапы проектов ({len(ids)})' if batch else 'Бэкап ' + names[0]
+        goal = 'Создать и проверить резервные копии: ' + ', '.join(names) + '.'
         with self._lock:
             task = self.create(title, goal, start=False)
-            task.data.update(workflow="project-backup", backup_project_id=project_id,
-                             progress=[0, 1], activity="Подготовка сценария бэкапа…", finished=False)
-            (task.dir / "план.md").write_text(
-                f"# {title}\n\n**Цель:** {goal}\n\n- [x] Создать задачу и проверить зарегистрированный сценарий\n"
-                "- [ ] Создать архив и проверить результат\n- [ ] Записать путь, состав и контрольную сумму в итог\n",
-                encoding="utf-8")
-            task.journal(f"▶ Запущен зарегистрированный сценарий бэкапа проекта {spec['title']}.")
+            task.data.update(workflow='project-backup-batch' if batch else 'project-backup',
+                             backup_project_ids=ids, backup_project_id=ids[0],
+                             backup_profiles=profiles, progress=[0, len(ids)],
+                             activity='Подготовка резервного копирования…', finished=False)
+            (task.dir / 'план.md').write_text(f'# {title}\n\n' + ''.join(
+                f'- [ ] Создать и проверить копию «{name}»\n' for name in names), encoding='utf-8')
+            task.journal('▶ Запущено резервирование: ' + ', '.join(names))
             task.save()
             self.start(task.id)
-            self.host.emit("tasks", tasks=self.list())
+            self.host.emit('tasks', tasks=self.list())
             return task
 
     def _run_project_backup(self, task):
-        """Long-running local project backup; status and final report are visible in Tasks and chat."""
-        from project_backups import PROJECT_BACKUPS, describe_result, run_project_backup
-        project_id = str(task.data.get("backup_project_id") or "")
-        spec = PROJECT_BACKUPS.get(project_id)
-        project_title = spec["title"] if spec else project_id or "неизвестный проект"
-        try:
-            if not spec:
-                raise ValueError("Сценарий бэкапа удалён из реестра.")
-            task.data.update(activity="Сценарий собирает исходники и создаёт ZIP…", progress=[0, 1], finished=False)
-            task.journal("⏳ Сценарий запущен; проверка состава и ZIP выполняется внутри него.")
-            task.save(); self._beat(task, "backup script"); self._emit(task)
+        from backup_destinations import deliver_backup
+        from project_backups import configured_projects, describe_result, run_project_backup
 
-            def progress(seconds):
-                if task.cancel.is_set():
-                    return
-                mins, secs = divmod(seconds, 60)
-                task.data.update(activity=f"Создаю архив… прошло {mins} мин {secs} с", progress=[0, 1])
-                task.save(); self._beat(task, "backup script"); self._emit(task)
+        ids = task.data.get('backup_project_ids') or [task.data.get('backup_project_id')]
+        profiles = task.data.get('backup_profiles') or configured_projects(self.host.s)
+        reports, steps, errors = [], [], []
+        stopped = False
 
-            run = run_project_backup(project_id, cancel=task.cancel, on_progress=progress)
-            if run["returncode"] != 0:
-                raise RuntimeError(f"Код завершения {run['returncode']}.\n{run['output'][-2500:]}")
-            facts = describe_result(project_id, run["output"])
-            archive = Path(facts["archive"]) if facts["archive"] else None
-            manifest = Path(facts["manifest"]) if facts["manifest"] else None
-            if not archive or not archive.is_file() or not manifest or not manifest.is_file() or not facts["sha256"]:
-                raise RuntimeError("Сценарий завершился без подтверждённого архива, manifest или SHA-256.\n" + run["output"][-2500:])
-            summary = (f"Бэкап проекта {spec['title']} завершён.\n"
-                       f"Архив: {archive}\nФайлов в архиве: {facts['included'] or 'не указано'}; "
-                       f"исключённых путей: {facts['excluded'] or 'не указано'}; размер: {facts['size'] or 'не указан'}.\n"
-                       f"SHA-256: {facts['sha256']}\nОпись: {manifest}\n{facts['scope_note']}")
-            task.data.update(status="done", finished=True, result=summary, error="", activity="", progress=[1, 1], outputs=[])
-            task.journal("✅ " + summary.replace("\n", " · "))
-            task.data["updated"] = _now()
-            (task.dir / "итог.md").write_text(summary + "\n", encoding="utf-8")
-            (task.dir / "план.md").write_text(
-                f"# {task.title}\n\n**Цель:** {task.goal}\n\n- [x] Создать задачу и проверить зарегистрированный сценарий\n"
-                "- [x] Создать архив и проверить результат\n- [x] Записать путь, состав и контрольную сумму в итог\n",
-                encoding="utf-8")
-            task.save(); self._beat(task); self._emit(task)
-            self.host.announce(f"Бэкап {spec['title']} завершён. В архиве {facts['included']} файлов; ZIP проверен.\n"
-                               f"Архив: {archive}\nSHA-256: {facts['sha256']}\nИтог и manifest — в задаче «{task.title}».")
-        except InterruptedError as exc:
-            summary = str(exc).strip() or "Создание бэкапа остановлено пользователем."
-            task.data.update(status="stopped", finished=False, result=summary, error="", activity="")
-            task.journal("⏹ " + summary)
-            task.save(); self._beat(task); self._emit(task)
-            self.host.announce(f"Задача «{task.title}» остановлена. Полный архив не подтверждён; подробности — в разделе «Задачи».")
-        except Exception as exc:  # noqa: BLE001 — status must be persisted and announced even for script/IO errors
-            summary = f"Бэкап {project_title} не подтверждён: {exc}"
-            task.data.update(status="failed", finished=False, result=summary, error=str(exc)[:2500], activity="")
-            task.journal("❌ " + summary)
-            task.save(); self._beat(task); self._emit(task)
-            self.host.announce(f"Задача «{task.title}» завершилась с ошибкой. Бэкап не подтверждён; подробности — в задаче.")
+        def show(message):
+            task.data['activity'] = message
+            task.save(); self._beat(task, 'project backup'); self._emit(task)
+
+        for index, key in enumerate(ids):
+            if task.cancel.is_set():
+                stopped = True
+                break
+            profile = profiles.get(key)
+            title = profile['title'] if profile else str(key or 'Проект')
+            failed = False
+            try:
+                if self.host.s.get('privacy', 'files') == 'folder':
+                    raise ValueError('Файлы ограничены папкой Dewiar.')
+                if not profile:
+                    raise ValueError('Настройки проекта не найдены.')
+                show(f'{title} ({index + 1}/{len(ids)}): создаю ZIP…')
+
+                def progress(done, total, seconds):
+                    show(f'{title}: добавлено {done} из {total} файлов, {seconds} с')
+
+                run = run_project_backup(key, profile=profile, cancel=task.cancel, on_progress=progress)
+                facts = describe_result(key, run['output'], profile)
+                if run['returncode'] or not facts['archive'] or not facts['verified'] or not facts['sha256']:
+                    raise RuntimeError('Сценарий не подтвердил целостность ZIP.')
+                archive, manifest = Path(facts['archive']), Path(facts['manifest'])
+                if not archive.is_file() or not manifest.is_file():
+                    raise RuntimeError('Архив или его опись не найдены.')
+                reports.append(f'{title}: {archive} · {facts["included"]} файлов, {facts["size"]}\n'
+                               f'SHA-256: {facts["sha256"]}\nОпись: {manifest}')
+                task.journal(f'✅ Проверен ZIP: {archive}')
+
+                def delivery_progress(label, sent, size):
+                    show(f'{title} → {label}: {sent * 100 // max(size, 1)}%')
+
+                local_only = self.host.s.get('privacy', 'local_only')
+                for label, ok, detail in deliver_backup(profile, archive, facts['sha256'], self.host.vault,
+                                                         task.cancel, delivery_progress, local_only=local_only):
+                    line = f'{label} · {detail}'
+                    reports.append(line)
+                    task.journal(('✅ ' if ok else '❌ ') + line)
+                    failed |= not ok
+                if failed:
+                    errors.append(f'{title}: не все назначения подтверждены')
+            except InterruptedError as exc:
+                stopped = True
+                reports.append(str(exc))
+                break
+            except Exception as exc:
+                failed = True
+                errors.append(f'{title}: {exc}')
+                reports.append(errors[-1])
+                task.journal('❌ ' + errors[-1])
+            steps.append(f'- [{" " if failed else "x"}] Резервная копия «{title}»')
+            task.data['progress'] = [index + 1, len(ids)]
+            task.save(); self._emit(task)
+        if stopped and not reports:
+            reports.append('Резервное копирование остановлено пользователем.')
+        result = '\n'.join(reports)
+        status = 'stopped' if stopped else 'failed' if errors else 'done'
+        task.data.update(status=status, finished=status == 'done', result=result, activity='',
+                         error='; '.join(errors)[:2500], updated=_now(), outputs=[])
+        (task.dir / 'итог.md').write_text(result + '\n', encoding='utf-8')
+        for key in ids[len(steps):]:
+            steps.append(f'- [ ] Резервная копия «{profiles.get(key, {}).get("title", key)}»')
+        (task.dir / 'план.md').write_text(f'# {task.title}\n\n' + '\n'.join(steps) + '\n', encoding='utf-8')
+        task.save(); self._beat(task); self._emit(task)
+        self.host.announce(result + f'\nПодробности в задаче «{task.title}».')
 
     def create_link_download(self, urls, action):
         from media_transcription import unique_sources
@@ -1418,7 +1449,7 @@ class TaskManager:
         t.beat, t.beat_tool, t.run_t0 = _t.monotonic(), "", _t.monotonic()
         t.save()
         runner = (self._run_link_download if t.data.get('workflow') == 'link-download' else
-                  self._run_project_backup if t.data.get('workflow') == 'project-backup' else
+                  self._run_project_backup if t.data.get('workflow') in ('project-backup', 'project-backup-batch') else
                   self._run_media if t.data.get('workflow') == 'media-transcription' else
                   self._run_media_translation if t.data.get('workflow') == 'video-translation' else
                   self._run_file_conversion if t.data.get('workflow') == 'file-conversion' else

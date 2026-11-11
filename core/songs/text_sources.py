@@ -113,12 +113,17 @@ def command(store, action, args, *, fetch=fetch_source):
         if not isinstance(indexes,list) or not indexes or any(type(i)!=int or not 0<=i<len(report.get('candidates',[])) for i in indexes):
             raise ValueError('Выберите исправления для применения')
         phrases=copy.deepcopy(row['phrases']);histories=copy.deepcopy(row.get('phrase_history',{}));chords=copy.deepcopy(row.get('chords',[]));count=0
+        # A correction across a line boundary also clears the cut-off part
+        # in the neighbouring line («при» | «подавателей в галфака»).
+        edits=[(report['candidates'][i],part,new) for i in sorted(set(indexes))
+               for part,new in [(report['candidates'][i]['current'],report['candidates'][i]['alternative']['text']),
+                                *[(extra,'') for extra in report['candidates'][i]['current'].get('also',[])]]]
         for phrase in phrases:
-            changes=[report['candidates'][i] for i in set(indexes) if report['candidates'][i]['current']['phrase_id']==phrase['phrase_id']]
+            changes=[(item,c,new) for item,c,new in edits if c['phrase_id']==phrase['phrase_id']]
             if not changes:continue
             before=copy.deepcopy(phrase); edge=len(phrase['text'])
-            for item in sorted(changes,key=lambda i:i['current']['char_start'],reverse=True):
-                c=item['current'];a,b=c['char_start'],c['char_end'];new=item['alternative']['text']
+            for item,c,new in sorted(changes,key=lambda e:e[1]['char_start'],reverse=True):
+                a,b=c['char_start'],c['char_end']
                 if item.get('status')=='user_applied' or b>edge or phrase['text'][a:b]!=c['text']:
                     raise ValueError('Исправления пересекаются или текст уже изменён — повторите сверку')
                 edit_span(phrase,a,b,new);edge=a
@@ -127,9 +132,11 @@ def command(store, action, args, *, fetch=fetch_source):
                     if anchor.get('phrase_id')==phrase['phrase_id'] and isinstance(at,int):
                         if at>=b:anchor['grapheme_index']+=len(new)-(b-a)
                         elif at>=a:anchor['grapheme_index']=a
-                item['status']='user_applied';count+=1
             history=histories.setdefault(phrase['phrase_id'],{'versions':[before],'cursor':0})
             history['versions']=history['versions'][:history['cursor']+1]+[copy.deepcopy(phrase)];history['cursor']+=1
+        for item,c,new in edits:
+            if c is item['current']:
+                item['status']='user_applied';count+=1
         report['user_applied']=True;report['user_applied_count']=report.get('user_applied_count',0)+count
         patch=result_patch(row,report)
         patch.update(phrases=phrases,words=[w for p in phrases for w in p.get('words',[])],chords=chords,phrase_history=histories)

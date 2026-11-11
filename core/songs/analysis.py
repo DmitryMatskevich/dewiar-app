@@ -55,9 +55,21 @@ class SongAnalyzer:
 
     @staticmethod
     def _reference_context(folder, row, current=False):
-        data={k:copy.deepcopy(row.get(k)) for k in ('title','search_query','artist','source_candidates')}
+        data={k:copy.deepcopy(row.get(k)) for k in ('title','search_query','artist','source_candidates','source_ref')}
         data['source_candidates']=data.get('source_candidates') or []
         data['protected_phrase_ids']=list(row.get('phrase_history') or {})
+        # The words are often under the video (description, a comment). The
+        # song worker has no yt-dlp for comments, so the app reads them here.
+        videos=[c for c in data['source_candidates'] if c.get('kind')=='youtube' and c.get('url')]
+        videos.sort(key=lambda c:c.get('url')!=data.get('source_ref'))
+        texts={}
+        for video in videos[:2]:
+            try:
+                from .text_reference import youtube_texts
+                texts[video['url']]=youtube_texts(video['url'])
+            except Exception:
+                pass
+        if texts:data['youtube_texts']=texts
         if current:data['current_phrases']=copy.deepcopy(row.get('phrases') or [])
         (folder/'reference_context.json').write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
 

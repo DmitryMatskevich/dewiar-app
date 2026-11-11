@@ -589,8 +589,11 @@ async function prMeetingBar(path) {
   return bar;
 }
 function loadMeetings() {
-  core.call("prompter_meetings").then(l => {
+  Promise.all([core.call("prompter_meetings"), core.call("prompter_interrupted")]).then(([l, interrupted]) => {
     prMeetings = l || [];
+    const recovery = $("#pr-interrupted");
+    recovery.innerHTML = (interrupted || []).map((m, i) => `<div class="pr-row"><div class="pr-it pr-static"><b>${escH(m.title || m.name)}</b><span>Прерванная запись · ${Math.floor((m.duration_s || 0) / 60)} мин · WAV ${m.audio_mb} МБ</span></div>
+      <button class="btn primary pr-recover" data-recover="${i}">Восстановить расшифровку и итог</button></div>`).join("");
     const nm = (m) => m.name.replace(/^(\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d) /, "$3.$2.$1 $4:$5 — ");
     const parts = (m) => [m.audio && "аудио", Object.keys(m.tracks || {}).length > 1 && "две дорожки", m.video && "видео", m.frames_count && `кадров: ${m.frames_count}`]
       .filter(Boolean).join(" · ") || "только итог";
@@ -616,6 +619,13 @@ function loadMeetings() {
     $$("#pr-list .pr-del").forEach(b => b.onclick = async () => {
       if (!await ask(`Удалить итог встречи «${b.dataset.n}»? Файл уйдёт в корзину — вернуть можно оттуда.`)) return;
       core.call("prompter_meeting_remove", { path: b.dataset.p }).then(() => { toast("Итог встречи — в корзине"); loadMeetings(); }).catch(e => toast(e.message, 4000));
+    });
+    $$("#pr-interrupted .pr-recover").forEach(b => b.onclick = async () => {
+      const meeting = interrupted[+b.dataset.recover]; if (!meeting) return;
+      if (!await ask(`Восстановить запись «${meeting.title}» за ${Math.floor((meeting.duration_s || 0) / 60)} мин? WAV останется на месте; будут созданы расшифровка и итог.`)) return;
+      b.disabled = true; b.textContent = "Восстанавливаю…";
+      core.call("prompter_recover", { id: meeting.id }).then(() => { toast("Восстановление записи запущено"); loadMeetings(); })
+        .catch(e => { b.disabled = false; b.textContent = "Восстановить расшифровку и итог"; toast(e.message, 4000); });
     });
   }).catch(() => {});
 }

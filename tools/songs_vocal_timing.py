@@ -19,7 +19,9 @@ writes with a revision check, so a card edited meanwhile is skipped.
                          text was recognized («Пение — текст не распознан»)
   ... --realign-gaps     lines around a pause in which somebody sings while no
                          text is there (a line packed too short); kept only if
-                         less singing stays without text (worker.realign_voiced_gaps)
+                         less singing stays without text (worker.realign_voiced_gaps);
+                         and a line placed where nobody sings, moved to the voice
+                         another recognizer heard it in (worker.realign_silent_lines)
   ... --realign-grid     lines whose recognizer times were a whole-second grid
                          (30–32, 32–34 … s) are aligned again as one passage
                          (worker.realign_grid_runs; needs the song models)
@@ -114,9 +116,11 @@ def _wav(audio, tmp):
 
 
 def realign_grid(audio, phrases, activity, hypotheses, title, vocals=None, gaps=False):
-    """Run the worker's joint alignment: whole-second grid passages, or voiced pauses."""
-    from songs.worker import realign_grid_runs, realign_voiced_gaps
-    run, key = (realign_voiced_gaps, 'gap_realignment') if gaps else (realign_grid_runs, 'grid_realignment')
+    """Run the worker's joint alignment: whole-second grid passages, voiced
+    pauses (``gaps=True``) or lines placed where nobody sings (``gaps='silent'``)."""
+    from songs.worker import realign_grid_runs, realign_silent_lines, realign_voiced_gaps
+    run, key = ((realign_silent_lines, 'silent_line_realignment') if gaps == 'silent' else
+                (realign_voiced_gaps, 'gap_realignment') if gaps else (realign_grid_runs, 'grid_realignment'))
     with tempfile.TemporaryDirectory(prefix='dewiar-grid-') as tmp:
         hypothesis = {'phrases': copy.deepcopy(phrases)}
         try:
@@ -233,6 +237,19 @@ def main():
                                   f"{seconds(p.get('start_ms'))}–{seconds(p.get('end_ms'))}", flush=True)
                     else:
                         print(f"  — {title}: пауза {seconds(run['window_ms'][0])}–{seconds(run['window_ms'][1])} "
+                              f"не переставлена: {run.get('reason')}", flush=True)
+            if vt.silent_line_groups(fitted, activity, hypotheses, duration):
+                moved, fitted, silent = realign_grid(audio, fitted, activity, hypotheses, title, vocals, gaps='silent')
+                item['silent_line_realignment'] = silent
+                regridded += moved
+                for run in (silent or {}).get('runs', []):
+                    lines = [p for p in fitted if p.get('phrase_id') in run.get('phrase_ids', [])]
+                    if run.get('applied'):
+                        for p in lines:
+                            print(f"    {str(p.get('text'))[:48]!r}: {seconds(p.get('grid_source_ms', [None])[0])} → "
+                                  f"{seconds(p.get('start_ms'))}–{seconds(p.get('end_ms'))}", flush=True)
+                    else:
+                        print(f"  — {title}: строка без голоса {seconds(run['window_ms'][0])}–{seconds(run['window_ms'][1])} "
                               f"не переставлена: {run.get('reason')}", flush=True)
         placed = 0
         if args.placeholders:

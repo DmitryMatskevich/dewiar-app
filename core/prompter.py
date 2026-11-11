@@ -245,6 +245,17 @@ class Prompter:
         self._frames_enabled = False
         self._frame_interval = 0.5
         self._frame_quality = 85
+        self._frame_max_dimension = 2560
+        self._capture_count = 0
+        self._capture_saved = 0
+        self._capture_skipped = 0
+        self._capture_last_ms = 0
+        self._capture_log_path = None
+        self._capture_heartbeat_t = 0.0
+        self._capture_safety_level = 0
+        self._capture_rss_mb = None
+        self._capture_cpu_pct = None
+        self._capture_system_available_mb = None
         self._video_enabled = False
         self._video_dir = None
         self._video_frames = 0
@@ -668,6 +679,11 @@ class Prompter:
             rec["system_backend"] = self._system_kind
             rec["microphone_error"] = self._mic_error
             rec.update({"frame_interval": self._frame_interval, "frame_quality": self._frame_quality,
+                        "frame_max_dimension": self._frame_max_dimension,
+                        "capture_count": self._capture_count, "capture_saved": self._capture_saved,
+                        "capture_skipped": self._capture_skipped, "capture_last_ms": self._capture_last_ms,
+                        "process_rss_mb": self._capture_rss_mb, "process_cpu_pct": self._capture_cpu_pct,
+                        "system_available_mb": self._capture_system_available_mb,
                         "video": bool(self._video_enabled), "video_frames": self._video_frames,
                         "video_path": Path(self._video_path).name if self._video_path else "",
                         "video_file": self._video_relative_path(), "video_error": self._video_error,
@@ -730,6 +746,120 @@ class Prompter:
         d = STATE_DIR / "prompter"
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def _active_manifest_path(self):
+        return self._session_dir / "session.active.json" if self._session_dir else None
+
+    def _clear_active_manifest(self):
+        path = self._active_manifest_path()
+        if path:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                log.warning("🎬 Маркер встречи не удалён после завершения: %s", exc)
+
+    def _write_active_manifest(self):
+        path = self._active_manifest_path()
+        if not path:
+            return
+        workspace = Path(self.eng.workspace.ensure()).resolve()
+        def relative(value):
+            try:
+                return Path(value).resolve().relative_to(workspace).as_posix() if value else ""
+            except (OSError, ValueError):
+                return ""
+        payload = {"version": 1, "meeting": dict(self.meeting),
+                   "record_path": relative(self._record_path),
+                   "track_paths": {k: relative(v) for k, v in self._track_paths.items()},
+                   "transcript_path": relative(self._transcript_path),
+                   "session_dir": relative(self._session_dir),
+                   "saved_at": time.time()}
+        pending = path.with_suffix(".json.tmp")
+        try:
+            pending.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            os.replace(pending, path)
+        except OSError as exc:
+            log.warning("🎬 Маркер восстановления записи не сохранён: %s", exc)
+
+    def interrupted_meetings(self):
+        """List deferred meeting recordings whose finalization marker survived a crash."""
+        root = (Path(self.eng.workspace.ensure()) / "Встречи").resolve()
+        rows = []
+        try:
+            manifests = list((root / "Расшифровки").glob("*/session.active.json"))
+        except OSError:
+            return []
+        for path in manifests:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                m = data.get("meeting") or {}
+                audio = (root.parent / data["record_path"]).resolve()
+                audio.relative_to(root.parent)
+                if not audio.is_file() or audio.stat().st_size <= 44:
+                    continue
+                from meeting_video import audio_duration
+                seconds = audio_duration(audio)
+                if seconds <= 0:
+                    continue
+                rows.append({"id": str(m.get("id") or ""), "name": path.parent.name,
+                             "title": str(m.get("title") or "Встреча"), "started": float(m.get("started") or 0),
+                             "duration_s": round(seconds), "audio_mb": round(audio.stat().st_size / 1048576, 1),
+                             "manifest": path.relative_to(root).as_posix()})
+            except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+                continue
+        return sorted(rows, key=lambda item: item["started"], reverse=True)
+
+    def recover_interrupted(self, meeting_id):
+        """Rebuild an interrupted recording's transcript and summary from its WAVs."""
+        if self.on or self._post_busy:
+            raise ValueError("Сначала завершите обработку текущей встречи.")
+        root = (Path(self.eng.workspace.ensure()) / "Встречи").resolve()
+        match = next((row for row in self.interrupted_meetings() if row["id"] == str(meeting_id)), None)
+        if not match:
+            raise ValueError("Прерванная запись не найдена или уже восстановлена.")
+        manifest = (root / match["manifest"]).resolve()
+        manifest.relative_to(root)
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        workspace = root.parent
+        def checked(rel):
+            result = (workspace / str(rel)).resolve()
+            result.relative_to(workspace)
+            return str(result)
+        meeting = dict(data.get("meeting") or {})
+        meeting["ended"] = float(meeting.get("ended") or time.time())
+        self.meeting = meeting
+        self._record_path = checked(data["record_path"])
+        self._track_paths = {k: checked(v) for k, v in (data.get("track_paths") or {}).items() if v}
+        self._transcript_path = checked(data["transcript_path"])
+        self._session_dir = Path(checked(data["session_dir"]))
+        self._capture_log_path = str(manifest.parent / "session.log")
+        self._frame_events = []
+        events_file = Path(self._session_dir) / "frames.jsonl"
+        try:
+            self._frame_events = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, ValueError):
+            self._frame_events = []
+        self._screenshots = []
+        for event in self._frame_events:
+            self._screenshots.append({"path": event.get("path", ""), "t": event.get("elapsed_seconds", 0), "ocr": ""})
+        self.lines = [{"who": "screen", "kind": "screen", "text": "Снимок экрана", "path": x["path"],
+                       "t": round(float(x.get("audio_seconds") or 0), 1), "ocr": ""} for x in self._frame_events]
+        self._video_enabled = bool(self._frame_events)
+        self._video_frames = 0
+        self._summary_path = ""
+        self._record_error = ""
+        self._post_busy = True
+        job = self._completed_snapshot()
+        job._job_owner = self
+        job._summary_busy = True
+        self._completed_job = job
+        self._post_busy = False
+        self._capture_log("recovery_start", duration_s=match["duration_s"])
+        job._emit("summary", summary="", busy=True, phase="transcribe")
+        thread = threading.Thread(target=job._post_transcribe, name="prompter-recovery", daemon=True)
+        self._post_thread = thread
+        thread.start()
+        return self.public()
 
     def add_file(self, name="", data=None, path=""):
         """Файл встречи (из окна — данные, из диалога — путь): текст и отрывки для поиска. -> {name, chars}."""
@@ -1200,9 +1330,10 @@ class Prompter:
 
     def start(self, title="", goal="", mode="auto", them=True, me=True, knowledge=False, keep_text=False, place="online", nudge=True,
               participants="", topics="", record=False, deferred=True, source="system", consent=False, auto_frames=False,
-              auto_interval=0.5, frame_quality=85, frame_video=False, auto_first_frame=True,
+              auto_interval=1.0, frame_quality=85, frame_video=False, auto_first_frame=True,
               capture_source="screen", capture_region=None, capture_application="", scheduled_end=None, record_source=None,
-              schedule_id=None, record_me=None, continue_group=False, speaker_mode=None, expected_speakers=None):
+              schedule_id=None, record_me=None, continue_group=False, speaker_mode=None, expected_speakers=None,
+              frame_max_dimension=2560):
         """Начать встречу. place: online — собеседник по звуку компьютера, вы — микрофон; live — очная встреча,
         один микрофон, кто говорит — по голосу (нужен запомненный голос владельца)."""
         if self.on:
@@ -1264,6 +1395,10 @@ class Prompter:
             self._frame_quality = max(40, min(100, int(frame_quality or 85)))
         except (TypeError, ValueError):
             self._frame_quality = 85
+        try:
+            self._frame_max_dimension = max(1280, min(5120, int(frame_max_dimension or 2560)))
+        except (TypeError, ValueError):
+            self._frame_max_dimension = 2560
         self._video_enabled = bool(auto_frames)
         self._frames_enabled = bool(auto_frames)
         self._video_dir = None
@@ -1339,18 +1474,32 @@ class Prompter:
             self._stop = stop_ev
             self.on = True
         self._transcript_open(self.meeting["title"])
+        self._capture_count = self._capture_saved = self._capture_skipped = 0
+        self._capture_last_ms = 0
+        self._capture_safety_level = 0
+        self._capture_rss_mb = self._capture_cpu_pct = self._capture_system_available_mb = None
+        self._session_dir = Path(self._transcript_path).parent / Path(self._transcript_path).stem
+        self._capture_log_path = self._session_dir / "session.log" if record else None
+        if record:
+            self._session_dir.mkdir(parents=True, exist_ok=True)
         # Первый кадр — полезная точка отсчёта протокола. По умолчанию он
         # делается только для записываемой встречи или при включённых кадрах;
         # отказ в разрешении не отменяет саму запись.
         if auto_first_frame and (record or auto_frames) and not screen_warning:
             try:
-                self.capture_frame(auto=False, ocr=True)
+                self.capture_frame(auto=False, ocr=False)
             except Exception as exc:  # noqa: BLE001
                 self.status = "первый снимок не сделан: " + str(exc)[:160]
                 log.info("🎬 Первый кадр не сохранён: %s", exc)
         if record:
             try:
                 self._record_open(self.meeting["title"], tracks=("them", "me") if dual else ())
+                self._write_active_manifest()
+                self._capture_heartbeat_t = time.monotonic()
+                self._t0 = self._capture_heartbeat_t
+                self._capture_log("start", interval_s=self._frame_interval, quality=self._frame_quality,
+                                  max_dimension=self._frame_max_dimension, source=self._capture_source,
+                                  dual_audio=dual, deferred=bool(deferred))
                 # Оба источника открывает поток встречи; обычный захват
                 # ассистента на это время отдаём ему, чтобы ассистент не
                 # отвечал на реплики разговора.
@@ -1574,6 +1723,8 @@ class Prompter:
         job = None
         try:
             self._finish_capture()
+            if not summary:
+                self._clear_active_manifest()
             if stt_thread is not None and stt_thread is not threading.current_thread() and stt_thread.is_alive():
                 stt_thread.join(timeout=60)
                 if stt_thread.is_alive():
@@ -2238,6 +2389,8 @@ class Prompter:
         """Поток prompter-watch: «замешкались» после вопроса и долгая пауза в разговоре."""
         stop_ev = stop_ev or self._stop
         while not stop_ev.wait(0.5):
+            if self.meeting.get("record"):
+                self._capture_heartbeat()
             m = self.meeting
             if self.paused or m.get("mode") != "auto" or not m.get("nudge", True):
                 continue
@@ -2466,6 +2619,10 @@ class Prompter:
         """
         if not self.on:
             raise ValueError("сначала начните встречу")
+        started = time.monotonic()
+        self._capture_count += 1
+        if self.meeting.get("record"):
+            ocr = False
         if data is None:
             from eyes import EyesError, capture_screen
             from tools import desktop_env
@@ -2473,7 +2630,9 @@ class Prompter:
             try:
                 data = capture_screen(desktop_env(), source=self._capture_source,
                                       region=self._capture_region, application=self._capture_application,
-                                      exclude_dewiar=MAC and self._capture_source in ("screen", "region"))
+                                      exclude_dewiar=MAC and self._capture_source in ("screen", "region"),
+                                      max_dimension=self._frame_max_dimension if auto or self.meeting.get("record") else 0,
+                                      quality=quality or self._frame_quality)
             except (EyesError, PermissionError, OSError) as exc:
                 raise ValueError(str(exc)) from exc
         from meeting_video import frame_stamp, write_frame
@@ -2499,18 +2658,22 @@ class Prompter:
         if auto and sig is not None:
             verdict, info = self._frame_triage(sig)
             if verdict == "skip":
+                self._capture_skipped += 1
+                self._capture_last_ms = round((time.monotonic() - started) * 1000)
                 return {"skipped": True, "reason": info}
             if verdict == "revisit":
                 # Вернулись к прошлому слайду: новый файл не нужен, но в шкалу времени
                 # (и в видео) сцена возвращается в текущий момент.
                 self._remember_frame(info, stamp)
                 self._remember_scene(sig, info)
+                self._capture_saved += 1
                 existing = next((x for x in self._screenshots if x.get("path") == info), {"path": info})
                 return dict(existing, revisit=True)
         digest = hashlib.sha1(data).hexdigest()
         if any(x.get("sha1") == digest for x in self._screenshots):
             existing = next(x for x in self._screenshots if x.get("sha1") == digest)
             self._remember_frame(existing["path"], stamp)
+            self._capture_skipped += 1
             return dict(existing)
         if self._session_dir is None:
             root = Path(self._transcript_path).parent if self._transcript_path else self._dir
@@ -2535,6 +2698,8 @@ class Prompter:
                 "path": rel, "ocr": text}
         entry = {"path": rel, "ocr": text, "sha1": digest, "t": t, **stamp}
         self._screenshots.append(entry)
+        self._capture_saved += 1
+        self._capture_last_ms = round((time.monotonic() - started) * 1000)
         self._remember_scene(sig, rel)
         self._remember_frame(rel, stamp)
         with self._lock:
@@ -2542,14 +2707,6 @@ class Prompter:
             self.lines = self.lines[-self.MAX_LINES:]
         self._transcript_write(line)
         self._emit("line", line=line)
-        if ocr and auto:
-            try:
-                self._ocr_q.put_nowait((data, entry, line, self._session))
-                if self._ocr_thread is None or not self._ocr_thread.is_alive():
-                    self._ocr_thread = threading.Thread(target=self._ocr_loop, args=(self._stop,), name="meeting-ocr", daemon=True)
-                    self._ocr_thread.start()
-            except queue.Full:
-                log.warning("🎬 OCR не успевает: кадр сохранён без текста")
         self._state()
         return dict(entry)
 
@@ -2717,15 +2874,102 @@ class Prompter:
         """Проверять экран с заданным интервалом; неизменившиеся сцены отбрасывать."""
         stop_ev = stop_ev or self._stop
         failures = 0
-        while self.on and self._frames_enabled and not stop_ev.wait(self._frame_interval):
+        interval = max(0.5, float(self._frame_interval))
+        next_tick = time.monotonic()
+        while self.on and self._frames_enabled:
+            next_tick += interval
+            if stop_ev.wait(max(0.0, next_tick - time.monotonic())):
+                break
             try:
                 self.capture_frame(auto=True)
                 failures = 0
+                self._capture_heartbeat()
             except Exception as exc:  # noqa: BLE001 — отсутствие Screen Recording не останавливает встречу
                 failures += 1
                 if failures in (1, 5):
                     self.status = "автокадры недоступны: " + str(exc)[:160]
+                    self._capture_log("capture_error", error=str(exc)[:300])
                     self._state()
+                if failures >= 5:
+                    self._frames_enabled = False
+                    self._capture_log("frames_disabled", reason="5 consecutive capture errors")
+                    self.status = "Автокадры остановлены после пяти ошибок; звук продолжает записываться. " + str(exc)[:120]
+                    self._state()
+                    break
+            updated_interval = max(0.5, float(self._frame_interval))
+            if updated_interval != interval:
+                interval = updated_interval
+                next_tick = max(next_tick, time.monotonic())
+            late = time.monotonic() - next_tick
+            if late >= interval:
+                skipped = int(late // interval)
+                next_tick += skipped * interval
+                self._capture_log("capture_ticks_skipped", count=skipped, lag_s=round(late, 2))
+
+    def _capture_log(self, event, **values):
+        path = self._capture_log_path
+        if not path:
+            return
+        try:
+            from datetime import datetime
+            row = {"at": datetime.now().astimezone().isoformat(timespec="seconds"), "event": event,
+                   "elapsed_s": round(time.monotonic() - self._t0, 1), "frames": self._capture_count,
+                   "saved": self._capture_saved, "skipped": self._capture_skipped,
+                   "last_capture_ms": self._capture_last_ms, "ocr": "disabled_during_recording", **values}
+            with Path(path).open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+        except OSError as exc:
+            log.warning("🎬 Журнал встречи не записан: %s", exc)
+
+    def _capture_heartbeat(self):
+        now = time.monotonic()
+        if now - self._capture_heartbeat_t < 30:
+            return
+        self._capture_heartbeat_t = now
+        try:
+            import psutil
+            proc = psutil.Process()
+            memory = round(proc.memory_info().rss / (1024 ** 2))
+            cpu = round(proc.cpu_percent(interval=None), 1)
+            available = round(psutil.virtual_memory().available / (1024 ** 2))
+        except Exception:
+            memory = cpu = available = None
+        self._capture_rss_mb, self._capture_cpu_pct = memory, cpu
+        self._capture_system_available_mb = available
+        with self._record_lock:
+            audio_s = round(self._record_wave.tell() / 16000, 1) if self._record_wave else 0
+        self._capture_log("heartbeat", process_rss_mb=memory, audio_s=audio_s,
+                          process_cpu_pct=cpu, system_available_mb=available,
+                          stt_queue=self._q.qsize() if self._q else 0)
+        self._capture_resource_guard(memory, available)
+        self._state()
+
+    def _capture_resource_guard(self, process_rss_mb, system_available_mb):
+        """Reduce optional screen work under memory pressure; preserve audio recording."""
+        if not self._frames_enabled:
+            return
+        rss = process_rss_mb if isinstance(process_rss_mb, (int, float)) else 0
+        free = system_available_mb if isinstance(system_available_mb, (int, float)) else float("inf")
+        if (rss >= 4096 or free < 512) and self._capture_safety_level < 2:
+            self._capture_safety_level = 2
+            self._frames_enabled = False
+            self._capture_log("frames_disabled", reason="memory pressure", process_rss_mb=rss,
+                              system_available_mb=free)
+            self.status = "Автокадры остановлены из-за нехватки памяти; аудиозапись продолжается."
+            self._state()
+            return
+        if (rss >= 3072 or free < 1024) and self._capture_safety_level < 1:
+            self._capture_safety_level = 1
+            self._frame_interval = min(5.0, max(1.0, self._frame_interval * 2))
+            self._frame_max_dimension = min(self._frame_max_dimension, 1920)
+            self._frame_quality = min(self._frame_quality, 75)
+            self._capture_log("capture_degraded", reason="memory pressure", process_rss_mb=rss,
+                              system_available_mb=free, interval_s=self._frame_interval,
+                              max_dimension=self._frame_max_dimension, quality=self._frame_quality)
+            self.status = "Снизил нагрузку автокадров из-за нехватки памяти; аудио пишется дальше."
+            self._state()
 
     def _finalize_frame_video(self):
         """Собрать MP4 из кадров; при записи встречи добавить исходный WAV."""
@@ -3027,6 +3271,7 @@ class Prompter:
             self.summary = body
             self._summary_path = path
             self._summary_busy = False
+        self._clear_active_manifest()
         self._transcript_set_participants(m.get("participants"))
         log.info("🎬 Итог встречи: %s", path or "(не сохранён)")
         self._emit("summary", summary=self.summary, path=path, busy=False)

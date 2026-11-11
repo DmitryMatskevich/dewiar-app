@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HTML-редактор · Dewiar</title>
+  <link rel="stylesheet" href="assets/vendor/grapesjs/grapes.min.css">
+  <link rel="stylesheet" href="assets/html-editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">D</span><div><strong>HTML-редактор</strong><small id="doc-title">Загружаю HTML…</small></div></div>
+    <div class="mode-tabs" role="tablist" aria-label="Режим редактора">
+      <button type="button" class="mode active" data-mode="visual" aria-pressed="true">Визуально</button>
+      <button type="button" class="mode" data-mode="code" aria-pressed="false">Код</button>
+      <button type="button" class="mode" data-mode="preview" aria-pressed="false">Предпросмотр</button>
+    </div>
+    <div class="top-actions">
+      <button type="button" id="undo" title="Отменить">Отменить</button><button type="button" id="redo" title="Повторить">Повторить</button>
+      <button type="button" id="save-as">Сохранить как…</button><button type="button" class="primary" id="save">Сохранить</button>
+    </div>
+  </header>
+  <div id="notice" class="notice" role="status" hidden></div>
+  <main class="workspace">
+    <section class="stage">
+      <div class="stage-toolbar">
+        <span id="stage-label">Выберите блок на странице, чтобы изменить его</span>
+        <label class="drop-target" id="drop-target"><span aria-hidden="true">⇩</span> Перетащите блок сюда из другого окна</label>
+      </div>
+      <div id="gjs"></div>
+      <textarea id="source" spellcheck="false" aria-label="Исходный HTML" hidden></textarea>
+      <iframe id="preview" title="Предпросмотр HTML" sandbox="" hidden></iframe>
+      <div class="canvas-footer"><span id="status" role="status">Подключение к Dewiar…</span><span id="dirty">Сохранено</span></div>
+    </section>
+    <aside class="side">
+      <div class="side-tabs"><button type="button" class="side-tab active" data-side="blocks">Элементы</button><button type="button" class="side-tab" data-side="layers">Структура</button><button type="button" class="side-tab" data-side="styles">Стиль</button></div>
+      <div id="blocks" class="side-panel active"></div><div id="layers" class="side-panel"></div><div id="styles" class="side-panel"></div>
+      <section class="ai-panel">
+        <div class="ai-title"><span class="ai-dot"></span><strong>AI-ассистент</strong><small>текущий документ</small></div>
+        <label for="ai-request">Что изменить на странице?</label>
+        <textarea id="ai-request" rows="3" maxlength="1200" placeholder="Например: добавь кнопку «Связаться» после этого абзаца"></textarea>
+        <button type="button" id="ai-ask" class="primary">Предложить изменения</button>
+        <div id="ai-result" role="status" aria-live="polite"></div>
+        <div id="ai-ops" hidden></div>
+      </section>
+    </aside>
+  </main>
+  <script src="assets/dewiar.js"></script>
+  <script src="assets/vendor/grapesjs/grapes.min.js"></script>
+  <script src="assets/html-editor.js"></script>
+</body>
+</html>

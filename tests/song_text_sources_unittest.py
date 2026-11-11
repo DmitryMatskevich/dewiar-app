@@ -105,13 +105,59 @@ class CatalogSearchTests(unittest.TestCase):
         def fetch(url):
             fetched.append(url)
             return dict(status='available', extracted_text='\n'.join(lines), page_title='Песня')
-        updated, report = run(phrases, {'title': 'Песня', 'artist': 'Автор'}, search=blocked, fetch=fetch,
-                              catalog=lambda title, artist: [{'url': 'https://lrclib.net/api/get/7', 'kind': 'lyrics',
-                                                              'provider': 'lrclib'}])
-        self.assertEqual(fetched[0], 'https://lrclib.net/api/get/7')
+        asked = []
+        def catalog(found_phrases):
+            asked.extend(found_phrases)
+            return [{'url': 'https://amdm.ru/akkordi/a/1/b/', 'kind': 'lyrics', 'provider': 'amdm', 'query': found_phrases[0]}]
+        updated, report = run(phrases, {'title': 'Песня Группа', 'artist': 'Исполнитель'}, search=blocked, fetch=fetch,
+                              catalog=catalog, youtube=lambda url: [])
+        self.assertEqual(fetched[0], 'https://amdm.ru/akkordi/a/1/b/')
         self.assertEqual(report['state'], 'compared')
-        self.assertEqual(report['references'][0]['url'], 'https://lrclib.net/api/get/7')
-        self.assertEqual(report['catalog'], [{'url': 'https://lrclib.net/api/get/7', 'provider': 'lrclib'}])
+        self.assertEqual(report['references'][0]['url'], 'https://amdm.ru/akkordi/a/1/b/')
+        # Searched by the sung phrases, never by the title or the performer.
+        self.assertTrue(asked and all(p in lines for p in asked))
+        self.assertFalse(any('Песня' in q['query'] or 'Исполнитель' in q['query'] for q in report['queries']))
+
+    def test_amdm_site_search_by_a_sung_phrase(self):
+        """«просыпаясь улыбаться ирония судьбы» (title + the group that sings)
+        finds nothing; a sung line finds Олег Митяев on AMDM."""
+        from unittest.mock import patch as _patch
+        import io
+        from songs import text_reference
+        page = ('<table class="items"><tr><td class="artist_name"><a href="https://amdm.ru/akkordi/oleg_mitaev/">Олег Митяев</a> — '
+                '<a href="https://amdm.ru/akkordi/oleg_mitaev/148075/prosipayas_ulibatsya/">Просыпаясь, улыбаться</a></td></tr></table>')
+        urls = []
+        class Answer(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        def opener(request, timeout=None):
+            urls.append(request.full_url)
+            return Answer(page.encode())
+        with _patch.object(text_reference, 'urlopen', opener):
+            hits = text_reference.catalog_search(['В облаках у водопада шаг до ада,'])
+        self.assertEqual(hits[0]['url'], 'https://amdm.ru/akkordi/oleg_mitaev/148075/prosipayas_ulibatsya/')
+        self.assertIn('%D0%92+%D0%BE%D0%B1%D0%BB%D0%B0%D0%BA%D0%B0%D1%85', urls[0])
+
+    def test_words_from_the_youtube_description_are_a_source(self):
+        lines = ['Вечерний поезд медленно уходит за деревню',
+                 'Тихий ветер согревает окна нашего дома',
+                 'Ранним утром золотые листья падают на землю',
+                 'И никто не ждёт меня у старого порога']
+        phrases = [dict(phrase_id=str(i), text=line, start_ms=i * 10000, end_ms=(i + 1) * 10000, words=[],
+                        agreement=[dict(char_start=t['start'], char_end=t['end'], text=t['text'], agree=2, models=2,
+                                        alternatives=[t['text']], needs_review=False) for t in tokens(line)])
+                   for i, line in enumerate(lines)]
+        video = 'https://www.youtube.com/watch?v=W0Ff9SF6mxs'
+        texts = {video: [{'url': video + '#description', 'plain_lyrics': 'Слова и музыка: автор\n' + '\n'.join(lines),
+                          'title': 'Описание видео на YouTube', 'provider': 'youtube', 'kind': 'lyrics'}]}
+        def nothing(url):
+            raise AssertionError('no page to fetch')
+        updated, report = run(phrases, {'source_candidates': [{'kind': 'youtube', 'url': video}], 'source_ref': video,
+                                        'youtube_texts': texts},
+                              search=lambda q: [], fetch=nothing, catalog=lambda p: [])
+        self.assertEqual(report['state'], 'compared')
+        self.assertEqual(report['references'][0]['url'], video)
+        self.assertEqual(report['references'][0]['title'], 'Описание видео на YouTube')
 
 
 if __name__ == '__main__':

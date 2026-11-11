@@ -652,6 +652,78 @@ class Api:
         base = ui_http_base() if WIN or MAC or os.environ.get("DEWIAR_UI_HTTP") else None
         return (base + page if base else (HERE / page).as_uri()) + f"?token={self.token}&port={WS_PORT}{extra}"
 
+    def open_html_editor(self, task_id, path):
+        """Open one independent visual editor window for a registered task HTML result."""
+        import hashlib
+        import threading
+        import webview
+        task_id, path = str(task_id or ""), str(path or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", task_id) or len(path) > 500 or not path.startswith("outputs/") or Path(path).suffix.lower() not in {".html", ".htm"}:
+            raise ValueError("Неверный HTML-результат")
+        windows = getattr(self, "_html_editor_windows", None)
+        if windows is None: windows = self._html_editor_windows = {}
+        key = task_id + ":" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:20]
+        existing = windows.get(key)
+        if existing:
+            try: existing["window"].show(); existing["window"].restore(); return {"opened": True, "key": key, "existing": True}
+            except Exception: windows.pop(key, None)
+        query = urllib.parse.urlencode({"task": task_id, "path": path, "doc": key})
+        window = webview.create_window("Dewiar — HTML", self._url("html-editor.html", "&" + query),
+                                       width=1440, height=960, min_size=(860, 600), js_api=self,
+                                       text_select=True, background_color="#eef2f8")
+        windows[key] = {"window": window, "task": task_id, "path": path, "title": Path(path).name}
+        for other_key, item in list(windows.items()):
+            if other_key == key: continue
+            try: item["window"].evaluate_js("window.htmlEditorRefreshTargets && window.htmlEditorRefreshTargets()")
+            except Exception: pass
+        window.events.closed += lambda *args: windows.pop(key, None)
+        def request_close():
+            if getattr(window, "_html_editor_close_ready", False): return True
+            def finish():
+                try:
+                    if window.evaluate_js("window.htmlEditorRequestClose ? window.htmlEditorRequestClose() : true"):
+                        self.close_html_editor(key)
+                except Exception: pass
+            threading.Thread(target=finish, daemon=True).start()
+            return False
+        window.events.closing += request_close
+        return {"opened": True, "key": key, "existing": False}
+
+    def list_html_editors(self):
+        rows = []
+        for key, item in list(getattr(self, "_html_editor_windows", {}).items()):
+            rows.append({"key": key, "title": item.get("title") or Path(item["path"]).name})
+        return rows
+
+    def html_editor_set_title(self, key, title):
+        item = getattr(self, "_html_editor_windows", {}).get(str(key or ""))
+        if not item: return False
+        value = str(title or "HTML")[:100]
+        item["title"] = value
+        try: item["window"].set_title("Dewiar — " + value)
+        except Exception: pass
+        return True
+
+    def html_editor_transfer(self, target_key, payload):
+        target_key = str(target_key or "")
+        if not isinstance(payload, dict) or len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 200_000:
+            raise ValueError("Элемент для переноса слишком большой")
+        item = getattr(self, "_html_editor_windows", {}).get(target_key)
+        if not item: raise ValueError("Целевое окно HTML-редактора закрыто")
+        script = "window.htmlEditorReceiveTransfer && window.htmlEditorReceiveTransfer(" + json.dumps(payload, ensure_ascii=True) + ")"
+        try: item["window"].evaluate_js(script)
+        except Exception as error: raise ValueError("Не удалось передать элемент в целевое окно") from error
+        return True
+
+    def close_html_editor(self, key):
+        import threading
+        item = getattr(self, "_html_editor_windows", {}).get(str(key or ""))
+        if item:
+            window = item["window"]
+            window._html_editor_close_ready = True
+            timer = threading.Timer(0.15, window.destroy); timer.daemon = True; timer.start()
+        return True
+
     def open_visual_editor(self, kind, identifier):
         import re
         import webview

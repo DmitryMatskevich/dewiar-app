@@ -6,7 +6,7 @@
 import copy
 from functools import wraps
 
-CARD_KEYS = ('song_id','revision','title','search_query','artist','tags','tag_scores','recording_version','source','source_ref',
+CARD_KEYS = ('song_id','revision','title','search_query','artist','tags','tag_scores','rating','recording_version','source','source_ref',
              'status','stage','stage_label','updated_at','created_at','capabilities','karaoke','processing')
 
 

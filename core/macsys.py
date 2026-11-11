@@ -4,7 +4,12 @@
 Пути передаются аргументами, без вставки пользовательского текста в shell/AppleScript.
 """
 import subprocess
+import threading
+import time
 from pathlib import Path
+
+_SC_CONTENT_LOCK = threading.Lock()
+_SC_CONTENT_CACHE = {"expires": 0.0, "value": None}
 
 
 def microphone_permission():
@@ -66,12 +71,18 @@ def trash(path):
         raise OSError(str(result[-1]) or "macOS не смогла переместить файл в Корзину")
 
 
-def _screenshot_without_dewiar():
+def _screenshot_without_dewiar(max_dimension=2560, quality=85):
+    import objc
+    with objc.autorelease_pool():
+        return _screenshot_without_dewiar_pooled(max_dimension, quality)
+
+
+def _screenshot_without_dewiar_pooled(max_dimension=2560, quality=85):
     """macOS 14+: compositor capture, revealing the content behind Dewiar windows."""
     import json
     import threading
     import ScreenCaptureKit as SC
-    from AppKit import NSBitmapImageRep, NSBitmapImageFileTypePNG
+    from AppKit import NSBitmapImageRep, NSBitmapImageFileTypeJPEG, NSImageCompressionFactor
     from Quartz import CGMainDisplayID
     from settings import STATE_DIR, WS_PORT
 
@@ -87,7 +98,12 @@ def _screenshot_without_dewiar():
             raise OSError(str(result.get("error") or "macOS вернула пустой снимок"))
         return result["value"]
 
-    content = await_result(SC.SCShareableContent.getShareableContentWithCompletionHandler_)
+    now = time.monotonic()
+    with _SC_CONTENT_LOCK:
+        content = _SC_CONTENT_CACHE["value"] if now < _SC_CONTENT_CACHE["expires"] else None
+        if content is None:
+            content = await_result(SC.SCShareableContent.getShareableContentWithCompletionHandler_)
+            _SC_CONTENT_CACHE.update(expires=now + 5.0, value=content)
     # Source runs in Python, so a generic Python bundle id must never exclude
     # other Python applications. The authenticated shell publishes its pid/port.
     ui_pid = 0
@@ -114,18 +130,26 @@ def _screenshot_without_dewiar():
     # Keep native pixel resolution for OCR, rather than the LLM's resized JPEG.
     scale = float(filter_.pointPixelScale())
     rect = filter_.contentRect()
-    config.setWidth_(max(1, round(rect.size.width * scale)))
-    config.setHeight_(max(1, round(rect.size.height * scale)))
+    width, height = max(1, round(rect.size.width * scale)), max(1, round(rect.size.height * scale))
+    reduction = min(1.0, max_dimension / max(width, height)) if max_dimension else 1.0
+    config.setWidth_(max(1, round(width * reduction)))
+    config.setHeight_(max(1, round(height * reduction)))
     config.setShowsCursor_(False)
     image = await_result(lambda done: SC.SCScreenshotManager.captureImageWithFilter_configuration_completionHandler_(filter_, config, done))
     bitmap = NSBitmapImageRep.alloc().initWithCGImage_(image)
-    data = bitmap.representationUsingType_properties_(NSBitmapImageFileTypePNG, {})
+    if max_dimension:
+        # JPEG avoids encoding full resolution PNGs every meeting frame.
+        data = bitmap.representationUsingType_properties_(NSBitmapImageFileTypeJPEG,
+                   {NSImageCompressionFactor: max(.4, min(1., quality / 100))})
+    else:
+        from AppKit import NSBitmapImageFileTypePNG
+        data = bitmap.representationUsingType_properties_(NSBitmapImageFileTypePNG, {})
     if not data:
-        raise OSError("macOS не смогла преобразовать снимок в PNG")
+        raise OSError("macOS не смогла преобразовать снимок экрана")
     return bytes(data)
 
 
-def screen_capture(source="screen", region=None, application="", exclude_dewiar=False):
+def screen_capture(source="screen", region=None, application="", exclude_dewiar=False, max_dimension=0, quality=85):
     """Capture a screen, region, or visible application window.
 
     ``source`` is deliberately small and serialisable because it is passed from
@@ -142,7 +166,7 @@ def screen_capture(source="screen", region=None, application="", exclude_dewiar=
     source = str(source or "screen").lower()
     if exclude_dewiar and source in ("screen", "region"):
         try:
-            raw = _screenshot_without_dewiar()
+            raw = _screenshot_without_dewiar(max_dimension=max_dimension, quality=quality)
             if source == "screen":
                 return raw
             from PIL import Image

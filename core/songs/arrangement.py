@@ -92,6 +92,47 @@ def edit_structure(store, args):
             'review_state': 'needs_review', 'stage_label': 'Ручная разметка сохранена'}, args['base_revision'])
 
 
+def preview_chords(store, args):
+    """Read-only word positions, through the same layout as the saved sheet."""
+    from .public import public_song
+    row = store.get(str(args.get('song_id') or ''))
+    if not row:
+        raise ValueError('Песня не найдена')
+    events = args.get('chords')
+    if not isinstance(events, list) or len(events) > 2000:
+        raise ValueError('Некорректный список аккордов')
+    row = copy.deepcopy(row)
+    row['chords'] = []
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            raise ValueError('Аккорд должен быть объектом')
+        start = event.get('start_ms')
+        if not isinstance(start, (int, float)) or not math.isfinite(start) or start < 0:
+            continue
+        row['chords'].append({**event, '_preview_index': index})
+    # Text drafts have no measured word timing until they are aligned again.
+    for phrase in row.get('phrases', []):
+        if phrase['phrase_id'] == args.get('phrase_id') and isinstance(args.get('text'), str) and phrase['text'] != args['text']:
+            phrase.update(text=args['text'][:20000], words=[], alignment_stale=True)
+            for chord in row['chords']:
+                if (chord.get('anchor') or {}).get('phrase_id') == phrase['phrase_id']:
+                    chord.pop('anchor', None)
+    positions = {}
+    for line in public_song(row)['guitar_sheet']:
+        for mark in line.get('chords', []):
+            index = mark.get('_preview_index')
+            if index is None or mark.get('continued'):
+                continue
+            at = mark.get('char_index')
+            span = next((s for s in line.get('source_spans', [])
+                         if s['display_char_start'] <= at < s['display_char_end']), None)
+            if span:
+                positions[index] = {'phrase_id': span['phrase_id'],
+                    'char_index': span['phrase_char_start'] + at - span['display_char_start'],
+                    'quality': mark.get('anchor_quality', 'line')}
+    return {'positions': positions}
+
+
 def edit_chords(store, args):
     if args.get('base_revision') is None:
         raise ValueError('Для сохранения аккордов нужна ревизия карточки')
@@ -104,6 +145,8 @@ def edit_chords(store, args):
             raise ValueError('Некорректный список аккордов')
         cleaned = []
         for event in events:
+            if not isinstance(event, dict):
+                raise ValueError('Аккорд должен быть объектом')
             # N is the recognizer's no-chord marker; preserve these intervals
             # when a user edits another event in the same song.
             name = 'N' if event.get('name') == 'N' else clean_chord(event.get('name'))

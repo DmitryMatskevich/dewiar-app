@@ -297,12 +297,13 @@
       <label class="opt"><div>Записать аудиофайл<small>WAV останется на Mac и будет расшифрован после встречи</small></div><span class="sw"><input type="checkbox" id="m-record" title="Записать аудио встречи и после окончания сделать расшифровку"><i></i></span></label>
       <label class="opt hidden" id="m-record-source-wrap"><div>Источник аудио<small>Core Audio или настроенный BlackHole/Loopback</small></div><span><select id="m-record-source" title="Источник WAV для записи встречи; способ захвата и приложение выбираются в настройках «Встречи»"><option value="system">Звук приложений</option><option value="microphone">Микрофон</option></select></span></label>
       <label class="opt"><div>Расшифровать после окончания<small>экономит ресурсы во время переговоров</small></div><span class="sw"><input type="checkbox" id="m-deferred" checked title="Сделать полную транскрибацию WAV после остановки встречи"><i></i></span></label>
-      <label class="opt"><div>Автоматические кадры<small>проверка экрана каждые 0,5 секунды; неизменившаяся сцена не дублируется</small></div><span class="sw"><input type="checkbox" id="m-auto-shot" title="Сохранять изменившиеся кадры экрана с локальным OCR"><i></i></span></label>
+      <label class="opt"><div>Автоматические кадры<small>сцены экрана для видео; распознавание текста во время записи выключено</small></div><span class="sw"><input type="checkbox" id="m-auto-shot" title="Сохранять изменившиеся кадры экрана без распознавания текста во время встречи"><i></i></span></label>
       <label class="opt"><div>Снимок при начале записи<small>первый кадр фиксирует, что было на экране в момент старта; можно отменить</small></div><span class="sw"><input type="checkbox" id="m-first-shot" checked title="Сделать первый снимок при запуске записи"><i></i></span></label>
       <div class="frame-settings hidden" id="m-frame-settings">
-        <label>Проверять экран<select id="m-frame-interval" title="Как часто проверять экран"><option value="0.5" selected>каждые 0,5 с</option><option value="1">каждую 1 с</option><option value="2">каждые 2 с</option><option value="5">каждые 5 с</option></select></label>
+        <label>Проверять экран<select id="m-frame-interval" title="Как часто проверять экран"><option value="0.5">каждые 0,5 с</option><option value="1" selected>каждую 1 с</option><option value="2">каждые 2 с</option><option value="5">каждые 5 с</option></select></label>
         <label>Качество кадров<select id="m-frame-quality" title="Качество JPEG автоматических кадров"><option value="60">экономно · 60%</option><option value="75">обычно · 75%</option><option value="85" selected>хорошо · 85%</option><option value="95">95%</option><option value="100">максимум · 100%</option></select></label>
-        <p class="muted" style="grid-column:1/-1">После завершения встречи видео из кадров и записанного звука создаётся автоматически.</p>
+        <label style="grid-column:1/-1">Размер кадра<select id="m-frame-size" title="Уменьшить кадр до выбранной длинной стороны перед сохранением"><option value="1920">1920 px · минимум нагрузки</option><option value="2560" selected>2560 px · обычно</option><option value="3840">3840 px · крупный экран</option><option value="5120">5120 px · исходный размер</option></select></label>
+        <p class="muted" style="grid-column:1/-1">Видео собирается после встречи. Во время записи OCR не запускается.</p>
       </div>
       <p class="hint hidden" id="m-frame-help">Автокадры и первый снимок используют «Запись экрана» macOS. Если доступа нет, встреча всё равно начнётся: звук и расшифровка продолжатся, а кадры можно включить после разрешения в настройках.</p>
       <label class="opt hidden" id="m-consent-wrap"><div>Согласие участников<small>подтверждаю, что предупредил участников о записи</small></div><span class="sw"><input type="checkbox" id="m-consent" checked><i></i></span></label>
@@ -607,7 +608,7 @@ $("#start").onclick = async () => {
       consent: place === "live" ? $("#m-live-consent").checked : $("#m-consent").checked,
       speaker_mode: $("#m-speaker-mode").value, expected_speakers: Number($("#m-expected").value || 0),
       auto_frames: $("#m-auto-shot").checked, auto_interval: Number($("#m-frame-interval").value),
-      frame_quality: Number($("#m-frame-quality").value), frame_video: true,
+      frame_quality: Number($("#m-frame-quality").value), frame_max_dimension: Number($("#m-frame-size").value), frame_video: true,
       auto_first_frame: $("#m-first-shot").checked, record_source: $("#m-record-source").value });
     idx = -1; follow = true; render();
   } catch (e) { await showStartError(e.message); }
@@ -679,7 +680,9 @@ function renderCaptureLive() {
     $("#track-" + who).value = level?.peak || 0;
     $("#track-" + who + "-label").classList.toggle("hidden", who === "me" && !st?.meeting?.dual);
   }
-  $("#recording-diagnostics").textContent = rec.microphone_error || (rec.underruns ? `Пропусков микрофона: ${rec.underruns}` : "");
+  $("#recording-diagnostics").textContent = rec.microphone_error || (rec.enabled
+    ? `Записано ${Math.max(0, Math.floor((Date.now() / 1000 - (st.meeting?.started || Date.now() / 1000)) / 60))} мин · кадров ${rec.capture_saved || 0} · ${rec.frame_max_dimension || 2560}px · ${rec.capture_last_ms || 0} мс/кадр${rec.process_rss_mb ? ` · память ${(rec.process_rss_mb / 1024).toFixed(1)} ГБ` : ""}${rec.underruns ? ` · пропуски микрофона ${rec.underruns}` : ""}`
+    : "");
   const interval = String(rec.frame_interval || 1), quality = String(rec.frame_quality || 85);
   if ([...$("#live-frame-interval").options].some(o => o.value === interval)) $("#live-frame-interval").value = interval;
   if ([...$("#live-frame-quality").options].some(o => o.value === quality)) $("#live-frame-quality").value = quality;
@@ -927,6 +930,9 @@ document.addEventListener("keydown", (e) => {
 core.on("hello", (e) => {
   prompterHotkey = e?.settings?.prompter?.capture_hotkey || "Ctrl+Shift+S";
   const cfg = e?.settings?.prompter || {};
+  if (cfg.frame_interval != null) $("#m-frame-interval").value = String(cfg.frame_interval);
+  if (cfg.frame_quality != null) $("#m-frame-quality").value = String(cfg.frame_quality);
+  if (cfg.frame_max_dimension != null) $("#m-frame-size").value = String(cfg.frame_max_dimension);
   if ($("#m-record-source") && cfg.audio_source) $("#m-record-source").value = cfg.audio_source;
   if ($("#m-record") && cfg.record_audio_default != null) $("#m-record").checked = !!cfg.record_audio_default;
   if (cfg.speaker_mode && $("#m-speaker-mode")) $("#m-speaker-mode").value = cfg.speaker_mode;

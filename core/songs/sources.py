@@ -99,7 +99,7 @@ def _embedded_lyrics(document, url):
                 if self.depth: self.parts.append(data)
         parser=Poem(); parser.feed(document)
         return re.sub(r'\n{3,}', '\n\n', ''.join(parser.parts)).strip()
-    if host in {'amdm.ru', 'www.amdm.ru'}:
+    if host == 'amdm.ru' or host.endswith('.amdm.ru'):  # mirrors: 496.amdm.ru
         # The song's text with chords; the rest of the page is site menus.
         block = re.search(r'<pre[^>]*itemprop="chordsBlock"[^>]*>(.*?)</pre>', document, re.S)
         return html.unescape(re.sub(r'<[^>]+>', '', block.group(1))).strip() if block else ''

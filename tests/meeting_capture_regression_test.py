@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -123,7 +124,7 @@ class Regression(unittest.TestCase):
             self.assertEqual(pr._load_schedules()[0]["id"], "legacy")
             pr.eng.stopping.set()
 
-    def test_automatic_ocr_does_not_block_frame_capture(self):
+    def test_automatic_ocr_is_disabled_during_recording(self):
         import io
         from PIL import Image
         with tempfile.TemporaryDirectory() as td:
@@ -132,11 +133,10 @@ class Regression(unittest.TestCase):
             pr.meeting = {"title": "OCR", "started": time.time(), "record": True}
             pr._transcript_open("OCR")
             pr._video_enabled = True
-            entered, release = threading.Event(), threading.Event()
+            called = threading.Event()
             def recognize(data):
-                entered.set()
-                release.wait(3)
-                return "Принято решение 42"
+                called.set()
+                raise AssertionError("live OCR must remain disabled during recording")
             image = io.BytesIO()
             Image.new("RGB", (96, 54), "white").save(image, "PNG")
             try:
@@ -144,19 +144,91 @@ class Regression(unittest.TestCase):
                     before = time.monotonic()
                     frame = pr.capture_frame(image.getvalue(), auto=True)
                     self.assertLess(time.monotonic() - before, 0.3)
-                    self.assertTrue(entered.wait(1))
+                    self.assertFalse(called.is_set())
                     self.assertTrue((Path(pr._transcript_path).parent / frame["path"]).is_file())
                     self.assertIsNone(pr._video_dir, "с аудио не нужны лишние покадровые JPEG")
                     pr.stop(summary=False)
-                    release.set()
-                    pr._ocr_thread.join(2)
-                    self.assertEqual(pr._screenshots[0]["ocr"], "Принято решение 42")
             finally:
-                release.set()
                 deadline = time.monotonic() + 3
                 while pr._post_busy and time.monotonic() < deadline:
                     time.sleep(0.01)
                 pr.eng.stopping.set()
+
+    def test_five_capture_errors_disable_only_frames_and_are_logged(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            pr = Prompter(Engine(Path(td)))
+            pr.on = True
+            pr.meeting = {"title": "fixture", "record": True, "started": time.time()}
+            pr._frames_enabled = True
+            pr._frame_interval = 0.001
+            pr._capture_log_path = Path(td) / "session.log"
+            pr._t0 = time.monotonic()
+            pr.capture_frame = lambda **kwargs: (_ for _ in ()).throw(OSError("fixture capture failure"))
+            pr._frame_loop(threading.Event())
+            events = [json.loads(line) for line in pr._capture_log_path.read_text().splitlines()]
+            self.assertFalse(pr._frames_enabled)
+            self.assertTrue(pr.on, "frame capture failure must not stop meeting/audio")
+            self.assertEqual([event["event"] for event in events], ["capture_error", "capture_error", "frames_disabled"])
+            self.assertEqual(events[-1]["reason"], "5 consecutive capture errors")
+            self.assertIn("звук продолжает записываться", pr.status)
+            pr.eng.stopping.set()
+
+    def test_memory_guard_reduces_capture_then_stops_frames(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            pr = Prompter(Engine(Path(td)))
+            pr.on = True
+            pr.meeting = {"title": "fixture", "record": True, "started": time.time()}
+            pr._frames_enabled = True
+            pr._capture_log_path = Path(td) / "session.log"
+            pr._t0 = time.monotonic()
+            pr._capture_resource_guard(3200, 2048)
+            self.assertEqual(pr._frame_max_dimension, 1920)
+            self.assertEqual(pr._frame_quality, 75)
+            self.assertEqual(pr._frame_interval, 1.0)
+            self.assertTrue(pr._frames_enabled)
+            pr._capture_resource_guard(4300, 400)
+            self.assertFalse(pr._frames_enabled)
+            self.assertIn("аудиозапись продолжается", pr.status)
+            events = [json.loads(line)["event"] for line in pr._capture_log_path.read_text().splitlines()]
+            self.assertEqual(events, ["capture_degraded", "frames_disabled"])
+            pr.eng.stopping.set()
+
+    def test_interrupted_recording_manifest_lists_and_starts_recovery(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            meeting_root = root / "Встречи"
+            session = meeting_root / "Расшифровки" / "fixture"
+            audio = meeting_root / "Аудио" / "fixture.wav"
+            session.mkdir(parents=True)
+            audio.parent.mkdir(parents=True)
+            with wave.open(str(audio), "wb") as out:
+                out.setnchannels(1); out.setsampwidth(2); out.setframerate(16000); out.writeframes(b"\x01\0" * 16000)
+            pr = Prompter(Engine(root))
+            pr.meeting = {"id": "recovery-id", "title": "fixture", "started": time.time(), "record": True,
+                          "deferred": True, "audio_source": "microphone", "speaker_mode": "none"}
+            pr._record_path = str(audio)
+            pr._track_paths = {}
+            pr._transcript_path = str(meeting_root / "Расшифровки" / "fixture.txt")
+            pr._session_dir = session
+            pr._capture_log_path = str(session / "session.log")
+            pr._write_active_manifest()
+            found = pr.interrupted_meetings()
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["id"], "recovery-id")
+            self.assertEqual(found[0]["duration_s"], 1)
+            with patch.object(Prompter, "_transcribe_segments", lambda self, path: [(0.0, 1.0, "тестовая реплика", None)]), \
+                 patch.object(Prompter, "_summary_text", lambda self, meeting, lines: "## Договорились\n- тест"):
+                pr.recover_interrupted("recovery-id")
+                pr._post_thread.join(5)
+            self.assertFalse(pr._post_thread.is_alive(), "recovery post-processing should finish")
+            self.assertEqual(pr._completed_job.meeting["title"], "fixture")
+            self.assertIn("тестовая реплика", Path(pr._transcript_path).read_text())
+            self.assertTrue(Path(pr._summary_path).is_file())
+            self.assertFalse((session / "session.active.json").exists())
+            pr.eng.stopping.set()
 
     @unittest.skipIf(os.name == "nt", "POSIX helper")
     def test_unresponsive_helper_read_is_bounded(self):

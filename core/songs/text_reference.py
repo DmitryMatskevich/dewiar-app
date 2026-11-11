@@ -108,62 +108,81 @@ def web_search(query, *, blocked=None):
     return []
 
 
-def catalog_search(title, artist=''):
-    """Lyric catalogues that answer a plain request (no search engine, no CAPTCHA).
+def catalog_search(phrases):
+    """Lyric catalogues searched by sung phrases (no search engine, no CAPTCHA).
 
-    Public search engines answer the app's automated browser with a robot
-    check, so every query can fail. LRCLIB and Genius are searched by title
-    and artist directly; their pages still have to pass the same three-anchor
-    confirmation as any other publication.
+    AMDM's site search looks through the lyrics: «В облаках у водопада шаг
+    до ада» finds Олег Митяев — «Просыпаясь, улыбаться», while the YouTube
+    title («просыпаясь улыбаться ирония судьбы») names the group that sings
+    it and finds nothing. Never by title or performer. Every page found still
+    has to pass the three-anchor confirmation.
     """
-    query = ' '.join(x for x in (str(title or '').strip(), str(artist or '').strip()) if x)
-    if not query:
-        return []
-    wanted = {t['norm'] for t in tokens(query) if len(t['norm']) >= 3}
-
-    def relevant(*values):
-        have = {t['norm'] for v in values for t in tokens(str(v or ''))}
-        return len(wanted & have) >= min(2, len(wanted))
-
-    hits, headers = [], {'User-Agent': 'Dewiar-Songs/0.1 (personal music study)'}
-    try:
-        with urlopen(Request('https://lrclib.net/api/search?' + urlencode({'q': query}), headers=headers), timeout=8) as r:
-            rows = json.loads(r.read(2_000_001))
-        for row in rows[:10]:
-            if row.get('plainLyrics') and relevant(row.get('trackName'), row.get('artistName')):
-                hits.append({'url': 'https://lrclib.net/api/get/' + str(row['id']), 'kind': 'lyrics',
-                             'title': f"{row.get('artistName') or ''} — {row.get('trackName') or ''}".strip(' —'),
-                             'provider': 'lrclib'})
-    except Exception:
-        pass
-    try:
-        with urlopen(Request('https://genius.com/api/search/multi?' + urlencode({'q': query}), headers=headers), timeout=8) as r:
-            data = json.loads(r.read(2_000_001))
-        for section in (data.get('response') or {}).get('sections') or []:
-            if section.get('type') != 'song':
-                continue
-            for hit in section.get('hits') or []:
-                song = hit.get('result') or {}
-                if song.get('url') and relevant(song.get('title'), (song.get('primary_artist') or {}).get('name')):
-                    hits.append({'url': song['url'], 'kind': 'lyrics', 'provider': 'genius',
-                                 'title': song.get('full_title') or song.get('title') or ''})
-    except Exception:
-        pass
-    try:
-        # AMDM: lyrics with chords for most Russian songs; the search page is
-        # plain HTML (a table of «artist — song» rows).
-        with urlopen(Request('https://amdm.ru/search/?' + urlencode({'q': query}),
-                             headers={'User-Agent': 'Mozilla/5.0 Dewiar-Songs/0.1'}), timeout=8) as r:
-            page = r.read(2_000_001).decode('utf-8', 'replace')
+    hits, seen = [], set()
+    for phrase in [p for p in phrases or [] if len(tokens(p)) >= 4][:4]:
+        query = ' '.join(t['text'] for t in tokens(phrase))
+        try:
+            with urlopen(Request('https://amdm.ru/search/?' + urlencode({'q': query}),
+                                 headers={'User-Agent': 'Mozilla/5.0 Dewiar-Songs/0.1'}), timeout=8) as r:
+                page = r.read(2_000_001).decode('utf-8', 'replace')
+        except Exception:
+            continue
         table = page.split('<table class="items">', 1)[1].split('</table>', 1)[0] if '<table class="items">' in page else ''
-        for cell in re.findall(r'<td class="artist_name">(.*?)</td>', table, re.S):
+        for cell in re.findall(r'<td class="artist_name">(.*?)</td>', table, re.S)[:3]:
             links = re.findall(r'<a href="(https://amdm\.ru/akkordi/[^"]+)"[^>]*>([^<]*)</a>', cell)
-            if len(links) >= 2 and relevant(links[1][1], links[0][1]):
-                hits.append({'url': links[1][0], 'kind': 'lyrics', 'provider': 'amdm',
+            if len(links) >= 2 and links[1][0] not in seen:
+                seen.add(links[1][0])
+                hits.append({'url': links[1][0], 'kind': 'lyrics', 'provider': 'amdm', 'query': query,
                              'title': f'{links[0][1].strip()} — {links[1][1].strip()}'})
-    except Exception:
-        pass
+        if len(hits) >= 4:
+            break
     return hits[:6]
+
+
+YOUTUBE_ID = re.compile(r'(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/)|youtu\.be/)([\w-]{11})')
+
+
+def youtube_texts(url, comments=40):
+    """The video's description and its longest comments: the words are often there.
+
+    The uploader writes them under the video, or a listener leaves them in a
+    comment. Each text is only a candidate; the three anchors decide.
+    """
+    match = YOUTUBE_ID.search(str(url or ''))
+    if not match:
+        return []
+    vid = match.group(1)
+    out = []
+    description, found = '', []
+    try:
+        import yt_dlp  # the app's environment; the song worker may lack it
+        opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'getcomments': bool(comments), 'socket_timeout': 10,
+                'extractor_args': {'youtube': {'max_comments': [str(comments), 'all', '0', '0'],
+                                               'comment_sort': ['top']}}}
+        with yt_dlp.YoutubeDL(opts) as loader:
+            info = loader.extract_info('https://www.youtube.com/watch?v=' + vid, download=False)
+        description = info.get('description') or ''
+        found = info.get('comments') or []
+    except Exception:
+        try:
+            with urlopen(Request('https://www.youtube.com/watch?v=' + vid + '&hl=ru',
+                                 headers={'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ru'}), timeout=10) as r:
+                page = r.read(4_000_001).decode('utf-8', 'replace')
+            raw = re.search(r'"shortDescription":("(?:[^"\\]|\\.)*")', page)
+            description = json.loads(raw.group(1)) if raw else ''
+        except Exception:
+            description = ''
+    def lyric_like(text):
+        lines = [line for line in str(text or '').splitlines() if line.strip()]
+        return len(lines) >= 4 and len(text) >= 120
+    if lyric_like(description):
+        out.append({'url': f'https://www.youtube.com/watch?v={vid}#description', 'plain_lyrics': description,
+                    'title': 'Описание видео на YouTube', 'provider': 'youtube', 'kind': 'lyrics'})
+    for comment in sorted(found, key=lambda c: -len(c.get('text') or ''))[:5]:
+        if lyric_like(comment.get('text')):
+            out.append({'url': f"https://www.youtube.com/watch?v={vid}&lc={comment.get('id')}",
+                        'plain_lyrics': comment['text'], 'title': 'Комментарий к видео на YouTube',
+                        'provider': 'youtube', 'kind': 'lyrics'})
+    return out
 
 
 def confirm_text(text, selected):
@@ -192,6 +211,10 @@ def reconcile(phrases, references, verify=None):
         choices={p['alternative']['text'] for p in proposals if p['current']==current}
         if len(choices)>1:
             item['status']='sources_disagree';continue
+        # Across a line boundary only by the user's choice: the cut-off
+        # piece in the neighbouring line is cleared on apply.
+        if current.get('also'):
+            continue
         if verify is None or checked>=8:
             continue
         checked+=1
@@ -227,7 +250,7 @@ def reconcile(phrases, references, verify=None):
     return result,proposals
 
 
-def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress=lambda _:None, catalog=None):
+def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress=lambda _:None, catalog=None, youtube=None):
     # A CAPTCHA blocks a provider for this run; do not repeatedly relaunch it
     # for every lyric query. Other providers and direct pages remain usable.
     default_search=search is None or search is web_search
@@ -246,7 +269,8 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
         nonlocal checked
         url=urldefrag(str(candidate.get('url') or ''))[0]
         key=url or candidate.get('candidate_id')
-        pasted=candidate.get('manual_source') and candidate.get('plain_lyrics')
+        # Text the user pasted, or a YouTube description/comment, has no page to fetch.
+        pasted=(candidate.get('manual_source') or candidate.get('provider')=='youtube') and candidate.get('plain_lyrics')
         if (not url.startswith(('https://','http://')) and not pasted) or key in seen or checked>=(20 if want_chords else 16) or time.monotonic()>deadline:return
         seen.add(key);checked+=1
         try:
@@ -279,20 +303,38 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
     for candidate in (context.get('text_reference') or {}).get('references',[])+context.get('source_candidates',[]):
         if checked>=4:break  # Reserve page slots for newly discovered publications.
         if candidate.get('kind') in {'lyrics','reference','chords'}: inspect(candidate)
-    # Catalogues by title/artist first: they work when search engines ask
-    # for a robot check, and the anchors still decide what is confirmed.
+    # The recording's own YouTube page: the words are often in the
+    # description or a comment.
+    if youtube is None:
+        youtube = youtube_texts if default_search else (lambda url: [])
+    videos = [c for c in context.get('source_candidates', []) if c.get('kind') == 'youtube' and c.get('url')]
+    videos.sort(key=lambda c: c.get('url') != context.get('source_ref'))
+    for video in videos[:2]:
+        try:
+            progress('Сверка с источником текста: смотрим описание и комментарии на YouTube')
+            # Read by the app before the step (it has yt-dlp for comments).
+            texts = (context.get('youtube_texts') or {}).get(video['url'])
+            if texts is None:
+                texts = youtube(video['url'])
+            report.setdefault('youtube', []).append({'url': video['url'], 'texts': len(texts)})
+            for candidate in texts:
+                inspect(candidate)
+        except Exception as exc:
+            report['errors'].append({'error': 'YouTube: ' + str(exc)[:200]})
+    # Catalogues by sung phrases: they work when search engines ask for a
+    # robot check. Never by title or performer.
     if catalog is None:
-        catalog = catalog_search if default_search else (lambda title, artist: [])
+        catalog = catalog_search if default_search else (lambda phrases: [])
     try:
-        found = catalog(context.get('title', ''), context.get('artist', ''))
-        report['catalog'] = [{'url': c.get('url'), 'provider': c.get('provider')} for c in found]
+        found = catalog([a['text'] for a in sorted(selected, key=lambda a: -a.get('score', 0))])
+        report['catalog'] = [{'url': c.get('url'), 'provider': c.get('provider'), 'query': c.get('query')} for c in found]
         if found:
-            progress('Сверка с источником текста: ищем в каталогах текстов')
+            progress('Сверка с источником текста: ищем в каталогах текстов по фразам')
         for candidate in found:
             inspect(candidate)
     except Exception as exc:
         report['errors'].append({'error': 'Каталоги текстов: ' + str(exc)[:200]})
-    plan=query_plan(selected,context.get('title',''),context.get('artist',''),limit=8)
+    plan=query_plan(selected,limit=8)
     # Search by recognized text for chord pages as well, not an assumed artist.
     plan += [{'query':'"'+a['text'].replace('"','')+'" аккорды','stage':'chords'} for a in selected[:2]]
     for query in plan:
