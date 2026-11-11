@@ -183,4 +183,19 @@ def parse(text, value=None):
     matches.sort(key=lambda x: x[0], reverse=True)
     best = [r for score, r in matches if score == matches[0][0]]
     if len({r['action'] for r in best}) > 1:raise ValueError('Команда соответствует нескольким действиям. Уточните фразы в настройках.')
-    return best[0]
+    result = best[0]
+    # The legacy template ID is retained for saved settings. A generic song
+    # command must never imply an external source merely because of that ID.
+    if result['action'] == 'yandex_search':
+        query = result['query'].strip().rstrip('.,!?')
+        local = re.search(r'локальн|библиотек|сборник|задач', query, re.I)
+        external = re.search(r'\b(?:яндекс\w*|yandex)\b', query, re.I)
+        if local or not external:
+            query = re.sub(r'\s+(?:на|в|из)\s+(?:(?:мо\w+|локальн\w+)\s+)*(?:диск\w*|библиотек\w*|сборник\w*|задач\w*).*$', '', query, flags=re.I)
+            query = re.sub(r'[,\s]+(?:плей|play)\s*$', '', query, flags=re.I)
+            result = dict(result, action='song_library', query=query,
+                          song_action='play' if re.search(r'включ|игра|постав|плей|play', t, re.I) else 'open')
+        else:
+            query = re.sub(r'\s+(?:(?:в|на|через)\s+)?(?:яндекс\w*|yandex)(?:[ -]+(?:музык\w*|music))?\s*$', '', query, flags=re.I)
+            result = dict(result, query=query)
+    return result

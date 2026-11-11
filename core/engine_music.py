@@ -66,6 +66,11 @@ class MusicMixin:
                 field_scores=([difflib.SequenceMatcher(None,nq,norm(r.get(k,''))).ratio() for k in ('title','artist')]
                               if search_in=='auto' else [])
                 score=max([token_coverage,difflib.SequenceMatcher(None,nq,hay).ratio(),*field_scores])
+                if search_in in ('auto','artist') and len(query_tokens)==1 and len(nq)>=5:
+                    # A spoken surname may be inflected: «Высоцкого» vs
+                    # «Владимир Высоцкий». Compare it to individual name tokens.
+                    score=max(score,max((difflib.SequenceMatcher(None,nq,part).ratio()
+                                         for part in tokens(hay) if len(part)>=5),default=0))
                 if nq in hay:score=max(score,.88)
                 if search_in=='meaning':score=max(score,.01)
                 if score>=.34 or search_in=='meaning':scored.append((score,r))
@@ -83,9 +88,9 @@ class MusicMixin:
                 return 'Кандидаты для поиска по смыслу (сверь описание пользователя с фрагментами; пока ничего не включай): '+'; '.join(choices)
             # A weak single hit is still uncertain. Return candidates to the model so it
             # can ask the user instead of silently opening the wrong song.
-            if scored[0][0]<.56 or (len(scored)>1 and scored[1][0]>=scored[0][0]-.08 and scored[0][0]<.88):
-                options=scored[:5]
-                return 'Неоднозначное название. Возможные варианты: '+ '; '.join(f'{r["title"]} — {r.get("artist") or "исполнитель не указан"} [id:{r["song_id"]}]' for _,r in options)+'. Уточни у пользователя, какую песню выбрать.'
+            if scored[0][0]<.56 or (len(scored)>1 and scored[1][0]>=scored[0][0]-.08):
+                options=[item for item in scored if item[0]>=scored[0][0]-.12][:5]
+                return 'Неоднозначное название. Возможные варианты: '+ '; '.join(f'{r["title"]}'+(f' — {r["artist"]}' if r.get('artist') else '')+f' [id:{r["song_id"]}]' for _,r in options)+'. Какую песню выбрать?'
             exact=scored[0][1]
         if action=='search':return f'Нашёл: «{exact["title"]}» — {exact.get("artist") or "исполнитель не указан"} [id:{exact["song_id"]}].'
         if action not in ('open','play'):return 'Неизвестное действие с библиотекой песен.'
@@ -278,7 +283,7 @@ class MusicMixin:
             self._say_quick(result,text)
             return True
         if result.startswith('Неоднозначное название'):
-            self._say_quick(result,text)
+            self._say_quick(re.sub(r'\s*\[id:[^\]]+\]', '', result),text)
             return True
         self._music_source_pending={'kind':'local_miss','query':query,'until':time.monotonic()+180}
         reason=(f'В локальной библиотеке у песни «{result.split("«",1)[1].split("»",1)[0]}» нет аудиозаписи. '
@@ -336,7 +341,7 @@ class MusicMixin:
         # not to a radio station. Keep station requests on the existing radio path.
         low=text.casefold().replace('ё','е')
         wants_playlist=bool(re.search(r"плейлист|подборк|включи музыку|поставь музыку|включи песни",low))
-        if wants_playlist and not re.search(r"радио|станци|волн",low):
+        if wants_playlist and not re.search(r"радио|станци|волн|яндекс|yandex|youtube|ютуб",low):
             tag=''
             for pattern,value in ((r"шансон",'Шансон'),(r"для мужчин|мужчин|мужская",'Мужская'),
                                   (r"любов",'Любовь'),(r"груст",'Грусть'),(r"юмор|весел",'Юмор')):
@@ -354,7 +359,7 @@ class MusicMixin:
         find_match=re.search(r'\b(найди(?:те)?|поищи(?:те)?|ищи|отыщи|открой(?:те)?|покажи(?:те)?)\b\s*(.*)',low)
         play_match=re.search(r'\b(включи(?:те)?|поставь(?:те)?|сыграй(?:те)?|играй|запусти(?:те)?|вруби(?:те)?|воспроизведи(?:те)?)\b\s*(.*)',low)
         request_match=find_match or play_match
-        if request_match:
+        if request_match and re.search(r'песн|трек|композици|музык|библиотек|сборник',low) and not re.search(r'радио|станци|волн',low):
             query=request_match.group(2).strip().rstrip('.,!?»"\'')
             query=re.sub(r'\s+(?:(?:в|на)\s+)?песн\w*\s*$','',query,flags=re.I).strip()
             query=re.sub(r'\s+(?:(?:в|на)\s+)?(?:раздел\w*\s+)?задач\w*\s*$','',query,flags=re.I).strip()
@@ -704,10 +709,28 @@ class MusicMixin:
             self._say_quick(f'Песня «{query}» добавлена. Запустила пакетную обработку в фоне.', text,
                             acts=['start_task'])
             return True
-        if configured and configured['action'] != 'yandex_search' and not _tools.MAC:
+        if configured and configured['action'] not in ('yandex_search', 'song_library') and not _tools.MAC:
             configured = None
         if configured and not configured['enabled']:
             self._say_quick('Эта голосовая команда выключена в настройках «Руки → Голосовые команды».', text)
+            return True
+        if configured and configured['action'] == 'song_library':
+            on, needs_confirm = self.toolbox.policy('song_library')
+            if not on:
+                self._say_quick('Локальная библиотека отключена в настройках умений.', text)
+                return True
+            def run_local():
+                if needs_confirm and not self.confirm('Открыть песню из локальной библиотеки: «' + configured['query'] + '»?', timeout=30):
+                    return
+                if not self.toolbox.policy('song_library')[0]:return
+                try:
+                    self._run_local_song_choice(configured['query'], text, configured['song_action'])
+                except Exception as error:
+                    self._say_quick('Не удалось обратиться к локальной библиотеке: ' + str(error), text)
+            if needs_confirm:
+                threading.Thread(target=run_local, name='local-song-confirm', daemon=True).start()
+            else:
+                run_local()
             return True
         if configured and hasattr(self, 'confirm'):
             tool = 'yandex_music' if configured['action'] == 'yandex_search' else 'control_mac_app'

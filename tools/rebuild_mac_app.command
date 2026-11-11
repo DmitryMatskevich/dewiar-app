@@ -25,7 +25,7 @@ for t in meeting_player_test prompter_dual_track_test prompter_links_test prompt
          mac_access_test macos_screen_startup_test macos_install_test dictation_engine_test \
          hud_draft_actions_ui_test hud_voice_finish_ui_test screenshot_text_test screenshot_button_ui_test mac_access_ui_test \
          song_source_search_test song_capture_unittest song_cards_ui_test song_capture_assistant_mode_test \
-         song_instrumental_batch_test; do
+         song_instrumental_batch_test voice_commands_test; do
   if "$PY" -B "tests/$t.py" >"work/rebuild-$TS-$t.log" 2>&1; then
     echo "OK   $t"
   else

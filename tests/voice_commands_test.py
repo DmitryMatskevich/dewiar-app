@@ -88,7 +88,7 @@ class VoiceCommandsTest(unittest.TestCase):
         song = 'Земфира — Хочешь & Live 2026'
         for verb in ['найди', 'открой', 'включи']:
             result = vc.parse(verb + ' песню ' + song)
-            self.assertEqual(result['action'], 'yandex_search'); self.assertEqual(result['query'], song)
+            self.assertEqual(result['action'], 'song_library'); self.assertEqual(result['query'], song)
         self.assertEqual(vc.parse('открой музыку')['application'], 'ru.yandex.desktop.music')
         self.assertEqual(vc.parse('найди песню Пожалуйста')['query'], 'Пожалуйста')
 
@@ -155,13 +155,51 @@ class VoiceCommandsTest(unittest.TestCase):
 
     def test_music_routing_exact_title_and_disabled_action(self):
         c = vc.config()
-        engine = SimpleNamespace(s=SimpleNamespace(get=lambda *args: c), toolbox=Mock(), _say_quick=Mock(), _yandex_cmd=Mock(return_value=True))
+        engine = SimpleNamespace(s=SimpleNamespace(get=lambda *args: c), toolbox=Mock(), _say_quick=Mock(), _yandex_cmd=Mock(return_value=True), _run_local_song_choice=Mock(return_value=True))
         engine.toolbox.policy.return_value = (True, False)
         self.assertTrue(MusicMixin._pc_cmd(engine, 'Включи песню Любимую музыку'))
-        engine._yandex_cmd.assert_called_once_with('Любимую музыку', 'Включи песню Любимую музыку', exact=True)
-        engine._yandex_cmd.reset_mock(); c['actions'][-1]['enabled'] = False
+        engine._run_local_song_choice.assert_called_once_with('Любимую музыку', 'Включи песню Любимую музыку', 'play')
+        engine._yandex_cmd.assert_not_called()
+        engine._run_local_song_choice.reset_mock(); c['actions'][-1]['enabled'] = False
         self.assertTrue(MusicMixin._pc_cmd(engine, 'Включи песню Любимую музыку'))
         engine._yandex_cmd.assert_not_called()
+        engine._run_local_song_choice.assert_not_called()
+
+    def test_legacy_saved_song_templates_route_through_pc_before_music(self):
+        from songs.store import SongStore
+        class Engine(MusicMixin):
+            def __init__(self, store, saved):
+                self.song_store=store
+                self.s=SimpleNamespace(get=lambda *args: saved)
+                self.toolbox=Mock(); self.toolbox.policy.return_value=(True,False)
+                self._say_quick=Mock(); self.emit=Mock(); self._yandex_cmd=Mock(return_value=True)
+            def dispatch(self, text):
+                # Engine.ask calls _pc_cmd before _music_cmd. Exercise that order.
+                return self._pc_cmd(text) or self._music_cmd(text)
+        with tempfile.TemporaryDirectory() as folder:
+            store=SongStore(Path(folder)/'songs')
+            row=store.create('Кони привередливые','Владимир Высоцкий')
+            store.patch(row['song_id'], {'audio':{'path':'fixture.wav'}}, row['revision'])
+            saved=copy.deepcopy(vc.DEFAULT)  # existing persisted yandex_search templates
+            for command,action in [('включи песню Высоцкого, плей','play'),
+                                   ('открой песню Высоцкого','open'),
+                                   ('Найди песню Высоцкого на локальном диске.','open')]:
+                with self.subTest(command=command):
+                    engine=Engine(store,saved)
+                    with patch.object(tools,'t_yandex_music',side_effect=AssertionError('external search forbidden')):
+                        self.assertTrue(engine.dispatch(command))
+                    engine._yandex_cmd.assert_not_called()
+                    self.assertEqual(engine.emit.call_args.args[0],'song_library_action')
+                    self.assertEqual(engine.emit.call_args.kwargs['action'],action)
+                    self.assertEqual(engine.emit.call_args.kwargs['songs'][0]['song_id'],row['song_id'])
+            engine=Engine(store,saved)
+            self.assertTrue(engine.dispatch('найди песню Высоцкого в Яндекс Музыке'))
+            engine._yandex_cmd.assert_called_once_with('Высоцкого','найди песню Высоцкого в Яндекс Музыке',exact=True)
+            store.create('Охота на волков','Владимир Высоцкий')
+            engine=Engine(store,saved)
+            self.assertTrue(engine.dispatch('включи песню Высоцкого'))
+            engine.emit.assert_not_called(); engine._yandex_cmd.assert_not_called()
+            self.assertIn('Неоднозначное',engine._say_quick.call_args.args[0])
 
     def test_yandex_native_detection_and_encoded_query(self):
         row = {'id': 'ru.yandex.desktop.music', 'name': 'Яндекс Музыка'}

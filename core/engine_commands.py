@@ -2551,7 +2551,7 @@ class CommandsMixin:
             value = validate(config(value))
             result = parse(str(a.get("text") or ""), value)
             if result:
-                tool = ("yandex_music" if result["action"] == "yandex_search" else
+                tool = ("song_library" if result["action"] == "song_library" else "yandex_music" if result["action"] == "yandex_search" else
                         "start_task" if result["action"] == "song_process" else "control_mac_app")
                 result["allowed"], result["confirm"] = self.toolbox.policy(tool)
             return result
