@@ -81,7 +81,7 @@ def validate_provider(data):
 
 
 def validate(data):
-    d = {k: data.get(k, '') for k in ('name', 'url', 'hoster', 'hoster_url', 'hosting_provider_id', 'panel_url', 'panel_name', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'network_operator', 'registrar', 'hosting_candidate', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'dns_host', 'mail_host', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'health_url', 'console_url', 'marker', 'ssh_host', 'hosting_expires', 'domain_expires')}
+    d = {k: data.get(k, '') for k in ('name', 'url', 'hoster', 'hoster_url', 'hosting_provider_id', 'panel_url', 'panel_name', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'network_operator', 'registrar', 'hosting_candidate', 'dns_provider', 'dns_provider_id', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'dns_host', 'mail_host', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'health_url', 'console_url', 'marker', 'ssh_host', 'hosting_expires', 'domain_expires')}
     for k, v in d.items():
         if not isinstance(v, str) or len(v) > (2000 if k == 'notes' else 2048):
             raise ValueError('Некорректное поле ' + k)
@@ -324,10 +324,21 @@ class Store:
                 config.setdefault('domain_expires', '')
                 config.setdefault('hoster_url', '')
                 config.setdefault('hosting_provider_id', '')
+                config.setdefault('dns_provider_id', '')
                 for key in ('hosting_vault_id','dns_vault_id','dns_provider','dns_provider_url','dns_panel_url','server_name','server_ip','network_operator','registrar','mail_provider','asset_id'):
                     config.setdefault(key, '')
                 for key in ('panel_name','dns_panel_name','dns_nameservers','dns_mx_hosts','hosting_candidate','mail_imap_host','mail_smtp_host','mail_mx_host','mail_smtp_kind'):
                     config.setdefault(key, '')
+                if not config.get('dns_provider_id') and config.get('dns_provider'):
+                    dns_name = config['dns_provider'].strip().casefold()
+                    dns_match = next((p for p in self.providers() if p['name'].strip().casefold() == dns_name), None)
+                    if dns_match: config['dns_provider_id'] = dns_match['id']
+                dns_provider = self.provider(config.get('dns_provider_id')) if config.get('dns_provider_id') else None
+                if dns_provider:
+                    config['dns_provider'] = dns_provider['name']
+                    config['dns_provider_url'] = dns_provider['website_url']
+                    config['dns_panel_url'] = dns_provider['panel_url']
+                    config['dns_panel_name'] = dns_provider['panel_name']
                 provider = self.provider(config.get('hosting_provider_id')) if config.get('hosting_provider_id') else None
                 if provider:
                     config['hoster'] = provider['name']
@@ -391,11 +402,18 @@ class Store:
             count = 0
             for site in linked:
                 site_cfg = json.loads(site['config'])
-                if site_cfg.get('hosting_provider_id') != provider_id:
+                if site_cfg.get('hosting_provider_id') != provider_id and site_cfg.get('dns_provider_id') != provider_id:
                     continue
-                site_cfg['hosting_provider_id'] = ''
-                site_cfg['hoster'] = cfg['name']
-                site_cfg['hoster_url'] = cfg['website_url']
+                if site_cfg.get('hosting_provider_id') == provider_id:
+                    site_cfg['hosting_provider_id'] = ''
+                    site_cfg['hoster'] = cfg['name']
+                    site_cfg['hoster_url'] = cfg['website_url']
+                if site_cfg.get('dns_provider_id') == provider_id:
+                    site_cfg['dns_provider_id'] = ''
+                    site_cfg['dns_provider'] = cfg['name']
+                    site_cfg['dns_provider_url'] = cfg['website_url']
+                    site_cfg['dns_panel_url'] = cfg['panel_url']
+                    site_cfg['dns_panel_name'] = cfg['panel_name']
                 c.execute('UPDATE sites SET config=?,rev=? WHERE id=?',
                           (json.dumps(site_cfg, ensure_ascii=False), site['rev'] + 1, site['id']))
                 count += 1
@@ -425,6 +443,8 @@ class Store:
         cfg = validate(data)
         if cfg.get('hosting_provider_id') and not self.provider(cfg['hosting_provider_id']):
             raise ValueError('Выбранный хостинг-провайдер не найден')
+        if cfg.get('dns_provider_id') and not self.provider(cfg['dns_provider_id']):
+            raise ValueError('Выбранный DNS-провайдер не найден')
         sid = str(data.get('id') or uuid.uuid4().hex)
         now = minute()
         with self.db() as c:
@@ -435,7 +455,7 @@ class Store:
             rev = old['rev'] + 1 if old else 1
             if old:
                 c.execute('UPDATE sites SET config=?,rev=?,due=? WHERE id=?', (json.dumps(cfg, ensure_ascii=False), rev, now, sid))
-                metadata = {'name', 'hoster', 'hoster_url', 'hosting_provider_id', 'panel_name', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'registrar', 'network_operator', 'hosting_candidate', 'panel_url', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'hosting_expires', 'domain_expires'}
+                metadata = {'name', 'hoster', 'hoster_url', 'hosting_provider_id', 'dns_provider_id', 'panel_name', 'dns_provider', 'dns_provider_url', 'dns_panel_url', 'dns_panel_name', 'dns_nameservers', 'dns_mx_hosts', 'registrar', 'network_operator', 'hosting_candidate', 'panel_url', 'vault_id', 'hosting_vault_id', 'dns_vault_id', 'server_id', 'asset_id', 'server_name', 'server_ip', 'mail_provider', 'mail_imap_host', 'mail_smtp_host', 'mail_mx_host', 'notes', 'hosting_expires', 'domain_expires'}
                 previous = json.loads(old['config'])
                 changed = any(previous.get(k) != v for k,v in cfg.items() if k not in metadata)
                 if changed:
