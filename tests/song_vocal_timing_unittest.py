@@ -778,6 +778,65 @@ class SilentOpeningLineTests(unittest.TestCase):
         self.assertEqual(hyp['phrases'], before)
 
 
+class SqueezedOpeningLineTests(unittest.TestCase):
+    """«Я счастливый, как никто»: Whisper put «Кто поверит» at 0 s; the
+    corrected opening line (11 syllables) was squeezed into 0.4 s on a breath
+    before a 27-second intro and stood above the intro chords. The breath is
+    a voice blip, so the line was not «silent»; Qwen heard it at 25–50 s."""
+
+    VOCAL = {'intervals': [[380, 1220], [13420, 15000], [23460, 25720], [27500, 84980]],
+             'weak': [[360, 1380], [13380, 15060], [18460, 18640], [23400, 26260], [27160, 84980]]}
+    QWEN = [{'model': 'Qwen3-ASR-1.7B', 'phrases': [
+        {'text': 'Что случилось?', 'start_ms': 0, 'end_ms': 25000},
+        {'text': 'Кто поверит, я и сам не верю. Даль на счастье то ли на беду.', 'start_ms': 25000, 'end_ms': 50000}]}]
+    FIRST = 'Кто поверит? Я и сам не верю\nТо ль'
+    SECOND = 'на счастье, то ли на беду.'
+    setUp = SilentOpeningLineTests.setUp
+    tearDown = SilentOpeningLineTests.tearDown
+
+    def leps(self):
+        return [phrase('a', self.FIRST, 400, 800, [(400, 480), (560, 636), (636, 647), (647, 658), (658, 691),
+                                                   (691, 713), (713, 756), (756, 778), (778, 800)]),
+                phrase('b', self.SECOND, 27500, 33120, [(27500, 27600), (31440, 32000), (32080, 32160),
+                                                                    (32480, 32560), (32720, 32880), (32960, 33120)]),
+                phrase('c', 'У меня семь пятниц на неделе,', 33680, 37760,
+                       [(33680, 33760), (34560, 34880), (34960, 35200), (35360, 35920), (35920, 36400), (36400, 37760)])]
+
+    def test_squeezed_line_is_not_taken_as_sung(self):
+        rows = self.leps()
+        self.assertTrue(vt.squeezed_line(rows[0]))
+        self.assertFalse(vt.squeezed_line(rows[2]))
+
+    def test_squeezed_line_goes_where_another_recognizer_heard_it(self):
+        rows = self.leps()
+        groups = vt.silent_line_groups(rows, self.VOCAL, self.QWEN, 212000)
+        # Not to the intro blips at 13.4 and 23.4 s: Qwen heard it at 25–50 s.
+        self.assertEqual([g[0] for g in groups], [[0, 1]])
+        self.assertGreaterEqual(groups[0][1][0], 25000)
+        sung = [(27500 + k * 420, 27880 + k * 420) for k in range(9)] + \
+               [(31440, 31560), (31600, 32000), (32080, 32160), (32480, 32560), (32720, 32880), (32960, 33120)]
+        hyp = {'phrases': rows}
+        changed = self.worker.realign_silent_lines('x.wav', hyp, self.VOCAL, self.QWEN, lambda s: None,
+                                                   align=lambda t, a, b, source: words(t, sung))
+        self.assertEqual(changed, 1)
+        first, second = hyp['phrases'][0], hyp['phrases'][1]
+        self.assertEqual((first['start_ms'], first['text']), (27500, self.FIRST))
+        self.assertGreaterEqual(second['start_ms'], first['end_ms'])
+        sheet = build_guitar_sheet(hyp['phrases'], [dict(name='Gm', start_ms=512, end_ms=13500),
+                                                    dict(name='Cm', start_ms=13500, end_ms=27264),
+                                                    dict(name='Gm', start_ms=27264, end_ms=31000)], 212000, self.VOCAL)
+        order = [r.get('text') or 'gap' for r in sheet]
+        self.assertEqual(order[0], 'gap')  # the intro comes first
+        self.assertEqual(order[1], 'Кто поверит?')
+        self.assertTrue(all(r['start_ms'] >= 27000 for r in sheet if r.get('text')))
+
+    def test_breath_before_the_voice_does_not_move_a_sung_line(self):
+        # The same breath under a line sung at its own pace stays.
+        rows = self.leps()
+        rows[0] = phrase('a', 'Кто', 400, 800, [(400, 800)])
+        self.assertEqual(vt.silent_line_groups(rows, self.VOCAL, self.QWEN, 212000), [])
+
+
 class HeldVowelSheetTests(unittest.TestCase):
     """«Ты так хороша-а»: the Am changed under the held «а» showed on a line
     of its own (no text) below the line that was still sung."""

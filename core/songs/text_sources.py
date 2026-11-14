@@ -5,16 +5,16 @@ import hashlib
 import re
 import time
 
-from .reference_fragments import anchors, lyrics_only, refresh_agreement
+from .reference_fragments import anchors, lyrics_only, lyrics_with_labels, refresh_agreement
 from .reference_text import tokens, reference_candidates
 from .text_reference import fetch_source, confirm_text, result_patch
 
 
-def checked_row(store, args):
+def checked_row(store, args, *, allow_stale=False, allow_busy=False):
     row=store.get(str(args.get('song_id') or ''))
     if not row:raise ValueError('Песня не найдена')
-    if args.get('base_revision')!=row['revision']:raise ValueError('Песня уже изменилась — обновите карточку')
-    if row.get('status') in {'running','recording'}:raise ValueError('Дождитесь завершения текущего этапа')
+    if not allow_stale and args.get('base_revision')!=row['revision']:raise ValueError('Песня уже изменилась — обновите карточку')
+    if not allow_busy and row.get('status') in {'running','recording'}:raise ValueError('Дождитесь завершения текущего этапа')
     return row
 
 
@@ -77,7 +77,13 @@ def edit_span(phrase, start, end, replacement):
 
 
 def command(store, action, args, *, fetch=fetch_source):
-    row=checked_row(store,args); report=copy.deepcopy(row.get('text_reference') or {})
+    # Keep an authoritative save atomic against song updates from the UI or
+    # in-process workers. SongStore uses an RLock, so its own get/patch calls
+    # remain safe while this command holds the same lock.
+    if action=='apply' and hasattr(store,'_lock') and not args.get('_authoritative_lock'):
+        with store._lock:
+            return command(store,action,{**args,'_authoritative_lock':True},fetch=fetch)
+    row=checked_row(store,args,allow_stale=action=='apply',allow_busy=action=='apply'); report=copy.deepcopy(row.get('text_reference') or {})
     if action=='add':
         url=str(args.get('url') or '').strip(); pasted=str(args.get('lyrics') or '').strip()
         if len(url)>2048 or len(pasted)>50000:raise ValueError('Источник слишком большой')
@@ -89,13 +95,13 @@ def command(store, action, args, *, fetch=fetch_source):
             page={'status':'available','extracted_text':pasted,'final_url':url,'page_title':row.get('title','Песня')+' — текст песни'} if pasted else fetch(url)
         except Exception as exc:
             page={'status':'unavailable','error':str(exc)[:300]}
-        text=lyrics_only(page.get('extracted_text','')) if page.get('status')=='available' else ''
+        text,labels=lyrics_with_labels(page.get('extracted_text','')) if page.get('status')=='available' else ('',[])
         selected=next((r for r in row.get('analysis_runs',[]) if r.get('run_id')==row.get('selected_run_id')), {})
         phrases=refresh_agreement(row.get('phrases',[]),selected['hypotheses']) if selected.get('hypotheses') else row.get('phrases',[])
         match=confirm_text(text,anchors(phrases,limit=12))
         ref={'candidate_id':'text-reference:'+hashlib.sha256((url or text).encode()).hexdigest()[:16],
              'kind':'lyrics','url':page.get('final_url') or url,'title':page.get('page_title') or url or 'Текст песни',
-             'plain_lyrics':text,'text_confirmed':match['confirmed'],'text_confirmation':match,
+             'plain_lyrics':text,'labels':labels,'text_confirmed':match['confirmed'],'text_confirmation':match,
              'source_check':{k:v for k,v in page.items() if k!='extracted_text'},'manual_source':True}
         report['suggested_sources']=[r for r in report.get('suggested_sources',[]) if r.get('candidate_id')!=ref['candidate_id']]+[ref]
         if match['confirmed']:compare(row,ref,report)
@@ -113,20 +119,51 @@ def command(store, action, args, *, fetch=fetch_source):
         if not isinstance(indexes,list) or not indexes or any(type(i)!=int or not 0<=i<len(report.get('candidates',[])) for i in indexes):
             raise ValueError('Выберите исправления для применения')
         phrases=copy.deepcopy(row['phrases']);histories=copy.deepcopy(row.get('phrase_history',{}));chords=copy.deepcopy(row.get('chords',[]));count=0
-        # A correction across a line boundary also clears the cut-off part
-        # in the neighbouring line («при» | «подавателей в галфака»).
-        edits=[(report['candidates'][i],part,new) for i in sorted(set(indexes))
-               for part,new in [(report['candidates'][i]['current'],report['candidates'][i]['alternative']['text']),
-                                *[(extra,'') for extra in report['candidates'][i]['current'].get('also',[])]]]
+        # The user's save is authoritative. Suggestions may overlap or their
+        # saved offsets may have moved after an edit. Resolve each source text
+        # against the latest phrase where possible, and let the last selected
+        # correction win when spans overlap instead of rejecting the save.
+        by_phrase={p['phrase_id']:p for p in phrases}; edits=[]
+        selected=[]
+        for i in indexes:
+            if i not in selected:selected.append(i)
+        stale=[]
+        for i in selected:
+            item=report['candidates'][i]
+            if item.get('status')=='user_applied':continue
+            # A suggestion made for another recognition (a rerun keeps the
+            # user's lines and ids) or for words the user has since changed
+            # cannot be applied anywhere; it is recomputed below instead of
+            # replacing whatever now stands at its old offsets.
+            found=[]
+            for part,new in [(item['current'],item['alternative']['text']),*[(extra,'') for extra in item['current'].get('also',[])]]:
+                phrase=by_phrase.get(part.get('phrase_id'))
+                if phrase is None:break
+                source=phrase.get('text',''); expected=str(part.get('text') or '')
+                a=max(0,min(len(source),int(part.get('char_start') or 0)))
+                b=max(a,min(len(source),int(part.get('char_end') or a)))
+                if source[a:b]!=expected and expected:
+                    positions=[];at=source.find(expected)
+                    while at>=0:
+                        positions.append(at);at=source.find(expected,at+1)
+                    if not positions:break
+                    a=min(positions,key=lambda pos:abs(pos-int(part.get('char_start') or 0)));b=a+len(expected)
+                found.append({'phrase_id':phrase['phrase_id'],'start':a,'end':b,'replacement':str(new)})
+            else:
+                for edit in found:
+                    a,b=edit['start'],edit['end']
+                    edits=[old for old in edits if old['phrase_id']!=edit['phrase_id'] or old['end']<=a or old['start']>=b]
+                    edits.append(edit)
+                item['status']='user_applied';count+=1
+                continue
+            stale.append(i)
         for phrase in phrases:
-            changes=[(item,c,new) for item,c,new in edits if c['phrase_id']==phrase['phrase_id']]
+            changes=[edit for edit in edits if edit['phrase_id']==phrase['phrase_id']]
             if not changes:continue
-            before=copy.deepcopy(phrase); edge=len(phrase['text'])
-            for item,c,new in sorted(changes,key=lambda e:e[1]['char_start'],reverse=True):
-                a,b=c['char_start'],c['char_end']
-                if item.get('status')=='user_applied' or b>edge or phrase['text'][a:b]!=c['text']:
-                    raise ValueError('Исправления пересекаются или текст уже изменён — повторите сверку')
-                edit_span(phrase,a,b,new);edge=a
+            before=copy.deepcopy(phrase)
+            for edit in sorted(changes,key=lambda e:e['start'],reverse=True):
+                a,b=edit['start'],edit['end'];new=edit['replacement']
+                edit_span(phrase,a,b,new)
                 for chord in chords:
                     anchor=chord.get('anchor') or {}; at=anchor.get('grapheme_index')
                     if anchor.get('phrase_id')==phrase['phrase_id'] and isinstance(at,int):
@@ -134,9 +171,15 @@ def command(store, action, args, *, fetch=fetch_source):
                         elif at>=a:anchor['grapheme_index']=a
             history=histories.setdefault(phrase['phrase_id'],{'versions':[before],'cursor':0})
             history['versions']=history['versions'][:history['cursor']+1]+[copy.deepcopy(phrase)];history['cursor']+=1
-        for item,c,new in edits:
-            if c is item['current']:
-                item['status']='user_applied';count+=1
+        if not edits and not stale:raise ValueError('Не удалось найти фразы для выбранных исправлений')
+        if stale:
+            from .text_reference import card_report
+            report=card_report(report,phrases)
+        report['last_apply']={'applied':count,'outdated':len(stale),'at':time.time()}
+        if not edits:
+            # Nothing of the selection is still on the card: the list was
+            # made for words the user already corrected. Show the fresh list.
+            return store.patch(row['song_id'],result_patch(row,report),row['revision'])
         report['user_applied']=True;report['user_applied_count']=report.get('user_applied_count',0)+count
         patch=result_patch(row,report)
         patch.update(phrases=phrases,words=[w for p in phrases for w in p.get('words',[])],chords=chords,phrase_history=histories)

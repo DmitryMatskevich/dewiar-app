@@ -5,6 +5,7 @@ import time
 import hashlib
 import json
 import os
+import shutil
 import zipfile
 from pathlib import Path
 from datetime import datetime
@@ -68,6 +69,7 @@ for _project_id, _dirname, _title in _ZIP_DCMASTER_PROJECTS:
 
 DEFAULT_OUTPUT = Path.home() / 'Documents/_Save_Project/SaveDevAll'
 CLOUD_DEFAULTS = {'yandex': 'SaveDevAll', 'google': '1lsKtVJBoy6Cs1fQ7ffDIYSd-fWBKd4EX'}
+BACKUP_RETENTION_COUNT = 2
 RELEASE_DIR = 'astro-prototype/dist'
 FIXED_EXCLUDED_DIRS = {'.git', '.ssh', '.gnupg', '.codegraph', 'private-data',
                        'ockc-form-data', 'ockc-comments-data', 'dcnt-form-data', 'dcnt-comments-data'}
@@ -169,6 +171,26 @@ _SOURCE_PROJECTS = {
         'Восстановить статический сайт из dist и локального слоя static-test; '
         'старая WordPress-копия, каталоги результатов, локальные backup и временные файлы не входят.',
     ),
+    '3d-lanmaster': (
+        '3d_lanmaster', 'LANMASTER 3D',
+        ('3d_lanmaster', '3d lanmaster', 'lanmaster 3d', 'landmaster 3d', 'ланмастер 3d', 'ланмастер'),
+        ('_migrated', 'documents', 'plan', 'skills', 'lanmaster-cad', 'lanmaster-models',
+         'lanmaster-models-qa-excluded', 'lanmaster-studio'),
+        ('lanmaster-cad/out', 'lanmaster-cad/tmp', 'lanmaster-cad/var',
+         'lanmaster-studio/frontend/dist', 'lanmaster-studio/frontend/e2e-artifacts',
+         'lanmaster-studio/var'),
+        (),
+        'Сохраняются код, параметры, исходные документы, JSON-манифесты и промежуточные описания. '
+        'Производные 3D-модели, рендеры, кэши и локальные окружения исключены; модели восстанавливаются повторной генерацией.',
+    ),
+}
+
+_SOURCE_EXTENSION_RULES = {
+    '3d-lanmaster': {
+        'lanmaster-models': ('stp', 'step', 'igs', 'iges', 'dxf', 'dwg', 'ifc', 'glb', 'stl',
+                             'brep', 'pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'rvt', 'zip'),
+        'lanmaster-models-qa-excluded': ('png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg'),
+    },
 }
 
 for key, (dirname, title, aliases, include, exclude, required, note) in _SOURCE_PROJECTS.items():
@@ -178,6 +200,19 @@ for key, (dirname, title, aliases, include, exclude, required, note) in _SOURCE_
         'include': include, 'exclude': exclude, 'required': required, 'scope_note': note,
         'cloud_destinations': CLOUD_DEFAULTS,
     }
+    if key in _SOURCE_EXTENSION_RULES:
+        PROJECT_BACKUPS[key]['exclude_extensions_by_prefix'] = _SOURCE_EXTENSION_RULES[key]
+
+PROJECT_BACKUPS['3d-lanmaster']['exclude_notes'] = {
+    'lanmaster-cad/out': 'Сгенерированные STEP/IFC/GLB/DXF/PDF/PNG и отчёты CAD; повторно создаются из кода, параметров и исходных документов.',
+    'lanmaster-cad/tmp': 'Временные конвертации, smoke-файлы и снимки инструментов; не являются исходными данными.',
+    'lanmaster-cad/var': 'Локальное состояние, журналы и служебная база; создаются заново при запуске.',
+    'lanmaster-studio/frontend/dist': 'Собранный frontend; восстанавливается командой сборки из исходников.',
+    'lanmaster-studio/frontend/e2e-artifacts': 'Снимки и отчёты E2E-тестов; не нужны для восстановления приложения.',
+    'lanmaster-studio/var': 'Локальное состояние Studio и журналы; рабочие данные восстанавливаются отдельно.',
+    'lanmaster-models': 'В каталоге оставляем JSON-манифесты и текстовые описания; большие STEP/STP/IGS/IFC/DXF/GLB/STL-модели и рендеры не сохраняем.',
+    'lanmaster-models-qa-excluded': 'QA-рендеры и графические результаты проверки можно получить повторно; JSON-описания проекта сохраняются.',
+}
 
 
 def normalize(value):
@@ -198,18 +233,89 @@ def _defaults(project_id):
         excludes += ['dcmaster/static', 'cmms-rus/netbox', '.codex_tmp/models', '.codex_tmp/profiler', 'cursor_report']
     if mode == 'source_archive':
         excludes = ['**/' + name for name in _SOURCE_CACHE] + list(spec['exclude'])
+    include = list(spec.get('include', (spec.get('archive_subdir', '.'),)))
+    description = spec.get('description') or spec.get('scope_note', '')
+    include_notes = dict(spec.get('include_notes') or {})
+    exclude_notes = dict(spec.get('exclude_notes') or {})
+    for path in include:
+        include_notes.setdefault(path, _default_include_note(path))
+    for pattern in excludes:
+        exclude_notes.setdefault(pattern, _default_exclude_note(pattern))
     return {
         'title': spec['title'], 'root': str(spec['root']), 'aliases': list(spec['aliases']),
-        'include': list(spec.get('include', (spec.get('archive_subdir', '.'),))), 'exclude': excludes,
+        'description': description, 'include': include, 'exclude': excludes,
+        'include_notes': include_notes, 'exclude_notes': exclude_notes,
+        'exclude_extensions_by_prefix': {
+            prefix: list(extensions)
+            for prefix, extensions in spec.get('exclude_extensions_by_prefix', {}).items()
+        },
         'output_dir': str(spec.get('output_dir', DEFAULT_OUTPUT.parent / 'cmms-rus' if mode == 'cmms' else DEFAULT_OUTPUT)),
         'destinations': [{'provider': key, 'target': value} for key, value in spec.get('cloud_destinations', {}).items()],
     }
+
+
+def _default_include_note(path):
+    """Explain why a selected path is part of a recoverable project copy."""
+    name = Path(path).name.casefold()
+    if path == '.':
+        return 'Весь проект: код, конфигурация и документы нужны для восстановления.'
+    if name == 'lanmaster-cad':
+        return 'Код CAD-пайплайна, параметры, исходные документы и тесты.'
+    if name == 'lanmaster-models':
+        return 'JSON-манифесты и промежуточные описания; тяжёлая геометрия фильтруется отдельно.'
+    if name == 'lanmaster-studio':
+        return 'API, интерфейс, миграции и тесты Studio.'
+    if name in {'dist', 'astro-prototype'}:
+        return 'Готовая публикация проекта вместе с файлами, которые нужны сайту.'
+    if name in {'sources', 'source', 'documents', 'document'}:
+        return 'Исходные документы и данные, без которых проект нельзя восстановить.'
+    return 'Исходники и данные, необходимые для восстановления проекта.'
+
+
+def _default_exclude_note(pattern):
+    """Explain a standard exclusion in a way that is useful in the settings UI."""
+    value = pattern.removeprefix('**/').casefold()
+    if value in {'node_modules', 'venv', '.venv'}:
+        return 'Локальные зависимости; восстанавливаются по package-lock/pnpm-lock/requirements-файлам.'
+    if value in {'.git', '.codegraph'}:
+        return 'Служебная история или индекс; исходная история хранится в GitHub, индекс создаётся заново.'
+    if value in _SOURCE_CACHE or value.endswith('cache') or 'pytest' in value:
+        return 'Кэш и временные результаты; не нужны для восстановления и только занимают место.'
+    if value in {'tmp', 'var', 'logs', 'coverage', 'e2e-artifacts'}:
+        return 'Временное рабочее состояние, логи или результаты тестов; создаются заново.'
+    if value in {'out', 'outputs', 'output', 'dist', 'build', 'backups'}:
+        return 'Сгенерированные артефакты или старые копии; восстанавливаются повторной сборкой.'
+    if value in {'database', 'media'}:
+        return 'Рабочие данные/медиа этой конфигурации; хранятся отдельно или восстанавливаются из источника.'
+    if value.startswith('lanmaster-models'):
+        return 'Большие производные 3D-модели и рендеры; сохраняются исходные данные и JSON-манифесты, модели генерируются заново.'
+    return 'Исключено по правилам проекта; перед восстановлением проверьте источник этого каталога.'
 
 
 def _items(value, label):
     if not isinstance(value, list) or len(value) > 100 or any(not isinstance(x, str) for x in value):
         raise ValueError(f'{label}: укажите список из не более чем 100 строк.')
     return list(dict.fromkeys(x.strip() for x in value if x.strip()))
+
+
+def _notes(value, label, *, anywhere=False):
+    """Validate path-to-explanation maps stored with a backup profile."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or len(value) > 150:
+        raise ValueError(f'{label}: укажите словарь до 150 пояснений.')
+    result = {}
+    for path, note in value.items():
+        if not isinstance(path, str) or not isinstance(note, str):
+            raise ValueError(f'{label}: путь и пояснение должны быть строками.')
+        path = _relative(path.strip(), anywhere=anywhere)
+        note = note.strip()
+        if not note:
+            raise ValueError(f'{label}: для «{path}» добавьте пояснение.')
+        if len(note) > 1000:
+            raise ValueError(f'{label}: пояснение для «{path}» слишком длинное.')
+        result[path] = note
+    return result
 
 
 def _relative(value, anywhere=False):
@@ -265,6 +371,9 @@ def validate_profile(raw):
     title = raw['title'].strip()
     if len(title) > 100 or '\n' in title or '\r' in title:
         raise ValueError('Название проекта должно помещаться в одну строку до 100 символов.')
+    description = str(raw.get('description') or '').strip()
+    if len(description) > 3000 or '\x00' in description:
+        raise ValueError('Описание резервирования должно быть не длиннее 3000 символов.')
     root = _absolute(raw.get('root'), 'Папка проекта')
     output = _absolute(raw.get('output_dir'), 'Папка архивов')
     if output == root:
@@ -273,6 +382,18 @@ def validate_profile(raw):
     if not include:
         raise ValueError('Укажите хотя бы одну папку или файл. Точка означает весь проект.')
     exclude = [_relative(x, anywhere=True) for x in _items(raw.get('exclude'), 'Исключить')]
+    extension_rules = raw.get('exclude_extensions_by_prefix', {})
+    if not isinstance(extension_rules, dict) or len(extension_rules) > 50:
+        raise ValueError('Правила исключения расширений должны быть словарём до 50 путей.')
+    normalized_extension_rules = {}
+    for prefix, extensions in extension_rules.items():
+        prefix = _relative(prefix)
+        normalized_extension_rules[prefix] = [
+            value.removeprefix('.').casefold()
+            for value in _items(extensions, f'Расширения для {prefix}')
+        ]
+    include_notes = _notes(raw.get('include_notes'), 'Комментарии к включению')
+    exclude_notes = _notes(raw.get('exclude_notes'), 'Комментарии к исключению', anywhere=True)
     aliases = _items(raw.get('aliases', []), 'Названия для ассистента')
     destinations = raw.get('destinations', [])
     if not isinstance(destinations, list) or len(destinations) > 20:
@@ -286,7 +407,9 @@ def validate_profile(raw):
             raise ValueError('Копия архива должна храниться в отдельной папке.')
         if dest not in rows:
             rows.append(dest)
-    return dict(title=title, root=root, output_dir=output, include=include, exclude=exclude,
+    return dict(title=title, description=description, root=root, output_dir=output, include=include, exclude=exclude,
+                include_notes=include_notes, exclude_notes=exclude_notes,
+                exclude_extensions_by_prefix=normalized_extension_rules,
                 aliases=aliases, destinations=rows)
 
 
@@ -294,6 +417,12 @@ def configured_projects(settings=None):
     overrides = settings.get('project_backups', 'profiles') or {} if settings is not None else {}
     profiles = {key: _defaults(key) for key in PROJECT_BACKUPS}
     profiles.update(overrides)
+    for key, profile in profiles.items():
+        preset = _defaults(key) if key in PROJECT_BACKUPS else {}
+        profile.setdefault('description', preset.get('description', ''))
+        profile.setdefault('include_notes', dict(preset.get('include_notes', {})))
+        profile.setdefault('exclude_notes', dict(preset.get('exclude_notes', {})))
+        profile.setdefault('exclude_extensions_by_prefix', dict(preset.get('exclude_extensions_by_prefix', {})))
     return profiles
 
 
@@ -416,6 +545,17 @@ def _inventory(root, profile, preset):
     if preset.get('mode') == 'source_archive':
         ignored_extensions = {'pyc', 'pyo', 'swp', 'log', 'db', 'sqlite', 'sqlite3', 'sqlite-wal',
                               'sqlite-shm', 'db-wal', 'db-shm', 'sqlite3-wal', 'sqlite3-shm', 'tsbuildinfo'}
+    extension_rules = {
+        Path(prefix): {str(value).removeprefix('.').casefold() for value in values}
+        for prefix, values in profile.get('exclude_extensions_by_prefix', {}).items()
+    }
+
+    def extensions_for(relative):
+        result = set(ignored_extensions)
+        for prefix, values in extension_rules.items():
+            if relative == prefix or prefix in relative.parents:
+                result.update(values)
+        return result
     files, excluded = {}, 0
     for include in profile['include']:
         path = root / include
@@ -437,7 +577,7 @@ def _inventory(root, profile, preset):
                 candidate = base / name
                 relative = candidate.relative_to(root)
                 if (candidate.is_symlink() or not candidate.is_file()
-                        or _skip(relative, profile, protected, ignored_extensions, ignored_files)):
+                        or _skip(relative, profile, protected, extensions_for(relative), ignored_files)):
                     excluded += 1
                     continue
                 member = relative
@@ -459,6 +599,43 @@ def _inventory(root, profile, preset):
         if missing:
             raise ValueError('В архиве исходников отсутствуют обязательные файлы: ' + ', '.join(sorted(missing)))
     return files, excluded
+
+
+def _retire_backup(path, project_name):
+    """Move an old archive pair out of the active folder without losing recovery options."""
+    trash = Path.home() / '.Trash' / 'Dewiar-backups-retired' / project_name
+    try:
+        trash.mkdir(parents=True, exist_ok=True)
+        target = trash / path.name
+        if target.exists():
+            target = trash / f'{path.stem}-{time.time_ns()}{path.suffix}'
+        shutil.move(str(path), str(target))
+        return target
+    except (OSError, shutil.Error):
+        retired = path.parent / '.retired' / project_name
+        retired.mkdir(parents=True, exist_ok=True)
+        target = retired / path.name
+        if target.exists():
+            target = retired / f'{path.stem}-{time.time_ns()}{path.suffix}'
+        shutil.move(str(path), str(target))
+        return target
+
+
+def _retain_latest_backups(directory, prefix, keep=BACKUP_RETENTION_COUNT):
+    """Keep only the newest complete archive pairs in the active output directory."""
+    pairs = []
+    for archive in directory.iterdir():
+        if not archive.is_file() or archive.suffix != '.zip' or not archive.name.startswith(prefix + '_'):
+            continue
+        manifest = archive.with_suffix('.manifest.json')
+        if not manifest.is_file():
+            continue
+        pairs.append((max(archive.stat().st_mtime_ns, manifest.stat().st_mtime_ns), archive, manifest))
+    pairs.sort(key=lambda row: row[0], reverse=True)
+    retired = []
+    for _, archive, manifest in pairs[keep:]:
+        retired.extend(str(_retire_backup(path, prefix)) for path in (manifest, archive))
+    return retired
 
 
 def run_project_backup(project_id, *, profile=None, cancel=None, on_progress=None):
@@ -506,18 +683,26 @@ def run_project_backup(project_id, *, profile=None, cancel=None, on_progress=Non
                 check()
                 digest.update(block)
         size, sha = partial.stat().st_size, digest.hexdigest()
-        manifest.write_text(json.dumps({'project': profile['title'], 'source': str(root), 'archive': str(archive),
+        manifest.write_text(json.dumps({'project': profile['title'], 'description': profile.get('description', ''),
+            'source': str(root), 'archive': str(archive),
             'files': len(files), 'excluded': excluded, 'bytes': size, 'sha256': sha, 'verified': True,
             'include': profile['include'], 'exclude': profile['exclude'], 'entries': list(files),
+            'include_notes': profile.get('include_notes', {}), 'exclude_notes': profile.get('exclude_notes', {}),
+            'retention': {'keep': BACKUP_RETENTION_COUNT, 'retired': []},
             'restore': preset.get('scope_note', '')},
             ensure_ascii=False, indent=2), encoding='utf-8')
         os.replace(partial, archive)
+        retired = _retain_latest_backups(directory, name)
+        manifest_data = json.loads(manifest.read_text(encoding='utf-8'))
+        manifest_data['retention'] = {'keep': BACKUP_RETENTION_COUNT, 'retired': retired}
+        manifest.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2), encoding='utf-8')
     except BaseException:
         partial.unlink(missing_ok=True)
         manifest.unlink(missing_ok=True)
         raise
     return {'returncode': 0, 'output': (f'Included files: {len(files)}\nExcluded paths: {excluded}\n'
         f'Created: {archive} ({size} bytes)\nSHA-256: {sha}\nManifest: {manifest}\n'
+        f'Retained: current + previous ({BACKUP_RETENTION_COUNT})\n'
         'Verified: ZIP CRC, entries, size, and SHA-256\n')}
 
 
@@ -527,6 +712,7 @@ def describe_result(project_id, output, profile=None):
         return match.group(1).strip() if match else ''
 
     return {'project': (profile or _defaults(project_id))['title'],
+            'description': (profile or _defaults(project_id)).get('description', ''),
             'included': line(r'^Included files:[ \t]*(.+)$'),
             'excluded': line(r'^Excluded paths:[ \t]*(.+)$'),
             'archive': line(r'^Created: (.+) \([^()]*\)$'),

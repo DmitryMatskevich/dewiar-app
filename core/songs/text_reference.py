@@ -13,7 +13,7 @@ from urllib.parse import urlencode, urlsplit, parse_qs, urldefrag
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
-from .reference_fragments import anchors, query_plan, publication_match, lyrics_only, refresh_agreement
+from .reference_fragments import anchors, query_plan, publication_match, lyrics_only, lyrics_with_labels, refresh_agreement
 from .reference_text import tokens, reference_candidates
 from .sources import check_reference
 from .evidence import compare_reference
@@ -277,13 +277,13 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
             page=({'status':'available','extracted_text':candidate['plain_lyrics'],'page_title':candidate.get('title'),'final_url':url} if pasted else fetch(url))
             if page.get('status')!='available':
                 report['checked_pages'].append({'url':url,'status':page.get('status'),'http_status':page.get('http_status')});return
-            text=lyrics_only(page.get('extracted_text',''))
+            text,labels=lyrics_with_labels(page.get('extracted_text',''))
             match=confirm_text(text,selected)
             report['checked_pages'].append({'url':url,'status':match['status'],'exact_matches':len(match['hits'])})
             final=page.get('final_url') or url
             ref={'candidate_id':'text-reference:'+hashlib.sha256((final or text).encode()).hexdigest()[:16],
                  'kind':'lyrics','url':final,'title':page.get('page_title') or candidate.get('title') or 'Текст песни / стихотворение',
-                 'plain_lyrics':text,'text_confirmed':match['confirmed'] or bool(candidate.get('user_confirmed')),'text_confirmation':match,
+                 'plain_lyrics':text,'labels':labels,'text_confirmed':match['confirmed'] or bool(candidate.get('user_confirmed')),'text_confirmation':match,
                  'version_verified':False,'source_check':{k:v for k,v in page.items() if k!='extracted_text'}}
             for field in ('user_confirmed','manual_source'):
                 if candidate.get(field):ref[field]=True
@@ -364,6 +364,69 @@ def run(phrases, context=None, *, search=None, fetch=None, verify=None, progress
     report['state']='compared'
     report['comparisons']=[compare_reference(updated,r) for r in report['references']]
     return updated,report
+
+
+def on_card(candidate, by_id):
+    """Every part of a suggestion is still the card's own text at its place.
+
+    An applied suggestion (by the user or by the audio check) only needs its
+    line: its words were replaced on purpose.
+    """
+    current=candidate.get('current') or {}
+    applied=candidate.get('auto_apply') or candidate.get('status')=='user_applied'
+    for part in [current,*(current.get('also') or [])]:
+        phrase=by_id.get(part.get('phrase_id'))
+        if phrase is None:return False
+        if applied:continue
+        text=str(phrase.get('text') or '');a,b=part.get('char_start'),part.get('char_end')
+        if type(a)!=int or type(b)!=int or text[a:b]!=part.get('text'):return False
+    return True
+
+
+def card_report(report, phrases):
+    """Source suggestions for the lines the card actually shows.
+
+    A rerun compares the publication with its own fresh recognition, while a
+    card whose lines the user corrected keeps its text and phrase ids. Such
+    suggestions point at lines the card does not have and re-propose edits
+    the user already made, so none of them can be applied. Suggestions still
+    on the card stay with their audio checks; the rest of the card is
+    compared with the same publications again.
+    """
+    report=copy.deepcopy(report or {})
+    candidates=report.get('candidates') or []
+    by_id={p.get('phrase_id'):p for p in phrases or []}
+    kept=[c for c in candidates if on_card(c,by_id)]
+    if len(kept)==len(candidates):return report
+    stale=[c for c in candidates if not on_card(c,by_id)]
+    def span(c):
+        cur=c.get('current') or {}
+        return cur.get('phrase_id'),cur.get('char_start') or 0,cur.get('char_end') or 0
+    def overlaps(x,y):
+        (p,a,b),(q,c,d)=span(x),span(y)
+        return p==q and a<d and c<b
+    def same(x,y):
+        # The same publication words for the same heard words at that time.
+        cx,cy=x.get('current') or {},y.get('current') or {}
+        key=lambda c:' '.join(t['norm'] for t in tokens(c.get('text') or ''))
+        return (key(x.get('alternative') or {})==key(y.get('alternative') or {}) and key(cx)==key(cy)
+                and int(cx.get('start_ms') or 0)<int(cy.get('end_ms') or 0)
+                and int(cy.get('start_ms') or 0)<int(cx.get('end_ms') or 0))
+    confirmed={r.get('url'):bool(r.get('user_confirmed') or r.get('text_confirmed')) for r in report.get('references') or []}
+    for item in reference_candidates(phrases or [],report.get('references') or []):
+        if any(overlaps(item,k) for k in kept):continue
+        old=next((c for c in stale if same(item,c)),None)
+        if old is not None:
+            for key in ('audio_evidence','source_confirmed','audio_error'):
+                if key in old:item[key]=copy.deepcopy(old[key])
+            if old.get('status') not in (None,'user_applied'):item['status']=old['status']
+        else:
+            item['source_confirmed']=confirmed.get((item.get('alternative') or {}).get('url'),False)
+        kept.append(item)
+    order={p.get('phrase_id'):i for i,p in enumerate(phrases or [])}
+    report['candidates']=sorted(kept,key=lambda c:(order.get(span(c)[0],len(order)),span(c)[1]))
+    report['rebased_on_card']=len(stale)
+    return report
 
 
 def result_patch(row, report):

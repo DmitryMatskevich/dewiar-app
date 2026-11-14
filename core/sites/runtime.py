@@ -256,13 +256,15 @@ class Runtime:
 
     def status(self):
         size = 0
-        for path in self.store.root.glob('sites.db*'):
+        for name in ('sites.db', 'sites.db-wal'):
             try:
-                size += path.stat().st_size
+                size += (self.store.root / name).stat().st_size
             except FileNotFoundError:
                 pass  # SQLite can remove/checkpoint its WAL between glob and stat.
         with self.lock:
+            running = [job for job in self.jobs.values() if job['state'] == 'running']
+            finished = [job for job in self.jobs.values() if job['state'] != 'running'][-50:]
             return dict(pid=os.getpid(), uptime_seconds=int(time.time()-self.started), heartbeat=self.tick,
-                        active=len(self.active)+len(self.port_active)+len(self.console_active), jobs=copy.deepcopy(list(self.jobs.values())[-50:]), error=self.error,
+                        active=len(self.active)+len(self.port_active)+len(self.console_active), jobs=copy.deepcopy(finished+running), error=self.error,
                         paused=self.store.settings()['paused'], policy_paused=self.local_only(),
                         database_bytes=size, autostart=(Path.home()/'Library/LaunchAgents/com.dewiar.sites-monitor.plist').exists())

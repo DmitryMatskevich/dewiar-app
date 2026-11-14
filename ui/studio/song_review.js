@@ -3,9 +3,17 @@
    конфликт ревизий показан рядом с полем и не перезаписывает введённый текст. */
 window.SongReview = (() => {
   const drafts = new Map(), timers = new Map();
-  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null, setPitchPlayback = null;
+  let queue = Promise.resolve(), audioRequest = 0, stopPlayback = null, togglePlayback = null, selectPlaybackVariant = null, setPlaybackVariant = null, setPitchPlayback = null, playFromPlayback = null;
   let spacePlaybackHandler = null, spacePlaybackBound = false;
   const speedBySong = new Map(), pitchBySong = new Map();
+  const PREF_KEY='dewiar:song-playback-prefs:v1';
+  let savedPrefs={};
+  try { savedPrefs=JSON.parse(localStorage.getItem(PREF_KEY)||'{}')||{}; } catch (_) {}
+  const readPref=(songId,key,fallback)=>Number(savedPrefs?.[songId]?.[key]??fallback);
+  function savePref(songId,key,value) {
+    savedPrefs={...savedPrefs,[songId]:{...(savedPrefs[songId]||{}),[key]:value}};
+    try { localStorage.setItem(PREF_KEY,JSON.stringify(savedPrefs)); } catch (_) {}
+  }
   window.addEventListener('beforeunload', event => {
     if (drafts.size) { event.preventDefault(); event.returnValue = ''; }
   });
@@ -113,8 +121,8 @@ window.SongReview = (() => {
     let fullData = new Map(), followSheet = true, variant = 'original';
     let livePlay = null, livePhraseId = '', liveAudio = null, liveSaving = false;
     let liveLoopTimer = null, liveLoopEnabled = false;
-    let speed = speedBySong.get(row.song_id) || 1;
-    let pitch = pitchBySong.has(row.song_id) ? pitchBySong.get(row.song_id) : (SongSheet.offset(row) || 0);
+    let speed = speedBySong.get(row.song_id) ?? readPref(row.song_id,'speed',1);
+    let pitch = pitchBySong.has(row.song_id) ? pitchBySong.get(row.song_id) : readPref(row.song_id,'pitch',SongSheet.offset(row)||0);
     pitchBySong.set(row.song_id, pitch);
     spacePlaybackHandler = () => togglePlayback?.(true);
     if (!spacePlaybackBound && typeof document !== 'undefined') {
@@ -258,6 +266,7 @@ window.SongReview = (() => {
       } catch (error) { if (request === audioRequest) message(error.message || 'Не удалось воспроизвести запись'); }
       finally { if (request === audioRequest && player.isConnected) { delete player.dataset.loading; sync(); } }
     }
+    playFromPlayback=seconds=>playFull(false,true,Number(seconds));
     const variantSelect = document.getElementById('song-play-variant');
     async function switchFullVariant(next) {
       if (next === 'instrumental' && row.karaoke?.state !== 'ready') return;
@@ -306,7 +315,7 @@ window.SongReview = (() => {
     const changeSpeed = delta => {
       const index = speedSteps.findIndex(value => Math.abs(value-speed)<0.001);
       speed = speedSteps[Math.max(0,Math.min(speedSteps.length-1,index + delta))];
-      speedBySong.set(row.song_id,speed); applyAudioSettings();
+      speedBySong.set(row.song_id,speed); savePref(row.song_id,'speed',speed); applyAudioSettings();
     };
     speedDown?.addEventListener('click',()=>changeSpeed(-1));
     speedUp?.addEventListener('click',()=>changeSpeed(1));
@@ -315,6 +324,7 @@ window.SongReview = (() => {
       if (songId !== row.song_id) return;
       pitch = Math.max(-12,Math.min(12,Number(value)||0));
       pitchBySong.set(songId,pitch);
+      savePref(songId,'pitch',pitch);
       if(liveTarget&&!liveEditor.hidden) {
         liveChordDraft=liveChordDraft.map((draft,index)=>({...readLiveChord(draft,index),original_start_ms:draft.original_start_ms}));
         liveKeyShift=pitch;renderLiveChords();
@@ -926,5 +936,5 @@ window.SongReview = (() => {
     const status=state==='ready' ? `Минусовка готова${row.karaoke.quality_status==='acceptable'?' и проверена на слух':row.karaoke.quality_status==='defects'?' · есть замечания':' · ожидает оценки качества'}` : state==='failed' ? `Ошибка подготовки: ${row.karaoke.error||'см. состояние этапа'}` : busy ? 'Идёт отдельный этап подготовки минусовки…' : 'Минусовка ещё не подготовлена';
     return `<section class="song-instrumental-stage" aria-label="Воспроизведение и минусовка"><h3>Воспроизведение</h3><div class="song-player"><audio id="song-review-audio" controls preload="none" aria-label="Прослушивание песни"></audio><div class="song-player-actions"><label>Дорожка <select id="song-play-variant"><option value="original">Оригинал</option><option value="instrumental" ${state==='ready'?'':'disabled'}>Минусовка</option></select></label><button class="btn small" id="song-play-full">Слушать всю песню</button><label><input id="song-review-loop" type="checkbox"> Повторять фрагмент</label></div><span id="song-play-status" role="status">${esc(status)}</span></div></section>`;
   }
-  return {html, playerHtml, bind, protectedView, stop, toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:(value,follow=true)=>selectPlaybackVariant?.(value,follow), setVariant:value=>setPlaybackVariant?.(value), setPitch:(songId,value)=>setPitchPlayback?.(songId,value)};
+  return {html, playerHtml, bind, protectedView, stop, playFrom:seconds=>playFromPlayback?.(seconds), toggleFull:(follow=true)=>togglePlayback?.(follow), playVariant:(value,follow=true)=>selectPlaybackVariant?.(value,follow), setVariant:value=>setPlaybackVariant?.(value), setPitch:(songId,value)=>setPitchPlayback?.(songId,value)};
 })();

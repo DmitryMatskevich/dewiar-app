@@ -524,12 +524,17 @@
           <label class="f">Название проекта<input name="title" required maxlength="100"></label>
           <label class="f">Названия и голосовые варианты<textarea name="aliases" rows="3" placeholder="По одному варианту в строке"></textarea><span class="hint">Например: dcnt.ru, DCNT, сайт DCNT, дсмастер. После слов «бэкап», «резерв» и «создай копию» Dewiar выберет проект по любому из этих вариантов.</span></label>
         </div>
+        <label class="f">Описание резервирования<textarea name="description" rows="3" placeholder="Что сохраняется, что восстанавливается и какие данные хранятся отдельно"></textarea><span class="hint">Опишите назначение копии и важные ограничения. Это описание попадёт в опись ZIP и останется рядом с результатом задачи.</span></label>
         <label class="f">Папка проекта<input name="root" required placeholder="~/Documents/проект"></label>
         <div class="row">
           <label class="f">Что включать<textarea name="include" rows="4" required spellcheck="false"></textarea><span class="hint">Пути от папки проекта, по одному в строке. Точка означает весь проект.</span></label>
           <label class="f">Что исключать<textarea name="exclude" rows="4" spellcheck="false"></textarea><span class="hint">Пути от папки проекта. Запись **/имя исключает это имя на любом уровне.</span></label>
         </div>
-        <label class="f">Папка для ZIP и описи<input name="output_dir" required></label>
+        <div class="row">
+          <label class="f">Почему включаем<textarea name="include_notes" rows="5" spellcheck="false" placeholder="lanmaster-cad — код CAD-пайплайна и исходные документы"></textarea><span class="hint">По одной строке: путь — зачем он нужен для восстановления.</span></label>
+          <label class="f">Почему исключаем<textarea name="exclude_notes" rows="5" spellcheck="false" placeholder="**/node_modules — зависимости восстанавливаются по lock-файлу"></textarea><span class="hint">По одной строке: путь или правило — почему это кэш, временный результат, старая копия или производный файл.</span></label>
+        </div>
+        <label class="f">Папка для ZIP и описи<input name="output_dir" required><span class="hint">Пакетная обработка хранит в этой папке текущую и предыдущую проверенную копию; более старые пары перемещаются обратимо в служебную корзину.</span></label>
         <h4>Куда отправлять копии</h4>
         <div id="projects-destinations"></div>
         <p class="hint">Для облачных дисков нужны подключения из сейфа. Для внешнего диска или папки синхронизации выберите «Локальная папка».</p>
@@ -830,6 +835,19 @@
       <button class="btn" id="kn-go">Найти</button>
     </div>
     <div id="kn-found"></div>
+    <h2 style="margin-top:24px">Архив почты</h2>
+    <p class="hint">Импортируйте MBOX из Apple Mail или уже собранный локальный архив. Письма и вложения индексируются только на этом компьютере. Поиск работает отдельно от папки «Знания».</p>
+    <div class="actions" style="margin:8px 0">
+      <button class="btn primary" id="ea-import">Импортировать архив…</button>
+      <button class="btn" id="ea-open">Открыть папку архива</button>
+      <button class="btn" id="ea-clean">Очистить по моим правилам…</button>
+      <span class="res" id="ea-status"></span>
+    </div>
+    <div class="actions" style="margin:8px 0">
+      <input type="text" id="ea-q" placeholder="искать в почтовом архиве" style="flex:1;min-width:220px">
+      <button class="btn" id="ea-search">Найти в почте</button>
+    </div>
+    <div id="ea-results"></div>
     <p class="hint" id="kn-site" style="margin-top:14px"></p>
   </section>
 

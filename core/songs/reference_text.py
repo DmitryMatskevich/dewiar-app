@@ -14,10 +14,19 @@ import sys
 import time
 
 TOKEN = re.compile(r"[\w]+(?:[-’'][\w]+)*", re.UNICODE)
+# Lyrics sites mix scripts inside a word («повeрит» with a Latin «e»). Such a
+# word is the Russian one: compare it as such and never paste the Latin letter.
+LOOKALIKE = str.maketrans('aceopxyAÁBCEHKMOPTXY', 'асеорхуААВСЕНКМОРТХУ')
+CYRILLIC = re.compile('[а-яё]', re.I)
+
+
+def plain_script(text):
+    return TOKEN.sub(lambda m: m.group().translate(LOOKALIKE) if CYRILLIC.search(m.group()) else m.group(),
+                     str(text or ''))
 
 
 def tokens(text):
-    return [dict(text=m.group(), norm=m.group().casefold().replace('ё', 'е'),
+    return [dict(text=m.group(), norm=plain_script(m.group()).casefold().replace('ё', 'е'),
                  start=m.start(), end=m.end()) for m in TOKEN.finditer(text)]
 
 
@@ -47,7 +56,8 @@ def lexical_signals(phrases, known, lexicon=()):
 
 
 def _fragment(item, part):
-    return dict(text=item['text'][part[0]['start']:part[-1]['end']],
+    text = item['text'][part[0]['start']:part[-1]['end']]
+    return dict(text=plain_script(text) if item.get('origin') == 'publication' else text,
                 phrase_id=item.get('phrase_id'), start_ms=item.get('start_ms'),
                 end_ms=item.get('end_ms'), char_start=part[0]['start'], char_end=part[-1]['end'],
                 origin=item.get('origin', 'repeat'), url=item.get('url'),
@@ -63,6 +73,25 @@ def _cleared(item, part):
     else:
         b = len(text) - len(text[b:].lstrip())          # the start of a line
     return dict(_fragment(item, part), text=text[a:b], char_start=a, char_end=b)
+
+
+def _printed_once(pub, c, d):
+    """No run of these publication words (up to five) is printed elsewhere."""
+    norms = [t['norm'] for t in pub]
+    n = min(5, d - c)
+    for x in range(c, d - n + 1):
+        gram = norms[x:x + n]
+        if any(norms[y:y + n] == gram for y in range(len(norms) - n + 1) if not c <= y < d):
+            return False
+    return True
+
+
+def _line_edge(token, start):
+    """True when a sung line begins (or ends) at this recognized word."""
+    text = token['phrase'].get('text', '')
+    around = text[:token['start']] if start else text[token['end']:]
+    gap = re.split(r'\w', around)[-1 if start else 0]
+    return not around.strip() or bool(re.search(r'[.!?…\n]', gap))
 
 
 def _current(target, order):
@@ -205,7 +234,16 @@ def reference_candidates(phrases, references):
             # «Осип, блять, Эмильич») is proposed from 0.6.
             firm = min(before, after) >= 3 and j - i <= 6
             close = j - i <= 4 and similarity >= .6
-            if similarity < .7 and not (firm and similarity >= .4) and not close:
+            # A fast line the recognizers lost leaves one word of it («Даль»
+            # for «Я и сам не верю / То ль»): firm anchors pin the
+            # publication's missing words around the word that was heard.
+            # A refrain the publication prints several times may simply be
+            # skipped by the singer: only words printed once are a lost line.
+            lost = firm and j - i <= 2 and d - c > j - i and _printed_once(pub, c, d) and any(
+                difflib.SequenceMatcher(None, left, ''.join(t['norm'] for t in pub[x:y]),
+                                        autojunk=False).ratio() >= .6
+                for x in range(c, d) for y in range(x + 1, min(d, x + j - i + 1) + 1))
+            if similarity < .7 and not (firm and similarity >= .4) and not close and not lost:
                 continue
             one = _current(target, order)
             if one is None:
@@ -242,8 +280,22 @@ def reference_candidates(phrases, references):
                     if best is None or score>best[0]:best=(score,target,matcher)
                 if best is None:continue
                 _,target,matcher=best
-                for tag,a,b,c,d in matcher.get_opcodes():
+                ops=matcher.get_opcodes()
+                for k,(tag,a,b,c,d) in enumerate(ops):
                     if tag!='replace' or max(b-a,d-c)>8:continue
+                    # The window is cut to fit the published line, so its edge
+                    # proves nothing: «Счастливый, как никто! / Счастливым и
+                    # уйду» fitted over «…как никто! Я счастливый, лет на сто»
+                    # would replace «Я счастливый». A difference needs equal
+                    # words on both sides, or both texts ending a line there.
+                    if not ((k and ops[k-1][0]=='equal') or (a==0 and c==0 and _line_edge(target[0],True))):continue
+                    if not ((k+1<len(ops) and ops[k+1][0]=='equal') or
+                            (b==len(target) and d==len(pn) and _line_edge(target[-1],False))):continue
+                    # Spacing alone («в разнос» / «вразнос») is a publication
+                    # habit: as in the whole-text pass, two equal words each side.
+                    if (''.join(t['norm'] for t in target[a:b])==''.join(pn[c:d]) and
+                            not (k and k+1<len(ops) and ops[k-1][0]==ops[k+1][0]=='equal' and
+                                 min(ops[k-1][2]-ops[k-1][1],ops[k+1][2]-ops[k+1][1])>=2)):continue
                     part=target[a:b]
                     similarity=difflib.SequenceMatcher(None,''.join(t['norm'] for t in part),''.join(pn[c:d]),autojunk=False).ratio()
                     if similarity<.65:continue

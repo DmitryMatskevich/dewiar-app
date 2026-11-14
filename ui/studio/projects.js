@@ -38,6 +38,20 @@
     get('projects-reset').disabled = busy;
   }
 
+  function formatNotes(notes) {
+    return Object.entries(notes || {}).map(([path, note]) => `${path} — ${note}`).join('\n');
+  }
+
+  function parseNotes(name) {
+    const result = {};
+    for (const line of form.elements[name].value.split('\n').map(value => value.trim()).filter(Boolean)) {
+      const match = line.match(/^(.+?)\s+[—-]\s+(.+)$/);
+      if (!match) throw new Error(`В строке «${line}» укажите путь, тире и пояснение.`);
+      result[match[1].trim()] = match[2].trim();
+    }
+    return result;
+  }
+
   function renderList() {
     list.replaceChildren();
     for (const project of catalog.projects) {
@@ -105,6 +119,9 @@
       const value = project[field];
       form.elements[field].value = Array.isArray(value) ? value.join('\n') : value || '';
     }
+    form.elements.description.value = project.description || '';
+    form.elements.include_notes.value = formatNotes(project.include_notes);
+    form.elements.exclude_notes.value = formatNotes(project.exclude_notes);
     destinations.replaceChildren();
     for (const row of project.destinations || []) addDestination(row);
     get('projects-reset').hidden = !project.preset;
@@ -136,13 +153,21 @@
   async function save(reset) {
     if (busy) return;
     const lines = name => form.elements[name].value.split('\n').map(line => line.trim()).filter(Boolean);
-    const data = reset ? null : {
-      title: form.elements.title.value, root: form.elements.root.value, output_dir: form.elements.output_dir.value,
-      aliases: lines('aliases'), include: lines('include'), exclude: lines('exclude'),
-      destinations: [...destinations.querySelectorAll('[data-backup-destination]')].map(row => ({
-        provider: row.querySelector('select').value, target: row.querySelector('input').value,
-      })),
-    };
+    let data;
+    try {
+      data = reset ? null : {
+        title: form.elements.title.value, root: form.elements.root.value, output_dir: form.elements.output_dir.value,
+        aliases: lines('aliases'), include: lines('include'), exclude: lines('exclude'),
+        description: form.elements.description.value,
+        include_notes: parseNotes('include_notes'), exclude_notes: parseNotes('exclude_notes'),
+        destinations: [...destinations.querySelectorAll('[data-backup-destination]')].map(row => ({
+          provider: row.querySelector('select').value, target: row.querySelector('input').value,
+        })),
+      };
+    } catch (error) {
+      status.textContent = error.message;
+      return;
+    }
     busy = true;
     buttonState();
     try {

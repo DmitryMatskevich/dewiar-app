@@ -1576,6 +1576,19 @@ def t_search_documents(a, ctx):
         "\n\nОтвечай по этим отрывкам и назови файл, откуда взято (по имени, например «Регламент.pdf»). Если ответа в них нет — так и скажи."
 
 
+def t_search_email_archive(a, ctx):
+    archive = ctx.get("email_archive")
+    if not archive:
+        raise ToolError("локальный архив почты недоступен")
+    hits = archive.search(a.get("query", ""), limit=8)
+    if not hits:
+        return "В локальном архиве почты ничего подходящего не нашлось."
+    return "\n\n".join(
+        f"[Письмо: {r.get('date') or 'дата неизвестна'}; от {r.get('sender') or 'неизвестно'}; тема «{r.get('subject') or 'без темы'}»; источник {r.get('source') or 'локальный архив'}]\n{r.get('body','')[:1800]}"
+        for r in hits
+    ) + "\n\nИспользуй только найденные письма, указывай отправителя, дату и тему как источник. Не утверждай, что архив содержит всё, если результаты ограничены."
+
+
 def t_ask_knowledge(a, ctx):
     """Вопрос к Знаниям на сайте Dewiar (account.py); base — база или раздел библиотеки по названию."""
     acc = ctx.get("account")
@@ -2746,7 +2759,7 @@ TOOLS = {
                      "что ищешь на странице, если она длинная: «Доллар США», «15 октября»"}, "visible": {"type": "boolean", "description":
                      "true — открыть страницу в окне браузера у человека, чтобы он сам прошёл проверку «я не робот» или вошёл; "
                      "только после его согласия, когда обычное чтение ответило, что сайт просит проверку"}}, ["url"]), "safe", t_read_webpage, "Чтение веб-страниц"),
-    "control_mac_app": ("Управление приложениями macOS и выполнение задач через Универсальный доступ. Сценарий: open → inspect → click/type/key/scroll → inspect для проверки. dnd_on/dnd_off — явно включить/выключить фокусировку «Не беспокоить» через системные команды macOS; это не переключатель. open — запуск, focus — переключение, minimize — свернуть окна приложения без завершения, quit — обычное завершение с сохранением диалогов, move — перенос окна на экран, cursor — курсор к окну без клика, list/screens/windows — списки, inspect — дерево доступных кнопок и полей, click — нажать элемент по его title/description, type — ввести текст в поле, key — отправить Enter/Tab/Escape/Cmd+A и другие клавиши, scroll — прокрутить доступный список. Для minimize/inspect/click/type/key/scroll нужен Универсальный доступ. Не угадывай координаты: сначала inspect и используй точное название элемента. При нескольких окнах указывай window; приложение — точное название или bundle ID. Экран — номер с 1, основной, другой, левый, правый.", S({"action": {"type": "string", "enum": ["open", "focus", "minimize", "quit", "dnd_on", "dnd_off", "move", "cursor", "list", "screens", "windows", "inspect", "click", "type", "key", "scroll"]}, "application": {"type": "string", "description": "Название запущенного приложения или bundle ID"}, "screen": {"type": "string"}, "window": {"type": "integer", "minimum": 1}, "target": {"type": "string", "description": "Точное title/description элемента из inspect"}, "text": {"type": "string"}, "mode": {"type": "string", "enum": ["replace", "append"]}, "key": {"type": "string", "description": "Enter, Tab, Escape, Cmd+A, Ctrl+C и т. п."}, "direction": {"type": "string", "enum": ["up", "down", "left", "right"]}}, ["action"]), "safe", t_control_mac_app, "Приложения и задачи Mac"),
+    "control_mac_app": ("Управление приложениями macOS и выполнение задач через Универсальный доступ. Сценарий: open → inspect → click/type/key/scroll → inspect для проверки. dnd_on/dnd_off — явно включить/выключить фокусировку «Не беспокоить» через системные команды macOS; input_english/input_russian — выбрать установленную английскую/русскую раскладку клавиатуры. open — запуск, focus — переключение, minimize — свернуть окна приложения без завершения, quit — обычное завершение с сохранением диалогов, move — перенос окна на экран, cursor — курсор к окну без клика, list/screens/windows — списки, inspect — дерево доступных кнопок и полей, click — нажать элемент по его title/description, type — ввести текст в поле, key — отправить Enter/Tab/Escape/Cmd+A и другие клавиши, scroll — прокрутить доступный список. Для minimize/inspect/click/type/key/scroll нужен Универсальный доступ. Не угадывай координаты: сначала inspect и используй точное название элемента. При нескольких окнах указывай window; приложение — точное название или bundle ID. Экран — номер с 1, основной, другой, левый, правый.", S({"action": {"type": "string", "enum": ["open", "focus", "minimize", "quit", "dnd_on", "dnd_off", "input_english", "input_russian", "move", "cursor", "list", "screens", "windows", "inspect", "click", "type", "key", "scroll"]}, "application": {"type": "string", "description": "Название запущенного приложения или bundle ID"}, "screen": {"type": "string"}, "window": {"type": "integer", "minimum": 1}, "target": {"type": "string", "description": "Точное title/description элемента из inspect"}, "text": {"type": "string"}, "mode": {"type": "string", "enum": ["replace", "append"]}, "key": {"type": "string", "description": "Enter, Tab, Escape, Cmd+A, Ctrl+C и т. п."}, "direction": {"type": "string", "enum": ["up", "down", "left", "right"]}}, ["action"]), "safe", t_control_mac_app, "Приложения и задачи Mac"),
     "open_app": ("Запустить установленную программу по названию (Firefox, Терминал, Telegram, Калькулятор…).", S({"name": {"type": "string"}}, ["name"]), "safe", t_open_app, "Запуск программ"),
     "open_path": ("Открыть файл или папку (можно «загрузки», «документы», «рабочий стол» или путь).", S({"path": {"type": "string"}}, ["path"]), "safe", t_open_path, "Открытие файлов и папок"),
     "play_music": ("Включить музыку: открывает поиск в YouTube Music.", S({"query": {"type": "string", "description": "исполнитель, песня или настроение"}}), "safe", t_play_music, "Музыка в YouTube Music"),
@@ -2891,6 +2904,10 @@ TOOLS = {
                          "про его документы или файлы, «что написано в…», «найди в моих документах». "
                          "Запрос — ключевые слова по-русски, без лишних слов.",
                          S({"query": {"type": "string"}}, ["query"]), "safe", t_search_documents, "Мои документы"),
+    "search_email_archive": ("Найти письма в локальном архиве почты пользователя. Вызывай, когда вопрос относится к старой переписке, "
+                             "отправителям, темам или событиям в импортированных письмах. Ищи краткими ключевыми словами; "
+                             "отвечай с датой, отправителем и темой письма.",
+                             S({"query": {"type": "string"}}, ["query"]), "safe", t_search_email_archive, "Архив почты"),
     "ask_knowledge": ("Спросить Знания пользователя на сайте Dewiar — его загруженные документы, регламенты, базы "
                       "знаний компании. Вызывай, когда вопрос про его документы, работу, компанию или «что у меня в "
                       "Знаниях». Вопрос пиши полностью, без «это» и «там». Ответ приходит с источниками — назови их.",
@@ -2950,7 +2967,7 @@ TOOLS = {
     "close_read": ("Последние сообщения от близких (и мои им): «что мне писали», «что ответил Андрей». who — имя или пусто — все.",
                    S({"who": {"type": "string"}}), "safe", t_close_read, "Близкие: прочитать"),
     "voice_command_settings": ("Настройки голосовых команд Dewiar. show — прочитать действующие фразы, названия приложений и список установленных программ. propose — подготовить одно конкретное изменение, без сохранения. Сначала прочитай настройки; уточни недостающее действие, приложение или фразу. Предложи помощь, если пользователь не знает, как настроить команду. Никогда не говори, что предложение уже применено: для этого нужен voice_command_apply и согласие пользователя. Разрешения инструментов не меняются.",
-        S({"operation": {"type": "string", "enum": ["show", "propose"]}, "change": {"type": "string", "enum": ["add_phrase", "remove_phrase", "add_alias", "remove_alias", "set_enabled"]}, "action": {"type": "string", "enum": ["open", "quit", "minimize", "focus", "dnd_on", "dnd_off", "yandex_search", "song_process"]}, "phrase": {"type": "string"}, "application": {"type": "string"}, "alias": {"type": "string"}, "enabled": {"type": "boolean"}}, ["operation"]), "safe", t_voice_command_settings, "Голосовые команды: подсказки и предложения"),
+        S({"operation": {"type": "string", "enum": ["show", "propose"]}, "change": {"type": "string", "enum": ["add_phrase", "remove_phrase", "add_alias", "remove_alias", "set_enabled"]}, "action": {"type": "string", "enum": ["open", "quit", "minimize", "focus", "dnd_on", "dnd_off", "input_english", "input_russian", "yandex_search", "song_process"]}, "phrase": {"type": "string"}, "application": {"type": "string"}, "alias": {"type": "string"}, "enabled": {"type": "boolean"}}, ["operation"]), "safe", t_voice_command_settings, "Голосовые команды: подсказки и предложения"),
     "voice_command_apply": ("Применить ранее подготовленное предложение голосовых команд по proposal_id. Пользователь обязательно подтверждает конкретное изменение; без подтверждения не сохранять. Не повторяй вызов после отказа. Если настройки изменились с момента предложения, подготовь новое.",
         S({"proposal_id": {"type": "string"}}, ["proposal_id"]), "confirm", t_voice_command_apply, "Голосовые команды: применить изменение"),
     "app_help": ("Руководство Dewiar — как пользоваться самим этим приложением: где кнопка или раздел, как настроить, как пригласить "
@@ -3072,7 +3089,7 @@ DEFAULT_OFF = set()          # команды терминала включен�
 SAFE_CORE = {"calc", "world_time", "weather", "web_search", "read_webpage", "show_images", "set_reminder", "list_reminders",
              "cancel_reminder", "mark_done", "done_report", "save_note", "find_notes", "read_file", "remember", "write_diary",
              "money_add", "money_report", "payments", "calendar_list", "app_help", "call_persona", "widget", "play_radio", "media_control",
-             "set_volume", "system_status", "task_status", "search_documents", "ask_knowledge", "meeting_screenshot", "meeting_frames"}
+             "set_volume", "system_status", "task_status", "search_documents", "search_email_archive", "ask_knowledge", "meeting_screenshot", "meeting_frames"}
 
 
 # инструменты навыков (skills.py): есть, только когда навыки включены; выполняет Toolbox.run
@@ -3125,6 +3142,10 @@ class Toolbox:
         if name == "search_documents":          # только когда в «Знаниях» есть документы
             kn = self.hooks.get("knowledge")
             if not (kn and kn.has_files()):
+                return False, False
+        if name == "search_email_archive":
+            archive = self.hooks.get("email_archive")
+            if not (archive and archive.status().get("messages")):
                 return False, False
         if name == "ask_knowledge":             # только после входа в аккаунт сайта
             acc = self.hooks.get("account")
@@ -3300,6 +3321,8 @@ class Toolbox:
             action = args.get("action")
             if action in ('dnd_on', 'dnd_off'):
                 return ('Включить' if action == 'dnd_on' else 'Выключить') + ' фокусировку «Не беспокоить» на Mac?'
+            if action in ('input_english', 'input_russian'):
+                return 'Переключить раскладку на ' + ('английскую' if action == 'input_english' else 'русскую') + '?'
             label = {"open": "Открыть", "focus": "Переключиться на", "minimize": "Свернуть окна приложения", "quit": "Завершить", "move": "Перенести окно", "cursor": "Переместить курсор к окну", "list": "Показать приложения", "screens": "Показать экраны", "windows": "Показать окна", "inspect": "Прочитать интерфейс", "click": "Нажать элемент", "type": "Ввести текст", "key": "Нажать клавишу", "scroll": "Прокрутить"}.get(action, "Выполнить действие")
             target = " «" + str(args.get("application") or "") + "»" if args.get("application") else ""
             screen = " на экран «" + str(args.get("screen") or "другой") + "»" if action == "move" else ""

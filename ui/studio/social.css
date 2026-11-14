@@ -3,5 +3,6 @@
 .sc-discard{max-width:460px;background:var(--frost,#172430);color:var(--ink,#eef5f8);border:1px solid #607887;border-radius:12px;padding:24px}.sc-discard::backdrop{background:#0009}.sc-discard button{margin:8px 8px 0 0}
 
 #social-app select{padding-right:34px}/* Keep theme.css select arrow; use background-color for fields. */
+.sc-browser-login{margin:16px 0;padding:14px;border:1px solid var(--line,#34404b);border-radius:9px;background:var(--panel,#1d2c38)}.sc-browser-login p{margin:8px 0 0;font-size:13px;color:var(--muted,#aebbc3)}
 
 .sc-discard{margin:auto;max-width:min(480px,calc(100vw - 32px))}

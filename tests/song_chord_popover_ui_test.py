@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         pop=page.locator('.song-chord-popover')
         trigger=page.locator('#song-guitar-content .song-chord-tip[data-chord-name="Em"]').first
         trigger.hover()
-        assert pop.is_visible()
+        pop.wait_for(state='visible')  # the window opens a second after the pointer rests
         assert pop.locator('[data-chord-transpose="-1"] path').get_attribute('d')=='M12 4v16m-6-6 6 6 6-6'
         assert pop.locator('[data-chord-transpose="1"] path').get_attribute('d')=='M12 20V4m-6 6 6-6 6 6'
         a2='[data-chord-string="4"][data-chord-fret="2"]'
@@ -78,6 +78,75 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert pop.locator('[data-chord-fret]').first.evaluate('(e)=>e===document.activeElement')
         pop.locator('[data-chord-close]').click()
 
+        # The clef right of the copy button: hover → follow → off. «Отключить»
+        # at the bottom of the window turns hovering off; a click still opens.
+        toggle=page.locator('#song-chord-hover')
+        mode=lambda:toggle.get_attribute('data-chord-mode')
+        assert page.locator('.song-copy-group button').evaluate_all('(b)=>b.map(e=>e.id)')[-3:]==['song-copy-sheet','song-chord-hover','song-layout-edit']
+        assert mode()=='hover' and toggle.locator('svg circle').count()==1
+        page.locator('#test-banner').hover();trigger.hover();pop.wait_for(state='visible')
+        assert pop.locator('.song-chord-popover-foot [data-chord-hover-off]').inner_text()=='Отключить'
+        pop.locator('[data-chord-hover-off]').click()
+        assert pop.is_hidden() and mode()=='off'
+        assert page.evaluate("localStorage.getItem('dewiar:song-chord-hover')")=='off'
+        page.locator('#test-banner').hover();trigger.hover();page.wait_for_timeout(1300);assert pop.is_hidden()
+        trigger.click();assert pop.is_visible()
+        assert pop.locator('[data-chord-hover-on]').count()==1
+        pop.locator('[data-chord-close]').click()
+        toggle.click();assert mode()=='hover'
+        page.locator('#test-banner').hover();trigger.hover();pop.wait_for(state='visible')
+        pop.locator('[data-chord-close]').click()
+        toggle.click();assert mode()=='follow'
+        assert page.evaluate("localStorage.getItem('dewiar:song-chord-hover')")=='follow'
+        page.locator('#test-banner').hover();trigger.hover();page.wait_for_timeout(1300);assert pop.is_hidden()
+
+        # Follow: while the song plays, a small card without buttons stands over
+        # the chord being played; it closes on pause.
+        page.evaluate("""()=>{
+          let audio=document.getElementById('song-review-audio');
+          if(!audio){audio=document.createElement('audio');audio.id='song-review-audio';document.body.append(audio);}
+          window.__paused=false;Object.defineProperty(audio,'paused',{get:()=>window.__paused,configurable:true});
+        }""")
+        page.evaluate('(sid)=>SongSheet.updatePlayback(sid,3500,false)',sid)
+        follow=page.locator('.song-chord-follow')
+        follow.wait_for(state='visible')
+        current=page.locator('#song-guitar-content .song-chord-tip.current-chord').first
+        current.evaluate("e=>e.scrollIntoView({block:'center'})");page.wait_for_timeout(150)
+        assert current.get_attribute('data-chord-name')=='Am'
+        assert follow.locator('.song-chord-mini-name').inner_text()=='Am'
+        assert follow.locator('button').count()==0
+        assert follow.evaluate("e=>getComputedStyle(e).pointerEvents")=='none'
+        fb,cb=follow.bounding_box(),current.bounding_box()
+        assert fb['y']+fb['height']<=cb['y']+1,(fb,cb)       # above the chord being played
+        assert fb['width']<200 and fb['height']<140,fb       # smaller than the editing window
+        assert follow.locator('i.filled').count()==3 and follow.locator('i.is-muted').count()==4  # Am: 0-1-2-2-0-x
+        (ROOT/'work/chord-popover-check').mkdir(exist_ok=True)
+        page.screenshot(path=str(ROOT/'work/chord-popover-check/follow-card.png'))
+        page.evaluate('(sid)=>SongSheet.updatePlayback(sid,1000,false)',sid)
+        assert follow.locator('.song-chord-mini-name').inner_text()=='Em'
+        page.evaluate('(sid)=>{window.__paused=true;SongSheet.updatePlayback(sid,1000,false);}',sid)
+        assert follow.is_hidden()
+        page.evaluate('(sid)=>{window.__paused=false;SongSheet.updatePlayback(sid,1000,false);}',sid)
+        follow.wait_for(state='visible')
+        page.evaluate('(sid)=>SongSheet.updatePlayback(sid,-1,false)',sid)  # stop
+        assert follow.is_hidden()
+        toggle.click();assert mode()=='off'
+        page.evaluate('(sid)=>SongSheet.updatePlayback(sid,1000,false)',sid)
+        assert follow.is_hidden()
+        toggle.click();assert mode()=='hover'
+
+        # A string that is not played: a × in the middle of every fret.
+        page.locator('#test-banner').hover()
+        page.locator('#song-guitar-content .song-chord-tip[data-chord-name="Am"]').first.hover();pop.wait_for(state='visible')
+        muted=pop.locator('.song-chord-grid.is-muted')
+        assert muted.count()==1
+        assert muted.evaluate("e=>getComputedStyle(e,'::after').content") in ('none','normal')
+        marks=muted.locator('.song-chord-fret').evaluate_all("(cells)=>cells.map(c=>getComputedStyle(c,'::before').content)")
+        assert marks==['"×"']*4,marks
+        (ROOT/'work/chord-popover-check').mkdir(exist_ok=True)
+        pop.screenshot(path=str(ROOT/'work/chord-popover-check/muted-and-switch-off.png'))
+        pop.locator('[data-chord-close]').click()
+
         trigger.hover();pop.locator(b1).click()
         assert pop.locator('.song-chord-popover-head [data-chord-apply]').count()==1
         pop.locator('[data-chord-name-edit]').fill('')
@@ -105,7 +174,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert saved['chords'][0]['voicing_fingering']==chosen_shape
         page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
         tip=page.locator(f'#song-guitar-content .song-chord-tip[data-chord-name="{chosen_name}"]').first
-        tip.hover()
+        tip.hover();pop.wait_for(state='visible')
         assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())==chosen_shape
         pop.locator('[data-chord-close]').click()
 
@@ -129,13 +198,13 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert store.get(sid)['chords'][0]['name']==chosen_name
         assert store.get(sid)['chords'][0]['voicing_key_shift']==1
         assert page.locator('#song-guitar-content .song-chord-tip').first.inner_text()==display_name
-        page.locator('#song-guitar-content .song-chord-tip').first.hover()
+        page.locator('#song-guitar-content .song-chord-tip').first.hover();pop.wait_for(state='visible')
         assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())==transposed_shape
         pop.locator('[data-chord-close]').click()
 
         # Expanded chooser after the sheet has already requested tooltip shapes.
         page.locator('#song-key-down').click()
-        page.locator('#song-guitar-content .song-chord-tip').first.hover()
+        page.locator('#song-guitar-content .song-chord-tip').first.hover();pop.wait_for(state='visible')
         pop.locator('[data-chord-name-edit]').fill('Ab')
         total=int(pop.locator('.song-chord-variants span').inner_text().split('/')[1])
         assert total>8,total
@@ -159,7 +228,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         pop.locator('[data-chord-apply]').click();pop.wait_for(state='hidden')
         assert store.get(sid)['chords'][0]['voicing_fingering']=='11-13-13-13-11-x'
         page.reload();page.locator(f'button[data-song-open="{sid}"]').click()
-        page.locator('#song-guitar-content .song-chord-tip').first.hover()
+        page.locator('#song-guitar-content .song-chord-tip').first.hover();pop.wait_for(state='visible')
         assert '-'.join(pop.locator('[data-chord-string-toggle]').all_inner_texts())=='11-13-13-13-11-x'
         pop.locator('[data-chord-close]').click()
 
@@ -167,7 +236,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         for light in (False,True):
             page.set_viewport_size(dict(width=375,height=812))
             page.evaluate('(light)=>document.documentElement.classList.toggle("st-light",light)',light)
-            page.locator('#song-guitar-content .song-chord-tip').first.hover()
+            page.locator('#song-guitar-content .song-chord-tip').first.hover();pop.wait_for(state='visible')
             box=pop.bounding_box();assert box['x']>=0 and box['x']+box['width']<=375
             assert not pop.evaluate("e=>getComputedStyle(e).backgroundColor").startswith('rgba(')
             label_color=pop.locator('.song-chord-string').first.evaluate('e=>getComputedStyle(e).color')

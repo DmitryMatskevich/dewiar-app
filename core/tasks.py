@@ -382,7 +382,7 @@ class TaskManager:
 
     # ---------- управление ----------
 
-    def create(self, title, goal, project="", start=True, persona="", parent="", team=None):
+    def create(self, title, goal, project="", start=True, persona="", parent="", team=None, execution_profile=""):
         """Создать папку задачи и начальные файлы; project — папка проекта для режима «Код». Нет папки — ValueError."""
         team = self._validate_team(team or {})
         title = _clean(title or goal[:50])
@@ -409,6 +409,8 @@ class TaskManager:
         data = {"id": tid, "title": title, "goal": goal.strip(), "project": project or "", "status": "paused",
                 "created": _now(), "updated": _now(), "steps": 0, "persona": persona or self.host.persona_name(),
                 "question": "", "result": "", "error": "", "activity": "", "team":team}
+        if execution_profile:
+            data["execution_profile"] = str(execution_profile)
         if parent:
             data["parent"] = parent
         (d / "план.md").write_text(f"# {title}\n\n**Цель:** {goal.strip()}\n\n_План появится, когда ассистент начнёт._\n", encoding="utf-8")
@@ -489,6 +491,9 @@ class TaskManager:
                 archive, manifest = Path(facts['archive']), Path(facts['manifest'])
                 if not archive.is_file() or not manifest.is_file():
                     raise RuntimeError('Архив или его опись не найдены.')
+                description = (profile.get('description') or '').strip()
+                if description:
+                    reports.append(f'{title}: описание правил — {description}')
                 reports.append(f'{title}: {archive} · {facts["included"]} файлов, {facts["size"]}\n'
                                f'SHA-256: {facts["sha256"]}\nОпись: {manifest}')
                 task.journal(f'✅ Проверен ZIP: {archive}')
@@ -1558,6 +1563,8 @@ class TaskManager:
         t = self.get(tid)
         read = lambda n: (t.dir / n).read_text(encoding="utf-8") if (t.dir / n).exists() else ""  # noqa: E731
         d = t.public()
+        if t.data.get("workflow") in {"media-transcription", "video-translation"}:
+            d["media_sources"] = list(t.data.get("media_sources") or [])
         d.update(plan=read("план.md"), journal=read("журнал.md")[-60000:], summary=read("итог.md"), notebook=read("блокнот.md"),
                  discussion=read('обсуждение-плана.md')[-60000:], team_review=read('проверка-команды.md')[-30000:])
         c = t.code()

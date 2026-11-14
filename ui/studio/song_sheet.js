@@ -2,7 +2,8 @@
 window.SongSheet = (() => {
   const esc = v => escH(String(v ?? ''));
   const shifts = new Map();
-  const offset = row => shifts.get(row.song_id) || 0;
+  function savedPitch(songId) { try { return Number(JSON.parse(localStorage.getItem('dewiar:song-playback-prefs:v1')||'{}')?.[songId]?.pitch)||0; } catch (_) { return 0; } }
+  const offset = row => shifts.has(row.song_id) ? shifts.get(row.song_id) : savedPitch(row.song_id);
   function transpose(name, steps) {
     if (!steps) return name;
     const notes = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
@@ -181,7 +182,9 @@ window.SongSheet = (() => {
     // With stanzas from the sheet, an automatic «Часть N» does not force a
     // blank line; recognized parts (verse, chorus) and confirmed ones do.
     const stanzaData=(row.guitar_sheet||[]).some(line=>line && 'stanza_start' in line);
-    const parts = new Map((row.sections || []).filter(s=>!stanzaData || (s.kind && s.kind!=='unknown') || s.review_state==='verified')
+    // Guessed parts («Возможный припев») no longer force a blank line: the
+    // sheet's stanzas come from the publication or from breaks.
+    const parts = new Map((row.sections || []).filter(s=>!stanzaData || s.review_state==='verified')
       .map(s => [row.phrases?.[s.phrase_indexes?.[0]]?.phrase_id,s.label]));
     const lines = [], width=columns(row), seenParts=new Set();
     let stanzaLines = 0, hasLyrics = false;
@@ -200,8 +203,13 @@ window.SongSheet = (() => {
       // breaks matched line by line made one-line stanzas where its lines
       // and the sung ones are cut differently; they serve old sheets only.
       const stanza=!flagged ? (sourceBreak || stanzaLines >= 4) : !!line.stanza_start;
-      if (lines.length && (newPart || stanza) && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:''}); stanzaLines=0; }
+      const ownKey=line.text && !line.verse_continuation ? (line.layout_key||'') : '';
+      if (lines.length && (newPart || stanza) && lines.at(-1).kind!=='space') { lines.push({kind:'space',text:'',before_key:ownKey}); stanzaLines=0; }
       else if (newPart || stanza) stanzaLines=0;
+      const blankBefore=!lines.length || lines.at(-1).kind==='space';
+      // A label over the line: the user's own («Припев», «×2») or the publication's.
+      const label=ownKey ? String(line.note || (line.label_hidden ? '' : line.source_label) || '').trim() : '';
+      if(label) lines.push({kind:'label',text:label,layout_key:ownKey,manual:!!line.note});
       const chords=line.text ? line.chords.map(c=>({...c,at:c.char_index})) : compactChords(line,offset(row),width);
       let text='';
       for (const c of chords) text=text.padEnd(c.at,' ')+c.name;
@@ -218,6 +226,7 @@ window.SongSheet = (() => {
       if(pause) { if(text) lines.push({kind:'pause',text:''}); continue; }
       if(line.text) {
         lines.push({kind:'lyrics',text:line.text,words:line.display_words || [],phrase_id:phraseId,
+          layout_key:ownKey,blank_before:blankBefore,has_label:!!label,
           display_line_id:line.phrase_id,source_phrase_ids:line.source_phrase_ids || [phraseId],source_spans:line.source_spans || []});stanzaLines++;hasLyrics=true;
       }
       else if(text || line.instrumental) { lines.push({kind:'instrumental',text:line.vocal?'Пение — текст не распознан':hasLyrics?(line.next_section_label==='Окончание'?'Окончание':'Проигрыш'):'Вступление',
@@ -240,7 +249,7 @@ window.SongSheet = (() => {
   function updatePlayback(songId, ms, scroll=true) {
     playback.set(songId,ms);
     const paper=document.querySelector('.song-paper');
-    if(!paper || paper.dataset.songId!==songId) return;
+    if(!paper || paper.dataset.songId!==songId) { hideChordFollow(); return; }
     const words=[...paper.querySelectorAll('.song-paper-word')];
     let selected=null;
     for(const word of words) {
@@ -285,6 +294,8 @@ window.SongSheet = (() => {
       activeChord=same.find(chord=>sung && chord.closest('.song-paper-line')===sung) || same[0];
     }
     for(const chord of chordSpans) chord.classList.toggle('current-chord',chord===activeChord);
+    const audio=document.getElementById?.('song-review-audio');
+    syncChordFollow(activeChord,ms>=0 && !!audio && !audio.paused && !audio.ended);
     const previousLine=paper.querySelector('.song-paper-line.playing-line');
     // A confirmed musical break wins over estimated lyric cues. A sustained
     // chord can belong to a previous row, so it must not control gap scrolling.
@@ -375,8 +386,10 @@ window.SongSheet = (() => {
       if(current.kind==='pause') continue;
       if(current.kind==='instrumental') {
         let next=i+1, chordLines=[];
+        const labels=[];
         while(next<rows.length && rows[next].kind!=='lyrics') {
           if(rows[next].kind==='chords' && rows[next].text) chordLines.push(rows[next].text.trim());
+          if(rows[next].kind==='label') labels.push(rows[next].text);
           next++;
         }
         if(rows[next]?.kind==='lyrics') {
@@ -384,6 +397,7 @@ window.SongSheet = (() => {
           // from the lyric.  Labels such as "Проигрыш" are presentation-only:
           // the copied notation should contain only chords and words.
           if(chordLines.length) out.push(chordLines.join(' '));
+          if(labels.length) { if(out.length && out.at(-1)!=='') out.push(''); out.push(...labels); }
           out.push(rows[next].text);
           i=next;
         } else if(chordLines.length) out.push(chordLines.join(' '));
@@ -587,13 +601,16 @@ window.SongSheet = (() => {
     return Number.isInteger(string)&&string>=0&&string<6&&Number.isInteger(fret)&&fret>=0
       ? names[(STRING_PC[string]+fret)%12] : '';
   }
-  function chordDiagramHTML(symbol,shape,index,total) {
-    const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'];
+  function fretWindow(values) {
     const fretted=values.map(Number).filter(Number.isFinite).filter(value=>value>0);
     const minFret=fretted.length ? Math.min(...fretted) : 1;
     const maxFret=fretted.length ? Math.max(...fretted) : 0;
     const base=maxFret<=4 ? 1 : Math.min(minFret,MAX_CHORD_FRET-3);
-    const fretLabels=Array.from({length:4},(_,column)=>base+column);
+    return Array.from({length:4},(_,column)=>base+column);
+  }
+  function chordDiagramHTML(symbol,shape,index,total) {
+    const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'];
+    const fretLabels=fretWindow(values);
     const rows=labels.map((label,row)=>{
       const value=values[row]??'x', fret=Number(value);
       const muted=String(value).toLowerCase()==='x';
@@ -607,7 +624,49 @@ window.SongSheet = (() => {
     }).join('');
     return `<div class="song-chord-fret-head"><span></span>${fretLabels.map(number=>`<b>${number}</b>`).join('')}<span></span></div><div class="song-chord-diagram">${rows}</div><div class="song-chord-variants"><button type="button" class="song-chord-nav" data-chord-prev title="Предыдущая аппликатура" aria-label="Предыдущая аппликатура">‹</button><span>${index+1}/${total}</span><button type="button" class="song-chord-nav" data-chord-next title="Следующая аппликатура" aria-label="Следующая аппликатура">›</button></div>`;
   }
+  // Three ways to see chord fingerings (the clef next to the copy button):
+  //  hover  — the window opens a second after the pointer rests on a chord;
+  //  follow — while the song plays, a small card without buttons stands over
+  //           the chord being played and closes on pause or stop;
+  //  off    — nothing opens by itself.
+  // A click or Enter on a chord opens the editing window in every mode.
+  const CHORD_HOVER_KEY='dewiar:song-chord-hover', CHORD_MODES=['hover','follow','off'];
+  let chordModeMemory='hover';
+  function chordMode() {
+    // Without storage (or if it refuses a write) the choice lasts until reload.
+    try {
+      const stored=localStorage.getItem(CHORD_HOVER_KEY);
+      return CHORD_MODES.includes(stored) ? stored : chordModeMemory;
+    } catch (_) { return chordModeMemory; }
+  }
+  function chordHoverEnabled() { return chordMode()==='hover'; }
+  const CHORD_MODE_TITLES={
+    hover:'Аккорды: окно открывается при наведении мыши. Нажмите — показывать аппликатуру текущего аккорда во время игры',
+    follow:'Аккорды: во время игры над звучащим аккордом показывается его аппликатура. Нажмите — не показывать аккорды',
+    off:'Аккорды не открываются сами (по щелчку на аккорде — всегда). Нажмите — открывать при наведении мыши'
+  };
+  function chordHoverTitle(mode=chordMode()) { return CHORD_MODE_TITLES[mode===true?'hover':mode===false?'off':mode]||CHORD_MODE_TITLES.hover; }
+  function syncChordHoverToggles() {
+    if(typeof document==='undefined' || !document.querySelectorAll) return;
+    const mode=chordMode(), title=chordHoverTitle(mode);
+    document.querySelectorAll('[data-chord-hover-toggle]').forEach(button=>{
+      button.setAttribute('data-chord-mode',mode); button.setAttribute('title',title); button.setAttribute('aria-label',title);
+    });
+  }
+  function setChordMode(mode) {
+    mode=CHORD_MODES.includes(mode)?mode:'hover';
+    chordModeMemory=mode;
+    try { localStorage.setItem(CHORD_HOVER_KEY,mode); } catch (_) {}
+    if(mode!=='follow') hideChordFollow();
+    syncChordHoverToggles();
+  }
+  function setChordHover(on) { setChordMode(on?'hover':'off'); }
+  function nextChordMode(mode=chordMode()) { return CHORD_MODES[(CHORD_MODES.indexOf(mode)+1)%CHORD_MODES.length]; }
   let chordPopoverBound=false, chordPopoverState=null;
+  let chordHoverTimer=0, chordHoverTrigger=null;
+  function cancelChordHover() {
+    clearTimeout(chordHoverTimer); chordHoverTimer=0; chordHoverTrigger=null;
+  }
   const chordApplyHandlers=new Map();
   function chordPopoverElement() {
     let popover=document.querySelector('.song-chord-popover');
@@ -642,7 +701,9 @@ window.SongSheet = (() => {
     const state=chordPopoverState, popover=chordPopoverElement();
     if(!state||!state.variants.length) return;
     const shape=state.variants[state.index];
-    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('down')}</button><input class="song-chord-name-input" data-chord-name-edit value="${esc(state.customName??state.symbol)}" maxlength="24" size="6" spellcheck="false" aria-label="Название аккорда" title="Название аккорда, например Bm или G7"><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('up')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<p class="song-chord-popover-status" role="status"></p>`;
+    popover.innerHTML=`<div class="song-chord-popover-head"><button type="button" class="song-chord-popover-btn" data-chord-transpose="-1" title="Понизить аккорд на полтона" aria-label="Понизить аккорд на полтона">${icon('down')}</button><input class="song-chord-name-input" data-chord-name-edit value="${esc(state.customName??state.symbol)}" maxlength="24" size="6" spellcheck="false" aria-label="Название аккорда" title="Название аккорда, например Bm или G7"><button type="button" class="song-chord-popover-btn" data-chord-transpose="1" title="Повысить аккорд на полтона" aria-label="Повысить аккорд на полтона">${icon('up')}</button><div><button type="button" class="song-chord-popover-btn ${state.pinned?'is-pinned':''}" data-chord-pin aria-pressed="${state.pinned}" title="${state.pinned?'Открепить аппликатуру при подтверждении':'Закрепить аппликатуру при подтверждении'}" aria-label="Закрепить выбранную аппликатуру">${icon('pin')}</button><button type="button" class="song-chord-popover-btn" data-chord-apply title="Сохранить название и аппликатуру аккорда" aria-label="Сохранить аккорд">${icon('check')}</button><button type="button" class="song-chord-popover-btn" data-chord-close title="Отменить изменения и закрыть окно аккорда" aria-label="Отменить изменения и закрыть окно аккорда">×</button></div></div>${chordDiagramHTML(state.symbol,shape,state.index,state.variants.length)}<p class="song-chord-popover-status" role="status"></p><div class="song-chord-popover-foot">${chordMode()!=='off'
+      ?'<button type="button" class="btn small" data-chord-hover-off title="Не открывать аккорды при наведении мыши. Включить снова — кнопка со скрипичным ключом над листом; по щелчку аккорд откроется всегда">Отключить</button>'
+      :'<button type="button" class="btn small" data-chord-hover-on title="Снова открывать аккорды при наведении мыши">Включить при наведении</button>'}</div>`;
     const redraw=selector=>renderChordPopover(selector);
     const nameEditor=popover.querySelector('[data-chord-name-edit]');
     nameEditor.addEventListener('input',()=>{
@@ -658,6 +719,10 @@ window.SongSheet = (() => {
     nameEditor.addEventListener('keydown',event=>{ if(event.key==='Enter'){ event.preventDefault(); nameEditor.blur(); } });
     popover.querySelector('[data-chord-pin]').onclick=()=>{ state.pinned=!state.pinned; redraw('[data-chord-pin]'); };
     popover.querySelector('[data-chord-close]').onclick=()=>hideChordPopover();
+    const hoverOff=popover.querySelector('[data-chord-hover-off]');
+    if(hoverOff)hoverOff.onclick=()=>{ setChordHover(false); hideChordPopover(); };
+    const hoverOn=popover.querySelector('[data-chord-hover-on]');
+    if(hoverOn)hoverOn.onclick=()=>{ setChordHover(true); redraw('[data-chord-hover-off]'); };
     popover.querySelectorAll('[data-chord-transpose]').forEach(button=>button.onclick=()=>{
       const symbol=transpose(state.symbol,Number(button.dataset.chordTranspose)||0);
       const variants=chordVariants(symbol,{song_id:state.songId});
@@ -696,6 +761,69 @@ window.SongSheet = (() => {
     positionChordPopover(popover,state.trigger);
     if(focusSelector)(popover.querySelector(focusSelector)||popover.querySelector('[data-chord-apply]')).focus({preventScroll:true});
   }
+  // The follow card: name and fingering only, no buttons, half the size of
+  // the editing window. It never takes clicks and closes on pause or stop.
+  let chordFollowTip=null, chordFollowKey='', chordFollowFrame=0, chordFollowBound=false;
+  function chordMiniHTML(symbol,shape) {
+    const values=String(shape||'').split('-'), labels=['e','B','G','D','A','E'], frets=fretWindow(values);
+    const rows=labels.map((label,row)=>{
+      const value=String(values[row]??'x'), muted=value.toLowerCase()==='x', fret=Number(value);
+      return `<div class="song-chord-mini-row"><span>${label}</span>${frets.map(number=>`<i class="${muted?'is-muted':fret===number?'filled':''}"></i>`).join('')}<b>${esc(value)}</b></div>`;
+    }).join('');
+    return `<div class="song-chord-mini-name">${esc(symbol)}</div><div class="song-chord-mini-row song-chord-mini-frets"><span></span>${frets.map(number=>`<span>${number}</span>`).join('')}<b></b></div>${rows}`;
+  }
+  function chordFollowElement() {
+    let card=document.querySelector('.song-chord-follow');
+    if(card) return card;
+    card=document.createElement('div'); card.className='song-chord-follow'; card.hidden=true;
+    card.setAttribute('aria-hidden','true');
+    document.body.appendChild(card);
+    return card;
+  }
+  function hideChordFollow() {
+    chordFollowTip=null; chordFollowKey='';
+    if(typeof document==='undefined' || !document.querySelector) return;
+    const card=document.querySelector('.song-chord-follow');
+    if(card) card.hidden=true;
+  }
+  function positionChordFollow() {
+    chordFollowFrame=0;
+    const card=document.querySelector('.song-chord-follow'), tip=chordFollowTip;
+    if(!card || !tip) return;
+    if(!tip.isConnected) { hideChordFollow(); return; }
+    const rect=tip.getBoundingClientRect(), gap=6;
+    if(rect.bottom<0 || rect.top>window.innerHeight) { card.style.visibility='hidden'; return; }
+    card.hidden=false; card.style.visibility='hidden';
+    const box=card.getBoundingClientRect();
+    // Above the chord being played when there is room (below the sticky
+    // tools of the sheet), otherwise under it.
+    const tools=document.querySelector('.song-sheet-tools')?.getBoundingClientRect?.();
+    const ceiling=Math.max(8,tools && tools.bottom>0 && tools.top<rect.top ? tools.bottom+4 : 8);
+    const above=rect.top-gap-box.height;
+    const top=above>=ceiling ? above : Math.min(window.innerHeight-box.height-8,rect.bottom+gap);
+    const left=Math.max(8,Math.min(window.innerWidth-box.width-8,rect.left+rect.width/2-box.width/2));
+    card.style.left=`${left}px`; card.style.top=`${top}px`; card.style.visibility='visible';
+  }
+  function scheduleChordFollow() {
+    if(!chordFollowTip || chordFollowFrame) return;
+    chordFollowFrame=(window.requestAnimationFrame||(fn=>setTimeout(fn,16)))(positionChordFollow);
+  }
+  function syncChordFollow(tip,playing) {
+    if(typeof document==='undefined' || !document.createElement) return;
+    if(chordMode()!=='follow' || !playing || !tip || chordPopoverState) { hideChordFollow(); return; }
+    const symbol=(tip.dataset.chordName||tip.textContent||'').trim();
+    const shape=chordVariants(symbol,{song_id:tip.dataset.songId||'',voicing_fingering:tip.dataset.chordFingering||''})[0];
+    if(!symbol || !shape) { hideChordFollow(); return; }
+    const card=chordFollowElement(), key=`${symbol}|${shape}`;
+    if(key!==chordFollowKey) { card.innerHTML=chordMiniHTML(symbol,shape); chordFollowKey=key; }
+    chordFollowTip=tip;
+    if(!chordFollowBound && window.addEventListener) {
+      chordFollowBound=true;
+      window.addEventListener('scroll',scheduleChordFollow,true);
+      window.addEventListener('resize',scheduleChordFollow);
+    }
+    positionChordFollow();
+  }
   function showChordPopover(trigger) {
     // Once opened, this is an editing draft. Hovering another chord, pressing a
     // grid button, scrolling or clicking outside cannot discard or replace it.
@@ -705,13 +833,38 @@ window.SongSheet = (() => {
     const variants=chordVariants(symbol,evidence); if(!variants.length) return;
     const pinnedShape=pinnedVoicing(symbol,evidence.song_id); let index=Math.max(0,variants.indexOf(pinnedShape));
     chordPopoverState={trigger,symbol,customName:symbol,description:trigger.dataset.chordDescription||'',original:symbol,songId:evidence.song_id,variants,variantNames:variants.map(()=>symbol),index,pinned:!!pinnedShape};
+    hideChordFollow();
     trigger.setAttribute('aria-expanded','true'); renderChordPopover();
   }
   function bindChordPopovers() {
     if(chordPopoverBound || typeof document==='undefined' || !document.addEventListener || !document.body) return;
     chordPopoverBound=true;
-    document.addEventListener('pointerover',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) showChordPopover(trigger); });
-    document.addEventListener('click',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger) showChordPopover(trigger); });
+    document.addEventListener('click',event=>{
+      const button=event.target?.closest?.('[data-song-layout]');
+      const word=!button&&event.target?.closest?.('.song-paper.is-layout-editing .song-paper-word');
+      if(!button&&!word) return;
+      event.preventDefault();event.stopPropagation();
+      if(button) runLayoutButton(button); else splitAtWord(word);
+    },true);
+    document.addEventListener('click',event=>{
+      const button=event.target?.closest?.('[data-song-paper-play]');
+      if(!button)return;
+      event.preventDefault();event.stopPropagation();
+      const line=button.closest('.song-paper-line'), start=Number(line?.querySelector('[data-start-ms]')?.dataset.startMs);
+      if(Number.isFinite(start))window.SongReview?.playFrom?.(start/1000);
+    });
+    document.addEventListener('pointerover',event=>{
+      const trigger=event.target?.closest?.('.song-chord-tip');
+      if(!trigger||!chordHoverEnabled()||trigger===chordHoverTrigger)return;
+      cancelChordHover();chordHoverTrigger=trigger;
+      chordHoverTimer=setTimeout(()=>{const target=chordHoverTrigger;cancelChordHover();if(target?.isConnected)showChordPopover(target);},1000);
+    });
+    document.addEventListener('pointerout',event=>{
+      if(!chordHoverTrigger)return;
+      const from=event.target?.closest?.('.song-chord-tip'), to=event.relatedTarget?.closest?.('.song-chord-tip');
+      if(from===chordHoverTrigger&&to!==chordHoverTrigger)cancelChordHover();
+    });
+    document.addEventListener('click',event=>{ const trigger=event.target?.closest?.('.song-chord-tip'); if(trigger){cancelChordHover();showChordPopover(trigger);} });
     document.addEventListener('keydown',event=>{
       const trigger=event.target?.closest?.('.song-chord-tip');
       if(trigger&&(event.key==='Enter'||event.key===' ')) {
@@ -780,16 +933,82 @@ window.SongSheet = (() => {
     const lineAttr=kind==='lyrics'&&lineId?` data-song-edit-line="${esc(lineId)}"`:'';
     return `<button type="button" class="btn song-paper-edit song-paper-edit-${kind}" data-song-edit-phrase="${esc(phraseId)}"${lineAttr} data-song-edit-kind="${kind}" title="${title}" aria-label="${title}">${icon('edit')}</button>`;
   }
+  // The user's layout of the sheet (blank lines, labels, line breaks): the
+  // «Правка строк» mode in the toolbar shows its buttons; saved on the card
+  // (song_edit_layout) and kept through any reprocessing.
+  let layoutEditing=false;
+  const layoutHandlers=new Map();
+  function layoutButton(action,key,glyph,title,value='',mode='') {
+    return `<button type="button" class="btn song-layout-btn" data-song-layout="${action}" data-layout-key="${esc(key)}"${value?` data-layout-value="${esc(value)}"`:''}${mode?` data-layout-mode="${mode}"`:''} title="${esc(title)}" aria-label="${esc(title)}">${glyph}</button>`;
+  }
+  function layoutStatus(text) {
+    const status=document.getElementById('song-layout-status');
+    if(status) status.textContent=text||'';
+  }
+  async function saveLayout(paper,args) {
+    const save=layoutHandlers.get(paper?.dataset.songId||'');
+    if(!save) { layoutStatus('Редактор песни недоступен. Обновите карточку.'); return false; }
+    try { layoutStatus('Сохраняем…'); await save(args); return true; }
+    catch(error) { layoutStatus(error?.message||'Не удалось сохранить раскладку'); return false; }
+  }
+  function openNoteEditor(button) {
+    document.querySelector('.song-layout-note')?.remove();
+    const paper=button.closest('.song-paper'), key=button.dataset.layoutKey;
+    const host=button.closest('.song-paper-label, .song-paper-line');
+    if(!paper||!host||!key) return;
+    const form=document.createElement('div'); form.className='song-layout-note';
+    form.innerHTML=`<span class="song-layout-presets">${['Припев','Куплет','Проигрыш','Вступление','×2'].map(text=>`<button type="button" class="btn small" data-note-preset="${text}">${text}</button>`).join('')}</span><input type="text" maxlength="80" placeholder="Своя подпись" aria-label="Подпись над строкой" value="${esc(button.dataset.layoutValue||'')}"><button type="button" class="btn small primary" data-note-save>Сохранить</button><button type="button" class="btn small" data-note-cancel>Отмена</button>`;
+    host.before(form);
+    const input=form.querySelector('input');
+    const submit=async value=>{ if(await saveLayout(paper,{key,action:'note',value:String(value||'').trim()||null})) form.remove(); };
+    form.querySelectorAll('[data-note-preset]').forEach(preset=>preset.onclick=()=>submit(preset.dataset.notePreset));
+    form.querySelector('[data-note-save]').onclick=()=>submit(input.value);
+    form.querySelector('[data-note-cancel]').onclick=()=>form.remove();
+    input.addEventListener('keydown',event=>{
+      if(event.key==='Enter') { event.preventDefault(); submit(input.value); }
+      if(event.key==='Escape') { event.preventDefault(); form.remove(); }
+    });
+    input.focus({preventScroll:true});
+  }
+  function runLayoutButton(button) {
+    const paper=button.closest('.song-paper'), key=button.dataset.layoutKey, action=button.dataset.songLayout;
+    if(action==='note') { openNoteEditor(button); return; }
+    const args={
+      'break-on':{action:'break',value:true}, 'break-off':{action:'break',value:false},
+      // A publication's label is hidden, the user's own is removed.
+      'note-remove':{action:'note',value:button.dataset.layoutMode==='hide'?false:null},
+      'join':{action:'cut',value:false}
+    }[action];
+    if(args) saveLayout(paper,{key,...args});
+  }
+  function splitAtWord(word) {
+    const paper=word.closest('.song-paper'), line=word.closest('.song-paper-lyrics');
+    if(!paper||!line) return;
+    if(line.querySelector('.song-paper-word')===word) { layoutStatus('Строка уже начинается с этого слова.'); return; }
+    const key=`${word.dataset.phraseId}:${word.dataset.charStart}`;
+    saveLayout(paper,{key,action:'cut',value:true});
+  }
+  function playLineButton(phraseId,kind) {
+    return phraseId?`<button type="button" class="btn song-paper-play song-paper-play-${kind}" data-song-paper-play="${esc(phraseId)}" title="Проиграть песню с этой строки" aria-label="Проиграть песню с этой строки">${icon('play')}</button>`:'';
+  }
   function sheetHTML(row) {
     if (!row.guitar_sheet?.length) return '';
     const links = sourceLinks(row);
     const rows=sheetRows(row), blocks=[];
     for(let i=0;i<rows.length;i++) {
       const r=rows[i];
-      if(r.kind==='space') { blocks.push('<div class="song-paper-space" aria-hidden="true"></div>');continue; }
+      if(r.kind==='space') {
+        blocks.push(r.before_key ? `<div class="song-paper-space">${layoutButton('break-off',r.before_key,'−','Убрать пустую строку')}</div>` : '<div class="song-paper-space" aria-hidden="true"></div>');
+        continue;
+      }
+      if(r.kind==='label') {
+        const tools=r.layout_key ? `<span class="song-layout-tools">${layoutButton('note',r.layout_key,'✎','Изменить подпись',r.text)}${layoutButton('note-remove',r.layout_key,'−','Убрать подпись','',r.manual?'':'hide')}</span>` : '';
+        blocks.push(`<div class="song-paper-label${r.manual?' is-manual':''}"><span>${esc(r.text)}</span>${tools}</div>`);
+        continue;
+      }
       if(r.kind==='pause') continue;
       const pause=r.kind==='chords'&&rows[i+1]?.kind==='pause';
-      const chords=r.kind==='chords' ? `${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
+      const chords=r.kind==='chords' ? `${playLineButton(r.phrase_id,'chords')}${editButton(r.phrase_id,'chords')}<div class="song-paper-chords">${chordLineHTML(r)}</div>` : '';
       const lyric=['lyrics','instrumental'].includes(r.kind) ? r : ['lyrics','instrumental'].includes(rows[i+1]?.kind) ? rows[++i] : null;
       let lyricHTMLContent='';
       if(lyric?.kind==='lyrics') lyricHTMLContent=lyricHTML(lyric);
@@ -802,9 +1021,15 @@ window.SongSheet = (() => {
       const timing=lyric?.kind==='instrumental'&&Number.isFinite(lyric.start_ms)&&Number.isFinite(lyric.end_ms)
         ? ` data-start-ms="${lyric.start_ms}" data-end-ms="${lyric.end_ms}" data-next-section="${esc(lyric.next_section_label||'вокала')}"` : '';
       const lyricEdit=lyric?.kind==='lyrics' ? editButton(lyric.phrase_id,'lyrics',lyric.display_line_id) : '';
-      blocks.push(`<div class="song-paper-line${pause?' song-paper-pause':''}${chords?' has-chords':''}${lyricEdit?' has-lyrics-edit':''}">${chords}${lyric ? `${lyricEdit}<div class="song-paper-${lyric.kind}"${lyric.phrase_id ? ` data-phrase-id="${esc(lyric.phrase_id)}"` : ''}${timing}>${lyric.kind==='lyrics' ? lyricHTMLContent : lyric.kind==='instrumental' ? lyricHTMLContent : esc(lyric.text)}</div>` : ''}</div>`);
+      const play=lyric?.kind==='lyrics'?playLineButton(lyric.phrase_id,'lyrics'):'';
+      const layoutTools=lyric?.kind==='lyrics'&&lyric.layout_key ? `<span class="song-layout-tools">${
+        lyric.blank_before?'':layoutButton('break-on',lyric.layout_key,'+','Вставить пустую строку перед этой строкой')}${
+        lyric.has_label?'':layoutButton('note',lyric.layout_key,'¶','Подпись над строкой: «Припев», «×2» или своя пометка')}${
+        lyric.blank_before&&!blocks.length?'':layoutButton('join',lyric.layout_key,'⤒','Склеить с предыдущей строкой')}</span>` : '';
+      const startAttr=lyric&&Number.isFinite(Number(lyric.start_ms))?` data-start-ms="${Number(lyric.start_ms)}"`:'';
+      blocks.push(`<div class="song-paper-line${pause?' song-paper-pause':''}${chords?' has-chords':''}${lyricEdit?' has-lyrics-edit':''}">${layoutTools}${play}${chords}${lyric ? `${lyricEdit}<div class="song-paper-${lyric.kind}"${lyric.phrase_id ? ` data-phrase-id="${esc(lyric.phrase_id)}"` : ''}${startAttr}${timing}>${lyric.kind==='lyrics' ? lyricHTMLContent : lyric.kind==='instrumental' ? lyricHTMLContent : esc(lyric.text)}</div>` : ''}</div>`);
     }
-    return `<article class="song-paper" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами"><h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
+    return `<article class="song-paper${layoutEditing?' is-layout-editing':''}" data-song-id="${esc(row.song_id)}" aria-label="Итоговый текст с аккордами">${layoutEditing?'<p class="song-layout-hint">Правка строк: «+» — пустая строка перед строкой, «−» — убрать пустую строку или подпись, «¶» — подпись над строкой («Припев», «×2»), «⤒» — склеить с предыдущей строкой. Щелчок по слову начинает с него новую строку. <span id="song-layout-status" role="status"></span></p>':''}<h3 class="song-paper-title">${esc(row.title)}${row.artist ? ' — '+esc(row.artist) : ''}</h3>${(row.guitar_sheet || []).some(l=>(l.display_words || []).some(w=>w.quality!=='aligned')) ? '<p class="song-timing-note">Подсветка слов без точных меток — приблизительно по времени фразы.</p>' : ''}<div class="song-paper-scroll" tabindex="0" aria-label="Лист песни; прокрутка длинных строк"><div class="song-paper-body">${blocks.join('')}</div></div>${links.length ? `<footer class="song-paper-sources"><span>Источники</span>${links.map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)}</a>`).join('')}</footer>` : ''}</article>`;
   }
   function icon(name) {
     const paths = {
@@ -818,6 +1043,8 @@ window.SongSheet = (() => {
       previous:'<path d="M5 5v14m14-14L7 12l12 7Z"/>',
       next:'<path d="M19 5v14M5 5l12 7-12 7Z"/>',
       copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+      pilcrow:'<path d="M18 4v16M14 4v16M19 4h-8a4 4 0 0 0 0 8h3"/>',
+      clef:'<path d="M10.6 20.7c1.2.9 3.1.3 2.9-1.5L11.6 4.6c-.2-1.8.8-2.8 1.8-2.4 1.2.5 1.1 2.5-.2 4-1.5 1.7-5.6 3.5-5.6 7.4 0 3 2.4 4.4 4.8 4.2 2.4-.2 4-1.8 3.8-4-.2-2-1.8-3-3.4-2.8-1.6.2-2.4 1.6-2 3"/><circle cx="9.6" cy="20.1" r="1.2" fill="currentColor" stroke="none"/>',
       text:'<path d="M4 5h16M12 5v15M8 20h8M4 5v3m16-3v3"/>',
       play:'<path d="m8 4 12 8-12 8Z"/>',
       karaoke:'<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8M18 4l3 2v5"/>',
@@ -854,9 +1081,11 @@ window.SongSheet = (() => {
         ${button('song-sheet-play-instrumental','karaoke',row.karaoke?.state === 'ready' ? 'Проиграть всю песню с минусовкой с текущей позиции' : 'Минусовка ещё не готова',row.karaoke?.state === 'ready' ? '' : 'disabled')}
       </div>
       </div>
-      <div class="song-tool-row song-tool-row--copy"><div class="song-tool-group song-copy-group" role="group" aria-label="Текст и копирование">
+      <div class="song-tool-row song-tool-row--copy"><div class="song-tool-group song-copy-group" role="group" aria-label="Текст, копирование и окна аккордов">
         ${button('song-show-text','text','Показать текст с аккордами для копирования в выбранной тональности','aria-controls="song-copy-panel" aria-expanded="false"')}
         ${button('song-copy-sheet','copy','Скопировать текст с аккордами, аппликатурами и ссылками на источники')}
+        ${button('song-chord-hover','clef',chordHoverTitle(),`data-chord-hover-toggle data-chord-mode="${chordMode()}"`)}
+        ${button('song-layout-edit','pilcrow','Правка строк: пустые строки, подписи («Припев», «×2») и переносы строк',`aria-pressed="${layoutEditing}"`)}
       </div></div>
       <span id="song-copy-status" role="status"></span><span id="song-sheet-play-status" role="status"></span>
       </div><div class="song-current-edit-wrap"><div class="song-copy-preview" id="song-copy-panel" hidden><p class="hint">Текст в выбранной тональности, аппликатуры использованных аккордов и проверенные ссылки на источники.</p><textarea id="song-copy-preview" aria-label="Текст с аккордами, аппликатурами и источниками" readonly rows="16" wrap="off">${esc(plainText(row))}</textarea></div>
@@ -904,6 +1133,18 @@ window.SongSheet = (() => {
       document.getElementById('song-show-text').setAttribute('aria-expanded', String(open));
     }
     document.getElementById('song-show-text').onclick = () => showText(document.getElementById('song-copy-panel').hidden);
+    const layoutToggle=document.getElementById('song-layout-edit');
+    if(layoutToggle)layoutToggle.onclick = () => {
+      layoutEditing=!layoutEditing; layoutToggle.setAttribute('aria-pressed',String(layoutEditing));
+      render();
+      if(playback.has(row.song_id))updatePlayback(row.song_id,playback.get(row.song_id),false);
+    };
+    const hoverToggle=document.getElementById('song-chord-hover');
+    if(hoverToggle)hoverToggle.onclick = () => {
+      setChordMode(nextChordMode());
+      if(playback.has(row.song_id))updatePlayback(row.song_id,playback.get(row.song_id),false);
+    };
+    syncChordHoverToggles();
     document.getElementById('song-copy-sheet').onclick = async () => {
       const text = plainText(getCurrent());
       document.getElementById('song-copy-preview').value = text;
@@ -927,6 +1168,12 @@ window.SongSheet = (() => {
       <button class="btn small" id="song-finish-review">Отметить песню готовой</button><p id="song-finish-status" role="status"></p></details>`;
   }
   function bind(row, getCurrent, accept) {
+    layoutHandlers.set(row.song_id,async args=>{
+      const current=getCurrent();
+      if(current?.song_id!==row.song_id)throw Error('Откройте эту песню, чтобы изменить раскладку.');
+      const saved=await core.call('song_edit_layout',{song_id:row.song_id,base_revision:current.revision,...args});
+      accept(saved);
+    });
     chordApplyHandlers.set(row.song_id,async({trigger,original,symbol,name,description,shape})=>{
       const current=getCurrent();
       if(current?.song_id!==row.song_id)throw Error('Откройте исходную песню, чтобы применить аккорд.');
@@ -999,6 +1246,11 @@ window.SongSheet = (() => {
       const lines = [`{title: ${current.title.replace(/[{}\n]/g,' ')}}`, `{artist: ${(current.artist || '').replace(/[{}\n]/g,' ')}}`,
         '{comment: Предварительный подбор Dewiar. B=си, Bb=си-бемоль.}'];
       for (const line of presentationLines(current)) {
+        if(line.text && !line.verse_continuation) {
+          if(line.stanza_start && lines.length>3 && lines.at(-1)!=='') lines.push('');
+          const label=String(line.note || (line.label_hidden ? '' : line.source_label) || '').trim();
+          if(label) lines.push(`{comment: ${label.replace(/[{}\n]/g,' ')}}`);
+        }
         const chords=line.text ? line.chords.map(c=>({...c,at:c.char_index})) : compactChords(line,offset(current),columns(current));
         let text='', cursor=0;
         for(const c of chords) { const at=Math.min(c.at,(line.text || '').length); text+=(line.text || '').slice(cursor,at)+`[${c.name}]`;cursor=at; }
@@ -1010,5 +1262,5 @@ window.SongSheet = (() => {
     };
     showLetters();
   }
-  return {html,bind,toolbar,bindToolbar,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,inferChordName,fretNote,voicingAtShift,icon,compactChords,layoutChordLine,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
+  return {html,bind,toolbar,bindToolbar,chordHoverEnabled,setChordHover,chordMode,setChordMode,transpose,offset,plainText,sheetRows,sheetHTML,sourceLinks,chordFingering,chordFingerings,chordTooltip,inferChordName,fretNote,voicingAtShift,icon,compactChords,layoutChordLine,wrapLine,presentationLines,updatePlayback,countdownState,currentWord,lineStarts,lineTarget};
 })();

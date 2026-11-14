@@ -335,6 +335,61 @@ def make_api(app):
         _screen_permission_lock = threading.RLock()
         _files_permission_lock = threading.RLock()
 
+        _social_browser_apps = (
+            ("chrome", "com.google.Chrome", "Google Chrome"),
+            ("yandex", "ru.yandex.desktop.yandex-browser", "Яндекс Браузер"),
+            ("safari", "com.apple.Safari", "Safari"),
+            ("firefox", "org.mozilla.firefox", "Firefox"),
+            ("edge", "com.microsoft.edgemac", "Microsoft Edge"),
+            ("brave", "com.brave.Browser", "Brave"),
+        )
+
+        def _social_browser_paths(self):
+            from AppKit import NSWorkspace
+            workspace = NSWorkspace.sharedWorkspace()
+            found = {}
+            for ident, bundle_id, name in self._social_browser_apps:
+                url = workspace.URLForApplicationWithBundleIdentifier_(bundle_id)
+                if url:
+                    found[ident] = {"id": ident, "name": name, "path": str(url.path())}
+            return found
+
+        def social_browsers(self):
+            """Installed browser choices for per-network social account settings."""
+            return [{"id": "default", "name": "Системный браузер"}, *[
+                {"id": item["id"], "name": item["name"]} for item in self._social_browser_paths().values()
+            ]]
+
+        def open_social_sites(self, entries):
+            """Open approved social URLs through each configured, installed browser."""
+            from urllib.parse import urlsplit
+            from content.social_store import HOSTS
+
+            if not isinstance(entries, list) or not 1 <= len(entries) <= 50:
+                raise ValueError("Нужно выбрать от 1 до 50 страниц соцсетей")
+            browsers = self._social_browser_paths()
+            opened = 0
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    raise ValueError("Некорректная страница соцсети")
+                platform = entry.get("platform")
+                browser = entry.get("browser", "default")
+                raw_url = entry.get("url")
+                if platform not in HOSTS or browser not in ("default", *browsers):
+                    raise ValueError("Неизвестная соцсеть или браузер")
+                if not isinstance(raw_url, str) or len(raw_url) > 2000:
+                    raise ValueError("Некорректная ссылка соцсети")
+                parsed = urlsplit(raw_url)
+                host = (parsed.hostname or "").lower()
+                allowed_hosts = HOSTS[platform] + (("accounts.google.com",) if platform == "youtube" else ())
+                if parsed.scheme != "https" or parsed.username or parsed.password or not any(host == item or host.endswith("." + item) for item in allowed_hosts):
+                    raise ValueError("Ссылка не принадлежит выбранной соцсети")
+                app_path = browsers.get(browser, {}).get("path")
+                command = ["/usr/bin/open"] + (["-a", app_path] if app_path else []) + [raw_url]
+                subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                opened += 1
+            return {"opened": opened}
+
         def microphone_permission(self):
             from macsys import microphone_permission
             with self._mic_permission_lock:

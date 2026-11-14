@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='dewiar-reference-ui-') as tmp, sync_pla
                 called.append(body['args']);route.fulfill(json={'result':store.get(sid)})
             else:route.continue_()
         page.route('**/api',retry)
-        panel.get_by_role('button',name='Повторить сверку',exact=True).click()
+        panel.get_by_role('button',name='Сверить текст',exact=True).click()
         page.wait_for_timeout(200)
         assert called==[{'song_id':sid,'step':'text_reference'}]
         page.locator('[data-song-reference-stage] b').click()

@@ -287,6 +287,7 @@
   body.mini #tarc { inset: 1px; width: calc(100% - 2px); height: calc(100% - 2px); }
   #task .tl { display: flex; align-items: center; gap: 7px; } #task .tl b { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #task .tl em { font-style: normal; opacity: .75; font-variant-numeric: tabular-nums; }
+  #task .task-stop { flex: none; border: 0; border-radius: 7px; padding: 3px 7px; color: inherit; background: rgba(255,255,255,.12); font: inherit; font-size: 11px; cursor: pointer; }
   #task .tsub { opacity: .75; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #task .tp { display: block; height: 3px; margin-top: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; }
   #task .tp b { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, rgba(255,255,255,.55), rgba(193,235,255,.95)); transition: width .6s; }
@@ -427,6 +428,10 @@
   @media (prefers-reduced-motion: reduce) { #a-mic.recording.quiet svg rect { animation: none; } }
   #a-mic-pick { width: 22px; min-width: 22px; margin-left: 0; }
   #a-mic-pick svg { width: 13px; height: 13px; }
+  #a-layout-state { width: 28px; min-width: 28px; margin-left: 0; font-size: 12px; font-weight: 750; letter-spacing: -.03em; }
+  #a-layout-state[data-layout="english"] { color: var(--accent, #78d8ad); }
+  #a-layout-state[data-layout="russian"] { color: var(--brand, #929bff); }
+  #a-layout-state[data-layout="unknown"] { color: var(--muted, #9aa4b5); }
   .qm-dialog { box-sizing:border-box; width:min(440px,calc(100% - 24px)); max-height:calc(100% - 24px); padding:16px; border:1px solid rgba(128,140,180,.28); border-radius:16px; color:var(--ink); background:#20232e; font:inherit; font-size:13px; line-height:1.45; overflow:auto; }
   .qm-dialog::backdrop { background:rgba(0,0,0,.55); }
   .qm-dialog [hidden] { display:none!important; }
@@ -750,6 +755,7 @@ body.mini #assistant-topbar{display:none}
           <button class="ab" id="b-voice-inline" title="Голосовой ответ: включить или выключить" aria-label="Голосовой ответ" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path class="w1" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path class="x" d="m16 9.5 5 5m0-5-5 5"/></svg></button>
           <button class="ab" id="a-mic" title="Начать голосовой ввод" aria-label="Начать голосовой ввод" aria-pressed="false"><svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><svg class="record-icon" viewBox="0 0 34 34" aria-hidden="true"><circle id="dictation-ring" cx="17" cy="17" fill="#ff922e" stroke="none"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#17181d" stroke="none"/></svg></button>
           <button class="ab" id="a-mic-pick" title="Выбрать микрофон" aria-label="Выбрать микрофон"><svg viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
+          <button class="ab" id="a-layout-state" type="button" data-layout="unknown" title="Раскладка клавиатуры не определена" aria-label="Раскладка клавиатуры не определена">…</button>
           <button class="ab" id="a-text-menu" type="button" title="Обработка текста" aria-label="Обработка текста" aria-haspopup="menu" aria-expanded="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><text x="2" y="16" fill="currentColor" stroke="none" font-size="14" font-weight="700">T</text><text x="13" y="16" fill="currentColor" stroke="none" font-size="10" font-weight="700">т</text><path d="M3 20h18"/></svg></button>
           <button class="ab" id="a-clear" type="button" hidden disabled title="Стереть выделенный текст или весь текст, если ничего не выделено. Вложения и переписка сохранятся." aria-label="Стереть текст ввода"><svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <button class="ab" id="a-copy" type="button" hidden disabled title="Скопировать выделенный текст или весь черновик, если выделения нет" aria-label="Скопировать текст ввода"><svg class="copy-icon" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3"/></svg><svg class="copied-icon" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></button>
@@ -797,7 +803,7 @@ body.mini #assistant-topbar{display:none}
     <h3>Ввод и отправка</h3><p>Введите просьбу в нижнее поле. Enter добавляет строку, а Ctrl+Enter (⌘+Enter на Mac) отправляет сообщение. Кнопка со стрелкой тоже отправляет текст. Можно обращаться голосом к Лире. Название модели в центре верхней строки открывает выбор модели.</p>
     <h3>Голосовой ввод</h3><p>Нажмите микрофон и произнесите фразу. Нажатие квадрата останавливает запись и дожидается распознавания последних слов, оставляя текст в поле без отправки. Команда «Лира, стоп» останавливает запись. Обращение к помощнику с распознанной командой, например «Лира, скопировать», выполняется и не добавляется в текст. Пока Лира думает или отвечает, в области ответа видна кнопка остановки: она прерывает текущий ответ и не очищает черновик. Для завершения и отправки скажите в конце имя текущего помощника, например «Лира». Имя можно произнести отдельно.</p>
     <h3>Диктовка в другие приложения</h3><p>Включите микрофон, поставьте курсор в нужное поле и скажите «Лира, слушай» или «Лира, записывай». Продиктуйте текст и скажите «Лира, вставить», «Лира, добавить» или «Лира, текст». Текст заменит предыдущее содержимое буфера обмена; если подходящее поле активно, Лира также вставит текст в него, не отправляя сообщение. Если поле недоступно, текст останется в буфере для ручной вставки, а черновик — в диктовке. Лира продолжит слушать.</p><p>Когда окно Лиры открыто, черновик фоновой диктовки виден в отдельном поле и доступен для редактирования. Команда «Лира, текст» также копирует текст при диктовке через кнопку микрофона. «Лира, отмена» очищает фоновый черновик; «Лира, стоп» или «Лира, закончи диктовку» останавливает запись и сохраняет распознанный черновик. Одно имя показывает ассистента. Для автоматической вставки требуется разрешение «Универсальный доступ» в настройках macOS; защищённые поля не поддерживаются.</p>
-    <h3>Текст и снимок экрана</h3><p>Меню обработки текста появляется, когда в поле есть текст. «Обработка текста» убирает слова-паразиты и повторы, склеивает очевидные продолжения фраз и исправляет явные опечатки по смыслу. Для контекстной правки используется подключённая модель; сомнительные слова и имена она должна сохранять. «Перевести» переводит выделенный фрагмент или весь черновик между русским и английским; направление определяется по алфавиту исходного текста. Скажите «Лира, перевод» или «Лира, перевести», чтобы запустить перевод. Кириллица ↔ латиница меняет раскладку. Действие применяется к выделенному тексту, а без выделения — ко всему черновику. Скажите «Лира, обработать» или «Лира, обработка», чтобы обработать текст. Для переключения текста скажите «Лира, кириллица» или «Лира, русский», либо «Лира, латиница» или «Лира, английский». Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» удаляет выделение, а если выделения нет — весь черновик. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
+    <h3>Текст и снимок экрана</h3><p>Меню обработки текста появляется, когда в поле есть текст. «Обработка текста» убирает слова-паразиты и повторы, склеивает очевидные продолжения фраз и исправляет явные опечатки по смыслу. Для контекстной правки используется подключённая модель; сомнительные слова и имена она должна сохранять. «Перевести» переводит выделенный фрагмент или весь черновик между русским и английским; направление определяется по алфавиту исходного текста. Скажите «Лира, перевод» или «Лира, перевести», чтобы запустить перевод. Кириллица ↔ латиница меняет раскладку. Действие применяется к выделенному тексту, а без выделения — ко всему черновику. Скажите «Лира, обработать» или «Лира, обработка», чтобы обработать текст. Для переключения текста скажите «Лира, кириллица» или «Лира, латиница». «Лира, русский» и «Лира, английский» — а во время диктовки и просто «Русский.» или «Английский.» отдельной фразой — сразу переключают раскладку клавиатуры; эти слова в текст не попадают. Копирование сохраняет весь текст в буфер обмена. Скажите «Лира, скопировать» или «Лира, скопировать текст», чтобы скопировать весь текст без вставки; «Лира, вставить» или «Лира, вставить текст» также попробует вставить его в активное поле другого приложения. «Лира, сотри» или «Лира, очисти» удаляет выделение, а если выделения нет — весь черновик. Команды работают во время и после диктовки, пока включён голосовой режим. Блеклый значок снимка означает, что доступ к записи экрана не подтверждён; нажмите его, чтобы открыть настройки доступа.</p>
     <h3>Ссылки и файлы</h3><p>Вставка ссылки сама ничего не открывает и не запускает. Выберите действие в меню над полем или напишите, что сделать. Файл, папку или снимок экрана добавьте перед отправкой; проверьте вложения и выбранную модель.</p>
     <h3>Ответы и действия</h3><p>Во время ответа кнопка «Стоп» прекращает текущую работу. Кнопки в карточке результата открывают связанные материалы или задачи. Если ассистент просит подтвердить действие, сначала прочитайте его описание: «Да» подтверждает, «Нет» отменяет.</p>
     <h3>Почта</h3><p>Значок конверта в нижней панели показывает число непрочитанных писем. Нажмите его, чтобы открыть этот список. Отправка ответа доступна после просмотра точного текста и отдельного подтверждения.</p>
@@ -1843,6 +1849,34 @@ async function showMicMenu() {
   } catch (e) { list.innerHTML = "<div style=\"padding:8px;color:var(--muted);font-size:11px\">Не удалось получить список микрофонов</div>"; }
 }
 $("a-mic-pick").onclick = showMicMenu;
+function updateKeyboardLayoutIndicator(language) {
+  const button = $("a-layout-state");
+  const known = language === "english" || language === "russian";
+  const current = known ? language : "unknown";
+  button.dataset.layout = current;
+  button.textContent = current === "english" ? "A" : current === "russian" ? "R" : "?";
+  const label = current === "english" ? "Английская раскладка" : current === "russian" ? "Русская раскладка" : "Раскладка клавиатуры не определена";
+  button.title = known ? `${label}. Нажмите, чтобы переключить.` : `${label}. Добавьте английскую и русскую раскладки в настройках macOS.`;
+  button.setAttribute("aria-label", button.title);
+}
+async function refreshKeyboardLayoutIndicator() {
+  const api = window.pywebview?.api;
+  if (!api?.keyboard_layout_state) return;
+  try { updateKeyboardLayoutIndicator(await api.keyboard_layout_state()); } catch (_) { updateKeyboardLayoutIndicator(""); }
+}
+$("a-layout-state").onclick = async () => {
+  const api = window.pywebview?.api;
+  if (!api?.set_keyboard_layout) return;
+  const target = $("a-layout-state").dataset.layout === "english" ? "russian" : "english";
+  try {
+    const result = await api.set_keyboard_layout(target);
+    updateKeyboardLayoutIndicator(result?.language || target);
+  } catch (error) { showErr(error); refreshKeyboardLayoutIndicator(); }
+};
+core.on("keyboard_layout", event => updateKeyboardLayoutIndicator(event?.language));
+core.on("hello", refreshKeyboardLayoutIndicator);
+window.addEventListener("pywebviewready", refreshKeyboardLayoutIndicator);
+setInterval(refreshKeyboardLayoutIndicator, 2500);
 document.addEventListener("mousedown", e => {
   if (!e.target.closest("#mic-menu, #a-mic-pick")) $("mic-menu").classList.remove("on");
   if (!e.target.closest("#att-menu, #a-att")) $("att-menu").classList.remove("on");
@@ -2114,6 +2148,19 @@ async function refreshRecentActivity() {
 function renderDone(el, t) {
   const esc = (s) => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const outs = t.outputs || [];
+  if (t.workflow === 'link-download') {
+    el.innerHTML = `<div class="tl">✅ <b>${esc(t.title)}</b><button class="tx" title="Скрыть готовый результат">×</button></div>`
+      + `<div class="tsub">Файл готов. Откройте задачу, чтобы посмотреть видео или прослушать звук.</div>`
+      + `<div class="tbtn"><button data-a="task" title="Открыть задачу и воспроизвести готовый файл">Открыть задачу</button></div>`;
+    el.querySelector('.tx').onclick = e => { e.stopPropagation(); dismissed.add(t.id); renderTask(); };
+    el.querySelector('[data-a="task"]').onclick = async e => {
+      e.stopPropagation(); e.currentTarget.disabled = true;
+      try { const a=api(); if(a?.open_settings) await a.open_settings('tasks','&task='+encodeURIComponent(t.id)); }
+      catch(error) { showCap('', error.message); hideCapLater(8000); }
+      finally { e.currentTarget.disabled = false; }
+    };
+    return;
+  }
   const transcript = t.workflow === 'media-transcription' || outs.some(o => /(?:^|\/)transcript(?:\.summary|\.clean)?\.(?:md|txt|srt)$/.test(o.path || ''));
   if (transcript) {
     const latest = outs.slice().reverse();
@@ -2304,8 +2351,14 @@ function renderTask_() {
   const esc = (s) => String(s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   el.innerHTML = t.status === "waiting"
     ? `<div class="tl">❓ <b>${esc(t.title)}</b></div><div class="tsub">${esc(t.question)}</div>`
-    : `<div class="tl"><span class="spin"></span><b>${esc(t.title)}</b><em>${t.progress && t.progress[1] ? `${t.progress[0]}/${t.progress[1]}` : `шаг ${t.steps}`}</em></div>` +
+    : `<div class="tl"><span class="spin"></span><b>${esc(t.title)}</b><em>${t.progress && t.progress[1] ? `${t.progress[0]}/${t.progress[1]}` : `шаг ${t.steps}`}</em>${t.workflow === 'link-download' ? '<button class="task-stop" type="button" title="Прервать скачивание и отменить задачу">Отменить</button>' : ''}</div>` +
       (t.activity ? `<div class="tsub">${esc(t.activity)}</div>` : "") + `<i class="tp"><b style="width:${Math.max(4, pr * 100)}%"></b></i>`;
+  const stop = el.querySelector('.task-stop');
+  if (stop) stop.onclick = async event => {
+    event.stopPropagation(); stop.disabled = true; stop.textContent = 'Отменяю…';
+    try { await core.call('task_stop', {id:t.id}); }
+    catch (error) { showCap('', error.message); hideCapLater(8000); stop.disabled = false; stop.textContent = 'Отменить'; }
+  };
 }
 core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); if (d.update && (d.update.available || d.update.failed)) showUpd(d.update); })
     .on("task", e => {
@@ -2315,7 +2368,7 @@ core.on("hello", d => { (d.tasks || []).forEach(t => tasks[t.id] = t); renderTas
       if (isNativeTask(e.task) && ["done", "failed"].includes(e.task.status)) showNativeTaskResult(e.task);
     })
     .on("update", e => showUpd(e.update));
-$("task").onclick = () => { const a = api(); if (a) a.open_settings("tasks"); };
+$("task").onclick = (event) => { if (event.target.closest('.task-stop')) return; const a = api(), id = $('b-tasks').dataset.taskId; if (a) a.open_settings("tasks", id ? '&task=' + encodeURIComponent(id) : ''); };
 $('b-tasks').onclick = () => { const a = api(), id = $('b-tasks').dataset.taskId; if (a) a.open_settings('tasks', id ? '&task=' + encodeURIComponent(id) : ''); };
 core.on('tasks', e => { Object.keys(tasks).forEach(id => delete tasks[id]); (e.tasks || []).forEach(t => tasks[t.id] = t); renderTask(); });
 core.on('hello',scheduleRecentActivity).on('chat_changed',scheduleRecentActivity).on('chat',scheduleRecentActivity)
@@ -2537,8 +2590,8 @@ $("b-type").onclick = () => {
   setTimeout(fitAsk, 0);
 };
 /* вложения: плюс, перетащить на виджет, Ctrl+V (картинка или файл), снимок экрана одной кнопкой */
-let atts = [];                                   // {kind: "image"|"file", name, url | b64, size}
-const IMG = /^image\//, MAXF = 10 * 1024 * 1024;
+let atts = [];                                   // {kind: "image"|"file", name, url | b64, sourceFile, size}
+const IMG = /^image\//, MAXF = 10 * 1024 * 1024; // inline threshold; larger files use the chunked upload commands
 const CONVERT_TARGETS = {
   doc: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"], docx: ["TXT", "MD", "HTML", "XLSX", "CSV", "PDF"], odt: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"], rtf: ["TXT", "HTML", "DOCX", "XLSX", "CSV", "PDF"],
   ppt: ["TXT", "HTML", "PDF"], pptx: ["TXT", "HTML", "PDF"], odp: ["TXT", "HTML", "PDF"], xls: ["TXT", "HTML", "XLSX", "CSV", "PDF"], ods: ["TXT", "HTML", "XLSX", "CSV", "PDF"], json: ["TXT", "MD", "HTML", "DOCX", "XLSX", "CSV", "PDF"], xml: ["TXT", "MD", "HTML", "DOCX", "XLSX", "CSV", "PDF"],
@@ -2657,6 +2710,22 @@ async function uploadConversionFile(file, target, goal = "") {
     throw err;
   }
 }
+async function uploadChatAttachment(file, progress = () => {}) {
+  let upload;
+  try {
+    upload = await core.call("chat_file_begin", {name:file.name, size:file.size});
+    const step = upload.chunk_bytes || 2 * 1024 * 1024;
+    for (let offset = 0; offset < file.size; offset += step) {
+      const end = Math.min(file.size, offset + step);
+      await core.call("chat_file_chunk", {upload_id:upload.upload_id, b64:await b64of(file.slice(offset, end))});
+      progress(end, file.size);
+    }
+    return await core.call("chat_file_finish", {upload_id:upload.upload_id});
+  } catch (error) {
+    if (upload?.upload_id) core.call("chat_file_abort", {upload_id:upload.upload_id}).catch(() => {});
+    throw error;
+  }
+}
 function uiConversionTarget(text) {
   const s = String(text || "").toLowerCase().replace(/ё/g, "е");
   const formats = [["docx", /(?:в\s+)?(?:word|ворд|docx)/], ["xlsx", /(?:в\s+)?(?:excel|эксель|xlsx)/], ["md", /(?:в\s+)?(?:markdown|маркдаун|md)/],
@@ -2673,8 +2742,7 @@ async function addFiles(list) {
   for (const f of list) {
     try {
       if (IMG.test(f.type)) atts.push({ kind: "image", name: f.name || "картинка.png", url: await shrink(f), ocrData: f.size <= MAXF ? await b64of(f) : null, sourceFile: f, size: f.size });
-      else if (f.size > 2 * 1024 * 1024 * 1024) showErr(`«${f.name}» больше предела 2 ГБ`);
-      else atts.push({ kind: "file", name: f.name, b64: f.size <= MAXF ? await b64of(f) : null, sourceFile: f, size: f.size });
+      else atts.push({ kind: "file", name: f.name, b64: null, sourceFile: f, size: f.size });
     } catch (err) { showErr(err); }
   }
   renderAtts(); openAsk();
@@ -2852,7 +2920,9 @@ document.addEventListener("keydown", (e) => {          // Ctrl+V мимо пол
   if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "м") && document.activeElement !== $("askin")
       && !/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || "")) { e.preventDefault(); pasteImage(true); }
 });
-function sendAsk() {
+let sendAskBusy = false;
+async function sendAsk() {
+  if (sendAskBusy) return;
   if (dictating) {
     core.call("dictation_finish", { submit: true }).catch(showErr);
     return;
@@ -2861,7 +2931,7 @@ function sendAsk() {
   if (!q && !atts.length) return;
   const converting = /(?:конвертир\w*|преобраз\w*)/i.test(q);
   const target = converting ? uiConversionTarget(q) : "";
-  if (!converting && atts.some(a => !a.b64)) { showErr(new Error("Этот файл больше 10 МБ. Для локального преобразования нажмите значок рядом с вложением; отправка крупных файлов в обычный чат пока недоступна.")); return; }
+  const selectedAtts = atts.slice();
   if (converting && target && atts.some(a => !(a.kind === "image" ? a.ocrData : a.b64))) {
     const selected = atts.slice(), goal = q;
     tlReset(q || selected.map(a => a.name).join(", "));
@@ -2872,15 +2942,40 @@ function sendAsk() {
     })).then(tasks => showCap("", `Преобразую ${tasks.length} файл(а). Покажу готовые результаты здесь, в верхней карточке.`)).catch(err => showErr(err));
     return;
   }
-  const images = converting ? [] : atts.filter(a => a.kind === "image").map(a => a.url);
-  const files = atts.filter(a => converting ? !!target : a.kind === "file").map(a => ({ name: a.name, b64: a.kind === "image" ? a.ocrData : a.b64 }));
+  const uploaded = new Map();
+  const largeFiles = !converting ? selectedAtts.filter(a => a.kind === "file") : [];
+  if (largeFiles.length) {
+    sendAskBusy = true; $("askin").disabled = true; $("a-send").disabled = true;
+    try {
+      for (const a of largeFiles) {
+        if (!a.sourceFile) throw new Error(`Исходный файл «${a.name}» недоступен. Прикрепите его заново.`);
+        const result = await uploadChatAttachment(a.sourceFile, (sent, total) =>
+          showCap("", `Загружаю «${a.name}»: ${sent} из ${total} байт`, WAIT));
+        uploaded.set(a, result.upload_id);
+      }
+    } catch (error) {
+      for (const id of uploaded.values()) core.call("chat_file_abort", {upload_id:id}).catch(() => {});
+      showErr(error); sendAskBusy = false; $("askin").disabled = false; $("a-send").disabled = false; return;
+    }
+    $("askin").disabled = false; $("a-send").disabled = false;
+  }
+  const images = converting ? [] : selectedAtts.filter(a => a.kind === "image").map(a => a.url);
+  const files = selectedAtts.filter(a => converting ? !!target : a.kind === "file").map(a => {
+    const item = {name:a.name, b64:a.kind === "image" ? a.ocrData : a.b64};
+    if (uploaded.has(a)) item.upload_id = uploaded.get(a);
+    return item;
+  });
   const label = q || atts.map(a => a.name).join(", ");
   tlReset(label);
   const kept = atts;
-  core.sendLater("say", { text: q, images, files }).catch(e => {   // не дошло — вопрос обратно в поле (№200)
+  sendAskBusy = true;
+  try { await core.sendLater("say", { text: q, images, files }); }
+  catch(e) {
+    for (const id of uploaded.values()) core.call("chat_file_abort", {upload_id:id}).catch(() => {});
     if (!$("askin").value.trim()) { $("askin").value = q; atts = kept; renderAtts(); fitAsk(); }
     showErr(new Error(errText(e) + " — вопрос вернул в поле, отправьте ещё раз"));
-  });
+    return;
+  } finally { sendAskBusy = false; }
   showCap(label + (q && atts.length ? `  📎${atts.length}` : ""), core.connected ? WAIT : "нет связи с ядром — отправлю, как только вернётся");
   $("askin").value = ""; atts = []; renderAtts(); fitAsk(); openAsk();
 }

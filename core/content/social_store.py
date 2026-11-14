@@ -6,11 +6,11 @@ import uuid
 from urllib.parse import urlsplit, urlunsplit, parse_qs
 from .store import dump, integer, now
 
-PLATFORMS=('linkedin','facebook','threads','x','vk','telegram','pinterest','dzen','max')
+PLATFORMS=('linkedin','facebook','threads','x','vk','telegram','pinterest','dzen','max','youtube','instagram')
 TABLES={kind:'social_'+kind for kind in ('connections','identities','destinations','bindings','sets')}
-HOSTS={'linkedin':('linkedin.com',),'facebook':('facebook.com','fb.com'),'threads':('threads.com','threads.net'),'x':('x.com','twitter.com'),'vk':('vk.com',),'telegram':('t.me','telegram.me'),'pinterest':('pinterest.com',),'dzen':('dzen.ru',),'max':('max.ru',)}
+HOSTS={'linkedin':('linkedin.com',),'facebook':('facebook.com','fb.com'),'threads':('threads.com','threads.net'),'x':('x.com','twitter.com'),'vk':('vk.com','vk.ru'),'telegram':('t.me','telegram.me'),'pinterest':('pinterest.com',),'dzen':('dzen.ru',),'max':('max.ru',),'youtube':('youtube.com',),'instagram':('instagram.com',)}
 FIELDS={
- 'connections':{'platform':'linkedin','name':'','description':'','transport':'manual'},
+ 'connections':{'platform':'linkedin','name':'','description':'','transport':'manual','browser':'default'},
  'identities':{'platform':'linkedin','name':'','description':'','kind':'personal','external_id':'','url':'','project_ids':[]},
  'destinations':{'platform':'linkedin','name':'','description':'','kind':'profile','external_id':'','url':'','project_ids':[],'language':'ru','audience':'','rules':''},
  'bindings':{'name':'','description':'','connection_id':'','identity_id':'','destination_id':'','role':'author','route':'manual'},
@@ -53,7 +53,9 @@ def _get(c,kind,ident):
     if not isinstance(ident,str):raise ValueError('Укажите ID записи соцсетей')
     row=c.execute(f'SELECT snapshot FROM {table(kind)} WHERE id=?',(ident,)).fetchone()
     if not row:raise ValueError('Запись соцсетей не найдена')
-    return json.loads(row['snapshot'])
+    value=json.loads(row['snapshot'])
+    if kind=='connections':value.setdefault('browser','default')
+    return value
 
 def get(store,kind,ident):
     with store.db() as c:return _get(c,kind,ident)
@@ -75,9 +77,10 @@ def _validate(c,kind,data,current=None):
     if current and 'platform' in value and current['platform']!=value['platform']:raise ValueError('Сеть существующей записи не меняется; создайте новую запись')
     if kind=='connections':
         if value['transport'] not in ('manual','api'):raise ValueError('Неизвестный способ подключения')
+        if value['browser'] not in ('default','chrome','yandex','safari','firefox','edge','brave'):raise ValueError('Неизвестный браузер')
         value.update(status='not_connected',credential_ref=None)
     if kind in ('identities','destinations'):
-        choices=('personal','company') if kind=='identities' else ('profile','page','group','community')
+        choices=('personal','company') if kind=='identities' else ('profile','page','group','community','board')
         if value['kind'] not in choices:raise ValueError('Неизвестный тип профиля или назначения')
         value['url']=canonical_url(value['platform'],value['url']);value['external_id']=text(value['external_id'],'Внешний ID')
         for other in c.execute(f'SELECT id,snapshot FROM {table(kind)} WHERE platform=?',(value['platform'],)):

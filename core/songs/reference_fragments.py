@@ -208,13 +208,28 @@ def lyrics_only(text):
     kept) and playing notes («Аккорды: …», «Бой: …», «Gadd9 можно заменить
     на G»). Words inside a lyric line are never removed.
     """
-    lines = []
+    return lyrics_with_labels(text)[0]
+
+
+def _label_text(match):
+    text = re.sub(r'^[\s\[]+|[\s:\]]+$', '', match)
+    return text[:1].upper() + text[1:]
+
+
+def lyrics_with_labels(text):
+    """``lyrics_only`` and the publication's labels of its parts.
+
+    ``[{'line': n, 'text': 'Припев'}]``: ``n`` is the index (in the returned
+    text's lines) of the first sung line after the label.
+    """
+    lines, labels, pending = [], [], None
     for raw in str(text or '').splitlines():
         line = re.sub(r'\[[A-H][^\]\s]{0,12}\]', '', raw)
         if PLAYING_NOTE.search(line) or _chord_line(line):
             continue
         label = SECTION_LABEL.match(line)
         if label:
+            pending = _label_text(label.group()) or pending
             line = line[label.end():]
             if not line.strip() or _chord_line(line):
                 continue
@@ -222,5 +237,8 @@ def lyrics_only(text):
         # Publications write numbers as digits; the singer sings words.
         line = re.sub(r'(?<![\w.,:])(\d{1,4})(?![\w.,:]\d)(?!\w)',
                       lambda m: number_words(int(m.group(1))) if int(m.group(1)) <= 1000 else m.group(1), line)
+        if pending and line.strip():
+            labels.append({'line': len(lines), 'text': pending})
+            pending = None
         lines.append(line)
-    return '\n'.join(lines)
+    return '\n'.join(lines), labels

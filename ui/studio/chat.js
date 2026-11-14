@@ -197,10 +197,8 @@ core.on("state", e => {
   if (e.state === "thinking" && !CH.live) { CH.live = { text: "" }; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
   if ((e.state === "idle" || e.state === "listening") && CH.live && !CH.live.text && !CH.live.media) { CH.live = null; if ($("#p-chat").classList.contains("cur")) chatRender("stay"); }
 });
-/* вложения к сообщению: скрепка, перетащить в ленту, Ctrl+V; картинки уменьшаются до 1600 px (как в виджете),
-   файлы — до 11 МБ; ядро кладёт всё во «Входящие» папки ассистента и показывает модели (текст документов, картинки) */
-let chAtts = [];                                       // {kind: "image"|"file", name, b64, size, url?}
-const CH_MAX = 11e6;
+/* Вложения к сообщению: большие файлы передаются в ядро блоками, не помещаясь целиком в кадр WebSocket. */
+let chAtts = [];                                       // {kind, name, b64?, sourceFile?, size, url?}
 function chatShrink(file) {
   return new Promise((ok, bad) => {
     const img = new Image(); img.onerror = () => bad(new Error("это не картинка"));
@@ -211,14 +209,29 @@ function chatShrink(file) {
   });
 }
 const chatB64 = (file) => new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(file); });
+async function chatUploadFile(file) {
+  let upload;
+  try {
+    upload = await core.call("chat_file_begin", {name:file.name, size:file.size});
+    const step = upload.chunk_bytes || 2 * 1024 * 1024;
+    for (let offset = 0; offset < file.size; offset += step) {
+      const end = Math.min(file.size, offset + step);
+      await core.call("chat_file_chunk", {upload_id:upload.upload_id, b64:await chatB64(file.slice(offset, end))});
+      $("#ch-res").textContent = `Загружаю «${file.name}»: ${end} из ${file.size} байт`;
+    }
+    return await core.call("chat_file_finish", {upload_id:upload.upload_id});
+  } catch (error) {
+    if (upload?.upload_id) core.call("chat_file_abort", {upload_id:upload.upload_id}).catch(() => {});
+    throw error;
+  }
+}
 async function chatAddFiles(list) {
   for (const f of list) {
     try {
       if (/^image\//.test(f.type) && !/svg/.test(f.type)) {
         const url = await chatShrink(f);
         chAtts.push({ kind: "image", name: (f.name || "картинка").replace(/\.\w+$/, "") + ".jpg", b64: url, url, ocrData: f.size <= 10 * 1024 * 1024 ? await chatB64(f) : null, size: Math.round(url.length * 0.75) });
-      } else if (f.size > CH_MAX) $("#ch-res").textContent = `«${f.name}» больше 11 МБ — положите его в папку ассистента`;
-      else chAtts.push({ kind: "file", name: f.name, b64: await chatB64(f), size: f.size });
+      } else chAtts.push({ kind: "file", name: f.name, b64: null, sourceFile:f, size: f.size });
     } catch (e) { $("#ch-res").textContent = `«${f.name}»: ${e.message}`; }
   }
   chAtts = chAtts.slice(0, 10);
@@ -247,19 +260,34 @@ function chatAttsRender() {
     menu.append(summary, actions); b.before(menu);
   });
 }
-function chatSend() {
+let chatSendBusy = false;
+async function chatSend() {
+  if (chatSendBusy) return;
   const t = $("#ch-text"), q = t.value.trim(); if (!q && !chAtts.length) return;
-  const files = chAtts.map(a => ({ name: a.name, b64: a.b64 }));
-  const atts = chAtts;
+  const atts = chAtts.slice(), uploaded = new Map();
+  chatSendBusy = true;
+  try {
+    for (const a of atts.filter(x => x.kind === "file" && !x.b64)) {
+      if (!a.sourceFile) throw new Error(`Исходный файл «${a.name}» недоступен. Прикрепите его заново.`);
+      uploaded.set(a, (await chatUploadFile(a.sourceFile)).upload_id);
+    }
+  } catch (error) {
+    for (const id of uploaded.values()) core.call("chat_file_abort", {upload_id:id}).catch(() => {});
+    $("#ch-res").textContent = error.message || String(error); chatSendBusy = false; return;
+  }
+  const files = atts.map(a => ({ name:a.name, b64:a.b64, ...(uploaded.has(a) ? {upload_id:uploaded.get(a)} : {}) }));
   t.value = ""; t.style.height = ""; chAtts = []; chatAttsRender(); $("#ch-res").textContent = "";
   DewiarLinks.refresh(t);
   if (!core.connected) $("#ch-res").textContent = "Нет связи с ядром — сообщение не потеряется: отправлю, как только ядро вернётся";
-  core.sendLater("say", { text: q, files }).then(() => { if (/отправлю, как только/.test($("#ch-res").textContent)) $("#ch-res").textContent = ""; })
-    .catch(e => {   // не дошло — текст обратно в поле, набирать заново не нужно (№200)
+  try {
+    await core.sendLater("say", { text: q, files });
+    if (/отправлю, как только/.test($("#ch-res").textContent)) $("#ch-res").textContent = "";
+  } catch(e) {   // не дошло — текст обратно в поле, набирать заново не нужно (№200)
+      for (const id of uploaded.values()) core.call("chat_file_abort", {upload_id:id}).catch(() => {});
       if (!t.value.trim()) { t.value = q; t.dispatchEvent(new Event("input")); }
       if (!chAtts.length) { chAtts = atts; chatAttsRender(); }
       $("#ch-res").textContent = e.message + " — текст вернул в поле, отправьте ещё раз";
-    });
+  } finally { chatSendBusy = false; }
 }
 $("#ch-file").onchange = (e) => { chatAddFiles([...e.target.files]); e.target.value = ""; };
 $("#ch-text").addEventListener("paste", (e) => {

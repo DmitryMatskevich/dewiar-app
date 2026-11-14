@@ -93,7 +93,7 @@ assert.ok(s.plainText(sheetExample).includes(s.sheetRows(sheetExample).map(r=>r.
 assert.ok(s.sheetHTML(sheetExample).includes('song-paper-sources'));assert.ok(s.plainText(sheetExample).includes('Источники:\nChords — https://chords.example/a'));assert.ok(!s.plainText({guitar_sheet:[{text:'No source',cells:[]}]}).includes('https://'));console.log('Paper layout, chord fingerings and copied source links: OK');
 
 const toolbar=s.toolbar({...fixture,capabilities:{audio:true}});
-for(const id of ['song-key-down','song-key-up','song-show-text','song-copy-sheet','song-speed-down','song-speed-up','song-sheet-play','song-sheet-play-instrumental','song-sheet-stop','song-sheet-previous','song-sheet-next']) {
+for(const id of ['song-key-down','song-key-up','song-show-text','song-copy-sheet','song-chord-hover','song-speed-down','song-speed-up','song-sheet-play','song-sheet-play-instrumental','song-sheet-stop','song-sheet-previous','song-sheet-next']) {
  const button=toolbar.match(new RegExp('<button[^>]*id="'+id+'"[^>]*>[\\s\\S]*?</button>'))?.[0];
  assert.ok(button && button.includes('title="') && button.includes('aria-label="') && button.includes('<svg'),id);
 }
@@ -102,6 +102,26 @@ assert.match(toolbar,/id="song-live-edit-play-original"[^>]+title="Проигр�
 assert.ok(!toolbar.includes('song-live-edit-play-instrumental'));
 assert.ok(!toolbar.includes('song-edit-current'));
 console.log('Compact named icon controls: OK');
+// The clef right of the copy button switches three chord modes: hover → follow → off.
+{
+  const group=toolbar.match(/<div class="song-tool-group song-copy-group"[\s\S]*?<\/div>/)[0];
+  assert.ok(group.indexOf('id="song-copy-sheet"')<group.indexOf('id="song-chord-hover"'));
+  assert.match(group,/id="song-chord-hover"[^>]*data-chord-hover-toggle data-chord-mode="hover"/);
+  const store=new Map();global.localStorage={getItem:k=>store.has(k)?store.get(k):null,setItem:(k,v)=>store.set(k,String(v)),removeItem:k=>store.delete(k)};
+  assert.equal(s.chordMode(),'hover');assert.equal(s.chordHoverEnabled(),true);
+  s.setChordMode('follow');
+  assert.equal(s.chordMode(),'follow');assert.equal(s.chordHoverEnabled(),false);
+  assert.equal(store.get('dewiar:song-chord-hover'),'follow');
+  assert.match(s.toolbar({...fixture,capabilities:{audio:true}}),/id="song-chord-hover"[^>]*data-chord-mode="follow"/);
+  s.setChordHover(false);assert.equal(s.chordMode(),'off');
+  store.set('dewiar:song-chord-hover','off');assert.equal(s.chordMode(),'off'); // value of the two-state version
+  s.setChordMode('hover');assert.equal(s.chordMode(),'hover');
+  s.setChordMode('nonsense');assert.equal(s.chordMode(),'hover');
+  global.localStorage={getItem(){throw Error('blocked')},setItem(){throw Error('blocked')},removeItem(){throw Error('blocked')}};
+  s.setChordMode('follow');assert.equal(s.chordMode(),'follow');s.setChordMode('hover');assert.equal(s.chordMode(),'hover');
+  delete global.localStorage;
+  console.log('Chord modes hover/follow/off next to copy, remembered, work without storage: OK');
+}
 
 const editable=s.sheetHTML({song_id:'edit-check',title:'Edit',phrases:[],guitar_sheet:[{phrase_id:'phrase-1:line:12',source_phrase_ids:['phrase-1'],text:'A lyric phrase.',chords:[{name:'Am',char_index:0,start_ms:0,end_ms:1000}]}]});
 assert.match(editable,/data-song-edit-phrase="phrase-1" data-song-edit-kind="chords" title="Редактировать аккорды этой фразы"/);
@@ -279,4 +299,31 @@ console.log('Short pauses carry chords without a «Проигрыш» label; voi
   assert.equal(rows.slice(0,space).filter(r=>r.kind==='lyrics').length,4);
   assert.ok(lyrics.length>7);
   console.log('Quatrains from the sheet; wrapped verse stays in its stanza: OK');
+}
+// Labels and the user's layout: a blank line names the line after it (for «−»),
+// a label row stands over its line, lyric lines carry their layout key.
+{
+  const layoutRow={song_id:'layout',title:'Layout',phrases:[{phrase_id:'p'},{phrase_id:'q'}],guitar_sheet:[
+    {phrase_id:'p',text:'Кто поверит? Я и сам не верю',layout_key:'p:0',stanza_start:true,cells:[],chords:[]},
+    {phrase_id:'p',text:'То ль на счастье',layout_key:'p:29',cells:[],chords:[]},
+    {phrase_id:'q',text:'Я счастливый, как никто!',layout_key:'q:0',stanza_start:true,source_label:'Припев',cells:[],chords:[]},
+    {phrase_id:'q',text:'Я счастливый лет уж сто!',layout_key:'q:25',note:'×2',cells:[],chords:[]},
+    {phrase_id:'q',text:'Так счастливым и уйду!',layout_key:'q:50',stanza_start:true,source_label:'Припев',label_hidden:true,cells:[],chords:[]}]};
+  const rows=s.sheetRows(layoutRow);
+  assert.deepEqual(rows.map(r=>r.kind),['lyrics','lyrics','space','label','lyrics','label','lyrics','space','lyrics']);
+  assert.equal(rows[2].before_key,'q:0');
+  assert.deepEqual([rows[3].text,rows[3].manual],['Припев',false]);
+  assert.deepEqual([rows[5].text,rows[5].manual],['×2',true]);
+  assert.deepEqual(rows.filter(r=>r.kind==='lyrics').map(r=>[r.layout_key,r.blank_before]),
+    [['p:0',true],['p:29',false],['q:0',true],['q:25',false],['q:50',true]]);
+  const html=s.sheetHTML(layoutRow);
+  assert.ok(!html.includes('is-layout-editing'));
+  assert.match(html,/data-song-layout="break-off" data-layout-key="q:0"/);
+  assert.match(html,/data-song-layout="break-on" data-layout-key="p:29"/);
+  assert.match(html,/data-song-layout="note-remove" data-layout-key="q:0"[^>]*data-layout-mode="hide"/);
+  assert.ok(!/data-song-layout="join" data-layout-key="p:0"/.test(html));
+  assert.ok(s.plainText(layoutRow).includes('Припев\nЯ счастливый, как никто!'));
+  assert.ok(!s.plainText(layoutRow).includes('Припев\nТак счастливым'));
+  assert.match(s.toolbar(layoutRow),/id="song-layout-edit"[^>]*aria-pressed="false"/);
+  console.log('Labels, blank lines and layout buttons of the sheet: OK');
 }

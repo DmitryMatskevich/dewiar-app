@@ -1026,14 +1026,33 @@ def line_voiced_share(phrase, vocal):
     return voiced_ms(rows, s, e) / max(1, e - s)
 
 
-def silent_line_groups(phrases, vocal, hypotheses=(), duration_ms=None):
-    """``[(indexes, span, windows)]``: a sung line placed where nobody sings,
-    and later in the song the voice that sang it.
+SYLLABLE_MS = 80
 
-    Either nobody's text is over that voice (the line alone goes there), or
-    the next line took it (both are aligned again together). Only when another
-    recognizer heard this line's words there: an invention over the music
-    («Валерий Курас») is not moved into the singing.
+
+def squeezed_line(phrase):
+    """Measured words faster than anyone sings: an aligner glued them together.
+
+    «Я счастливый» (Лепс): «Кто поверит? Я и сам не верю, То ль» — eleven
+    syllables in 0.4 s at the start of the file, on a breath in the vocal
+    stem; the verse is sung from 27.5 s.
+    """
+    from .chord_layout import _vocal_bounds
+    s, e = _vocal_bounds(phrase)
+    syllables = len(re.findall(r'[аеёиоуыэюяaeiouy]', str(phrase.get('text') or ''), re.I))
+    return syllables >= 4 and e - s < syllables * SYLLABLE_MS
+
+
+def silent_line_groups(phrases, vocal, hypotheses=(), duration_ms=None):
+    """``[(indexes, span, windows)]``: a sung line placed where nobody sings
+    (or squeezed into a moment), and later in the song the voice that sang it.
+
+    The voice is the first voiced stretch before the next line's end that
+    another recognizer heard this line's words around («Я счастливый»: not
+    the short sounds of the intro at 13 and 23 s, Qwen heard nothing of the
+    line there; the verse at 27.5 s). Either nobody's text is over that voice
+    (the line alone goes there), or the next line took it (both are aligned
+    again together). An invention over the music («Валерий Курас») is heard
+    nowhere else and is never moved into the singing.
     """
     from .chord_layout import _vocal_bounds
     if _intervals(vocal) is None:
@@ -1053,21 +1072,22 @@ def silent_line_groups(phrases, vocal, hypotheses=(), duration_ms=None):
         if _user_timed(p) or any(i in g for g, _, _ in out):
             continue
         s, e = _vocal_bounds(p)
-        if e <= s or line_voiced_share(p, vocal) > SILENT_LINE_SHARE:
+        if e <= s or (line_voiced_share(p, vocal) > SILENT_LINE_SHARE and not squeezed_line(p)):
             continue
         previous = _vocal_bounds(phrases[lines[k - 1]])[1] if k else 0
         j = lines[k + 1] if k + 1 < len(lines) else None
         if j is not None and _user_timed(phrases[j]):
             continue
         js, je = _vocal_bounds(phrases[j]) if j is not None else (int(duration_ms or e), int(duration_ms or e))
-        onset = first_voice(vocal, e, je if j is not None else js)
+        limit = je if j is not None else js
+        onset = next((x for x, y in _intervals(vocal) if e <= x < limit
+                      and heard_near(p.get('text'), hypotheses, x) >= SILENT_LINE_HEARD), None)
         if onset is None:
             continue
-        if uncovered_voice(phrases, vocal, e, js, duration_ms) >= GAP_VOICE_MIN:
+        stop = next((y for x, y in _intervals(vocal) if x <= onset < y), js)
+        if onset < js and uncovered_voice(phrases, vocal, onset, js, duration_ms) >= GAP_VOICE_MIN:
             # Singing without text before the next line: this line goes there.
-            group, end = [i], js
-            stop = next((y for x, y in _intervals(vocal) if x <= onset < y), js)
-            end = min(js, stop + 1500)
+            group, end = [i], min(js, stop + 1500)
         elif j is not None and onset < je:
             after = [q for q in lines if q > j]
             group, end = [i, j], je + 500
@@ -1079,7 +1099,7 @@ def silent_line_groups(phrases, vocal, hypotheses=(), duration_ms=None):
             end = min(end, int(duration_ms))
         windows = [(max(previous, onset - lead), end) for lead in SILENT_LINE_LEADS]
         windows = [w for n, w in enumerate(windows) if w[1] > w[0] and w not in windows[:n]]
-        if not windows or heard_near(p.get('text'), hypotheses, onset) < SILENT_LINE_HEARD:
+        if not windows:
             continue
         out.append((group, (windows[0][0], end), windows))
     return out

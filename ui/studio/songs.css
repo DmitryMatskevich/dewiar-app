@@ -248,9 +248,17 @@ html.st-light .song-status[data-status="failed"] { color:#85223a; background:#ff
 .song-paper-scroll { overflow-x:auto; padding-bottom:6px; }
 .song-paper-body { width:100%; font:400 18px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-variant-ligatures:none; }
 .song-paper-chords, .song-paper-lyrics, .song-paper-space { white-space:pre; }
-.song-paper-line { display:block; position:relative; margin:0; padding:0 0 0 34px; break-inside:avoid; }
+.song-paper-line { display:block; position:relative; margin:0; padding:0 0 0 64px; break-inside:avoid; }
 .song-paper-line > .song-paper-chords, .song-paper-line > .song-paper-lyrics, .song-paper-line > .song-paper-instrumental { display:block; margin:0; padding:0; min-height:0; }
 .song-paper-edit { position:absolute; left:0; z-index:1; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; min-width:26px; padding:3px; border-radius:7px; opacity:.72; }
+.song-paper-play { position:absolute; left:0; top:0; z-index:2; display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; min-width:26px; padding:3px; border-radius:7px; opacity:.72; }
+.song-paper-play:hover, .song-paper-play:focus-visible { opacity:1; color:var(--accent); }
+.song-paper-play svg { width:17px; height:17px; pointer-events:none; }
+.song-paper-line.has-chords .song-paper-play-chords { top:0; }
+.song-paper-line.has-chords .song-paper-play-lyrics { top:1.5em; }
+.song-paper-line.has-chords .song-paper-edit-chords { left:29px; }
+.song-paper-line.has-chords .song-paper-edit-lyrics { left:29px; }
+.song-paper-line:not(.has-chords) .song-paper-play-lyrics { top:0; }
 .song-paper-edit:hover, .song-paper-edit:focus-visible { opacity:1; }
 .song-paper-edit svg { width:17px; height:17px; pointer-events:none; }
 .song-paper-edit-chords { top:0; }
@@ -272,6 +280,8 @@ html.st-light .song-chord-popover { --ink:#1d2230; --muted:rgba(29,34,48,.75); -
 .song-chord-apply { width:100%; margin-top:8px; }
 .song-chord-popover-status { margin:8px 0 0; font-size:13px; }
 .song-chord-popover-status:empty { display:none; }
+.song-chord-popover-foot { display:flex; justify-content:center; margin:10px -14px 0; padding:10px 14px 0; border-top:1px solid color-mix(in srgb,var(--line) 80%,transparent); }
+.song-chord-popover-foot .btn { min-width:0; }
 .song-chord-popover-head { display:grid; grid-template-columns:30px minmax(0,1fr) 30px auto; align-items:center; gap:4px; margin:0 -14px 10px; padding:10px 12px 10px 14px; border-radius:16px 16px 0 0; background-color:rgba(255,255,255,.06); }
 html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 .song-chord-popover-head b { min-width:0; overflow:hidden; padding:2px 4px; border-radius:5px; font-size:22px; text-align:center; white-space:nowrap; text-overflow:ellipsis; cursor:text; }
@@ -286,8 +296,8 @@ html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 .song-chord-diagram { border-top:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent); padding:4px 18px 4px 0; }
 .song-chord-string { color:var(--muted); font-weight:600; text-align:left; }
 .song-chord-grid { position:relative; display:grid; grid-column:2 / span 4; grid-row:1; grid-template-columns:repeat(4,1fr); height:24px; }
-.song-chord-grid.is-muted .song-chord-fret::before { opacity:0; }
-.song-chord-grid.is-muted::after { content:'----'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted); font:700 15px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.28em; pointer-events:none; }
+/* A string that is not played: a centred × in every fret, not dots or dashes. */
+.song-chord-grid.is-muted .song-chord-fret::before { content:'×'; width:auto; height:auto; border-radius:0; background:none; color:var(--muted); font:600 15px/1 system-ui,sans-serif; opacity:.85; }
 .song-chord-fret { position:relative; width:100%; height:24px; padding:0; border:0; border-right:1px solid color-mix(in srgb,var(--line) 80%,transparent); border-bottom:1px solid color-mix(in srgb,var(--line) 80%,transparent); background:transparent; color:inherit; cursor:pointer; }
 .song-chord-popover button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
 .song-chord-fret:first-child { border-left:1px solid color-mix(in srgb,var(--line) 80%,transparent); }
@@ -304,6 +314,27 @@ html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 .song-paper-lyrics.playing-line { background:color-mix(in srgb,var(--accent,#4d78c9) 7%,transparent); border-radius:4px; }
 .song-timing-note { font:12px/1.4 system-ui,sans-serif; color:var(--muted); margin:0 0 16px; }
 .song-paper-space { height:1.5em; }
+/* Labels over lines: the publication's («Припев») and the user's («×2»). */
+.song-paper-label { position:relative; margin:0; padding:0 0 0 64px; color:var(--muted); font:italic 600 13px/1.5 system-ui,sans-serif; white-space:pre-wrap; }
+.song-paper-label.is-manual { color:color-mix(in srgb,var(--accent,#4d78c9) 70%,var(--ink)); }
+/* «Правка строк»: buttons only in that mode, never over the sheet while playing. */
+.song-layout-tools { display:none; }
+.song-paper-space .song-layout-btn { display:none; }
+.song-paper.is-layout-editing .song-layout-tools { position:absolute; right:0; top:0; z-index:3; display:inline-flex; gap:3px; padding:0 2px; border-radius:8px; background:color-mix(in srgb,var(--field,#fff) 85%,transparent); }
+.song-paper.is-layout-editing .song-paper-label .song-layout-tools { position:static; margin-left:10px; vertical-align:middle; background:none; }
+.song-paper.is-layout-editing .song-paper-label { margin:2px 0; }
+.song-paper.is-layout-editing .song-paper-space { position:relative; border-radius:4px; outline:1px dashed color-mix(in srgb,var(--line) 90%,transparent); outline-offset:-3px; }
+.song-paper.is-layout-editing .song-paper-space .song-layout-btn { position:absolute; right:2px; top:50%; z-index:3; display:inline-flex; transform:translateY(-50%); }
+/* The line's own ▶ and ✎ step aside while the layout is edited. */
+.song-paper.is-layout-editing .song-paper-edit, .song-paper.is-layout-editing .song-paper-play { visibility:hidden; }
+.song-layout-btn { display:inline-flex; align-items:center; justify-content:center; width:24px; height:22px; min-width:24px; padding:0; border-radius:6px; font:700 15px/1 system-ui,sans-serif; }
+.song-paper.is-layout-editing .song-paper-word { cursor:pointer; }
+.song-paper.is-layout-editing .song-paper-word:hover { text-decoration:underline dotted; text-underline-offset:3px; }
+.song-layout-hint { margin:0 0 10px; color:var(--muted); font:13px/1.45 system-ui,sans-serif; white-space:normal; }
+.song-layout-hint [role="status"]:not(:empty) { display:block; margin-top:4px; color:var(--ink); font-weight:600; }
+.song-layout-note { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:4px 0 6px; padding-left:64px; font:13px/1.3 system-ui,sans-serif; white-space:normal; }
+.song-layout-note input { min-width:12ch; max-width:24ch; padding:4px 8px; }
+.song-layout-presets { display:inline-flex; flex-wrap:wrap; gap:4px; }
 .song-paper-sources { margin-top:28px; display:flex; flex-direction:column; gap:8px; font:14px/1.5 var(--font,system-ui); }
 .song-paper-sources > span { color:var(--muted); }
 .song-paper-sources a { overflow-wrap:anywhere; }
@@ -321,7 +352,29 @@ html.st-light .song-chord-popover-head { background-color:rgba(29,34,48,.06); }
 #song-speed-label { min-width:4ch; text-align:center; font-variant-numeric:tabular-nums; }
 .song-copy-group { gap:0; border-radius:14px; box-shadow:var(--raise,none); }
 .song-copy-group .song-icon-btn { box-shadow:none; border-radius:14px 0 0 14px; }
-.song-copy-group .song-icon-btn + .song-icon-btn { border-radius:0 14px 14px 0; border-left:1px solid var(--muted); }
+.song-copy-group .song-icon-btn + .song-icon-btn { border-radius:0; border-left:1px solid var(--muted); }
+.song-copy-group .song-icon-btn:last-child:not(:first-child) { border-radius:0 14px 14px 0; }
+/* Chord fingerings: hover (plain clef), follow (accent clef with a dot), off (crossed out). */
+.song-icon-btn[data-chord-hover-toggle] { position:relative; }
+.song-icon-btn[data-chord-hover-toggle][data-chord-mode="follow"] { color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,var(--field,transparent)); }
+.song-icon-btn[data-chord-hover-toggle][data-chord-mode="follow"]::after { content:''; position:absolute; right:8px; top:8px; width:7px; height:7px; border-radius:50%; background:currentColor; pointer-events:none; }
+.song-icon-btn[data-chord-hover-toggle][data-chord-mode="off"] svg { opacity:.45; }
+.song-icon-btn[data-chord-hover-toggle][data-chord-mode="off"]::after { content:''; position:absolute; left:50%; top:50%; width:26px; height:2px; border-radius:1px; background:currentColor; transform:translate(-50%,-50%) rotate(-45deg); pointer-events:none; }
+/* The card over the chord being played: no buttons, never takes clicks. */
+.song-chord-follow { --ink:#f4f4f6; --muted:rgba(244,244,246,.7); --line:rgba(244,244,246,.22); position:fixed; z-index:999; padding:5px 8px 6px; border:1px solid var(--line); border-radius:10px; background-color:#171b2d; color:var(--ink); box-shadow:0 8px 22px rgba(0,0,0,.22); font:11px/1 system-ui,sans-serif; pointer-events:none; user-select:none; }
+html.st-light .song-chord-follow { --ink:#1d2230; --muted:rgba(29,34,48,.7); --line:rgba(29,34,48,.18); background-color:#f6f8fc; }
+.song-chord-follow[hidden] { display:none; }
+.song-chord-mini-name { margin:0 0 4px; text-align:center; font-weight:700; font-size:14px; }
+.song-chord-mini-row { display:grid; grid-template-columns:10px repeat(4,16px) 14px; align-items:center; height:13px; }
+.song-chord-mini-row > span { color:var(--muted); font-weight:600; }
+.song-chord-mini-row > b { text-align:right; font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.song-chord-mini-frets { height:11px; color:var(--muted); }
+.song-chord-mini-frets > span:not(:first-child) { text-align:center; font-size:9px; font-weight:400; }
+.song-chord-mini-row > i { position:relative; height:13px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+.song-chord-mini-row > span + i { border-left:1px solid var(--line); }
+.song-chord-mini-row > i::before { content:''; position:absolute; left:50%; top:50%; width:3px; height:3px; border-radius:50%; background:var(--muted); opacity:.4; transform:translate(-50%,-50%); }
+.song-chord-mini-row > i.filled::before { width:9px; height:9px; background:var(--accent,#4d78c9); opacity:1; }
+.song-chord-mini-row > i.is-muted::before { content:'×'; width:auto; height:auto; background:none; color:var(--muted); font:600 10px/1 system-ui,sans-serif; opacity:.85; }
 #song-copy-status, #song-sheet-play-status { font-size:13px; color:var(--muted); }
 .song-copy-preview[hidden] { display:none; }
 #song-copy-preview { width:100%; font-family:ui-monospace,Menlo,Consolas,monospace; white-space:pre; overflow:auto; }

@@ -72,8 +72,46 @@ function loadMe() {
   meExam();
   core.call("knowledge_list").then(r => renderKn(r.files)).catch(e => ($("#kn-res").textContent = e.message));
   core.call("knowledge_folders").then(renderKnFolders).catch(() => {});
+  emailArchiveStatus();
   const a = S && lastAccount; $("#kn-site").textContent = a && a.logged_in ? `Знания с сайта тоже подключены: аккаунт ${a.user && a.user.login || a.login} (раздел «Подключение»).` : "";
 }
+async function emailArchiveStatus() {
+  const out = $("#ea-status"); if (!out) return;
+  try { const s = await core.call("email_archive_status"); out.textContent = `В архиве: ${s.messages} писем`; }
+  catch (e) { out.textContent = e.message; }
+}
+$("#ea-import")?.addEventListener("click", async () => {
+  const api = window.pywebview?.api;
+  if (!api?.pick_folder) return toast("Выберите папку с MBOX или archive.sqlite3 в приложении Dewiar");
+  const path = await api.pick_folder(); if (!path) return;
+  const out = $("#ea-status"); out.textContent = "Импортирую локально…";
+  try { const r = await core.call("email_archive_import", { path }); out.textContent = `Импортировано: ${r.imported}; дубликатов: ${r.duplicates}; ошибок: ${r.errors}; всего в архиве: ${r.messages}`; }
+  catch (e) { out.textContent = e.message; }
+});
+$("#ea-open")?.addEventListener("click", () => core.call("email_archive_open").catch(e => toast(e.message)));
+$("#ea-search")?.addEventListener("click", async () => {
+  const q = $("#ea-q").value.trim(), box = $("#ea-results"); if (!q) return;
+  box.textContent = "Ищу…";
+  try {
+    const hits = await core.call("email_archive_search", { query: q, limit: 40 }); box.innerHTML = "";
+    if (!hits.length) { box.textContent = "Ничего не найдено."; return; }
+    hits.forEach(h => { const d = document.createElement("div"); d.className = "kn-hit";
+      const b = document.createElement("b"), body = document.createElement("div");
+      b.textContent = `${h.date || "Без даты"} · ${h.sender || ""} · ${h.subject || "Без темы"}`;
+      body.textContent = `${h.body || ""}`.slice(0, 700); d.append(b, body); box.appendChild(d); });
+  } catch (e) { box.textContent = e.message; }
+});
+$("#ea-q")?.addEventListener("keydown", e => { if (e.key === "Enter") $("#ea-search").click(); });
+$("#ea-clean")?.addEventListener("click", async () => {
+  const out = $("#ea-status");
+  try {
+    const preview = await core.call("email_archive_cleanup_preview");
+    const categories = Object.entries(preview.by_reason || {}).map(([k,v]) => `${k}: ${v}`).join("\n");
+    if (!preview.total) { out.textContent = "Писем по правилам очистки нет."; return; }
+    if (!window.confirm(`Будет удалено из локального архива ${preview.total} писем:\n${categories}\n\nПродолжить? Исходные MBOX и почтовые серверы не затрагиваются.`)) return;
+    const done = await core.call("email_archive_cleanup"); out.textContent = `Удалено из локального архива: ${done.removed}; осталось: ${done.messages}. Отчёт: ${done.report}`;
+  } catch (e) { out.textContent = e.message; }
+});
 let lastAccount = null;
 $("#me-save").onclick = () => core.call("memory_set", { text: $("#me-mem").value }).then(() => { $("#me-res").className = "res ok"; $("#me-res").textContent = "Сохранено"; setTimeout(() => ($("#me-res").textContent = ""), 2500); }).catch(e => toast(e.message));
 $("#kn-open").onclick = () => core.call("knowledge_open").catch(e => toast(e.message));

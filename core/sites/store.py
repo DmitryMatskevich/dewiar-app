@@ -17,6 +17,27 @@ def minute():
     return int(time.time() // 60)
 
 
+def tls_observation(result):
+    """Read the TLS date from a check or its last observed certificate."""
+    try:
+        detail = json.loads(result['detail'])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(detail, dict):
+        return None
+    expires = detail.get('tls_until')
+    checked = result['at']
+    from_check = bool(expires)
+    if not expires:
+        last = detail.get('last_tls')
+        if not isinstance(last, dict):
+            return None
+        expires, checked = last.get('expires'), last.get('checked')
+    if type(expires) is int and expires > 0 and type(checked) is int and checked >= 0:
+        return {'expires': expires, 'checked': checked, 'from_check': from_check}
+    return None
+
+
 def web_url(value, allow_fragment=False):
     value = str(value).strip()
     if '://' not in value:
@@ -566,7 +587,12 @@ class Store:
                     if tail and tail['end'] > now:
                         c.execute('UPDATE spans SET end=MAX(start,?) WHERE id=?', (now, tail['id']))
                     c.execute('INSERT INTO spans(site,probe,start,end,state,rev) VALUES (?,?,?,?,?,?)', (sid, probe, now, due, state, site['rev']))
-                c.execute('INSERT OR REPLACE INTO current VALUES (?,?,?,?,?,?,?,?,?,?)', (sid, probe, state, now, due, r.get('reason', ''), json.dumps(r.get('detail', {}), ensure_ascii=False)[:4096], r.get('latency'), min(fails, 100), min(oks, 100)))
+                detail = r.get('detail', {})
+                if probe in ('http', 'https_port') and state != 'UP' and not detail.get('tls_until') and prev:
+                    last_tls = tls_observation(prev)
+                    if last_tls:
+                        detail = {**detail, 'last_tls': {'expires': last_tls['expires'], 'checked': last_tls['checked']}}
+                c.execute('INSERT OR REPLACE INTO current VALUES (?,?,?,?,?,?,?,?,?,?)', (sid, probe, state, now, due, r.get('reason', ''), json.dumps(detail, ensure_ascii=False)[:4096], r.get('latency'), min(fails, 100), min(oks, 100)))
                 if probe not in ('web', 'ssh', 'ftp', 'mail'):
                     continue
                 inc = c.execute('SELECT * FROM incidents WHERE site=? AND probe=? AND closed IS NULL', (sid, probe)).fetchone()
@@ -614,6 +640,14 @@ class Store:
             if sid:
                 return [dict(r) for r in c.execute('SELECT * FROM incidents WHERE site=? ORDER BY confirmed DESC LIMIT 100', (sid,))]
             return [dict(r) for r in c.execute('SELECT * FROM incidents ORDER BY confirmed DESC LIMIT 100')]
+
+    def incident_overview(self):
+        """Keep every open incident visible even when recent history fills up."""
+        with self.db() as c:
+            c.execute('BEGIN')
+            active = c.execute('SELECT * FROM incidents WHERE closed IS NULL ORDER BY confirmed DESC, id').fetchall()
+            recent = c.execute('SELECT * FROM incidents WHERE closed IS NOT NULL ORDER BY closed DESC, id LIMIT 100').fetchall()
+        return {'active': [dict(row) for row in active], 'recent': [dict(row) for row in recent]}
 
     def deliveries(self):
         with self.db() as c:

@@ -58,7 +58,9 @@
       busy=true;status.textContent='Создаю задачу…';render();
       try {
         const task=await core.call('link_action',{urls:value.urls,action,media:isMedia});
-        launched.set(action,task);status.textContent=task.status==='done' ? 'Результат уже готов.' : 'Задача создана. Ход выполнения и файлы — в задачах.';
+        launched.set(action,task);status.textContent=task.status==='done' ? 'Результат уже готов.' : action==='html-edit'
+          ? 'Загружаю HTML-копию страницы. Когда задача завершится, откройте HTML-файл в редакторе из её результатов.'
+          : 'Задача создана. Ход выполнения и файлы — в задачах.';
         options.started?.(task); const open=document.createElement('button');open.type='button';open.className='la-open-task';open.title='Открыть задачу с ходом выполнения и результатами';open.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3.5" width="16" height="18" rx="2"/><path d="M9 3h6v4H9zM8 12h8M8 16h6"/></svg><span>Открыть задачу</span>';
         open.onclick=()=>openTask(task.id);status.append(' ',open);
       } catch(error) {status.textContent=error.message || String(error);}
@@ -67,8 +69,8 @@
     function render() {
       actions.replaceChildren();
       const button=(action,label,parent=actions)=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.dataset.linkAction=action;b.disabled=busy||!!options.readOnly;b.onclick=()=>runAction(action);if(launched.has(action))b.textContent+=' · задача создана';parent.append(b);return b;};
-      const menu=(label,choices,icon=false)=>{const details=document.createElement('div');details.className='la-menu';const toggle=document.createElement('button');toggle.type='button';toggle.className='la-menu-toggle'+(icon?' icon':'');toggle.title=label;toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-haspopup','menu');toggle.setAttribute('aria-expanded','false');
-        if(icon) toggle.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><text x="2" y="16" fill="currentColor" stroke="none" font-size="14" font-weight="700">T</text><text x="13" y="16" fill="currentColor" stroke="none" font-size="10" font-weight="700">т</text><path d="M3 20h18"/></svg>';
+      const menu=(label,choices,icon=false,iconMarkup='')=>{const details=document.createElement('div');details.className='la-menu';const toggle=document.createElement('button');toggle.type='button';toggle.className='la-menu-toggle'+(icon?' icon':'');toggle.title=label;toggle.setAttribute('aria-label',label);toggle.setAttribute('aria-haspopup','menu');toggle.setAttribute('aria-expanded','false');
+        if(icon) toggle.innerHTML=iconMarkup || '<svg viewBox="0 0 24 24" aria-hidden="true"><text x="2" y="16" fill="currentColor" stroke="none" font-size="14" font-weight="700">T</text><text x="13" y="16" fill="currentColor" stroke="none" font-size="10" font-weight="700">т</text><path d="M3 20h18"/></svg>';
         else toggle.textContent=label+' ▾';
         const list=document.createElement('div');list.className='la-menu-options';list.setAttribute('role','menu');list.setAttribute('aria-label',label);list.hidden=true;
         toggle.onclick = () => {
@@ -90,6 +92,8 @@
         else menu('Аудио',[['audio','Извлечь звук'],['transcribe','Транскрибировать']]);
       } else {
         menu('Текст',[['text','Извлечь текст'],['html','Извлечь HTML и картинки'],['contacts','Извлечь контакты'],['images','Извлечь картинки'],['screenshot','Снимок страницы']],false);
+        menu('Дизайн HTML',[['html-edit','Редактировать HTML'],['design-review','Проверить дизайн страницы']],true,
+          '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.2" cy="9" r="1.4"/><path d="m4 17 5-5 3 3 2-2 6 5"/></svg>');
         menu('SEO',[['seo-page','SEO страницы'],['seo-site','SEO всего сайта']]);
       }
       if(isMedia) {

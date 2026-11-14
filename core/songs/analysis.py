@@ -331,6 +331,13 @@ class SongAnalyzer:
                     capabilities={**(row.get("capabilities") or {}),
                                   "chords": any(event.get("name") != "N" for event in events)},
                 )
+            if "text_reference" in changes:
+                # The card may keep its own corrected lines (and their ids)
+                # while the rerun compared the publication with a fresh
+                # recognition: point every suggestion at the card's text.
+                from .text_reference import card_report
+                changes["text_reference"] = card_report(changes["text_reference"],
+                                                        changes.get("phrases") or row.get("phrases") or [])
             changes["stage_label"] = {
                 "lyrics": "Распознавание слов обновлено; проверьте текст по записи",
                 "text_reference": "Сверка с источником текста завершена",

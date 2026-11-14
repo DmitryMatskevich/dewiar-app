@@ -2,8 +2,9 @@
 
 The recognizer cut lines where the singer breathed: «Я молча | пил, а лес
 валил, Летели щепки.», «А срок | костил, я не просил». Every breath became a
-pause row and every pause row ended a line. Lines now follow the verse and
-are grouped into stanzas of four.
+pause row and every pause row ended a line. Lines now follow the verse; the
+quatrains come from the confirmed publication (without one, only a break or
+a long pause parts the text).
 """
 import re
 import sys
@@ -13,6 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'core'))
 from songs.chord_layout import build_guitar_sheet
 from songs.sheet_lines import readable_sheet, song_meter, stanza_starts, verse_cuts, syllables
+from songs.source_layout import word_layout
+
+PUBLICATION = dict(text_confirmed=True, plain_lyrics=(
+    'На зоне был, не фраерил,\nТам это ни к чему,\nЯ молча пил, а лес валил,\nЛетели щепки.\n\n'
+    'Хозяин бил, я не скулил,\nИ сил упадок не косил,\nА срок костил, я не просил,\nЯ парень крепкий.'))
 
 
 def timed(pid, text, start, step=320, pause_after=()):
@@ -43,11 +49,12 @@ def phrases():
 
 
 class VerseLineTests(unittest.TestCase):
-    def sheet(self, rows=None, starts=()):
+    def sheet(self, rows=None, starts=(), references=()):
         rows = rows or phrases()
         vocal = {'intervals': [[34000, 60000]], 'weak': [[34000, 60000]]}
-        return readable_sheet(build_guitar_sheet(rows, [dict(name='Am', start_ms=34000, end_ms=60000)], 61000, vocal),
-                              section_starts=starts, events=[dict(name='Am', start_ms=34000, end_ms=60000)])
+        built = build_guitar_sheet(rows, [dict(name='Am', start_ms=34000, end_ms=60000)], 61000, vocal)
+        return readable_sheet(built, section_starts=starts, events=[dict(name='Am', start_ms=34000, end_ms=60000)],
+                              layout=word_layout(built, list(references))[0])
 
     def test_a_breath_does_not_cut_the_verse(self):
         lines = [l['text'] for l in self.sheet() if l.get('text')]
@@ -56,9 +63,12 @@ class VerseLineTests(unittest.TestCase):
         self.assertNotIn('Я молча', lines)
         self.assertEqual(' '.join(lines), ' '.join(t for _, t in VERSE))
 
-    def test_two_quatrains(self):
+    def test_two_quatrains_from_the_publication(self):
         lines = [l for l in self.sheet() if l.get('text')]
         self.assertEqual(len(lines), 8)
+        # Without a publication: one block, no long pause inside the verse.
+        self.assertEqual([k for k, l in enumerate(lines) if l.get('stanza_start')], [0])
+        lines = [l for l in self.sheet(references=[PUBLICATION]) if l.get('text')]
         self.assertEqual([k for k, l in enumerate(lines) if l.get('stanza_start')], [0, 4])
 
     def test_words_keep_their_phrase_and_timing(self):

@@ -21,7 +21,7 @@ def public_song(row, summary=False):
                               for r in row.get('analysis_runs',[]) if r['run_id']==row.get('candidate_run_id')]
     result['phrase_history'] = {pid:{'cursor':h['cursor'],'version_count':len(h['versions'])}
         for pid,h in row.get('phrase_history',{}).items() if isinstance(h,dict) and 'versions' in h}
-    keys = ('phrase_id','source_phrase_ids','source_spans','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words','instrumental','vocal','pause','unsung','stanza_start','verse_continuation','verse_pause')
+    keys = ('phrase_id','source_phrase_ids','source_spans','text','start_ms','end_ms','cells','chords','unplaced_chords','timing_quality','display_words','instrumental','vocal','pause','unsung','stanza_start','verse_continuation','verse_pause','layout_key','source_covered','source_label','note','label_hidden')
     from .chord_layout import build_guitar_sheet
     from .sheet_lines import readable_sheet
     from .phrase_timeline import ordered_phrases
@@ -43,13 +43,13 @@ def public_song(row, summary=False):
             members=[phrases[i] for i in section['phrase_indexes']]
             if members:
                 section.update(start_ms=min(p['start_ms'] for p in members),end_ms=max(p['end_ms'] for p in members))
-    # A recognized part (verse, chorus) or one the user confirmed starts a
-    # stanza. Automatic «Часть N» splits only mark gaps in the recording and
-    # are left to the stanza layout (one-line «parts» otherwise).
+    # Only a part the user confirmed starts a stanza by itself. Guessed
+    # parts («Возможный припев» from repeats) put blank lines inside quatrains;
+    # stanzas come from the publication or from breaks (sheet_lines).
     starts = [phrases[s['phrase_indexes'][0]].get('phrase_id')
               for s in result.get('sections',[]) if s.get('phrase_indexes')
               and 0 <= s['phrase_indexes'][0] < len(phrases)
-              and (s.get('kind') not in (None, '', 'unknown') or s.get('review_state') == 'verified')]
+              and s.get('review_state') == 'verified']
     events = sorted(copy.deepcopy(row.get('chords',[])), key=lambda c:c.get('start_ms',0))
     duration = max([row.get('audio',{}).get('duration_ms',0) or 0,
                     *[p.get('end_ms',0) or 0 for p in row.get('phrases',[])]])
@@ -62,7 +62,13 @@ def public_song(row, summary=False):
         # a lead instrument in the vocal stem is not singing.
         from .vocal_timing import unrecognized_windows
         vocal = {**vocal, 'lexical': unrecognized_windows(phrases, selected.get('hypotheses', []))}
-    sheet = readable_sheet(build_guitar_sheet(phrases,events,duration,vocal), section_starts=starts, events=events)
+    rows = build_guitar_sheet(phrases,events,duration,vocal)
+    from .source_layout import confirmed_references, word_layout
+    layout, coverage = word_layout(rows, confirmed_references(row))
+    result['layout_source'] = {'coverage': round(coverage, 2), 'used': bool(layout)}
+    from .layout_edit import resolve_layout
+    sheet = readable_sheet(rows, section_starts=starts, events=events, layout=layout,
+                           manual=resolve_layout(row.get('sheet_layout'), phrases))
     result['guitar_sheet'] = [{k:copy.deepcopy(line[k]) for k in keys if k in line} for line in sheet]
     from .evidence import review_evidence
     result['review_evidence'] = review_evidence(row)

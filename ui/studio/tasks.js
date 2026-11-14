@@ -168,6 +168,22 @@ function renderOutputs(t) {
       <button class="btn small primary" id="o-dl">Скачать</button><button class="btn small primary" id="o-pdf">PDF</button></div>
       <div id="o-view"></div></div>`;
 }
+function transcriptTimestampLinks(source, text) {
+  const url = String(source || "").trim();
+  if (!/^https?:\/\//i.test(url)) return text;
+  return text.replace(/\[(\d{2}):(\d{2}):(\d{2})(?:\s*[–—-]\s*(\d{2}):(\d{2}):(\d{2}))?\](?!\()/g, (whole, hh, mm, ss) => {
+    const seconds = Number(hh) * 3600 + Number(mm) * 60 + Number(ss);
+    let target;
+    try {
+      const parsed = new URL(url);
+      if (/(^|\.)youtu\.be$/i.test(parsed.hostname)) { parsed.searchParams.set("t", String(seconds)); target = parsed.toString(); }
+      else if (/(^|\.)youtube\.com$/i.test(parsed.hostname)) { parsed.searchParams.set("t", String(seconds)); target = parsed.toString(); }
+      else if (/(^|\.)vimeo\.com$/i.test(parsed.hostname)) target = `${parsed.origin}${parsed.pathname}#t=${seconds}s`;
+      else return whole;
+    } catch (_) { return whole; }
+    return `[${whole}](${target})`;
+  });
+}
 async function wireOutputs(t) {
   const rel = tOutSel; if (!rel) return;
   const dirRel = "Задачи/" + t.dir.replace(/\\/g, "/").split("/Задачи/").pop();   // ws_* принимают пути от корня папки ассистента
@@ -217,11 +233,30 @@ async function wireOutputs(t) {
       const f = await core.call("ws_read", {path:dirRel + "/" + tOutSel});
       if (f.truncated || f.binary) throw Error("Этот файл слишком большой для встроенного редактора");
       const area = document.createElement("textarea"); area.className = "otext oedit"; area.value = f.text || "";
-      area.setAttribute("aria-label", `Редактирование ${tOutSel}`); view.replaceChildren(area);
+      area.setAttribute("aria-label", `Редактирование ${tOutSel}`);
+      const editor = document.createElement("div"); editor.className = "oedit-wrap";
+      const modes = document.createElement("div"); modes.className = "oedit-modes";
+      const codeMode = document.createElement("button"); codeMode.className = "btn small primary"; codeMode.textContent = "Разметка";
+      const previewMode = document.createElement("button"); previewMode.className = "btn small"; previewMode.textContent = "Предпросмотр";
+      const preview = document.createElement("div"); preview.className = "md otext oedit-preview"; preview.hidden = true;
+      const isMarkdown = /\.md$/i.test(tOutSel);
+      previewMode.disabled = !isMarkdown;
+      modes.append(codeMode, previewMode); editor.append(modes, area, preview); view.replaceChildren(editor);
+      const showMode = mode => {
+        const isPreview = mode === "preview";
+        area.hidden = isPreview; preview.hidden = !isPreview;
+        codeMode.classList.toggle("primary", !isPreview); previewMode.classList.toggle("primary", isPreview);
+        if (isPreview) {
+          const rendered = transcriptTimestampLinks((t.media_sources || [])[0], area.value);
+          preview.innerHTML = md(rendered);
+          preview.querySelectorAll('a[href^="http"]').forEach(link => { link.target = "_blank"; link.rel = "noopener noreferrer"; });
+        }
+      };
+      codeMode.onclick = () => showMode("code"); previewMode.onclick = () => showMode("preview");
       const controls = document.createElement("div"); controls.className = "oedit-actions";
       const save = document.createElement("button"); save.className = "btn small primary"; save.textContent = "Сохранить";
       const cancel = document.createElement("button"); cancel.className = "btn small"; cancel.textContent = "Отмена";
-      controls.append(save, cancel); view.append(controls); area.focus();
+      controls.append(save, cancel); editor.append(controls); area.focus();
       cancel.onclick = () => wireOutputs(t);
       save.onclick = async () => { save.disabled = true;
         try { await core.call("task_write_result", {id:t.id,path:tOutSel,text:area.value}); toast("Изменения сохранены"); await openTask(t.id); }
@@ -271,7 +306,7 @@ async function wireOutputs(t) {
     } catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; }
     else v.innerHTML = openHint;
   } else if (["md", "txt", "srt", "csv", "json", "py", "js", "css"].includes(ext)) {
-    try { const f = await core.call("ws_read", { path: dirRel + "/" + rel }); copyResult(f); v.innerHTML = ext === "md" ? `<div class="md otext">${md(f.text || "")}</div>` : `<pre class="otext"></pre>`; if (ext !== "md") $("pre", v).textContent = f.text || "";
+    try { const f = await core.call("ws_read", { path: dirRel + "/" + rel }); copyResult(f); v.innerHTML = ext === "md" ? `<div class="md otext">${md(/transcript\.summary\.md$/i.test(rel) ? transcriptTimestampLinks((t.media_sources || [])[0], f.text || "") : f.text || "")}</div>` : `<pre class="otext"></pre>`; if (ext !== "md") $("pre", v).textContent = f.text || "";
       v.querySelectorAll("[data-contact-frame]").forEach(link => link.addEventListener("click", event => {
         event.preventDefault();
         const imagePath = `${rel.slice(0, rel.lastIndexOf("/"))}/${link.dataset.contactFrame}`;
@@ -280,6 +315,14 @@ async function wireOutputs(t) {
       }));
       if (f.truncated) v.insertAdjacentHTML('beforeend', '<p class="hint">Показан и доступен для копирования только загруженный фрагмент. Полный файл откройте в его программе.</p>'); }
     catch (e) { v.innerHTML = `<p class="hint">${escH(e.message)}</p>`; taskCopySource(copy, '', false, 'Не удалось прочитать текст результата: ' + e.message); }
+  } else if (["mp4", "webm", "mov", "mkv", "m4v"].includes(ext) && OUT_FILE_OK) {
+    taskCopySource(copy, '', false, 'Видео можно смотреть прямо здесь.');
+    v.innerHTML = `<video controls playsinline preload="metadata" aria-label="${escH(t.outputs?.find(o=>o.path===rel)?.title || rel)}"></video>`;
+    $("video", v).src = outUrl(t, rel);
+  } else if (["mp3", "mpeg", "wav", "flac", "ogg", "opus", "m4a", "aac"].includes(ext) && OUT_FILE_OK) {
+    taskCopySource(copy, '', false, 'Звук можно слушать прямо здесь.');
+    v.innerHTML = `<audio controls preload="metadata" aria-label="${escH(t.outputs?.find(o=>o.path===rel)?.title || rel)}"></audio>`;
+    $("audio", v).src = outUrl(t, rel);
   } else {
     v.innerHTML = openHint;
     if (['pdf','docx','odt'].includes(ext)) {

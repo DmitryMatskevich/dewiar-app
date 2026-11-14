@@ -68,6 +68,8 @@ def http_probe(url, marker='', test=False):
         conn = (http.client.HTTPSConnection if u.scheme == 'https' else http.client.HTTPConnection)(host, port, timeout=5)
         conn.sock = sock
         try:
+            # A response with Connection: close can release conn.sock in getresponse().
+            cert = sock.getpeercert() if u.scheme == 'https' else {}
             conn.request('GET', (u.path or '/') + ('?' + u.query if u.query else ''), headers={'User-Agent': 'Dewiar-SiteCheck/1.0', 'Accept-Encoding': 'identity', 'Connection': 'close'})
             resp = conn.getresponse()
             if resp.status in (301, 302, 303, 307, 308):
@@ -82,10 +84,8 @@ def http_probe(url, marker='', test=False):
                 url = target
                 continue
             detail = {'http_code': resp.status, 'ip': ip, 'redirects': redirects}
-            if u.scheme == 'https':
-                cert = sock.getpeercert()
-                if cert.get('notAfter'):
-                    detail['tls_until'] = int(ssl.cert_time_to_seconds(cert['notAfter']) // 60)
+            if cert.get('notAfter'):
+                detail['tls_until'] = int(ssl.cert_time_to_seconds(cert['notAfter']) // 60)
             if not 200 <= resp.status < 300:
                 return 'DOWN', 'HTTP_STATUS', detail
             if marker:

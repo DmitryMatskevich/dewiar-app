@@ -281,7 +281,7 @@ class SongStore:
                        "stage", "stage_label", "coverage", "audio", "capabilities", "sections", "phrases", "words", "sources", "chords", "guitar_sheet",
                        "analysis_runs", "phrase_history", "active_run_id", "interrupted_run_id", "selected_run_id", "candidate_run_id", "timing_quality",
                        "harmony", "analysis_errors", "analysis_models", "source_candidates", "selected_source_id", "capture_result", "text_reference",
-                       "vocal_activity", "timing_version"}
+                       "vocal_activity", "timing_version", "sheet_layout"}
             if "title" in changes and not _clean(changes["title"]):
                 raise ValueError("Укажите название песни")
             if "status" in changes and changes["status"] not in STATUS:
@@ -408,6 +408,12 @@ class SongStore:
                                guitar_sheet=build_guitar_sheet(selected, chords, None, activity),
                                capabilities={**row.get('capabilities', {}), 'lyrics': bool(selected),
                                              'structure': bool(selected), 'chords': has_chords})
+            if 'text_reference' in changes:
+                # A kept card shows the user's lines, not this run's: source
+                # suggestions must point at them to be applicable.
+                from .text_reference import card_report
+                changes['text_reference'] = card_report(changes['text_reference'],
+                                                        changes.get('phrases') or row.get('phrases') or [])
             tags, tag_scores = infer_tags(selected, row.get('title', ''), row.get('artist', ''))
             tags = list(dict.fromkeys([*tags, *(tag for tag in row.get('tags', []) if tag not in TAG_OPTIONS)]))
             changes.update(tags=tags, tag_scores=tag_scores)

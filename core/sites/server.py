@@ -18,11 +18,33 @@ from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
-from .store import Store, minute
+from .store import Store, minute, tls_observation
 from .runtime import Runtime
 from . import access, discovery
 
 UI = Path(__file__).resolve().parents[2] / 'ui' / 'sites'
+MONITOR_TZ = ZoneInfo('Europe/Moscow')
+
+
+def site_tls_deadline(results, now, today, paused):
+    # Prefer the configured website URL over the optional probe at port 443.
+    for probe in ('http', 'https_port'):
+        result = next((row for row in results if row['probe'] == probe), None)
+        if not result or not (observed := tls_observation(result)):
+            continue
+        expires = observed['expires']
+        try:
+            local_date = datetime.fromtimestamp(expires * 60, MONITOR_TZ).date()
+        except (OverflowError, OSError, ValueError):
+            continue
+        return {
+            'date': local_date.isoformat(),
+            'days': (local_date - today).days,
+            'expired': expires <= now,
+            'checked_at': observed['checked'],
+            'fresh': observed['from_check'] and not paused and result['until_min'] > now,
+        }
+    return None
 
 
 class App:
@@ -48,7 +70,8 @@ class App:
 
     def summary(self, days=30):
         now = minute()
-        local_day = datetime.now(ZoneInfo('Europe/Moscow')).date()
+        local_day = datetime.fromtimestamp(now * 60, MONITOR_TZ).date()
+        paused = self.store.settings()['paused'] or self.runtime.local_only()
         out = []
         for s in self.store.all():
             linked=self.store.asset(s.get('asset_id'))
@@ -63,8 +86,9 @@ class App:
             state = current['state'] if current and current['until_min'] > now else 'UNKNOWN'
             if state == 'DOWN' and current['failures'] == 1:
                 state = 'PENDING'
-            if not s['enabled'] or self.store.settings()['paused'] or self.runtime.local_only():
+            if not s['enabled'] or paused:
                 state = 'PAUSED'
+            s['tls_deadline'] = site_tls_deadline(rows, now, local_day, state == 'PAUSED')
             history = self.store.history(s, s['created'] if days == 0 else now-days*1440, now)
             history.pop('bars')
             out.append(dict(s, state=state, results=rows, stats=history))
@@ -104,6 +128,8 @@ class App:
             unavailable=sum(1 for site in items if site['state']=='DOWN')
             return {'count':len(alerts),'unavailable_count':unavailable,'items':alerts,'updated_at':now}
         if path == '/api/incidents':
+            if query.get('view') == ['overview']:
+                return self.store.incident_overview()
             return {'items': self.store.incidents(query.get('site',[None])[0])}
         if path == '/api/deliveries':
             return {'items': self.store.deliveries()}

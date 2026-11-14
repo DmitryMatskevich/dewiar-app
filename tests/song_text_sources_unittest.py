@@ -160,5 +160,84 @@ class CatalogSearchTests(unittest.TestCase):
         self.assertEqual(report['references'][0]['title'], 'Описание видео на YouTube')
 
 
+CHORUS = ('Кто поверит? Я и сам не верю\nТо ль на счастье, то ли на беду\n\n'
+          'Я счастливый, как никто!\nЯ счастливый лет уж сто!\nЯ счастливый – я не вру!\n'
+          'Так счастливым и уйду!\n\nСчастливый, как никто!\nСчастливым и уйду!')
+
+
+def line(pid, text, start):
+    return dict(phrase_id=pid, text=text, start_ms=start, end_ms=start + 4000, words=[])
+
+
+class SourceSuggestionsFollowTheCardTests(unittest.TestCase):
+    """Suggestions point at the lines the card shows (Лепс, «Я счастливый»)."""
+    REF = [dict(plain_lyrics=CHORUS, url='https://example.org/song', text_confirmed=True)]
+
+    FRESH = [line('new-0', 'Я счастливый, как никто! Я счастливый, лет на сто!', 0),
+             line('new-1', 'Я счастливый, я не угру! Так счастливый бы и уйду!', 4000)]
+    KEPT = [line('old-0', 'Я счастливый, как никто! Я счастливый лет уж сто!', 0),
+            line('old-1', 'Я счастливый, я не угру! Так счастливым и уйду!', 4000)]
+
+    def texts(self, rows):
+        return [(c['current']['phrase_id'], c['current']['text'], c['alternative']['text'])
+                for c in reference_candidates(rows, self.REF)]
+
+    def test_window_edge_does_not_replace_a_chorus_word(self):
+        # «Счастливый, как никто! / Счастливым и уйду!» fitted over «…как
+        # никто! Я счастливый, лет…» must not turn «Я счастливый» into the
+        # refrain's other line; a difference between equal words stays.
+        texts = self.texts(self.FRESH)
+        self.assertNotIn(('new-0', 'Я счастливый', 'Счастливым и уйду'), texts)
+        self.assertIn(('new-1', 'счастливый бы', 'счастливым'), texts)
+
+    def test_words_of_a_lost_line_are_proposed_around_the_heard_word(self):
+        rows = [line('a', 'Кто поверит', 0), line('b', 'Даль на счастье, то ли на беду.', 27000)]
+        item = reference_candidates(rows, self.REF)[0]
+        self.assertEqual((item['current']['phrase_id'], item['current']['text']), ('b', 'Даль'))
+        self.assertEqual(item['alternative']['text'], 'Я и сам не верю\nТо ль')
+
+    def test_skipped_refrain_is_not_a_lost_line(self):
+        rows = [line('a', 'Я счастливый, как никто! Так счастливым и уйду!', 0)]
+        self.assertFalse([c for c in reference_candidates(rows, self.REF)
+                          if 'как никто' in c['alternative']['text']])
+
+    def test_latin_letters_inside_a_russian_word_are_the_russian_letters(self):
+        ref = [dict(plain_lyrics='Кто повeрит? Я и сам не вeрю', url='u')]
+        self.assertEqual(reference_candidates([line('a', 'Кто поверит? Я и сам не верю', 0)], ref), [])
+        item = reference_candidates([line('a', 'Кто поверит? Я и сам не мерю', 0)], ref)[0]
+        self.assertEqual(item['alternative']['text'], 'верю')
+
+    def test_suggestions_of_a_rerun_are_recomputed_for_the_kept_lines(self):
+        # A rerun of the recognition compared the publication with its fresh
+        # lines (new ids); the card kept the user's lines (old ids).
+        tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)
+        store = SongStore(Path(tmp.name)); song = store.create('ТЕСТ')
+        stale = reference_candidates(self.FRESH, self.REF)
+        row = store.patch(song['song_id'], dict(phrases=self.KEPT, phrase_history={'old-0': {'versions': [], 'cursor': 0}},
+                                                text_reference=dict(state='compared', references=self.REF,
+                                                                    candidates=stale)))
+        row = command(store, 'apply', dict(song_id=row['song_id'], base_revision=row['revision'],
+                                           indexes=list(range(len(stale)))))
+        report = row['text_reference']
+        self.assertEqual(row['phrases'], self.KEPT)            # nothing pasted at stale offsets
+        self.assertEqual(report['last_apply'], dict(report['last_apply'], applied=0, outdated=len(stale)))
+        self.assertEqual([(c['current']['phrase_id'], c['current']['text'], c['alternative']['text'])
+                          for c in report['candidates']], [('old-1', 'угру', 'вру')])
+        row = command(store, 'apply', dict(song_id=row['song_id'], base_revision=row['revision'], indexes=[0]))
+        self.assertEqual(row['phrases'][1]['text'], 'Я счастливый, я не вру! Так счастливым и уйду!')
+        self.assertEqual(row['text_reference']['last_apply']['applied'], 1)
+
+    def test_card_report_keeps_suggestions_on_the_card_and_their_audio_checks(self):
+        from songs.text_reference import card_report
+        report = dict(references=self.REF, candidates=reference_candidates(self.KEPT, self.REF))
+        report['candidates'][0]['audio_evidence'] = {'basis': 'kept'}
+        self.assertEqual(card_report(report, self.KEPT), report)
+        moved = copy.deepcopy(report)
+        moved['candidates'][0]['current']['phrase_id'] = 'new-1'
+        rebased = card_report(moved, self.KEPT)
+        self.assertEqual(rebased['candidates'][0]['current']['phrase_id'], 'old-1')
+        self.assertEqual(rebased['candidates'][0]['audio_evidence'], {'basis': 'kept'})
+        self.assertEqual(rebased['rebased_on_card'], 1)
+
 if __name__ == '__main__':
     unittest.main()

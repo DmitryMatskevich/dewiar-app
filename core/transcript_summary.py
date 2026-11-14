@@ -5,7 +5,7 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
-VERSION = 'ru-summary-7'
+VERSION = 'ru-summary-8'
 SUMMARY_FILE = 'transcript.summary.md'
 TOPICS_FILE = 'transcript.topics.md'
 META_FILE = 'summary.json'
@@ -62,7 +62,7 @@ def _final_prompt(title, source, notes, kind):
     if kind == 'short':
         return f"""На основе заметок по всем частям расшифровки составь содержательное краткое резюме всей записи на русском языке.
 Запись длинная: не своди её к общему описанию или нескольким универсальным тезисам и обязательно пройди заметки от первого до последнего фрагмента. Отрази основные самостоятельные темы, включая темы, которые возникли лишь в одной части; объединяй только повторы. Сохрани порядок появления тем, основные идеи, существенные аргументы, ключевые технические детали, примеры, числа, ограничения, решения и открытые вопросы. Не перечисляй выступающих и не связывай содержание с именами. Не добавляй внешние сведения.
-Оформи заголовком и тематическими пунктами. На каждый фрагмент заметок дай от одного до трёх пунктов: объедини близкие детали в один тезис, но не смешивай самостоятельные темы. Включи хотя бы один содержательный пункт из каждого фрагмента. Для каждого пункта сохрани таймкод и короткую дословную цитату из заметок, копируя их без изменений. Подробности и дополнительную доказательную основу оставь в тематическом конспекте. Верни только Markdown.
+Оформи заголовком и тематическими разделами с короткими понятными названиями тем. Под каждым заголовком перечисли тезисы в формате «- [таймкод] суть обсуждения». Таймкод копируй из заметок без изменений: интерфейс превратит его в ссылку на соответствующее место видео. Каждый тезис должен кратко и ясно передавать содержание фрагмента. Не добавляй цитаты, слова автора, пересказ прямой речи, вводные фразы «говорится/обсуждается» и указания на выступающих: пользователь сможет открыть видео по таймкоду. На каждый фрагмент заметок дай от одного до трёх пунктов; объедини близкие детали, но не смешивай самостоятельные темы. Включи хотя бы один содержательный пункт из каждого фрагмента. Подробности и доказательную основу оставь в тематическом конспекте. Верни только Markdown.
 
 Название: {title or 'неизвестно'}
 Источник: {source or 'локальный файл'}
@@ -105,10 +105,24 @@ def _fallbacks(title, text):
             choices = [s for s in _sentences(chunks[i]) if len(s) > 55]
             if choices:
                 sampled.append(choices[0])
-    short = ' '.join(sampled).strip()
-    if len(short) > 1300:
-        short = short[:1297].rsplit(' ', 1)[0] + '…'
-    brief = f"# Краткое резюме\n\n{short or 'Содержание не удалось извлечь из расшифровки.'}\n"
+    timed_rows = [(m.group(1), m.group(2).strip()) for line in text.splitlines()
+                  if (m := re.match(r'^\[(\d{2}:\d{2}:\d{2})\]\s*(.+)$', line))]
+    if timed_rows:
+        count = min(8, len(timed_rows))
+        indices = sorted({round(i * (len(timed_rows) - 1) / max(1, count - 1)) for i in range(count)})
+        brief_rows = []
+        for row_index in indices:
+            stamp, sentence = timed_rows[row_index]
+            sentence = re.sub(r'\s+', ' ', sentence).strip()
+            if len(sentence) > 240:
+                sentence = sentence[:237].rsplit(' ', 1)[0] + '…'
+            brief_rows.append(f'- [{stamp}] {sentence}')
+        brief = '# Краткое резюме\n\n## Основные темы\n\n' + '\n'.join(brief_rows) + '\n'
+    else:
+        short = ' '.join(sampled).strip()
+        if len(short) > 1300:
+            short = short[:1297].rsplit(' ', 1)[0] + '…'
+        brief = f"# Краткое резюме\n\n{short or 'Содержание не удалось извлечь из расшифровки.'}\n"
     topics = [f"# Подробный тематический конспект\n\nЛокальная выборка по всей расшифровке; автоматическая тематическая группировка недоступна, поэтому пункты требуют редакторской проверки. Фрагментов: {len(chunks)}.\n"]
     for i, chunk in enumerate(chunks, 1):
         sentences = [s for s in _sentences(chunk) if len(s) > 45]
@@ -129,6 +143,7 @@ def _brief_from_verified_notes(notes, per_part=3):
             active_part = True
             out.append('\n## ' + line.removeprefix('### ').strip())
         elif re.match(r'^\s*(?:[-*+]\s+|\d+[.)]\s+)', line) and count < per_part:
+            line = re.sub(r'\s*Опора:\s*«[^»]*»\s*$', '', line)
             out.append(line)
             count += 1
     return '\n'.join(out).strip() + '\n'
@@ -294,6 +309,33 @@ def _valid_final_topics(value, notes, require_coverage=False):
     return True
 
 
+def _valid_final_brief(value, notes, require_coverage=False):
+    """Краткое резюме подтверждается таймкодами; цитаты речи в нём лишние."""
+    available = set(re.findall(r'^\s*[-*+]\s+\[(\d{2}:\d{2}:\d{2})(?:\s*[–—-]\s*\d{2}:\d{2}:\d{2})?\]', notes, re.M))
+    claims = []
+    for line in str(value or '').splitlines():
+        if re.match(r'^\s*[-*+]\s+', line):
+            claims.append(line)
+    if not claims:
+        return False
+    seen = set()
+    for line in claims:
+        match = re.match(r'^\s*[-*+]\s+\[(\d{2}:\d{2}:\d{2})(?:\s*[–—-]\s*\d{2}:\d{2}:\d{2})?\]\s+(.+)', line)
+        if not match or match.group(1) not in available:
+            return False
+        body = match.group(2)
+        if re.search(r'«[^»]+»|\b(?:автор|выступающ\w*|говорит|сказал\w*|сообщил\w*)\b', body, re.I):
+            return False
+        seen.add(match.group(1))
+    if require_coverage:
+        parts = re.split(r'(?m)^### Фрагмент \d+/\d+[^\n]*\n', notes)[1:]
+        for part in parts:
+            part_times = set(re.findall(r'^\s*[-*+]\s+\[(\d{2}:\d{2}:\d{2})', part, re.M))
+            if part_times and not part_times.intersection(seen):
+                return False
+    return True
+
+
 def ensure_summary(directory, title='', source='', generate=None, notify=lambda message: None, force=False):
     """Создаёт краткое резюме, подробный тематический конспект и JSON-аудит."""
     directory = Path(directory)
@@ -352,13 +394,13 @@ def ensure_summary(directory, title='', source='', generate=None, notify=lambda 
             brief_error = ''
             try:
                 brief = _normalize(generate(_final_prompt(title, source, all_notes, 'short')))
-                if not brief or not _valid_final_topics(brief, all_notes, require_coverage=True):
+                if not brief or not _valid_final_brief(brief, all_notes, require_coverage=True):
                     retry = (_final_prompt(title, source, all_notes, 'short') +
-                             "\n\nПРОВЕРКА: у каждого пункта должны быть точная цитата и таймкод из заметок. "
-                             "Скопируй их без изменений; удали пункт, если опоры нет.\n\nПЕРВАЯ ВЕРСИЯ:\n" + brief)
+                             "\n\nПРОВЕРКА: у каждого пункта должен быть точный таймкод из заметок в начале пункта и краткая суть темы. "
+                             "Убери цитаты и пересказ слов автора; оставь только тему и смысл. Удали пункты без подтверждённого таймкода.\n\nПЕРВАЯ ВЕРСИЯ:\n" + brief)
                     brief = _normalize(generate(retry))
-                if not brief or not _valid_final_topics(brief, all_notes, require_coverage=True):
-                    raise ValueError('краткое резюме потеряло проверяемые цитаты или таймкоды')
+                if not brief or not _valid_final_brief(brief, all_notes, require_coverage=True):
+                    raise ValueError('краткое резюме потеряло проверяемые таймкоды или охват фрагментов')
             except Exception as exc:
                 if 'остановили' in str(exc).lower():
                     raise

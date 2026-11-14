@@ -106,6 +106,29 @@ class SongStepRestartTests(unittest.TestCase):
             self.analyzer.rerun_step(self.sid,'text_reference');self.assertTrue(self.done.wait(3))
         self.assertEqual(self.store.get(self.sid)['phrases'][0]['text'],self.phrase['text'])
 
+    def test_recognition_rerun_points_source_suggestions_at_the_kept_lines(self):
+        # The user corrected the text, then reran word recognition: the card
+        # keeps its lines (and ids), so the suggestions must name them.
+        from songs.reference_text import reference_candidates
+        ref = [{'url': 'https://example.org/song', 'plain_lyrics':
+                'Я счастливый, как никто!\nЯ счастливый лет уж сто!\nЯ счастливый – я не вру!\nТак счастливым и уйду!'}]
+        kept = [{**self.phrase, 'phrase_id': 'run-0', 'text': 'Я счастливый, как никто! Я счастливый лет уж сто!'},
+                {**self.phrase, 'phrase_id': 'run-1', 'text': 'Я счастливый, я не угру! Так счастливым и уйду!',
+                 'start_ms': 5000, 'end_ms': 9000}]
+        fresh = [{**kept[0], 'phrase_id': 'rr-0', 'text': 'Я счастливый, как никто! Я счастливый, лет на сто!'},
+                 {**kept[1], 'phrase_id': 'rr-1', 'text': 'Я счастливый, я не угру! Так счастливый бы и уйду!'}]
+        self.store.patch(self.sid, {'phrases': kept, 'phrase_history': {'run-0': {'versions': [], 'cursor': 0}}})
+        def analyze(*args, **kwargs):
+            return {'selected': {'phrases': fresh}, 'errors': [],
+                    'text_reference': {'state': 'compared', 'references': ref,
+                                       'candidates': reference_candidates(fresh, ref)}}
+        with patch('songs.runtime.analyze', side_effect=analyze):
+            self.analyzer.rerun_step(self.sid, 'lyrics'); self.assertTrue(self.done.wait(3))
+        row = self.store.get(self.sid)
+        self.assertEqual([p['text'] for p in row['phrases']], [p['text'] for p in kept])
+        self.assertEqual([(c['current']['phrase_id'], c['current']['text'], c['alternative']['text'])
+                          for c in row['text_reference']['candidates']], [('run-1', 'угру', 'вру')])
+
 
 if __name__ == "__main__":
     unittest.main()

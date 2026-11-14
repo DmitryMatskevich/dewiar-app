@@ -506,6 +506,23 @@ class CommandsMixin:
                     self.emit("tools", tools=self.toolbox.catalog())
                 return kn.folders_state()
             return {"folder": str(kn.root), "files": kn.list()}
+        if cmd.startswith("email_archive_"):
+            archive = self.email_archive
+            if cmd == "email_archive_status":
+                return archive.status()
+            if cmd == "email_archive_import":
+                return archive.import_path(a.get("path", ""))
+            if cmd == "email_archive_search":
+                return archive.search(a.get("query", ""), a.get("limit", 30))
+            if cmd == "email_archive_cleanup_preview":
+                return archive.cleanup_preview()
+            if cmd == "email_archive_cleanup":
+                return archive.cleanup()
+            if cmd == "email_archive_open":
+                from tools import launch
+                launch(["xdg-open", str(archive.root)])
+                return str(archive.root)
+            return archive.status()
         if cmd == "report":
             return self.save_report()
         if cmd == "report_send":
@@ -1180,6 +1197,55 @@ class CommandsMixin:
             if self.on_quit:
                 threading.Timer(0.2, self.on_quit).start()
             return True
+        if cmd in {"chat_file_begin", "chat_file_chunk", "chat_file_finish", "chat_file_abort"}:
+            import base64 as _b64
+            import shutil as _shutil
+            import time as _time
+            import uuid as _uuid
+            sessions = self.__dict__.setdefault("_chat_file_uploads", {})
+            lock = self.__dict__.setdefault("_chat_file_uploads_lock", threading.RLock())
+            upload_id = str(a.get("upload_id") or "")
+            if cmd == "chat_file_begin":
+                name = Path(str(a.get("name") or "file")).name
+                try: size = int(a.get("size") or 0)
+                except (TypeError, ValueError): raise ValueError("Не удалось определить размер файла")
+                if not name or not 0 < size: raise ValueError("Выберите непустой файл")
+                root = self.workspace.ensure() / ".media-cache" / "chat-file-uploads"
+                root.mkdir(parents=True, exist_ok=True)
+                now = _time.time()
+                with lock:
+                    for key, old in list(sessions.items()):
+                        if now - old["created"] > 3600:
+                            _shutil.rmtree(old["dir"], ignore_errors=True); sessions.pop(key, None)
+                    if len(sessions) >= 10: raise ValueError("Слишком много одновременных загрузок. Отправьте их по очереди.")
+                    if size > _shutil.disk_usage(root).free:
+                        raise ValueError("На диске недостаточно свободного места для вложения")
+                    token = _uuid.uuid4().hex
+                    folder = root / token; folder.mkdir()
+                    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", name)[:140] or "file"
+                    path = folder / safe_name; path.touch()
+                    sessions[token] = {"dir": folder, "path": path, "name": name, "size": size,
+                                       "received": 0, "ready": False, "created": now}
+                return {"upload_id": token, "chunk_bytes": 2 * 1024 * 1024}
+            with lock:
+                session = sessions.get(upload_id)
+                if not session: raise ValueError("Загрузка истекла или не найдена. Начните ещё раз.")
+                if cmd == "chat_file_abort":
+                    sessions.pop(upload_id, None); _shutil.rmtree(session["dir"], ignore_errors=True)
+                    return {"aborted": True}
+                if cmd == "chat_file_chunk":
+                    raw = str(a.get("b64") or "")
+                    if raw.startswith("data:"): raw = raw.split(",", 1)[-1]
+                    try: data = _b64.b64decode(raw, validate=True)
+                    except (ValueError, _b64.binascii.Error) as exc: raise ValueError("Блок файла повреждён") from exc
+                    if session["ready"] or not data or len(data) > 2 * 1024 * 1024 or session["received"] + len(data) > session["size"]:
+                        raise ValueError("Неверный размер блока файла")
+                    with session["path"].open("ab") as stream: stream.write(data)
+                    session["received"] += len(data)
+                    return {"received": session["received"], "size": session["size"]}
+                if session["received"] != session["size"]: raise ValueError("Файл загружен не полностью")
+                session["ready"] = True
+                return {"upload_id": upload_id, "name": session["name"], "size": session["size"]}
         if cmd.startswith("canvas_scope_"):
             from canvas_scope import command
             return command(self, cmd, a)
@@ -1192,7 +1258,23 @@ class CommandsMixin:
                 return True
             # картинки (вставленные, снимок экрана) — как файлы: сохраняются во «Входящие» и видны в ленте «Чата»
             images = []
-            files = list(a.get("files") or [])
+            files = []
+            upload_sessions = self.__dict__.get("_chat_file_uploads", {})
+            upload_lock = self.__dict__.setdefault("_chat_file_uploads_lock", threading.RLock())
+            for item in a.get("files") or []:
+                upload_id = str(item.get("upload_id") or "") if isinstance(item, dict) else ""
+                if not upload_id:
+                    files.append(item); continue
+                with upload_lock:
+                    session = upload_sessions.get(upload_id)
+                    if not session or not session.get("ready") or session["received"] != session["size"]:
+                        raise ValueError("Вложение не загружено полностью. Отправьте файл ещё раз.")
+                    path = Path(session["path"]).resolve()
+                    root = (self.workspace.ensure() / ".media-cache" / "chat-file-uploads").resolve()
+                    if root not in path.parents or not path.is_file() or path.stat().st_size != session["size"]:
+                        raise ValueError("Загруженное вложение повреждено. Отправьте файл ещё раз.")
+                    files.append({"name": session["name"], "path": str(path), "upload_id": upload_id,
+                                  "upload_dir": str(session["dir"])})
             text_request = str(a.get('text') or '')
             from file_converter import is_contact_extraction_command
             if is_contact_extraction_command(text_request):
@@ -1978,7 +2060,7 @@ class CommandsMixin:
             if a.get("base_revision") is None:
                 raise ValueError("Для сохранения нужна ревизия карточки")
             return self.song_store.patch(str(a.get("song_id") or ""), changes, a.get("base_revision"))
-        if cmd in {"song_edit_phrase", "song_edit_display_line", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_preview_chords", "song_finish_review"}:
+        if cmd in {"song_edit_phrase", "song_edit_display_line", "song_phrase_audio", "song_full_audio", "song_edit_structure", "song_edit_chords", "song_preview_chords", "song_finish_review", "song_edit_layout"}:
             if cmd == "song_full_audio" and a.get("variant") == "instrumental":
                 from songs.review import instrumental_audio_command
                 return instrumental_audio_command(self.song_store, self.song_instrumental, a)

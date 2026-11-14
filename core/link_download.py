@@ -26,11 +26,18 @@ def download(url, folder, action, cancel, notify):
         options['postprocessors'] = [dict(key='FFmpegExtractAudio', preferredcodec='m4a')]
     if cancel.is_set():
         raise Cancelled('Задачу остановили')
-    with yt_dlp.YoutubeDL(options) as loader:
-        metadata = loader.extract_info(url, download=False) or {}
-        if metadata.get('_type') in ('playlist', 'multi_video'):
-            raise ValueError('Нужна ссылка на отдельный ролик; плейлисты не скачиваются автоматически')
-        info = loader.extract_info(url, download=True) or {}
+    try:
+        with yt_dlp.YoutubeDL(options) as loader:
+            metadata = loader.extract_info(url, download=False) or {}
+            if metadata.get('_type') in ('playlist', 'multi_video'):
+                raise ValueError('Нужна ссылка на отдельный ролик; плейлисты не скачиваются автоматически')
+            info = loader.extract_info(url, download=True) or {}
+    except Exception:
+        if cancel.is_set():
+            for partial in folder.glob('media.*'):
+                if partial.suffix in ('.part', '.ytdl'):
+                    partial.unlink(missing_ok=True)
+        raise
     if info.get('_type') in ('playlist', 'multi_video'):
         raise ValueError('Нужна ссылка на отдельный ролик; плейлисты не скачиваются автоматически')
     progress({})

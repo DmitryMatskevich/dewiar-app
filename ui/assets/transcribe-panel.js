@@ -90,6 +90,12 @@
       <p id="mt-error" role="alert"></p><footer><button type="button" id="mt-start" title="Запустить всю очередь как одну фоновую задачу: субтитры → при их отсутствии звук → распознавание → исходные TXT/SRT → чистовой Markdown → общее резюме → отчёт очистки и места для сверки по аудио. Повторное нажатие не создаёт копию уже работающей или завершённой задачи.">Транскрибировать</button></footer></form>`;
     document.body.append(panel);
     by('mt-links').oninput = render;
+    by('mt-links').onkeydown = event => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        if (!by('mt-start').disabled) by('mt-start').click();
+      }
+    };
     by('mt-paste').onclick = () => importSource(by('mt-paste'), async () => {
       const api = window.api?.();
       if (api?.clipboard_text) return await api.clipboard_text();

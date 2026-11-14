@@ -154,6 +154,9 @@ class Engine(AudioMixin, AnswerMixin, ToolsMixin, MusicMixin, BrainMixin, Remote
         from knowledge import Knowledge
         self.knowledge = Knowledge(self.workspace, STATE_DIR / "knowledge.json", folders=lambda: self.s.get("knowledge", "folders") or [])
         self.toolbox.hooks["knowledge"] = self.knowledge
+        from email_archive import EmailArchive
+        self.email_archive = EmailArchive(STATE_DIR)
+        self.toolbox.hooks["email_archive"] = self.email_archive
         self.toolbox.hooks["sources"] = self._turn_sources          # найденные документы — источниками под ответом
         threading.Thread(target=self.knowledge.watch, name="knowledge-folders", daemon=True).start()
         from prompter import Prompter

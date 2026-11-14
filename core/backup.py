@@ -54,7 +54,7 @@ README = """Слепок знаний Dewiar — открытый формат (
 Восстановить: Dewiar → «Главная» → «Слепок знаний» → «Восстановить…» и выберите этот файл.
 """
 STATE_FILES = ["reminders.json", "reminders-log.json", "knowledge.json", "radio.json"]
-STATE_DIRS = ["voiceprints"]
+STATE_DIRS = ["voiceprints", "email_archive"]
 CONFIG_SKIP = {"token", "vault.key", "vault.bin", "snapshot.pw"}   # не копируем и не восстанавливаем: сейф идёт отдельно (vault.json)
 CONFIG_LOCAL_DIRS = {"content-oauth-vault", "runtimes"}  # device-bound OAuth and reproducible optional environments
 WS_SKIP_DIRS = {"рабочая копия", "_run", "_guard", ".git", "__pycache__", "node_modules", ".venv", "venv", ".trash", ".obsidian"}

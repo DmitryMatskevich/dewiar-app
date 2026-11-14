@@ -79,7 +79,7 @@ def make_server(store, capture=None, processing=None):
             if not 0 < size < 1_600_000: return self.reply(413, b'{}')
             try:
                 body = json.loads(self.rfile.read(size)); cmd = body['cmd']; a = body.get('args') or {}
-                if cmd in {'song_edit_phrase','song_phrase_audio','song_full_audio','song_edit_structure','song_edit_chords','song_preview_chords','song_finish_review'}: result = review_command(store,cmd,a)
+                if cmd in {'song_edit_phrase','song_phrase_audio','song_full_audio','song_edit_structure','song_edit_chords','song_preview_chords','song_finish_review','song_edit_layout'}: result = review_command(store,cmd,a)
                 elif cmd in {'song_upload_begin','song_upload_chunk','song_upload_finish','song_upload_cancel'}: result = importer.command(cmd,a)
                 elif cmd == 'songs_list': result = store.list(a.get('q',''),a.get('status',''))
                 elif cmd == 'songs_tags_list':

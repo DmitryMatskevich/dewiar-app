@@ -6,9 +6,14 @@ short pause inside a verse no longer ends a line. Verse lines are chosen
 over the whole passage at once: a sung line has a steady length in
 syllables (the meter of the song), it ends where the next word starts with
 a capital letter, at punctuation or at a pause, and not after a preposition
-or conjunction. Lines are then grouped into stanzas — four lines where the
-song allows it, split at the longest pauses, never across a break or a part
-of the song (verse, chorus).
+or conjunction.
+
+Blank lines (stanzas) come from the confirmed publication of the text: its
+printed lines and quatrains, found in the sung words (``source_layout``).
+Without a publication, and where the singer departs from it, a blank line
+stands only at a break or a long pause: stanzas guessed «by four, at the
+longest pause» disagreed with the publication three times out of four.
+The user's own layout (blank lines, labels, line breaks) always wins.
 """
 import re
 from .playback_layout import display_words
@@ -24,6 +29,13 @@ VERSE_CHARS = 64
 # A short gap between two lyric rows stays inside the verse.
 VERSE_PAUSE_MS = 2500
 STANZA_SIZE_COST = {1: 3.0, 2: 1.2, 3: 1.4, 4: 0.0, 5: 1.6, 6: 1.4, 7: 3.0, 8: 2.5}
+# Without a publication a blank line marks a pause this long (a break is ≥ 3 s).
+LONG_PAUSE_MS = 3000
+
+
+def layout_key(phrase_id, char):
+    """Stable name of a sung word for the layout: its phrase and character."""
+    return f'{phrase_id}:{int(char)}'
 
 
 def syllables(text):
@@ -190,7 +202,13 @@ def _tokens_of(text, spans, cues):
     return out
 
 
-def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
+def readable_sheet(rows, max_chars=42, section_starts=(), events=None, layout=None, manual=None):
+    """``layout``: word flags from the publication (``source_layout.word_layout``);
+    ``manual``: the user's layout (``breaks``, ``notes``, ``cuts`` by layout_key).
+    """
+    layout = layout or {}
+    manual = manual or {}
+    cuts_manual = {k: v for k, v in (manual.get('cuts') or {}).items() if isinstance(v, bool)}
     output, group, waiting, absorbed = [], [], [], []
     starts, opened = set(section_starts), set()
     seen_changes = set()
@@ -231,7 +249,28 @@ def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
                     marks.append(dict(m, char_index=offset+m['char_index']))
                     seen_changes.add(key)
         tokens = _tokens_of(text, spans, cues)
-        cuts = verse_cuts(tokens, meter, [k for k, t in enumerate(tokens) if t['hard']])
+        for t in tokens:
+            lo, _, row = next((sp for sp in spans if sp[0] <= t['start'] < sp[1]), spans[-1])
+            char = int(row.get('source_char_offset') or 0) + t['start'] - lo
+            t['key'] = layout_key(row.get('phrase_id'), char)
+            t['src'] = layout.get((row.get('phrase_id'), char))
+        hard = {k for k, t in enumerate(tokens) if t['hard']}
+        for k in range(len(tokens) - 1):
+            here, nxt = tokens[k]['src'], tokens[k + 1]['src']
+            # A printed line starts here: the sung line starts here too. Inside
+            # a printed line the sung one is not cut (unless it is too long).
+            if nxt and nxt['line']:
+                hard.add(k)
+            elif here and nxt and nxt['joined']:
+                tokens[k]['bonus'] -= 8.0
+            manual_cut = cuts_manual.get(tokens[k + 1]['key'])
+            if manual_cut is True:
+                hard.add(k)
+            elif manual_cut is False:
+                hard.discard(k)
+                tokens[k]['bonus'] -= 100.0
+        cuts = verse_cuts(tokens, meter, sorted(hard))
+        by_start = {t['start']: t for t in tokens}
         verses, first = [], 0
         for cut in [*cuts, len(tokens) - 1]:
             verses.append(tokens[first:cut + 1])
@@ -288,7 +327,20 @@ def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
             pid = source.get('phrase_id')
             display_id = pid if pid not in shown and not source.get('source_char_offset') else f"{pid}:line:{source.get('source_char_offset', 0)+a}"
             shown.add(pid)
+            first_token = by_start.get(a) or {}
+            # The line's place in the publication: its first word, or one of
+            # the next two when the first was misheard or not printed.
+            src, stanza = None, False
+            line_tokens = [t for t in tokens if a <= t['start'] < a + len(content)]
+            for idx, t in enumerate(line_tokens[:3]):
+                if t.get('src'):
+                    src = t['src']
+                    stanza = src['stanza'] if idx == 0 else bool(src.get('first_line') and src.get('pos', 9) <= idx + 1)
+                    break
             output.append({**source, 'phrase_id': display_id, 'text': content, 'cells': cells, 'chords': chosen,
+                'layout_key': first_token.get('key'),
+                'source_covered': bool(src and src.get('stanzas', True)), 'source_stanza': stanza,
+                'source_label': src.get('label') if src and stanza else None,
                 'unplaced_chords': [], 'display_only': True, 'source_phrase_ids': [r.get('phrase_id') for r in owners],
                 'source_spans': source_spans, 'verse_continuation': continuation.get(a, False),
                 'section_start': a == 0 and group[0][0].get('phrase_id') in starts and group[0][0].get('source_char_offset', 0) == 0,
@@ -341,7 +393,7 @@ def readable_sheet(rows, max_chars=42, section_starts=(), events=None):
         waiting.clear()
         group.append((row, carried))
     close()
-    _mark_stanzas(output)
+    _mark_stanzas(output, manual)
     return output
 
 
@@ -352,39 +404,56 @@ def _line_span(line):
     return line.get('start_ms'), line.get('end_ms')
 
 
-def _mark_stanzas(output):
-    """``stanza_start`` on the first line of every stanza (see stanza_starts)."""
-    runs, current = [], []
+def _mark_stanzas(output, manual=None):
+    """``stanza_start`` (a blank line before) on the first line of every stanza.
+
+    A publication's stanza where it covers the line; elsewhere a break or a
+    pause of LONG_PAUSE_MS. The user's blank lines and labels win.
+    """
+    manual = manual or {}
+    breaks = {k: v for k, v in (manual.get('breaks') or {}).items() if isinstance(v, bool)}
+    notes = {k: (False if v is False else str(v).strip()[:80]) for k, v in (manual.get('notes') or {}).items()
+             if v is False or str(v or '').strip()}
+    previous_text, gap_row = None, None
     for k, line in enumerate(output):
         if not line.get('text'):
-            if line.get('verse_pause'):
-                continue
-            if current:
-                runs.append(current)
-            current = []
+            if not line.get('verse_pause'):
+                gap_row = line
             continue
         if line.get('verse_continuation'):
             continue
-        if line.get('section_start') and current:
-            runs.append(current)
-            current = []
-        current.append(k)
-    if current:
-        runs.append(current)
-    for run in runs:
-        ends = {}
-        for k in run:
-            ends[k] = _line_span(output[k])[1]
-        # The verse line may continue on wrapped lines: its end is the last one.
-        for k in run:
-            j = k + 1
-            while j < len(output) and output[j].get('text') and output[j].get('verse_continuation'):
-                ends[k] = _line_span(output[j])[1]
-                j += 1
-        gaps = []
-        for a, b in zip(run, run[1:]):
-            start, end = _line_span(output[b])[0], ends[a]
-            gaps.append(start - end if isinstance(start, (int, float)) and isinstance(end, (int, float)) else None)
-        output[run[0]]['stanza_start'] = True
-        for i in stanza_starts(gaps):
-            output[run[i]]['stanza_start'] = True
+        if previous_text is None:
+            stanza = True
+        elif line.get('section_start'):
+            stanza = True
+        elif gap_row is not None and not gap_row.get('pause'):
+            stanza = True          # after a break («Проигрыш»)
+        elif line.get('source_covered'):
+            stanza = bool(line.get('source_stanza'))
+        else:
+            start, end = _line_span(line)[0], _line_end(output, previous_text)
+            gap = start - end if isinstance(start, (int, float)) and isinstance(end, (int, float)) else 0
+            stanza = gap >= LONG_PAUSE_MS
+        key = line.get('layout_key')
+        if key in breaks:
+            stanza = breaks[key]
+        if stanza:
+            line['stanza_start'] = True
+        else:
+            line.pop('stanza_start', None)
+        if key in notes:
+            if notes[key] is False:
+                line['label_hidden'] = True
+            else:
+                line['note'] = notes[key]
+        previous_text, gap_row = k, None
+
+
+def _line_end(output, k):
+    """End of the verse line at ``k``, including its wrapped continuation lines."""
+    end = _line_span(output[k])[1]
+    j = k + 1
+    while j < len(output) and output[j].get('text') and output[j].get('verse_continuation'):
+        end = _line_span(output[j])[1]
+        j += 1
+    return end

@@ -225,14 +225,19 @@ class ProbeTests(unittest.TestCase):
         # URL. Exercise the real HTTP serializer without a TLS/network fixture.
         class Socket:
             request = b''
+            closed = False
             def sendall(self, data):self.request += data
-            def makefile(self, *args):return io.BytesIO(b'HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n')
-            def getpeercert(self):return {}
-            def close(self):pass
+            def makefile(self, *args):return io.BytesIO(b'HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+            def getpeercert(self):
+                if self.closed:
+                    raise ValueError('Socket already closed')
+                return {'notAfter': 'Nov 24 14:31:00 2030 GMT'}
+            def close(self):self.closed = True
         sock=Socket()
         with patch('sites.probes.connect',return_value=(sock,'93.184.215.14')):
             result=execute(dict(id='http',kind='http',target='https://example.org/'))
         self.assertEqual(result['state'],'UP')
+        self.assertGreater(result['detail']['tls_until'], 0)
         self.assertIn(b'Host: example.org\r\n',sock.request)
         self.assertNotIn(b'Host: example.org:443',sock.request)
     def test_independent_services_and_dns_host(self):
@@ -278,6 +283,23 @@ class DiscoveryTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_status_keeps_active_jobs_and_counts_only_database_and_wal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(tmp)
+            runtime = Runtime(store, test=True)
+            self.addCleanup(runtime.pool.shutdown)
+            self.addCleanup(runtime.port_pool.shutdown)
+            runtime.jobs['active'] = {'id': 'active', 'state': 'running'}
+            for n in range(51):
+                runtime.jobs[str(n)] = {'id': str(n), 'state': 'complete'}
+            before = runtime.status()['database_bytes']
+            (store.root / 'sites.db.before-upgrade').write_bytes(b'x' * 8192)
+            status = runtime.status()
+            self.assertEqual(len(status['jobs']), 51)
+            self.assertEqual(status['jobs'][-1]['id'], 'active')
+            self.assertEqual(status['jobs'][0]['id'], '1')
+            self.assertEqual(status['database_bytes'], before)
+
     def test_opening_view_queues_separate_port_diagnostics_without_probe_slots(self):
         with tempfile.TemporaryDirectory() as root:
             store=Store(root)
@@ -371,6 +393,44 @@ class ApiTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError):
             urllib.request.urlopen(urllib.request.Request(self.url+'/api/settings',data=b'{"paused":true}',headers=headers))
     def test_status(self):self.assertTrue(self.request('/api/status')['test'])
+    def test_tls_deadline_survives_failure_and_tracks_replacement(self):
+        from sites.store import minute
+        now = minute()
+        site = self.request('/api/sites', dict(name='TLS', url='https://example.org:444'))['item']
+
+        def put(run_id, state, reason, at, expires=None):
+            detail = {'tls_until': expires} if expires else {}
+            self.app.store.ingest(site, [
+                dict(probe='http', state=state, reason=reason, detail=detail),
+                dict(probe='https_port', state='UP', reason='OK', detail={'tls_until': now+50*1440}),
+            ], run_id, at)
+            return self.request('/api/sites')['items'][0]['tls_deadline']
+
+        first = put('old', 'UP', 'OK', now-2, now+2*1440)
+        self.assertTrue(first['fresh'])
+        self.assertEqual(first['days'], 2)
+        failed = put('failure', 'DOWN', 'TLS_INVALID', now-1)
+        self.assertFalse(failed['fresh'])
+        self.assertEqual(failed['date'], first['date'])
+        self.assertEqual(failed['checked_at'], now-2)
+        renewed = put('renewal', 'UP', 'OK', now, now+45*1440)
+        self.assertTrue(renewed['fresh'])
+        self.assertEqual(renewed['days'], 45)
+        self.request('/api/sites', dict(site, url='https://different.example.org'))
+        self.assertIsNone(self.request('/api/sites')['items'][0]['tls_deadline'])
+    def test_incident_overview_keeps_older_open_incidents(self):
+        site = self.request('/api/sites', dict(name='Fixture', url='https://example.org'))['item']
+        with self.app.store.db() as connection:
+            connection.execute('INSERT INTO incidents VALUES (?,?,?,?,?,?,?,?)',
+                               ('open', site['id'], 'web', 1, 2, None, None, 'DNS_ERROR'))
+            connection.executemany('INSERT INTO incidents VALUES (?,?,?,?,?,?,?,?)',
+                                   [(str(n), site['id'], 'web', n+3, n+4, n+5, n+6, 'TIMEOUT')
+                                    for n in range(101)])
+        overview = self.request('/api/incidents?view=overview')
+        self.assertEqual([row['id'] for row in overview['active']], ['open'])
+        self.assertEqual(len(overview['recent']), 100)
+        self.assertEqual(overview['recent'][0]['id'], '100')
+        self.assertEqual(len(self.request('/api/incidents')['items']), 100)
     def test_scan_ports_route_is_one_shot_and_returns_queued_count(self):
         with patch.object(self.app.runtime,'scan_ports',return_value={'queued':2,'skipped':1}) as scan:
             self.assertEqual(self.request('/api/scan-ports',{'open':True}),{'queued':2,'skipped':1})

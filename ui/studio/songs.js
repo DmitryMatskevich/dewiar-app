@@ -131,7 +131,7 @@
       <div class="song-text-source-form"><label class="f">Ссылка на источник текста<input id="song-text-source-url" type="url" value="${esc(report?.state==='source_unavailable'?report.suggested_sources?.at(-1)?.url:'')}" maxlength="2048" placeholder="https://genius.com/…"></label><details><summary>Вставить текст песни вручную</summary><label class="f">Текст источника<textarea id="song-text-source-lyrics" rows="6" maxlength="50000"></textarea></label></details><button type="button" class="btn" id="song-text-source-add" ${busy?'disabled':''}>Загрузить текст и сверить</button><p id="song-text-source-result" class="hint" role="status"></p></div>
       ${refs.map(ref=>`<details class="song-reference-diff"><summary>${esc(ref.title)} · ${ref.user_confirmed?'подтверждено вами':`подтверждено по ${ref.text_confirmation?.hits?.length||0} фразам`}</summary>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}<ul>${(ref.text_confirmation?.hits||[]).map(hit=>`<li>${esc(hit.anchor)}</li>`).join('')}</ul><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre><button class="btn small" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Сверить с этим источником</button></details>`).join('')}
       ${(report?.suggested_sources||[]).filter(ref=>!refs.some(r=>r.candidate_id===ref.candidate_id)).map(ref=>`<div class="song-reference-diff"><h4>${esc(ref.title)}</h4>${ref.url?`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">Открыть источник текста</a>`:''}${ref.plain_lyrics?`<details><summary>Посмотреть полученный текст · совпадений: ${ref.text_confirmation?.hits?.length||0}</summary><pre style="white-space:pre-wrap;max-height:240px;overflow:auto">${esc(ref.plain_lyrics)}</pre></details><button class="btn" data-text-source-confirm="${esc(ref.candidate_id)}" ${busy?'disabled':''}>Подтвердить источник и сверить</button>`:`<p class="hint">${esc(ref.source_check?.error||'Не удалось извлечь текст. Вставьте его вручную.')}</p>`}</div>`).join('')}
-      ${(report?.candidates||[]).some(c=>!c.auto_apply&&c.status!=='user_applied')?`<details id="song-text-corrections" open><summary>Исправления по источнику — выберите подходящие</summary><div class="actions song-reference-bulk"><button type="button" class="btn small" data-text-select-all>Выбрать все</button><span class="hint">Выделенный фрагмент показан в исходной и подтверждаемой фразе. Любую правку можно изменить в любой момент.</span></div>${report.candidates.map((c,i)=>c.auto_apply||c.status==='user_applied'?'':`<div class="song-reference-candidate-choice"><div class="song-reference-candidate-head"><label><input type="checkbox" data-text-correction="${i}"><span>Применить это исправление</span></label><button type="button" class="btn small song-reference-play" data-text-correction-play="${i}" aria-pressed="false" title="Прослушать это место записи">▶</button></div>${textCandidatePreview(row,c)}</div>`).join('')}<button class="btn primary" id="song-text-source-apply" ${busy?'disabled':''}>Применить выбранные исправления</button><p class="hint">Повторы и времена фраз сохраняются. Различия исполнения проверяйте по записи.</p></details>`:''}
+      ${(report?.candidates||[]).some(c=>!c.auto_apply&&c.status!=='user_applied')?`<details id="song-text-corrections" open><summary>Исправления по источнику — выберите подходящие</summary><div class="actions song-reference-bulk"><button type="button" class="btn small" data-text-select-all>Выбрать все</button><span class="hint">Если выбрать варианты, которые исправляют одно место по-разному, сохранится последний отмеченный.</span></div>${report.candidates.map((c,i)=>c.auto_apply||c.status==='user_applied'?'':`<div class="song-reference-candidate-choice"><div class="song-reference-candidate-head"><label><input type="checkbox" data-text-correction="${i}"><span>Применить это исправление</span></label><button type="button" class="btn small song-reference-play" data-text-correction-play="${i}" aria-pressed="false" title="Прослушать это место записи">▶</button></div>${textCandidatePreview(row,c)}</div>`).join('')}<button type="button" class="btn primary" id="song-text-source-apply" ${busy?'disabled':''}>Применить выбранные исправления</button><p id="song-text-source-apply-status" class="hint" role="status" aria-live="polite"></p><p class="hint">Повторы и времена фраз сохраняются. Различия исполнения проверяйте по записи.</p></details>`:''}
       ${(report?.chord_sources||[]).length?`<p>Источники аккордов: ${report.chord_sources.map(ref=>`<a href="${esc(ref.url)}" target="_blank" rel="noopener noreferrer">${esc(ref.title)}</a>`).join(' · ')}</p>`:''}</section>`;
   }
   const esc = (v) => escH(v == null ? "" : v);
@@ -496,18 +496,36 @@
     bindBatchRestarts(detail);
     async function textSourceAction(button,action,args) {
       button.disabled=true;
-      const message=$s('song-text-source-result');
+      button.setAttribute('aria-busy','true');
+      const message=action==='apply'?$s('song-text-source-apply-status'):$s('song-text-source-result');
       if(message)message.textContent=action==='add'?'Читаем страницу и сравниваем текст…':'Сохраняем…';
       try {
-        const saved=await call('song_text_source_'+action,{song_id:row.song_id,base_revision:state.current.revision,...args});
+        const commandArgs={song_id:row.song_id,base_revision:state.current.revision,...args};
+        let saved;
+        try {
+          saved=await call('song_text_source_'+action,commandArgs);
+        } catch(error) {
+          // The detail pane can be refreshed by playback/analysis events while
+          // a correction is selected. Retry a revision-only conflict against
+          // the latest row; the backend still checks that each selected span
+          // has not changed before applying it.
+          if(action!=='apply' || !/песня уже изменилась/i.test(error.message||'')) throw error;
+          const fresh=await call('song_get',{song_id:row.song_id});
+          saved=await call('song_text_source_'+action,{...commandArgs,base_revision:fresh.revision});
+        }
         renderDetail(saved);await load();
         if(action==='confirm' || action==='add') {
           const corrections=$s('song-text-corrections');
           if(corrections) { corrections.open=true; corrections.scrollIntoView({block:'nearest'}); }
         }
-        if(action==='apply')toast('Выбранные исправления сохранены');
-        if(action==='apply_all')toast('Все найденные исправления сохранены');
-      } catch(error) {if(message)message.textContent=error.message||'Не удалось выполнить сверку';button.disabled=false;}
+        // A list made for an earlier recognition is recomputed for the
+        // card's current lines by the backend; say so instead of «saved».
+        const last=(action==='apply'||action==='apply_all')?(saved?.text_reference?.last_apply||{}):{};
+        if(last.outdated&&!last.applied)toast('Эти исправления относились к прежнему распознаванию — их слова уже исправлены. Список пересчитан по текущему тексту.');
+        else if(last.outdated)toast(`Исправлений сохранено: ${last.applied}. Устаревшие (${last.outdated}) пересчитаны по текущему тексту.`);
+        else if(action==='apply')toast('Выбранные исправления сохранены');
+        else if(action==='apply_all')toast('Все найденные исправления сохранены');
+      } catch(error) {if(message)message.textContent=error.message||'Не удалось выполнить сверку';button.disabled=false;button.removeAttribute('aria-busy');}
     }
     $s('song-text-source-add')?.addEventListener('click',event=>textSourceAction(event.currentTarget,'add',{
       url:$s('song-text-source-url').value,lyrics:$s('song-text-source-lyrics').value}));
@@ -519,15 +537,24 @@
       textSourceAction(button,'confirm',{candidate_id:button.dataset.textSourceConfirm})));
     detail.querySelectorAll('[data-text-apply-all]').forEach(button=>button.addEventListener('click',()=>
       textSourceAction(button,'apply_all',{})));
+    let textCorrectionOrder=[];
     detail.querySelectorAll('[data-text-select-all]').forEach(button=>button.addEventListener('click',()=>{
       const boxes=[...detail.querySelectorAll('[data-text-correction]:not(:disabled)')], select=boxes.some(box=>!box.checked);
       boxes.forEach(box=>{box.checked=select;});
+      textCorrectionOrder=select?boxes.map(box=>Number(box.dataset.textCorrection)):[];
       button.textContent=select?'Снять выделение':'Выбрать все';
+      const status=$s('song-text-source-apply-status');
+      if(status)status.textContent=select?`Выбрано исправлений: ${boxes.length}.`:'';
+    }));
+    detail.querySelectorAll('[data-text-correction]').forEach(box=>box.addEventListener('change',()=>{
+      const index=Number(box.dataset.textCorrection);
+      textCorrectionOrder=textCorrectionOrder.filter(value=>value!==index);
+      if(box.checked)textCorrectionOrder.push(index);
     }));
     detail.querySelectorAll('[data-text-correction-play]').forEach(button=>button.addEventListener('click',()=>
       playCorrection(button,row,(row.text_reference?.candidates||[])[Number(button.dataset.textCorrectionPlay)]||{})));
     $s('song-text-source-apply')?.addEventListener('click',event=>textSourceAction(event.currentTarget,'apply',{
-      indexes:[...detail.querySelectorAll('[data-text-correction]:checked')].map(el=>Number(el.dataset.textCorrection))}));
+      indexes:[...new Set([...textCorrectionOrder,...[...detail.querySelectorAll('[data-text-correction]:checked')].map(el=>Number(el.dataset.textCorrection))])]}));
     const referenceStage=detail.querySelector('[data-song-reference-stage]');
     if(referenceStage) {
       const sourceLink=referenceStage.querySelector('[data-song-reference-source]');

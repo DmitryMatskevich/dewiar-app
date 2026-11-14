@@ -101,6 +101,9 @@ def review_command(store, cmd, args):
             return store.patch(song_id,{'status':'ready','review_state':'verified',
                 'stage_label':'Текст и аккорды проверены пользователем','phrases':phrases,'chords':chords,
                 'guitar_sheet':build_guitar_sheet(phrases,chords),'phrase_history':history},args['base_revision'])
+    if cmd == 'song_edit_layout':
+        from .layout_edit import edit_layout
+        return edit_layout(store, args)
     if cmd == 'song_edit_structure':
         from .arrangement import edit_structure
         return edit_structure(store, args)

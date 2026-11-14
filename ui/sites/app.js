@@ -4,6 +4,7 @@ const $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&
 const fragment = new URLSearchParams(location.hash.slice(1));
 if (fragment.get('token')) { sessionStorage.setItem('sites-token', fragment.get('token')); history.replaceState(null,'',location.pathname); }
 let rows=[], status={}, providers=[], catalog={vault:[],servers:[],accounts:[],channels:{}}, currentTab='sites', editing=false, lastDiscovery=null, pendingDelete=null, availabilityFilter=['DOWN','UP','OFF'].includes(fragment.get('state'))?fragment.get('state'):'ALL', providerView=localStorage.getItem('sites-provider-view')==='rows'?'rows':'cards', providerPage=1, providerPageSize=10;
+let incidentOverview = null;
 const labels={UP:'Доступен',DOWN:'Недоступен',UNKNOWN:'Нет данных',CONFIG_ERROR:'Нужна настройка',PAUSED:'На паузе',PENDING:'Проверяем сбой'};
 const probes={http:'HTTP(S)',http_port:'HTTP',https_port:'HTTPS',health:'HTML — тестовая страница',console:'Консоль',web:'Веб-сайт',dns:'DNS',ping:'Ping IP',ssh:'SSH',ftp:'FTP',mail:'Почта'};
 const reasons={OK:'Проверка успешна',TIMEOUT:'Превышено время ожидания',HTTP_STATUS:'Неподходящий HTTP-код',TLS_HANDSHAKE:'Не удалось установить TLS',TLS_INVALID:'Сертификат не прошёл проверку',DNS_ERROR:'Не удалось разрешить имя',ICMP_NO_REPLY:'Нет ответа ICMP',CONNECTION_FAILED:'Ошибка соединения',HTTP_PROTOCOL:'Некорректный HTTP-ответ',CONTENT_MISMATCH:'Ожидаемый текст не найден',CONTENT_ENCODING:'Неподдерживаемое сжатие ответа',REDIRECT_LIMIT:'Слишком много перенаправлений',TARGET_POLICY:'Ограничение сетевой цели',BANNER_BAD:'Нет ожидаемого приветствия',STARTTLS_MISSING:'STARTTLS не предложен сервером',SUPERSEDED_BY_WEB_INCIDENT:'Объединён с веб-инцидентом',INVALIDATED_HTTP_HOST_BUG:'Измерение признано ошибочным и исключено'};
@@ -35,7 +36,7 @@ function tooltipFor(el){
   if(d.providerComplaint)return `Подготовить черновик обращения провайдеру «${providers.find(p=>p.id===d.providerComplaint)?.name||''}». Текст можно проверить и исправить перед использованием.`;
   if(d.providerView)return `Показать список провайдеров в виде «${d.providerView==='rows'?'строк':'карточек'}». Выбор сохраняется на этом компьютере.`;
   if(d.providerPage)return `Перейти ${Number(d.providerPage)<0?'на предыдущую':'на следующую'} страницу списка провайдеров.`;
-  if(d.tab)return `Открыть раздел «${({sites:'Обзор сайтов',providers:'Хостинг-провайдеры',processes:'Фоновые процессы',notifications:'Уведомления'}[d.tab]||d.tab)}».`;
+  if(d.tab)return `Открыть раздел «${({sites:'Обзор сайтов',incidents:'Инциденты',deadlines:'Сроки',providers:'Хостинг-провайдеры',processes:'Фоновые процессы',notifications:'Уведомления'}[d.tab]||d.tab)}».`;
   if(d.test)return `Отправить тестовое уведомление через канал «${d.test}», выбранный в настройках. Это тестовая доставка, не уведомление об инциденте.`;
   if(el.hasAttribute('data-contact-remove'))return 'Удалить этот контакт из редактируемого списка провайдера. Изменение сохранится только после нажатия «Сохранить».';
   if(el.id==='add')return 'Создать новую карточку сайта. Мониторинг можно включить или настроить позже.';
@@ -62,12 +63,55 @@ function tooltipFor(el){
 function ensureTooltips(root=document){root.querySelectorAll('button,input,select,textarea').forEach(el=>{const detail=tooltipFor(el);if(!detail)return;if(!el.title||el.title.length<55||el.id==='pause')el.title=detail;});}
 function metrics(){const n=s=>rows.filter(r=>r.state===s).length;$('#metrics').innerHTML=[['Всего сайтов',rows.length],['Доступны',n('UP')],['Недоступны',n('DOWN')],['Без данных / пауза',rows.length-n('UP')-n('DOWN')]].map(([name,val])=>`<div class="metric"><strong>${val}</strong><span>${name}</span></div>`).join('');}
 const serviceDefs=[['ip','IP','ping','ping','ssh-settings','ssh_host'],['dns','DNS','dns','dns','dns-settings','dns_host'],['http','HTTP','check_http','http_port','web-settings','url'],['https','HTTPS','check_https','https_port','web-settings','url'],['html','HTML','health_url','health','html-settings','health_url'],['console','Консоль','console_url','console','console-settings','console_url'],['ssh','SSH','ssh','ssh','ssh-settings','ssh_host'],['ftp','FTP','ftp','ftp','ssh-settings','ftp_port']];
-function serviceState(s,def){const [, ,configured,probe]=def;const now=Math.floor(Date.now()/60000),result=s.results.find(r=>r.probe===probe&&r.until_min>now);if(['ssh','ftp'].includes(probe)){if(result)return result.state==='UP'?'+':result.state==='DOWN'?'-':'?';return '?';}if(['check_http','check_https'].includes(configured)&&!s.url)return '?';const enabled=typeof configured==='string'&&configured.endsWith('_url')?!!s[configured]:!!s[configured];if(!enabled)return '?';if(!s.enabled||status.paused||status.policy_paused)return '-';return result&&result.state==='UP'?'+':'-';}
+const probeIndicators = {
+ UP: ['+', 'good', 'проверка прошла'],
+ DOWN: ['−', 'bad', 'проверка не прошла'],
+ UNKNOWN: ['?', 'unset', 'нет свежего результата'],
+ PAUSED: ['Ⅱ', 'unset', 'проверки на паузе'],
+ DISABLED: ['·', 'unset', 'не настроено'],
+};
+
+function serviceIndicator(site, definition, now) {
+ const [, label, setting, probe] = definition;
+ const result = site.results.find(r => r.probe === probe && r.until_min > now);
+ const enabled = Boolean(site[setting]) && (!['check_http', 'check_https'].includes(setting) || Boolean(site.url));
+ let state = 'DISABLED';
+ if (enabled || result?.diagnostic) {
+  state = site.state === 'PAUSED' ? 'PAUSED' : result?.state || 'UNKNOWN';
+ }
+ const [symbol, color, description] = probeIndicators[state] || probeIndicators.UNKNOWN;
+ const reason = state === 'DOWN' && result?.reason ? ` · ${reasons[result.reason] || result.reason}` : '';
+ const source = result?.diagnostic && state !== 'PAUSED' ? ' · разовая диагностика' : '';
+ const hint = `${label}: ${description}${reason}${source} · открыть настройки`;
+ return `<button class="service-icon ${color}" data-service="${definition[0]}" data-site="${esc(site.id)}" title="${esc(hint)}" aria-label="${esc(hint)}"><span aria-hidden="true">${symbol}</span><small>${label}</small></button>`;
+}
+function siteFailure(site, now) {
+ if (site.state === 'PAUSED') return null;
+ const failed = site.results.filter(result => !result.diagnostic && result.probe !== 'web' &&
+  result.until_min > now && ['DOWN','CONFIG_ERROR'].includes(result.state));
+ const aggregate = site.results.find(result => result.probe === 'web' && result.until_min > now && result.state === 'DOWN');
+ if (aggregate) {
+  const required = [site.url ? 'http' : 'mail'];
+  if (site.health_required) required.push('health');
+  const result = failed.find(result => required.includes(result.probe) && result.state === 'DOWN') || aggregate;
+  return failureDetails(result);
+ }
+ const result = failed.sort((a,b) => b.at - a.at)[0];
+ return result ? failureDetails(result) : null;
+}
+
+function failureDetails(result) {
+ return {label: result.reason === 'DNS_ERROR' ? 'DNS' : probes[result.probe] || result.probe,
+  reason: reasons[result.reason] || result.reason || 'Проверка не прошла', at: result.at};
+}
+
 function render(){
  metrics();const q=$('#search').value.trim().toLowerCase();
+ const now=Math.floor(Date.now()/60000);
  const filtered=[...rows].sort((a,b)=>({DOWN:0,PENDING:0,UNKNOWN:1,CONFIG_ERROR:1,UP:2,PAUSED:3}[a.state]??1)-({DOWN:0,PENDING:0,UNKNOWN:1,CONFIG_ERROR:1,UP:2,PAUSED:3}[b.state]??1)||a.name.localeCompare(b.name)).filter(r=>(availabilityFilter==='ALL'||availabilityFilter==='DOWN'&&r.state==='DOWN'||availabilityFilter==='UP'&&r.state==='UP'||availabilityFilter==='OFF'&&!r.enabled)&&[r.name,r.url,r.hoster,r.dns_provider].join(' ').toLowerCase().includes(q));
  $('#list').innerHTML=filtered.length?filtered.map(s=>{
   const dates=[until(s.hosting_expires,s.hosting_expires_in_days,'Хостинг'),until(s.domain_expires,s.domain_expires_in_days,'Домен')].filter(Boolean);
+  const failure=siteFailure(s,now);
   const health=s.state==='UP'?'good':s.state==='DOWN'?'bad':s.state==='PENDING'?'pending':'unknown';
   return `<article class="site-row">
    <div class="site-topline">
@@ -81,13 +125,34 @@ function render(){
    <div class="row-uptime ${health}" title="${esc('Доступность: '+(percent(s.stats.uptime))+' · '+(labels[s.state]||s.state))}"><strong>${percent(s.stats.uptime)}</strong></div>
    </div>
    <div class="site-details">
-    <div class="service-icons" aria-label="Состояние сервисов">${serviceDefs.map(d=>{const state=serviceState(s,d);const color=state==='+'?'good':state==='-'?'bad':'unset';const text=state==='+'?'всё в порядке':state==='-'?'есть проблема':'не настроено';return `<button class="service-icon ${color}" data-service="${d[0]}" data-site="${esc(s.id)}" title="${esc(d[1]+': '+text+' · нажмите для настройки')}" aria-label="${esc(d[1]+': '+state+' — '+text+'; открыть настройку')}"><span>${state}</span><small>${d[1]}</small></button>`}).join('')}</div>
+    <div class="site-observation">${badge(s.state)}<span class="muted small">Покрытие за выбранный период ${percent(s.stats.coverage)}</span></div>
+    <div class="service-icons" aria-label="Состояние сервисов">${serviceDefs.map(d=>serviceIndicator(s,d,now)).join('')}</div>
+    ${failure ? `<p class="site-failure small"><strong>${esc(failure.label)}</strong> · ${esc(failure.reason)} <span class="muted">· проверено ${when(failure.at)}</span></p>` : ''}
     ${dates.length?`<div class="renewal-info">${dates.join('<br>')}</div>`:''}
    </div>
   </article>`
  }).join(''):'<div class="empty">Нет сайтов, соответствующих выбранному состоянию и поиску.</div>';
 }
-async function refresh(){const [sites,st,p]=await Promise.all([api('sites?days='+$('#period').value),api('status'),api('providers')]);rows=sites.items;status=st;providers=p.items;if($('#message').className==='error')notice('Связь восстановлена');$('#connection').textContent=`Процесс ${status.pid} · ${status.active} заданий`;$('#test-banner').hidden=!status.test;if(status.test)document.title='ТЕСТ — Сайты · Dewiar';render();renderProcesses();if(currentTab==='providers')renderProviders();if(currentTab==='notifications')await deliveries();}
+async function refresh(){
+ const [sites, st, directory, incidents] = await Promise.all([
+  api('sites?days='+$('#period').value), api('status'), api('providers'),
+  api('incidents?view=overview').catch(() => null),
+ ]);
+ rows=sites.items;
+ status=st;
+ providers=directory.items;
+ incidentOverview=incidents;
+ if($('#message').className==='error')notice('Связь восстановлена');
+ $('#connection').textContent=`Процесс ${status.pid} · ${status.active} заданий`;
+ $('#test-banner').hidden=!status.test;
+ if(status.test)document.title='ТЕСТ — Сайты · Dewiar';
+ render();
+ renderIncidents();
+ renderDeadlines();
+ renderProcesses();
+ if(currentTab==='providers')renderProviders();
+ if(currentTab==='notifications')await deliveries();
+}
 function options(items,label){return '<option value="">Не выбрано</option>'+items.map(i=>`<option value="${esc(i.id)}">${esc(label(i))}</option>`).join('');}
 async function loadAccess(){catalog=await api('access');$('#vault-options').innerHTML=options(catalog.vault,i=>i.name+(i.login?' · '+i.login:''));$('#server-options').innerHTML=options(catalog.servers,i=>i.name+' · '+i.host);$('#mail-accounts').innerHTML=options(catalog.accounts,i=>i.address);$('#channel-hint').textContent=['telegram','max'].map(k=>k+': '+(catalog.channels[k]?'подключён':'не подключён')).join(' · ')+(catalog.errors.length?' · '+catalog.errors.join(' '):'');}
 function renderProviders(){const typeName={telegram:'Telegram / поддержка',ticket:'Тикет в панели',email:'E-mail',phone:'Телефон',chat:'Онлайн-чат',news:'Новости',status:'Статус сервиса',feedback:'Отзывы / жалоба на оператора',complaint:'Претензии по услугам',abuse:'Обработка abuse-жалоб',other:'Другое'},pages=Math.max(1,Math.ceil(providers.length/providerPageSize));providerPage=Math.min(providerPage,pages);const start=(providerPage-1)*providerPageSize,visible=providers.slice(start,start+providerPageSize);$('#provider-controls').innerHTML=`<div class="provider-view-switch" role="group" aria-label="Вид списка провайдеров"><button type="button" data-provider-view="cards" aria-pressed="${providerView==='cards'}">Карточки</button><button type="button" data-provider-view="rows" aria-pressed="${providerView==='rows'}">Строки</button></div><span class="provider-page-count">${providers.length?`${start+1}–${Math.min(start+providerPageSize,providers.length)} из ${providers.length}`:'0 провайдеров'}</span><label class="provider-page-size">На странице<select id="provider-page-size"><option value="10" ${providerPageSize===10?'selected':''}>10</option><option value="25" ${providerPageSize===25?'selected':''}>25</option><option value="50" ${providerPageSize===50?'selected':''}>50</option></select></label><div class="provider-pagination"><button type="button" data-provider-page="-1" ${providerPage<=1?'disabled':''}>Назад</button><span>Страница ${providerPage} из ${pages}</span><button type="button" data-provider-page="1" ${providerPage>=pages?'disabled':''}>Вперёд</button></div>`;const hrefFor=c=>c.url||(c.type==='email'||c.type==='feedback'||c.type==='complaint'||c.type==='abuse'?'mailto:'+c.value:c.type==='phone'?'tel:'+c.value.replace(/[^+\d]/g,''):'');
@@ -104,7 +169,13 @@ function contactRow(contact={type:'phone',label:'',value:'',url:''}){const types
 async function editProvider(id){const p=providers.find(x=>x.id===id);const f=$('#provider-form');f.reset();$('#provider-contacts').replaceChildren();f.elements.id.value=p?.id||'';f.elements.rev.value=p?.rev||'';$('#delete-provider').hidden=!p;for(const k of ['name','website_url','panel_url','panel_name','source_url','notes'])f.elements[k].value=p?.[k]||'';(p?.contacts?.length?p.contacts:[{type:'email',label:'Техническая поддержка',value:'',url:''}]).forEach(contactRow);$('#provider-editor-title').textContent=p?'Изменить провайдера':'Новый провайдер';$('#provider-error').textContent='';$('#provider-editor').showModal();if(!p)f.elements.name.focus();}
 function updateComplaintEmail(){const to=$('#complaint-to').value.trim(),subject=$('#complaint-subject').value,body=$('#complaint-body').value,link=$('#complaint-email');link.href=to?`mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`:'#';link.setAttribute('aria-disabled',to?'false':'true');}
 function editComplaint(id){const p=providers.find(x=>x.id===id);if(!p)return;$('#complaint-title').textContent=`Обращение: ${p.name}`;const emailContacts=p.contacts.filter(c=>['feedback','complaint','abuse','email'].includes(c.type)&&c.value.includes('@'));$('#complaint-targets').innerHTML=emailContacts.map(c=>`<button type="button" data-complaint-to="${esc(c.value)}">${esc(c.label||c.value)} · ${esc(c.value)}</button>`).join('');const target=emailContacts.find(c=>c.type==='feedback')||emailContacts.find(c=>c.type==='complaint')||emailContacts[0];$('#complaint-to').value=target?.value||'';$('#complaint-ticket-links').innerHTML=p.contacts.filter(c=>c.type==='ticket'&&c.url).map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.label||c.value||'Открыть тикет в панели')}</a>`).join('');const legalNote=$('#complaint-provider-note');legalNote.hidden=p.id!=='beget';legalNote.innerHTML=p.id==='beget'?'Для договорной претензии Beget указывает письменное обращение на почтовый или юридический адрес; e-mail abuse@beget.com можно использовать как дубликат. Срок рассмотрения — до 30 календарных дней. <a href="https://beget.com/files/contract_org.pdf" target="_blank" rel="noopener noreferrer">Условия договора</a>':'';$('#complaint-subject').value=`Обращение по услугам ${p.name}`;$('#complaint-body').value=`Здравствуйте.\n\nПрошу рассмотреть обращение по услугам провайдера ${p.name}.\n\nСайт / домен: [укажите]\nЛогин аккаунта / номер договора: [укажите]\nДата и время события: [укажите]\n\nОписание проблемы и последовательность событий:\n[кратко изложите факты]\n\nПрошу: [укажите ожидаемое решение]\n\nНомер предыдущего обращения (если есть): [укажите]\nПодтверждения: [перечислите ссылки, скриншоты и документы]\n\nПрошу подтвердить получение обращения и сообщить его номер и срок ответа.`;updateComplaintEmail();$('#complaint-editor').showModal();}
-async function tab(name){currentTab=name;for(const n of ['sites','providers','processes','notifications']){$('#'+n+'-view').hidden=n!==name;document.querySelector(`[data-tab="${n}"]`).classList.toggle('selected',n===name);}if(name==='providers'){providers=(await api('providers')).items;renderProviders();}if(name==='notifications'){await loadAccess();const f=$('#notify-form'),cfg=status.settings;for(const k of ['telegram','max','email','simulation'])f.elements[k].checked=cfg.channels.includes(k);f.elements.mail_account_id.value=cfg.mail_account_id;f.elements.email_to.value=cfg.email_to;await deliveries();}}
+async function tab(name){currentTab=name;for(const n of ['sites','incidents','deadlines','providers','processes','notifications']){
+ $('#'+n+'-view').hidden=n!==name;
+ const button=document.querySelector(`nav [data-tab="${n}"]`);
+ button.classList.toggle('selected',n===name);
+ if(n===name)button.setAttribute('aria-current','page');
+ else button.removeAttribute('aria-current');
+ }if(name==='providers'){providers=(await api('providers')).items;renderProviders();}if(name==='notifications'){await loadAccess();const f=$('#notify-form'),cfg=status.settings;for(const k of ['telegram','max','email','simulation'])f.elements[k].checked=cfg.channels.includes(k);f.elements.mail_account_id.value=cfg.mail_account_id;f.elements.email_to.value=cfg.email_to;await deliveries();}}
 function providerMatch(candidate){if(!candidate)return null;const text=String(candidate.name||candidate.operator||'').toLowerCase().replace(/[^a-zа-яё0-9]+/g,'');const exact=providers.find(p=>String(p.name).toLowerCase().replace(/[^a-zа-яё0-9]+/g,'')===text);if(exact)return exact;const aliases=[['beget',['beget','бегет']],['firstvds',['firstvds','jsciot']],['timeweb',['timeweb']],['timeweb-cloud',['timewebcloud']],['sweb',['sweb','spaceweb']],['nic-ru',['nicru','rucenter','руцентр']]];const alias=aliases.find(([,values])=>values.some(v=>text.includes(v)));if(!alias)return null;const candidates=providers.filter(p=>{const name=String(p.name).toLowerCase().replace(/[^a-zа-яё0-9]+/g,'');return alias[1].some(v=>name.includes(v));});return candidates[0]||null;}
 function assignIfEmpty(form,name,value){if(value==null||value==='')return;const field=form.elements[name];if(field&&!String(field.value||'').trim())field.value=String(value);}
 function showDiscovery(d){lastDiscovery=d;const f=$('#site-form');const formDomain=d.domain||'';assignIfEmpty(f,'name',formDomain);assignIfEmpty(f,'url',formDomain?normalizeSiteUrl(formDomain):'');assignIfEmpty(f,'dns_host',formDomain);assignIfEmpty(f,'server_ip',d.addresses?.[0]);const network=d.networks?.[0],operatorCandidate=network?.operator||network?.organization||network?.network;assignIfEmpty(f,'network_operator',operatorCandidate);assignIfEmpty(f,'registrar',d.registrar);assignIfEmpty(f,'dns_nameservers',(d.nameservers||[]).join(', '));assignIfEmpty(f,'dns_mx_hosts',(d.mx_hosts||[]).join(', '));assignIfEmpty(f,'domain_expires',d.domain_expires);assignIfEmpty(f,'mail_mx_host',d.mx_hosts?.length===1?d.mx_hosts[0]:'');
@@ -132,7 +203,130 @@ $('#server-options').addEventListener('change',e=>{const item=catalog.servers.fi
 $('#site-form').elements.mail_kind.addEventListener('change',e=>{$('#site-form').elements.mail_port.value={imap_tls:993,smtp_tls:465,smtp_starttls:587,smtp:25}[e.target.value];});
 function table(headers,lines){return '<div class="table-wrap"><table><thead><tr>'+headers.map(x=>'<th>'+esc(x)+'</th>').join('')+'</tr></thead><tbody>'+lines.map(c=>'<tr>'+c.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';}
 async function detail(id){const s=rows.find(x=>x.id===id);if(!s)return;const days=Number($('#period').value),end=Math.floor(Date.now()/60000),start=days?end-days*1440:s.created;const [h,inc]=await Promise.all([api(`history?site=${id}&start=${start}&end=${end}`),api('incidents?site='+id)]);$('#detail-title').textContent=s.name;const span=h.end-h.start;$('#detail-body').innerHTML=`<div class="actions">${s.url?`<a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">Открыть сайт</a>`:''}${s.panel_url?`<a href="${esc(s.panel_url)}" target="_blank" rel="noopener noreferrer">Панель</a>`:''}${s.vault_id?`<button id="reveal" data-vault="${esc(s.vault_id)}">Показать пароль из сейфа</button>`:''}</div><div id="secret"></div><div class="detail-grid"><div class="panel"><span class="muted">Наблюдаемая доступность</span><h2>${percent(h.uptime)}</h2><span>Покрытие ${percent(h.coverage)}</span></div><div class="panel">Работал: ${h.U} мин<br>Недоступен: ${h.D} мин<br>Нет данных: ${h.X} мин<br>Пауза: ${h.E} мин</div></div><div class="history-bar" aria-label="История состояний">${h.bars.map(b=>`<span class="${b.state}" style="flex:${b.end-b.start}" title="${esc(b.state+' '+when(b.start)+' — '+when(b.end))}"></span>`).join('')}</div><p class="muted small">Зелёный — доступен · красный — недоступен · серый — нет данных · песочный — пауза</p><h2>Проверки</h2>${table(['Сервис','Результат','Последняя проба','Диагностика'],s.results.filter(r=>r.probe!=='web').map(r=>[esc(probes[r.probe]||r.probe),badge(r.until_min>end?r.state:'UNKNOWN'),when(r.at),diagnosis(r)]))}<h2>Инциденты</h2>${inc.items.length?table(['Сервис','Начало','Завершение','Причина'],inc.items.map(i=>[esc(probes[i.probe]||i.probe),when(i.start),i.recovered?'Восстановлен '+when(i.recovered):i.closed?'Закрыт без восстановления '+when(i.closed):'Открыт',esc(reasons[i.reason]||i.reason)])):'<p class="muted">Подтверждённых инцидентов нет.</p>'}<h2>Инфраструктура</h2><p>Хостинг: ${esc(s.hoster||'не указан')}</p><p>DNS: ${esc(s.dns_provider||'не указан')}</p><p class="muted">${esc(s.notes||'Заметок нет')}</p><button id="export-history">Скачать историю JSON</button>`;const domainHost=s.url?new URL(s.url).hostname.toLowerCase():'';if(domainHost.endsWith('.ru')||domainHost.endsWith('.xn--p1ai'))$('#detail-body').insertAdjacentHTML('beforeend',`<section class="panel registry-info"><b>Сведения об администраторе домена .RU/.РФ</b><p>Откройте WHOIS Координационного центра. Публичные сведения могут быть ограничены; для получения более полных данных обратитесь к регистратору домена.</p><a href="https://cctld.ru/" target="_blank" rel="noopener noreferrer">Сайт Координационного центра</a> · <a href="https://cctld.ru/help/trademark/" target="_blank" rel="noopener noreferrer">Как запрашивать сведения об администраторе</a></section>`);$('#export-history').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({site:s.name,...h},null,2)],{type:'application/json'}));a.download='site-history.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};$('#reveal')?.addEventListener('click',e=>action(async()=>{const result=await api('reveal',{id:e.target.dataset.vault});$('#secret').textContent=result.value;$('#secret').className='secret';setTimeout(()=>{$('#secret').textContent='';$('#secret').className='';},15000);},e.target));$('#detail').showModal();}
-function renderProcesses(){const t=status;$('#process-info').innerHTML=`<div class="process-grid"><div class="panel"><span class="muted">Отдельный процесс</span><h2>PID ${t.pid}</h2><span>${Math.floor(t.uptime_seconds/60)} мин работы · автозапуск ${t.autostart?'включён':'не установлен'}</span></div><div class="panel"><span class="muted">Проверки</span><h2>${t.active} в работе</h2><span>${t.policy_paused?'Остановлены сетевой политикой':t.paused?'Опрос на паузе':'Планировщик активен'}</span></div><div class="panel"><span class="muted">База и журнал WAL</span><h2>${(t.database_bytes/1024).toFixed(0)} КиБ</h2><span>Последний тик: ${t.heartbeat?new Date(t.heartbeat*1000).toLocaleTimeString('ru-RU'):'ожидается'}</span></div></div>${t.error?'<p class="error">'+esc(t.error)+'</p>':''}`;$('#pause').textContent=t.paused?'Возобновить опрос':'Приостановить опрос';$('#workers').value=t.settings.workers;$('#jobs').innerHTML=t.jobs.length?table(['Объект','Режим','Состояние','Сервис','Начало'],[...t.jobs].reverse().map(j=>[esc(j.name),j.mode==='scheduled'?'По расписанию':j.mode==='port-diagnostic'?'SSH/FTP при открытии раздела':j.mode==='console-diagnostic'?'Проверка панели провайдера':'Ручная диагностика',esc({running:'Выполняется',complete:'Готово',failed:'Ошибка'}[j.state]),esc(j.probe)+'<br><span class="small">'+esc(j.results.map(r=>r.probe+': '+r.state+' ('+r.reason+')').join('; '))+'</span>',when(j.started)])):'<p class="muted">Пока нет заданий.</p>';}
+const lastMarkup = new WeakMap();
+function updateMarkup(element, markup) {
+ // Preserve keyboard focus when the periodic refresh returns identical content.
+ if (lastMarkup.get(element) === markup) return;
+ lastMarkup.set(element, markup);
+ element.innerHTML = markup;
+}
+
+function renderIncidents() {
+ const summary = $('#incident-summary');
+ const available = Array.isArray(incidentOverview?.active) && Array.isArray(incidentOverview?.recent);
+ const count = available ? incidentOverview.active.length : 0;
+ summary.hidden = count === 0;
+ updateMarkup(summary, count ? `<button type="button" data-tab="incidents">Открытые инциденты · ${count}</button>` : '');
+ if (!available) {
+  updateMarkup($('#incident-list'), '<p class="muted">Журнал инцидентов сейчас недоступен.</p>');
+  return;
+ }
+ const filter = $('#incident-filter').value;
+ const items = incidentOverview[filter];
+ const names = new Map(rows.map(site => [site.id, site.name]));
+ const markup = items.map(item => {
+  const name = names.get(item.site);
+  const state = item.recovered ? 'Восстановлен' : item.closed ? 'Закрыт без восстановления' : 'Открыт';
+  const reason = reasons[item.reason] || item.reason;
+  const time = item.closed ? ` · ${state} ${when(item.recovered || item.closed)}` : '';
+  return `<article class="panel incident-card">
+   <div><h3>${esc(name || 'Карточка сайта недоступна')}</h3>
+   <p>${esc(probes[item.probe] || item.probe)} · ${esc(reason)}</p>
+   <p class="muted small">Начало ${when(item.start)}${time}</p></div>
+   <div class="incident-actions">${item.closed ? '' : '<span class="badge DOWN">Открыт</span>'}
+   ${name ? `<button type="button" data-detail="${esc(item.site)}">История сайта</button>` : ''}</div>
+   </article>`;
+ }).join('');
+ updateMarkup($('#incident-list'), markup || `<p class="muted">${filter === 'active' ? 'Открытых инцидентов нет.' : 'Закрытых инцидентов пока нет.'}</p>`);
+}
+
+function siteDeadlines(site) {
+ const entries = [];
+ for (const [field, label] of [['domain_expires','Домен'], ['hosting_expires','Хостинг']]) {
+  if (site[field]) {
+   const days = site[field+'_in_days'];
+   entries.push({site, label, date: site[field], days, expired: days < 0});
+  }
+ }
+ if (site.tls_deadline) entries.push({site, label:'TLS', ...site.tls_deadline});
+ return entries;
+}
+
+function renderDeadlines() {
+ const entries = rows.flatMap(siteDeadlines).sort((a,b) => a.date.localeCompare(b.date) || a.site.name.localeCompare(b.site.name, 'ru'));
+ const due = entries.filter(entry => entry.days <= 30);
+ const summary = $('#deadline-summary');
+ summary.hidden = due.length === 0;
+ updateMarkup(summary, due.length ? `<button type="button" data-tab="deadlines" data-due-only>Истекли или до 30 дней · ${due.length}</button>` : '');
+ const onlyDue = $('#deadline-filter').value === 'due';
+ const markup = (onlyDue ? due : entries).map(entry => {
+  const status = entry.expired ? (entry.days < 0 ? `Истёк ${Math.abs(entry.days)} дн. назад` : 'Истёк сегодня')
+   : entry.days === 0 ? 'Истекает сегодня' : `Осталось ${entry.days} дн.`;
+  const severity = entry.days <= 7 ? 'renewal-bad' : entry.days <= 30 ? 'renewal-soon' : 'renewal-good';
+  const displayDate = entry.date.split('-').reverse().join('.');
+  const checked = entry.checked_at == null ? '' : entry.fresh
+   ? ` · проверено ${when(entry.checked_at)}` : ` · данные от ${when(entry.checked_at)}, требуется свежая проверка`;
+  return `<article class="panel incident-card deadline-card">
+   <div><h3>${esc(entry.site.name)}</h3><p>${entry.label} · <time datetime="${esc(entry.date)}">${esc(displayDate)}</time></p>
+   <p class="muted small"><strong class="${severity}">${status}</strong>${checked}</p></div>
+   <div class="incident-actions"><button type="button" data-detail="${esc(entry.site.id)}">История сайта</button></div>
+   </article>`;
+ }).join('');
+ updateMarkup($('#deadline-list'), markup || `<p class="muted">${onlyDue ? 'Истёкших сроков и сроков на ближайшие 30 дней нет.' : 'В карточках пока нет известных сроков.'}</p>`);
+}
+
+$('#deadline-filter').addEventListener('change', renderDeadlines);
+$('#deadline-summary').addEventListener('click', event => {
+ if (event.target.closest('[data-due-only]')) {
+  $('#deadline-filter').value='due';
+  renderDeadlines();
+ }
+});
+
+const jobModes = {
+ scheduled: 'По расписанию', 'port-diagnostic': 'SSH/FTP при открытии раздела',
+ 'console-diagnostic': 'Проверка панели провайдера', diagnostic: 'Ручная диагностика',
+};
+
+function renderJobs() {
+ const filter = $('#job-filter').value;
+ const jobs = [...(status.jobs || [])].reverse().filter(job => {
+  if (filter === 'running') return job.state === 'running';
+  if (filter === 'problems') return job.state === 'failed' ||
+   job.results.some(result => result.state === 'DOWN' || result.state === 'UNKNOWN');
+  return true;
+ });
+ const markup = jobs.length ? table(['Объект','Режим','Состояние','Сервисы','Начало'], jobs.map(job => {
+  const state = {running:'Выполняется', complete:'Готово', failed:'Ошибка'}[job.state] || job.state;
+  const results = job.results.map(result => {
+   const service = probes[result.probe] || result.probe;
+   const reason = reasons[result.reason] || result.reason;
+   return `<div>${esc(service)} · ${esc(labels[result.state] || result.state)}${reason ? ' · '+esc(reason) : ''}</div>`;
+  }).join('');
+  const current = job.state === 'running' && job.probe ? esc(probes[job.probe] || job.probe) : '';
+  return [esc(job.name), esc(jobModes[job.mode] || job.mode), esc(state),
+   `<div class="small job-results">${current ? `<strong>${current}</strong>` : ''}${results || (current ? '' : '—')}${job.error ? `<div class="job-error">${esc(job.error)}</div>` : ''}</div>`, when(job.started)];
+ })) : '<p class="muted">По этому фильтру заданий нет.</p>';
+ updateMarkup($('#jobs'), markup);
+}
+
+function renderProcesses() {
+ const t = status;
+ const heartbeatAge = t.heartbeat ? Date.now() / 1000 - t.heartbeat : null;
+ const scheduler = t.policy_paused ? 'Остановлен сетевой политикой' : t.paused ? 'Опрос на паузе'
+  : heartbeatAge == null ? 'Ожидаем первый сигнал' : heartbeatAge > 30 ? 'Нет свежего сигнала планировщика' : 'Планировщик активен';
+ updateMarkup($('#process-info'), `<div class="process-grid">
+  <div class="panel"><span class="muted">Отдельный процесс</span><h2>PID ${t.pid}</h2><span>${Math.floor(t.uptime_seconds/60)} мин работы · автозапуск ${t.autostart?'включён':'не установлен'}</span></div>
+  <div class="panel"><span class="muted">Проверки</span><h2>${t.active} в работе</h2><span>${scheduler}</span></div>
+  <div class="panel"><span class="muted">База и журнал WAL</span><h2>${(t.database_bytes/1024).toFixed(0)} КиБ</h2><span>Сигнал планировщика ${t.heartbeat?new Date(t.heartbeat*1000).toLocaleTimeString('ru-RU'):'ожидается'}</span></div>
+  </div>${t.error ? '<p class="error">'+esc(t.error)+'</p>' : ''}`);
+ $('#pause').textContent=t.paused?'Возобновить опрос':'Приостановить опрос';
+ $('#workers').value=t.settings.workers;
+ renderJobs();
+}
+
+$('#incident-filter').addEventListener('change', renderIncidents);
+$('#job-filter').addEventListener('change', renderJobs);
 async function deliveries(){const r=await api('deliveries');$('#deliveries').innerHTML=r.items.length?table(['Канал','Статус','Попыток','Ошибка'],r.items.map(d=>[esc(d.channel),esc({pending:'В очереди',sending:'Отправляется',sent:'Принято каналом',simulated:'Эмуляция — без отправки',uncertain:'Результат неизвестен',failed:'Ошибка',superseded:'Объединено с восстановлением'}[d.state]||d.state),d.tries,esc(d.error)])):'<p class="muted">Очередь пуста. Стабильная работа не создаёт сообщений.</p>';}
 $('#notify-form').addEventListener('submit',e=>{e.preventDefault();action(async()=>{const f=e.target;await api('settings',{channels:['telegram','max','email','simulation'].filter(k=>f.elements[k].checked),mail_account_id:f.elements.mail_account_id.value,email_to:f.elements.email_to.value});notice('Настройки уведомлений сохранены');await refresh();},e.submitter);});
 document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.close){$('#'+b.dataset.close).close();editing=false;$('#secret')?.replaceChildren();}if(b.hasAttribute('data-contact-remove'))b.closest('.provider-contact-row')?.remove();if(b.dataset.providerEdit)action(()=>editProvider(b.dataset.providerEdit),b);if(b.dataset.service)action(()=>edit(b.dataset.site,b.dataset.service),b);if(b.dataset.edit)action(()=>edit(b.dataset.edit),b);if(b.dataset.detail)action(()=>detail(b.dataset.detail),b);if(b.dataset.tab)action(()=>tab(b.dataset.tab),b);if(b.dataset.check)action(async()=>{await api('check',{id:b.dataset.check});notice('Диагностика запущена. Результат — в фоновых процессах; статистику не изменяет.');await refresh();await tab('processes');},b);if(b.dataset.test)action(async()=>{await api('notify-test',{channel:b.dataset.test});notice('Тест добавлен в очередь');await deliveries();},b);});
