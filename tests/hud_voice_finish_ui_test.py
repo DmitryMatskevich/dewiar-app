@@ -30,6 +30,20 @@ with tempfile.TemporaryDirectory() as folder, sync_playwright() as pw:
       applyPersona('lira');openAsk();
     }""")
     field = page.locator("#askin")
+    # Layout events preserve the draft/caret and stay silent after success.
+    field.fill("Сохранить мой черновик")
+    field.evaluate("e=>e.setSelectionRange(4,8)")
+    sent_before = page.evaluate("sent.length")
+    for action in ("input_english", "input_russian"):
+        page.evaluate("action=>fire('voice_command',{action,status:'error',message:'Проверка ошибки'})", action)
+        assert page.locator("#voice-command-feedback").is_visible()
+        assert "клавиатура" in page.locator("#voice-command-message").inner_text()
+        assert "«команда»" not in page.locator("#voice-command-message").inner_text()
+        page.evaluate("action=>fire('voice_command',{action,status:'done'})", action)
+        assert page.locator("#voice-command-feedback").is_hidden()
+        assert field.input_value() == "Сохранить мой черновик"
+        assert field.evaluate("e=>[e.selectionStart,e.selectionEnd]") == [4,8]
+        assert page.evaluate("sent.length") == sent_before
     hint = field.get_attribute("title")
     assert "Ctrl+Enter" not in hint
     for word in ["Enter — новая строка", "стрелкой вверх", "«Лира»", "отдельно"]:

@@ -193,6 +193,8 @@ class AnswerMixin:
         не голосом (Telegram/MAX, см. Turn.via); raw — без быстрых путей и передачи специалисту (дела по расписанию);
         shown — что показать вместо текста; report(ok, text) — чем кончился ход (дела по расписанию: повтор при сбое)."""
         text = text.strip()
+        if not raw and not quiet and not via and not images and text and self._dispatch_input_layout_command(text):
+            return
         if not raw and not quiet and self._explicit_external_music(text):
             self._song_context=None
         if not via and not raw and not images:
@@ -1197,12 +1199,34 @@ class AnswerMixin:
         saved = []                                         # для «Чата» студии: что приложено (имя, путь, миниатюра картинки)
         for f in files[:10]:
             name = Path(str(f.get("name") or "файл")).name or "файл"
-            raw = f.get("b64", "")
-            data = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
             dst, n = inbox / name, 2
             while dst.exists():
                 dst, n = inbox / f"{Path(name).stem} ({n}){Path(name).suffix}", n + 1
-            dst.write_bytes(data)
+            source_path = Path(str(f.get("path") or "")).resolve() if f.get("upload_id") else None
+            upload_id = str(f.get("upload_id") or "")
+            if source_path:
+                cache_root = (self.workspace.ensure() / ".media-cache" / "chat-file-uploads").resolve()
+                if cache_root not in source_path.parents or not source_path.is_file():
+                    raise ValueError(f'Временное вложение «{name}» недоступно. Прикрепите его заново.')
+                source_size = source_path.stat().st_size
+                # Avoid reading large media into memory; it is already stored in the assistant's inbox.
+                data = source_path.read_bytes() if source_size <= 10 * 1024 * 1024 else b""
+                try:
+                    import shutil
+                    shutil.copyfile(source_path, dst)
+                finally:
+                    sessions = self.__dict__.get("_chat_file_uploads", {})
+                    lock = self.__dict__.setdefault("_chat_file_uploads_lock", __import__('threading').RLock())
+                    with lock:
+                        session = sessions.pop(upload_id, None)
+                    if session:
+                        import shutil
+                        shutil.rmtree(session["dir"], ignore_errors=True)
+            else:
+                raw = f.get("b64", "")
+                data = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+                source_size = len(data)
+                dst.write_bytes(data)
             rel = dst.relative_to(self.workspace.root).as_posix()
             if Path(name).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
                 try:
@@ -1212,9 +1236,9 @@ class AnswerMixin:
                     continue
                 except Exception:  # noqa: BLE001
                     pass
-            saved.append({"kind": "file", "name": dst.name, "path": rel, "size": len(data)})
+            saved.append({"kind": "file", "name": dst.name, "path": rel, "size": source_size})
             try:
-                body = extract(dst) if dst.suffix.lower() in (".md", ".txt", ".csv", ".html", ".htm", ".pdf", ".docx", ".odt") \
+                body = extract(dst) if source_size <= 50 * 1024 * 1024 and dst.suffix.lower() in (".md", ".txt", ".csv", ".html", ".htm", ".pdf", ".docx", ".odt") \
                     else (data.decode("utf-8") if len(data) < 400_000 else "")
             except Exception as e:  # noqa: BLE001
                 body = ""
@@ -1226,7 +1250,7 @@ class AnswerMixin:
                 parts.append(f"[Файл «{name}», сохранён в папке ассистента: {rel}]\n{cut}" +
                              ("\n…(дальше файл обрезан — целиком его можно прочитать инструментом read_file)" if len(cut) < len(body) else ""))
             else:
-                parts.append(f"[Файл «{name}» ({len(data) // 1024} КБ) сохранён в папке ассистента: {rel}; текста в нём нет]")
+                parts.append(f"[Файл «{name}» ({source_size // 1024} КБ) сохранён в папке ассистента: {rel}; текста в нём нет]")
             log.info("📎 %s → %s", name, rel)
         self._chat_att = (time.monotonic(), saved)
         q = text.strip() or ATT_DEFAULT_Q

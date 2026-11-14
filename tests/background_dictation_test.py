@@ -26,7 +26,18 @@ class Engine(AudioMixin):
     def note(self, value): self.notes.append(value)
     def _window_cmd(self, arg): return False
     def _voice_control_cmd(self, arg): return False
+    def _dispatch_input_layout_command(self, text): return False
     def ask(self, arg): self.command = arg; self.command_done.set()
+
+class LayoutEngine(Engine):
+    """Engine with the keyboard switch recorded instead of calling macOS."""
+    def __init__(self):
+        super().__init__()
+        self.switched, self.locked = [], []
+    def _switch_input_layout(self, action):
+        self.locked.append(self._dictation_lock._is_owned())
+        self.switched.append(action)
+        return True
 
 class Background(unittest.TestCase):
     def test_wake_command_starts_background_without_opening_window(self):
@@ -46,9 +57,9 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Лира, текст', ['лира']), ('', ('insert','')))
         for phrase in ('обработать', 'обработай', 'обработка', 'обработать текст', 'обработай текст', 'обработка текста'):
             self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('process','')))
-        for phrase in ('кириллица', 'кириллицу', 'русский', 'на кириллицу', 'на русский'):
+        for phrase in ('кириллица', 'кириллицу', 'на кириллицу', 'на русский'):
             self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('layout_cyr','')))
-        for phrase in ('латиница', 'латиницу', 'английский', 'на латиницу', 'на английский'):
+        for phrase in ('латиница', 'латиницу', 'на латиницу', 'на английский'):
             self.assertEqual(parse('Лира, ' + phrase, ['лира']), ('', ('layout_lat','')))
         self.assertEqual(parse('Мы обсудили Лира и другие вопросы', ['лира'])[1], None)
         self.assertEqual(parse('Лира', ['лира']), ('', ('show','')))
@@ -61,6 +72,53 @@ class Background(unittest.TestCase):
         self.assertEqual(parse('Лира, сотри', ['лира']), ('', ('clear','')))
         self.assertEqual(parse('Лира, очисти текст', ['лира']), ('', ('clear','')))
         self.assertEqual(parse('Решение принято. Лира, стоп', ['лира']), ('Решение принято.', ('stop','')))
+
+    def test_layout_command_switches_at_once_and_stays_out_of_chat_draft(self):
+        e = LayoutEngine()
+        e._background_dictation = False
+        with patch('tools.MAC', True):
+            e._dictation_result('Лира, английский.', 'test', 3)
+            e._dictation_result('Привет. Русский. Как дела?', 'test', 3)
+            e._dictation_result('Лира. Английский.', 'test', 3)
+            e._dictation_result('Пишу письмо, Лира, английский, dear John.', 'test', 3)
+            e._dictation_result('Перевод на английский язык.', 'test', 3)
+        self.assertEqual(e.switched, ['input_english', 'input_russian', 'input_english', 'input_english'])
+        self.assertEqual(e.locked, [False] * 4)        # раскладка — не под блокировкой диктовки
+        partial = [event['text'] for kind, event in e.events if kind == 'dictation' and event.get('state') == 'partial']
+        self.assertEqual(partial, ['Привет.', 'Как дела?', 'Пишу письмо', 'dear John.', 'Перевод на английский язык.'])
+        self.assertFalse(any(event.get('state') == 'finishing' for _, event in e.events))   # «Лира.» не отправила черновик
+        self.assertTrue(e.dictation_active)
+
+    def test_layout_command_in_background_dictation_keeps_draft(self):
+        e = LayoutEngine()
+        with patch('tools.MAC', True):
+            e._dictation_result('Важный черновик. Лира, русский', 'test', 3)
+            e._dictation_result('Английский', 'test', 3)
+        self.assertEqual(e.switched, ['input_russian', 'input_english'])
+        self.assertEqual(e._background_draft, ['Важный черновик.'])
+        self.assertTrue(e.dictation_active)
+
+    def test_layout_words_stay_text_without_mac_or_in_image_editor(self):
+        e = LayoutEngine()
+        e._background_dictation = False
+        with patch('tools.MAC', False):
+            e._dictation_result('Английский.', 'test', 3)
+        self.assertEqual(e.switched, [])
+        self.assertEqual(e.events[-1][1]['text'], 'Английский.')
+        e._visual_dictation_target = 'asset'
+        with patch('tools.MAC', True):
+            e._dictation_result('Английский.', 'test', 3)
+        self.assertEqual(e.switched, [])
+
+    def test_draft_actions_are_not_typed_into_chat_dictation(self):
+        e = Engine()
+        e._background_dictation = False
+        for phrase, action in [('Лира, латиница', 'layout_lat'), ('Лира, кириллица', 'layout_cyr'),
+                               ('Текст. Лира, обработать', 'process'), ('Лира, перевод', 'translate')]:
+            e.events.clear()
+            e._dictation_result(phrase, 'test', 3)
+            self.assertIn(('draft_command', {'action': action}), e.events, phrase)
+            self.assertFalse(any('Лира' in str(event.get('text', '')) for _, event in e.events), phrase)
 
     def test_voice_copy_also_works_in_normal_dictation(self):
         e = Engine()

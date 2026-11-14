@@ -13,7 +13,7 @@ def action(key, title, verbs, slot='приложение'):
 
 
 DEFAULT = {
-    'defaults_revision': 3,
+    'defaults_revision': 6,
     'actions': [
         action('open', 'Открыть приложение', ['открой', 'открыть', 'отрыть', 'запусти', 'запустить']),
         action('quit', 'Закрыть приложение', ['закрой', 'закрыть', 'заверши', 'завершить', 'отключи', 'отключить', 'выключи', 'выключить']),
@@ -25,6 +25,10 @@ DEFAULT = {
          'phrases': ['не беспокоить', 'переговоры', 'включи не беспокоить', 'включи режим не беспокоить', 'включи фокусировку не беспокоить']},
         {'id': 'dnd_off', 'title': 'Выключить «Не беспокоить» на Mac', 'enabled': True,
          'phrases': ['выключи не беспокоить', 'выключи режим не беспокоить', 'отключи не беспокоить', 'отключи режим не беспокоить']},
+        {'id': 'input_english', 'title': 'Переключить набор на английский', 'enabled': True,
+         'phrases': ['английский', 'лира английский', 'лира, английский', 'вера английский', 'вера, английский']},
+        {'id': 'input_russian', 'title': 'Переключить набор на русский', 'enabled': True,
+         'phrases': ['русский', 'лира русский', 'лира, русский', 'вера русский', 'вера, русский']},
         action('song_process', 'Добавить песню и запустить пакетную обработку',
                ['найти песню', 'поиск песни', 'поискать песню', 'обработать песню', 'обработай песню'], 'запрос'),
         action('yandex_search', 'Найти песню в Яндекс Музыке', ['найди песню', 'открой песню', 'включи песню', 'найди трек', 'включи трек'], 'запрос'),
@@ -58,7 +62,7 @@ DEFAULT = {
     ],
 }
 IDS = {a['id'] for a in DEFAULT['actions']}
-LITERAL_ACTIONS = {'dnd_on', 'dnd_off'}
+LITERAL_ACTIONS = {'dnd_on', 'dnd_off', 'input_english', 'input_russian'}
 QUERY_ACTIONS = {'yandex_search', 'song_process'}
 NEW_APPLICATIONS = {'com.apple.iWork.Numbers', 'org.libreoffice.script', 'com.apple.mail', 'com.apple.AddressBook'}
 
@@ -88,6 +92,25 @@ def config(value=None):
             known = {a.get('id') for a in result['actions']}
             result['actions'].extend(copy.deepcopy(a) for a in DEFAULT['actions']
                                      if a['id'] == 'song_process' and a['id'] not in known)
+        if revision < 4 and isinstance(result['actions'], list) and all(isinstance(a, dict) for a in result['actions']):
+            known = {a.get('id') for a in result['actions']}
+            result['actions'].extend(copy.deepcopy(a) for a in DEFAULT['actions']
+                                     if a['id'] in {'input_english', 'input_russian'} and a['id'] not in known)
+        if revision < 5 and isinstance(result['actions'], list):
+            defaults = {a['id']: a for a in DEFAULT['actions']}
+            for saved in result['actions']:
+                if isinstance(saved, dict) and saved.get('id') in {'input_english', 'input_russian'}:
+                    phrases = saved.get('phrases')
+                    if isinstance(phrases, list):
+                        phrases.extend(p for p in defaults[saved['id']]['phrases']
+                                       if p.startswith('вера') and p not in phrases)
+        if revision < 6 and isinstance(result['actions'], list):
+            for saved in result['actions']:
+                if isinstance(saved, dict) and saved.get('id') in {'input_english', 'input_russian'}:
+                    phrases = saved.get('phrases')
+                    bare = 'английский' if saved['id'] == 'input_english' else 'русский'
+                    if isinstance(phrases, list) and bare not in phrases:
+                        phrases.append(bare)
     return result
 
 
@@ -149,7 +172,7 @@ def target(name, c):
     return next(iter(matches), name)
 
 
-def parse(text, value=None):
+def parse(text, value=None, assistant_names=None):
     from media_intent import protected
     if protected(text):
         return None
@@ -160,7 +183,15 @@ def parse(text, value=None):
     for a in c['actions']:
         if a['id'] in LITERAL_ACTIONS:
             literal = re.sub(r'[, ]+пожалуйста$', '', t, flags=re.I)
-            if any(norm(literal) == norm(phrase) for phrase in a['phrases']):
+            literal = ' '.join(re.sub(r'[.,!?;:]+', ' ', literal).split())
+            phrases = list(a['phrases'])
+            if a['id'] in {'input_english', 'input_russian'}:
+                language = 'английский' if a['id'] == 'input_english' else 'русский'
+                names = assistant_names or []
+                if isinstance(names, str): names = [names]
+                phrases.extend(f'{name} {language}' for name in names
+                               if isinstance(name, str) and name.strip())
+            if any(norm(literal) == norm(phrase) for phrase in phrases):
                 matches.append((1000, {'action': a['id'], 'enabled': a['enabled'], 'title': a['title']}))
             continue
         slot = '{запрос}' if a['id'] in QUERY_ACTIONS else '{приложение}'
@@ -199,3 +230,81 @@ def parse(text, value=None):
             query = re.sub(r'\s+(?:(?:в|на|через)\s+)?(?:яндекс\w*|yandex)(?:[ -]+(?:музык\w*|music))?\s*$', '', query, flags=re.I)
             result = dict(result, query=query)
     return result
+
+
+LAYOUT_IDS = ('input_english', 'input_russian')
+_SEP = r'[\s,.:;!?…—–-]'
+
+
+def _plain(value):
+    """«Лира, Английский.» → «лира английский»: регистр, ё и знаки препинания не важны."""
+    words = re.sub(r'[^\w-]+', ' ', str(value).casefold().replace('ё', 'е')).split()
+    return ' '.join(w.strip('-') for w in words if w.strip('-'))
+
+
+def _words_rx(plain):
+    return (_SEP + '+').join(re.escape(w).replace('е', '[её]') for w in plain.split())
+
+
+def layout_segments(text, value=None, assistant_names=()):
+    """Продиктованный фрагмент → [('text', слова) | ('layout', 'input_english' | 'input_russian')].
+    None — команды раскладки во фрагменте нет.
+
+    Команда — отдельное предложение («… Английский. …», можно с именем: «Лира, английский»)
+    или имя помощника с фразой внутри предложения, если после фразы конец предложения
+    или знак препинания («пишу письмо, Лира, английский, dear John»). Без имени слово
+    внутри предложения остаётся текстом («перевод на английский язык»)."""
+    c = config(value)
+    names = sorted({_plain(n) for n in assistant_names or () if isinstance(n, str) and _plain(n)},
+                   key=len, reverse=True)
+    whole, core = {}, {}
+    for a in c['actions']:
+        if not isinstance(a, dict) or a.get('id') not in LAYOUT_IDS or not a.get('enabled'):
+            continue
+        for phrase in a.get('phrases') or []:
+            p = _plain(phrase)
+            if not p:
+                continue
+            bare = next((p[len(n) + 1:] for n in names if p.startswith(n + ' ')), p)
+            for key in [p, bare] + [n + ' ' + bare for n in names]:
+                whole.setdefault(key, a['id'])
+            core.setdefault(bare, a['id'])
+    if not core:
+        return None
+    inside = None
+    if names:
+        name_rx = '(?:' + '|'.join(_words_rx(n) for n in names) + r')(?!\w)'
+        # после фразы — конец, знак препинания или следующее обращение («Лира английский Лира вставить» без точек)
+        inside = re.compile(r'(?<!\w)' + name_rx + _SEP + r'+(?P<cmd>'
+                            + '|'.join(_words_rx(p) for p in sorted(core, key=len, reverse=True))
+                            + r')(?!\w)(?=\s*(?:[.,!?;:…—–-]|$|' + name_rx + r'))[\s.,!?;:…—–-]*', re.I)
+    items = []
+    for sentence in re.split(r'(?<=[.!?…])\s+', ' '.join(str(text or '').split())):
+        if not sentence:
+            continue
+        action = whole.get(_plain(sentence))
+        if action:
+            # «Лира. Английский.» — распознаватель отделил имя точкой: это одна команда,
+            # а не имя в конце черновика (оно отправило бы сообщение).
+            if items and items[-1][0] == 'text' and _plain(items[-1][1]) in names:
+                items.pop()
+            items.append(('layout', action))
+            continue
+        pos = 0
+        for match in inside.finditer(sentence) if inside else ():
+            before = sentence[pos:match.start()].rstrip(' ,;:—–-')
+            if before.strip():
+                items.append(('text', before))
+            items.append(('layout', core[_plain(match['cmd'])]))
+            pos = match.end()
+        if sentence[pos:].strip():
+            items.append(('text', sentence[pos:].strip()))
+    if not any(kind == 'layout' for kind, _ in items):
+        return None
+    merged = []
+    for kind, value in items:
+        if kind == 'text' and merged and merged[-1][0] == 'text':
+            merged[-1] = ('text', merged[-1][1] + ' ' + value)
+        else:
+            merged.append((kind, value))
+    return merged

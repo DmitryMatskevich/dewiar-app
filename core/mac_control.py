@@ -1,6 +1,9 @@
 """Named Mac application/window actions. No shell scripts, forced quits, clicks or arbitrary processes."""
 import re
 import subprocess
+import json
+import os
+import sys
 import time
 from pathlib import Path
 from macsys import applications
@@ -360,6 +363,8 @@ def execute(args, alias_config=None):
     if action in ('dnd_on', 'dnd_off'):
         from mac_focus import set_dnd
         return set_dnd(action == 'dnd_on')
+    if action in ('input_english', 'input_russian'):
+        return set_input_language('English' if action == 'input_english' else 'Russian')
     if action not in ('screens','list','open','quit','focus','minimize','move','cursor','windows','inspect','click','type','key','scroll'):
         raise ValueError('Неизвестное действие с приложением')
     if action=='screens':return {'screens':screens()}
@@ -522,3 +527,45 @@ def execute(args, alias_config=None):
     if not rect['x']<=x<=rect['x']+rect['w'] or not rect['y']<=y<=rect['y']+rect['h']:raise ValueError('Окно вне видимой области экрана')
     if CGWarpMouseCursorPosition(CGPointMake(x,y))!=0:raise ValueError('macOS не переместила курсор')
     return {'message':'Курсор перемещён к окну «'+row['name']+'», без нажатия.','point':{'x':x,'y':y}}
+
+
+def _desired_input_source(layout_ids, language):
+    from mac_input_source import desired_input_source
+    return desired_input_source(layout_ids, str(language).casefold())
+
+
+def _input_source_worker(*args):
+    """Use a main-thread subprocess even when the caller has no Cocoa run loop."""
+    command = ([sys.executable, '--input-source-worker'] if getattr(sys, 'frozen', False)
+               else [sys.executable, '-B', str(Path(__file__).with_name('mac_input_source.py'))])
+    try:
+        result = subprocess.run(command + list(args), capture_output=True, text=True,
+                                encoding='utf-8', timeout=5,
+                                env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError('Служба переключения раскладки macOS не ответила вовремя') from error
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError(f'Служба переключения раскладки macOS завершилась без ответа (код {result.returncode})') from error
+    if not isinstance(data, dict):
+        raise RuntimeError('Служба переключения раскладки macOS вернула неверный ответ')
+    if result.returncode != 0 or data.get('ok') is not True:
+        raise RuntimeError(data.get('error') or f'Ошибка переключения раскладки macOS (код {result.returncode})')
+    return data
+
+
+def set_input_language(language):
+    """Select an enabled layout without native calls in the engine/UI threads."""
+    desired = str(language).casefold()
+    if desired not in ('english', 'russian'):
+        raise ValueError('Выберите английскую или русскую раскладку')
+    return _input_source_worker('select', desired)
+
+
+def current_input_language():
+    """Read the selected layout; the optional indicator must never crash the app."""
+    try:
+        return _input_source_worker('current')['language']
+    except Exception:
+        return ''

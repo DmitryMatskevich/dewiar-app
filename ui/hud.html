@@ -1672,7 +1672,12 @@ function copyDraftByVoice(action) {
   }).catch(error => { showVoiceCommand({action, status:"error", message:error.message || String(error)}); });
 }
 function showVoiceCommand(e) {
-  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", process:"обработать текст", translate:"перевести", layout_cyr:"кириллица", layout_lat:"латиница", stop:"стоп", cancel:"отмена"};
+  const layout = e.action === "input_russian" || e.action === "input_english";
+  if (layout && e.status !== "error") {
+    if ($("voice-command-feedback").dataset.action?.startsWith("input_")) $("voice-command-feedback").hidden = true;
+    return;
+  }
+  const labels = {insert:"вставить", copy:"скопировать", clear:"очистить", process:"обработать текст", translate:"перевести", layout_cyr:"кириллица", layout_lat:"латиница", input_russian:"русская клавиатура", input_english:"английская клавиатура", stop:"стоп", cancel:"отмена"};
   const label = e.action === "command" ? String(e.command || "команда") : (labels[e.action] || "команда");
   let message = "Команда «" + label + "» получена.";
   if (e.status === "received") message += " Выполняю…";
@@ -1692,6 +1697,7 @@ function showVoiceCommand(e) {
     else if (e.action === "clear" || e.action === "cancel") message += " Текст очищен.";
   }
   $("voice-command-message").textContent = message;
+  $("voice-command-feedback").dataset.action = e.action || "";
   $("voice-command-access").hidden = e.reason_code !== "accessibility";
   $("voice-command-feedback").hidden = false;
   openAsk();

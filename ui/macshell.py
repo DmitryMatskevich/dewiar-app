@@ -855,6 +855,16 @@ def make_api(app):
             open_target(url)
             return True
 
+        def keyboard_layout_state(self):
+            from mac_control import current_input_language
+            return current_input_language()
+
+        def set_keyboard_layout(self, language):
+            if language not in ("english", "russian"):
+                raise ValueError("Выберите английскую или русскую раскладку")
+            from mac_control import set_input_language
+            return set_input_language("English" if language == "english" else "Russian")
+
         def open_meeting_file(self, relative, summary_path):
             """Open a meeting artifact, but never an arbitrary path from the page."""
             rel = str(relative or "").replace("\\", "/")

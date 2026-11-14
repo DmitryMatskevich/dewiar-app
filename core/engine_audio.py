@@ -1033,17 +1033,47 @@ class AudioMixin:
             self.stt_q.put((b"", False, False, None, "dictation_end", sid))
 
     def _dictation_result(self, text, by, sid):
-        """Фрагменты идут по порядку; имя текущего помощника в конце отправляет черновик."""
-        paste = None
+        """Фрагменты идут по порядку; имя текущего помощника в конце отправляет черновик.
+        «Английский» / «Русский» (отдельной фразой или «Лира, английский») переключают раскладку сразу,
+        в черновик не попадают и подтверждения не ждут; слова до и после команды остаются текстом."""
+        segments = self._dictation_layout_segments(text)
+        actions = []
         with self._dictation_lock:
             if not self.dictation_active or sid != self._dictation_session:
                 return
-            if getattr(self, "_background_dictation", False):
-                paste = self._background_dictation_result(text)
-            else:
-                self._foreground_dictation_result(text, by, sid)
-        if paste:
-            paste()    # переход в приложение и ⌘V занимают до 1,5 с — не под блокировкой диктовки
+            if getattr(self, '_visual_dictation_target', None):
+                segments = None    # редактор снимка: слова — его черновик, не команды рабочего стола
+            for kind, value in segments or [('text', text)]:
+                if kind == 'layout':
+                    actions.append(lambda action=value: self._switch_input_layout(action))
+                elif getattr(self, "_background_dictation", False):
+                    paste = self._background_dictation_result(value)
+                    if paste:
+                        actions.append(paste)
+                else:
+                    self._foreground_dictation_result(value, by, sid)
+        for action in actions:
+            action()   # раскладка, переход в приложение и ⌘V (до 1,5 с) — не под блокировкой диктовки
+
+    def _dictation_layout_segments(self, text):
+        """Команды раскладки во фрагменте диктовки (см. voice_commands.layout_segments); None — команд нет."""
+        if not text or getattr(self, '_switch_input_layout', None) is None:
+            return None
+        import tools
+        if not tools.MAC:
+            return None
+        try:
+            from voice_commands import layout_segments
+            settings = getattr(self, 's', None)
+            names = [n for group in (getattr(self, 'aliases', None) or {}).values() for n in group or ()]
+            try:
+                names += [p.get('name') for p in self.personas.all() if isinstance(p, dict)]
+            except Exception:  # noqa: BLE001 — без списка персонажей хватит имён из aliases
+                pass
+            return layout_segments(text, settings.get('voice_commands') if settings is not None else None, names)
+        except Exception as error:  # noqa: BLE001 — фраза останется текстом черновика
+            log.warning('Диктовка: команда раскладки не разобрана: %s', error)
+            return None
 
     def _foreground_dictation_result(self, text, by, sid):
         with self._dictation_lock:
@@ -1069,6 +1099,12 @@ class AudioMixin:
                 if words:
                     self._dictation_emit(state="partial", text=words, by=by, session=sid)
                 self._run_dictation_voice_command(command[1])
+                return
+            if command and command[0] in ("process", "translate", "layout_cyr", "layout_lat"):
+                # «Лира, обработать / перевод / латиница / кириллица» — действие над черновиком, не его текст
+                if words:
+                    self._dictation_emit(state="partial", text=words, by=by, session=sid)
+                self.emit("draft_command", action=command[0])
                 return
             if command and command[0] in ("cancel", "stop", "listen"):
                 if words:
@@ -1631,6 +1667,8 @@ class AudioMixin:
             # имя уже узнано по звуку и отрезано; если распознаватель всё же написал его — уберём
             pid, end = find_name(text, self.aliases) if text else (None, 0)
             rest = text[end:].lstrip(" ,.!?:;—-").strip() if pid else text.strip()
+            if rest and self._dispatch_input_layout_command(rest):
+                return
             from background_dictation import draft_command
             action = draft_command(rest)
             if action:
@@ -1673,6 +1711,8 @@ class AudioMixin:
             if pid != self.s.get("persona"):
                 self.switch_persona(pid)
             rest = text[end:].lstrip(" ,.!?:;—-").strip()
+            if rest and self._dispatch_input_layout_command(rest):
+                return
             from background_dictation import draft_command
             action = draft_command(rest)
             if action:
@@ -1701,6 +1741,8 @@ class AudioMixin:
             else:
                 self.ask(rest)
         elif follow and text:
+            if self._dispatch_input_layout_command(text):
+                return
             if self._voice_control_cmd(text):
                 return
             ws = _norm(re.sub(r"[^\w ]", " ", text)).split()

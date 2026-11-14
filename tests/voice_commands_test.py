@@ -43,6 +43,67 @@ class VoiceCommandsTest(unittest.TestCase):
         self.assertIsNone(vc.parse('таблица'))
         self.assertIsNone(vc.parse('открой таблицу из файла'))
 
+    def test_keyboard_layout_literal_commands(self):
+        for phrase in ['Лира русский', 'Лира, русский', 'Лира. Русский.', 'Вера русский']:
+            with self.subTest(phrase=phrase): self.assertEqual(vc.parse(phrase)['action'], 'input_russian')
+        for phrase in ['Лира английский', 'Лира, английский', 'Лира. Английский.', 'Вера английский']:
+            with self.subTest(phrase=phrase): self.assertEqual(vc.parse(phrase)['action'], 'input_english')
+        for old_phrase in ['переключить английский', 'шрифт русский', 'клавиатура английский', 'набор русский']:
+            self.assertIsNone(vc.parse(old_phrase), old_phrase)
+        self.assertEqual(vc.parse('Патрик. Русский.', assistant_names=['Патрик'])['action'], 'input_russian')
+        self.assertEqual(vc.parse('Эва английский', assistant_names=['Эва'])['action'], 'input_english')
+
+    def test_keyboard_layout_command_switches_silently(self):
+        config = vc.config()
+        engine = SimpleNamespace(s=SimpleNamespace(get=lambda *_: config),
+                                 personas=SimpleNamespace(all=lambda: [{'name': 'Патрик'}]),
+                                 toolbox=Mock(), _say_quick=Mock(), confirm=Mock(return_value=False))
+        engine.toolbox.policy.return_value = (True, True)
+        with patch.object(tools, 'MAC', True), patch.object(tools, 't_control_mac_app', return_value='Включена русская раскладка.') as run:
+            self.assertTrue(MusicMixin._pc_cmd(engine, 'Патрик. Русский.'))
+        self.assertEqual(run.call_args.args[0]['action'], 'input_russian')
+        engine.confirm.assert_not_called()
+        engine._say_quick.assert_not_called()
+
+    def test_layout_segments_in_dictation(self):
+        names = ['Лира', 'Патрик']
+        self.assertEqual(vc.layout_segments('Английский', None, names), [('layout', 'input_english')])
+        self.assertEqual(vc.layout_segments('Лира, русский.', None, names), [('layout', 'input_russian')])
+        self.assertEqual(vc.layout_segments('Лира. Английский.', None, names), [('layout', 'input_english')])
+        self.assertEqual(vc.layout_segments('Привет. Английский. Hello.', None, names),
+                         [('text', 'Привет.'), ('layout', 'input_english'), ('text', 'Hello.')])
+        self.assertEqual(vc.layout_segments('Пишу, Патрик, русский, дальше', None, names),
+                         [('text', 'Пишу'), ('layout', 'input_russian'), ('text', 'дальше')])
+        self.assertEqual(vc.layout_segments('Лира английский Лира вставить', None, names),
+                         [('layout', 'input_english'), ('text', 'Лира вставить')])
+        for text in ['Перевод на английский язык.', 'Лира, английский язык сложный.', 'Русский язык', 'Обычный текст']:
+            self.assertIsNone(vc.layout_segments(text, None, names), text)
+        off = vc.config()
+        for action in off['actions']:
+            if action['id'] == 'input_english': action['enabled'] = False
+        self.assertIsNone(vc.layout_segments('Английский.', off, names))
+        self.assertEqual(vc.layout_segments('Русский.', off, names), [('layout', 'input_russian')])
+        custom = vc.config()
+        for action in custom['actions']:
+            if action['id'] == 'input_english': action['phrases'] = ['лира инглиш']
+        self.assertEqual(vc.layout_segments('Инглиш.', custom, names), [('layout', 'input_english')])
+        self.assertIsNone(vc.layout_segments('Английский.', custom, names))
+
+    def test_dictation_layout_switch_is_silent(self):
+        engine = SimpleNamespace(toolbox=Mock(), note=Mock(), emit=Mock(), emit_keyboard_layout=Mock(), _say_quick=Mock())
+        engine.toolbox.policy.return_value = (True, True)
+        with patch.object(tools, 't_control_mac_app', return_value='Включена английская раскладка.') as run:
+            self.assertTrue(MusicMixin._switch_input_layout(engine, 'input_english'))
+        self.assertEqual(run.call_args.args[0], {'action': 'input_english'})
+        engine.note.assert_not_called(); engine._say_quick.assert_not_called()
+        with patch.object(tools, 't_control_mac_app', side_effect=ValueError('В настройках macOS не включена английская раскладка клавиатуры')):
+            self.assertFalse(MusicMixin._switch_input_layout(engine, 'input_english'))
+        engine.note.assert_called_once()
+        engine.toolbox.policy.return_value = (False, False)
+        with patch.object(tools, 't_control_mac_app') as run:
+            self.assertFalse(MusicMixin._switch_input_layout(engine, 'input_russian'))
+        run.assert_not_called()
+
     def test_numbers_missing_names_the_app_instead_of_bundle_id(self):
         import mac_control
         with self.assertRaisesRegex(mac_control.AppNotFound, '«Numbers»'):

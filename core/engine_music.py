@@ -776,7 +776,13 @@ class MusicMixin:
         import tools as _tools
         from voice_commands import parse as parse_voice
         settings = getattr(self, 's', None)
-        configured = parse_voice(text, settings.get('voice_commands') if settings else None)
+        assistant_names = []
+        try:
+            assistant_names = [p.get('name') for p in self.personas.all() if isinstance(p, dict)]
+        except Exception:
+            pass
+        configured = parse_voice(text, settings.get('voice_commands') if settings else None,
+                                 assistant_names=assistant_names)
         # Голосовые команды «найти/поискать/обработать песню …» добавляют
         # карточку и сразу запускают фоновый поиск источников и пакетный разбор.
         # Это локальная операция студии, поэтому она не должна превращаться
@@ -799,6 +805,19 @@ class MusicMixin:
             configured = None
         if configured and not configured['enabled']:
             self._say_quick('Эта голосовая команда выключена в настройках «Руки → Голосовые команды».', text)
+            return True
+        if configured and configured['action'] in ('input_english', 'input_russian'):
+            on, _needs_confirm = self.toolbox.policy('control_mac_app')
+            if not on:
+                self._say_quick('Переключение клавиатуры выключено в настройках «Руки → Умения».', text)
+                return True
+            try:
+                _tools.t_control_mac_app(
+                    {k: v for k, v in configured.items() if k not in ('enabled', 'title')},
+                    self.toolbox.hooks,
+                )
+            except Exception as error:
+                self._say_quick(str(error), text)
             return True
         if configured and configured['action'] == 'song_library':
             on, needs_confirm = self.toolbox.policy('song_library')
@@ -830,10 +849,13 @@ class MusicMixin:
                     question = self.toolbox.describe(tool, args) if tool != 'yandex_music' else 'Открыть поиск в Яндекс Музыке: «' + args['query'] + '»?'
                     if not self.confirm(question, timeout=30):return
                     if not self.toolbox.policy(tool)[0]:return
+                    succeeded = False
                     try:
                         result = _tools.t_yandex_music(args, self.toolbox.hooks) if tool == 'yandex_music' else _tools.t_control_mac_app(args, self.toolbox.hooks)
+                        succeeded = True
                     except Exception as error:result = str(error)
-                    self._say_quick(result, text)
+                    if not (succeeded and args.get('action') in ('input_english', 'input_russian')):
+                        self._say_quick(result, text)
                 threading.Thread(target=run_confirmed, name='voice-command-confirm', daemon=True).start()
                 return True
         if configured and configured['action'] == 'yandex_search':
@@ -846,13 +868,15 @@ class MusicMixin:
         if _tools.MAC:
             from mac_control import parse as parse_app, AppNotFound
             request = {k:v for k,v in configured.items() if k not in ('enabled','title')} if configured else parse_app(text)
-            if not configured and request and request['action'] in ('open','quit','focus','minimize','dnd_on','dnd_off'):
+            if not configured and request and request['action'] in ('open','quit','focus','minimize','dnd_on','dnd_off','input_english','input_russian'):
                 request = None  # Removed templates must not return through the built-in parser.
             if request:
                 on, confirm = self.toolbox.policy("control_mac_app")
                 if on and not confirm:
+                    succeeded = False
                     try:
                         result = _tools.t_control_mac_app(request, self.toolbox.hooks)
+                        succeeded = True
                     except AppNotFound as error:
                         from voice_commands import config
                         known = configured and configured.get('application') in {x['target'] for x in config(settings.get('voice_commands') if settings else None)['applications']}
@@ -862,11 +886,13 @@ class MusicMixin:
                         return False  # Other commands (web, music, tasks) retain their normal routing.
                     except Exception as error:
                         result = str(error)
-                    self._say_quick(result, text)
+                    if not (succeeded and request.get('action') in ('input_english', 'input_russian')):
+                        self._say_quick(result, text)
                     return True
         c = parse(text)
         if not c:
             return False
+
         if c["op"] == "volume" and c.get("change") and self.radio.playing \
                 and self._radio_step(c["change"] > 0, text):
             return True                                        # играет радио — громче/тише само радио, как у колонки
@@ -902,6 +928,72 @@ class MusicMixin:
         self.emit("power", action=act, seconds=60 if act in ("shutdown", "reboot", "logout") else 0)
         log.info("⏻ %s → %s", text, act)
         self._say_quick(msg, text)
+        return True
+
+    def _is_input_layout_command(self, text):
+        """Recognize keyboard layout commands before any conversational routing starts."""
+        import tools
+        if not tools.MAC:
+            return False
+        from voice_commands import parse as parse_voice
+        settings = getattr(self, 's', None)
+        assistant_names = []
+        try:
+            assistant_names = [p.get('name') for p in self.personas.all() if isinstance(p, dict)]
+        except Exception:
+            pass
+        command = parse_voice(text, settings.get('voice_commands') if settings else None,
+                              assistant_names=assistant_names)
+        return bool(command and command.get('action') in ('input_english', 'input_russian'))
+
+    def _switch_input_layout(self, action):
+        """Раскладка по команде из диктовки: сразу, без подтверждения; и статус (voice_command), и индикатор
+        (keyboard_layout) обновляются и при успехе, и при ошибке — чтобы было видно, что команда дошла."""
+        language = 'english' if action == 'input_english' else 'russian'
+        on, _needs_confirm = self.toolbox.policy('control_mac_app')
+        if not on:
+            log.info('⌨️ Раскладка: %s — умение control_mac_app выключено', language)
+            self.emit('voice_command', action=action, status='error',
+                      message='Переключение клавиатуры выключено в настройках «Руки → Умения».')
+            self.emit_keyboard_layout()
+            return False
+        import tools as _tools
+        try:
+            _tools.t_control_mac_app({'action': action}, self.toolbox.hooks)
+        except Exception as error:  # noqa: BLE001 — причина уходит в окно и в журнал
+            message = str(error) or 'macOS не переключила раскладку клавиатуры.'
+            log.warning('⌨️ Раскладка не переключена (%s): %s', language, message)
+            self.note(message)
+            self.emit('voice_command', action=action, status='error', message=message)
+            self.emit_keyboard_layout()
+            return False
+        log.info('⌨️ Раскладка: %s', 'английская' if language == 'english' else 'русская')
+        self.emit('voice_command', action=action, status='done')
+        self.emit_keyboard_layout(language)
+        return True
+
+    def emit_keyboard_layout(self, language=None):
+        """Сообщить фронту текущую раскладку: индикатор A/R слева от значка звука."""
+        if language is None:
+            try:
+                from mac_control import current_input_language
+                import tools as _tools
+                language = current_input_language() if _tools.MAC else ''
+            except Exception as error:  # noqa: BLE001 — индикатор необязателен
+                log.info('⌨️ Текущая раскладка не определена: %s', error)
+                language = ''
+        try:
+            self.emit('keyboard_layout', language=language or '')
+        except Exception:  # noqa: BLE001 — эмит через мост может быть ещё не готов
+            pass
+
+    def _dispatch_input_layout_command(self, text):
+        """Run a recognized layout command directly, before it can become a chat turn."""
+        if not self._is_input_layout_command(text):
+            return False
+        self._pc_cmd(text)
+        if getattr(self, 'state', '') in ('thinking', 'listening'):
+            self.set_state('idle')
         return True
 
     def _obsidian_index_info(self):

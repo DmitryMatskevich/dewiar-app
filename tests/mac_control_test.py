@@ -25,6 +25,15 @@ class ControlTest(unittest.TestCase):
         self.screen=display(1,0)
         self.rect=dict(x=100,y=125,w=800,h=600)
 
+    def test_keyboard_source_selection_prefers_russian_and_abc(self):
+        ids = ['com.apple.keylayout.Russian', 'com.apple.keylayout.US', 'com.apple.keylayout.ABC']
+        self.assertEqual(mc._desired_input_source(ids, 'Russian'), 'com.apple.keylayout.russian')
+        self.assertEqual(mc._desired_input_source(ids, 'English'), 'com.apple.keylayout.abc')
+
+    def test_keyboard_source_selection_reports_missing_layout(self):
+        with self.assertRaisesRegex(ValueError, 'английская раскладка'):
+            mc._desired_input_source(['com.apple.keylayout.Russian'], 'English')
+
     def test_russian_commands(self):
         for text,action in [('Открой Калькулятор','open'),('Закрой приложение Safari','quit'),('Переключись на Safari','focus'),('Перенеси Safari на второй экран','move'),('Перемести курсор мыши на Safari','cursor'),('Покажи мониторы','screens')]:
             self.assertEqual(mc.parse(text)['action'],action)
