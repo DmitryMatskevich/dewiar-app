@@ -461,6 +461,7 @@ class TaskManager:
         ids = task.data.get('backup_project_ids') or [task.data.get('backup_project_id')]
         profiles = task.data.get('backup_profiles') or configured_projects(self.host.s)
         reports, steps, errors = [], [], []
+        web_uploads = []
         stopped = False
 
         def show(message):
@@ -506,10 +507,14 @@ class TaskManager:
                                                          task.cancel, delivery_progress, local_only=local_only):
                     line = f'{label} · {detail}'
                     reports.append(line)
-                    task.journal(('✅ ' if ok else '❌ ') + line)
+                    manual_web = detail.startswith('Веб-интерфейс:')
+                    if manual_web:
+                        web_uploads.append({'project': key, 'label': label, 'archive': str(archive), 'manifest': str(manifest)})
+                    task.journal(('✅ ' if ok else '⚠️ ' if manual_web else '❌ ') + line)
                     failed |= not ok
                 if failed:
-                    errors.append(f'{title}: не все назначения подтверждены')
+                    errors.append(f'{title}: не все назначения подтверждены'
+                                  + ('; требуется ручная загрузка через веб-интерфейс' if any(x['project'] == key for x in web_uploads) else ''))
             except InterruptedError as exc:
                 stopped = True
                 reports.append(str(exc))
@@ -527,7 +532,7 @@ class TaskManager:
         result = '\n'.join(reports)
         status = 'stopped' if stopped else 'failed' if errors else 'done'
         task.data.update(status=status, finished=status == 'done', result=result, activity='',
-                         error='; '.join(errors)[:2500], updated=_now(), outputs=[])
+                         error='; '.join(errors)[:2500], web_uploads=web_uploads, updated=_now(), outputs=[])
         (task.dir / 'итог.md').write_text(result + '\n', encoding='utf-8')
         for key in ids[len(steps):]:
             steps.append(f'- [ ] Резервная копия «{profiles.get(key, {}).get("title", key)}»')

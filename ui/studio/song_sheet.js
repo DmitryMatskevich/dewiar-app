@@ -295,7 +295,8 @@ window.SongSheet = (() => {
     }
     for(const chord of chordSpans) chord.classList.toggle('current-chord',chord===activeChord);
     const audio=document.getElementById?.('song-review-audio');
-    syncChordFollow(activeChord,ms>=0 && !!audio && !audio.paused && !audio.ended);
+    const playing=ms>=0 && !!audio && !audio.paused && !audio.ended;
+    syncChordFollow(activeChord,playing);
     const previousLine=paper.querySelector('.song-paper-line.playing-line');
     // A confirmed musical break wins over estimated lyric cues. A sustained
     // chord can belong to a previous row, so it must not control gap scrolling.
@@ -308,9 +309,26 @@ window.SongSheet = (() => {
     activeChord?.classList.add('current-chord');
     line?.classList.add('playing-line');
     selected?.closest('.song-paper-lyrics')?.classList.add('playing-line');
-    if(scroll && line && line!==previousLine) {
+    // The sheet follows the song: on a request (play from the sheet), and
+    // whenever the sheet is what is on screen and the line being played has
+    // gone below (or above) it — also when playback began from a card.
+    if(line && line!==previousLine && (scroll || (playing && sheetInView(paper) && !lineInView(line)))) {
       line.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
     }
+  }
+  function sheetInView(paper) {
+    // The sheet fills at least two fifths of the window: the user reads it.
+    // A card list on screen with the sheet's edge below it does not count.
+    const rect=paper.getBoundingClientRect?.(), height=window.innerHeight||0;
+    if(!rect || !height) return false;
+    return (Math.min(rect.bottom,height)-Math.max(rect.top,0))/height >= 0.4;
+  }
+  function lineInView(line) {
+    const rect=line.getBoundingClientRect?.(), height=window.innerHeight||0;
+    if(!rect || !height) return true;
+    const tools=document.querySelector('.song-sheet-tools')?.getBoundingClientRect?.();
+    const top=tools && tools.bottom>0 && tools.top<height/2 ? tools.bottom : 0;
+    return rect.top>=top && rect.bottom<=height-24;
   }
   function countdownState(ms,start,end) {
     const duration=end-start;
@@ -509,9 +527,23 @@ window.SongSheet = (() => {
         const spread=max-min;
         if(max>MAX_CHORD_FRET || spread>3 || fingeringFingers(positions)>4) return;
         const distinct=new Set(fretted).size;
-        const score=fretted.reduce((sum,f)=>sum+f,0)+max*1.25+distinct*0.7+
-          positions.filter(f=>f<0).length*7+Math.max(0,spread-4)*2-
-          positions.filter(f=>f===0).length*0.8;
+        // Ranking (lower is better), in the order a player wants:
+        //  1) open strings — the most, first;
+        //  2) closest to the nut — the lowest frets;
+        //  3) the fewest muted strings — and a muted string BETWEEN two
+        //     sounding ones (3rd and 5th silent while 4th rings) is very hard
+        //     to damp, so such a voicing is pushed to the very end. Muted
+        //     strings running off the bass or treble edge are normal.
+        const sounding=positions.map((f,i)=>f>=0?i:-1).filter(i=>i>=0);
+        const firstS=sounding[0], lastS=sounding[sounding.length-1];
+        const interiorMuted=positions.filter((f,i)=>f<0&&i>firstS&&i<lastS).length;
+        const edgeMuted=positions.filter(f=>f<0).length-interiorMuted;
+        const open=positions.filter(f=>f===0).length;
+        const score=interiorMuted*500        // scattered mutes: always last
+          -open*9                             // 1) open strings
+          +max*1.5+fretted.reduce((sum,f)=>sum+f,0)*0.5   // 2) close to the nut
+          +edgeMuted*5                        // 3) fewer muted strings (fuller voicing)
+          +distinct*0.5+Math.max(0,spread-3)*4;           // playability
         const shape=positions.map(f=>f<0?'x':String(f)).join('-');
         const previous=found.get(shape);
         found.set(shape,{score,shape,position:min,template:template||!!previous?.template});
@@ -540,7 +572,9 @@ window.SongSheet = (() => {
       const count=perPosition.get(item.position)||0;perPosition.set(item.position,count+1);
       return item.template||count<2;
     });
-    selected.sort((a,b)=>Number(b.template)-Number(a.template)||a.score-b.score||a.shape.localeCompare(b.shape));
+    // Order by the player's priorities (open, near the nut, fewest/edge
+    // mutes); the canonical movable form breaks a tie.
+    selected.sort((a,b)=>a.score-b.score||Number(b.template)-Number(a.template)||a.shape.localeCompare(b.shape));
     const result=selected.map(item=>item.shape);
     // Cache the complete selection, even when a tooltip asks for just one.
     fingeringCache.set(cacheKey,result);return result.slice(0,limit);
@@ -791,18 +825,19 @@ window.SongSheet = (() => {
     const card=document.querySelector('.song-chord-follow'), tip=chordFollowTip;
     if(!card || !tip) return;
     if(!tip.isConnected) { hideChordFollow(); return; }
-    const rect=tip.getBoundingClientRect(), gap=6;
-    if(rect.bottom<0 || rect.top>window.innerHeight) { card.style.visibility='hidden'; return; }
+    const paper=tip.closest('.song-paper') || document.querySelector('.song-paper');
+    const area=paper?.getBoundingClientRect?.();
+    // Only while the sheet is on screen; never floating over the card list.
+    if(!area || area.bottom<80 || area.top>window.innerHeight-40) { card.style.visibility='hidden'; return; }
     card.hidden=false; card.style.visibility='hidden';
-    const box=card.getBoundingClientRect();
-    // Above the chord being played when there is room (below the sticky
-    // tools of the sheet), otherwise under it.
+    const box=card.getBoundingClientRect(), gap=10;
+    // Pinned to one place — the right side of the sheet, where there is no
+    // text — so it does not jump from chord to chord. It rides just under the
+    // sticky tools and stays within the visible part of the sheet.
     const tools=document.querySelector('.song-sheet-tools')?.getBoundingClientRect?.();
-    const ceiling=Math.max(8,tools && tools.bottom>0 && tools.top<rect.top ? tools.bottom+4 : 8);
-    const above=rect.top-gap-box.height;
-    const top=above>=ceiling ? above : Math.min(window.innerHeight-box.height-8,rect.bottom+gap);
-    const left=Math.max(8,Math.min(window.innerWidth-box.width-8,rect.left+rect.width/2-box.width/2));
-    card.style.left=`${left}px`; card.style.top=`${top}px`; card.style.visibility='visible';
+    const top=Math.max(tools && tools.bottom>0 ? tools.bottom+gap : gap, Math.min(area.top, window.innerHeight-box.height-8));
+    const left=Math.min(window.innerWidth-box.width-8, area.right-box.width-gap);
+    card.style.left=`${Math.max(8,left)}px`; card.style.top=`${Math.max(8,top)}px`; card.style.visibility='visible';
   }
   function scheduleChordFollow() {
     if(!chordFollowTip || chordFollowFrame) return;

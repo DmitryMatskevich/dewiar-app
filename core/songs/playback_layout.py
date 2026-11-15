@@ -3,6 +3,17 @@ import re
 
 
 def display_words(phrase):
+    if phrase.get('cues'):
+        # Words already placed in the voice (word_timeline): the highlight and
+        # the chords use the same times.
+        def quality(cue):
+            if not cue.get('measured'):
+                return 'estimated_phrase'
+            return ('estimated_reference' if cue.get('method') == 'reference_edit_estimated' else
+                    'estimated_manual' if cue.get('method') == 'manual_word_edit_estimated' else 'aligned')
+        return [dict(start_ms=cue['start_ms'], end_ms=cue['end_ms'], quality=quality(cue),
+                     char_start=cue['char_start'], char_end=cue['char_end'],
+                     word_id=f"{phrase.get('phrase_id','phrase')}:{cue['char_start']}") for cue in phrase['cues']]
     tokens = list(re.finditer(r'\S+', phrase.get('text', '')))
     start, end = phrase.get('start_ms', 0), phrase.get('end_ms', 0)
     if not tokens or end <= start:

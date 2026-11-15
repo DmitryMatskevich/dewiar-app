@@ -273,6 +273,23 @@ class MusicMixin:
         и будильник), и ответить туда, куда просили; бот не подключён — голосом. Не удалось — повтор через
         JOB_RETRY_MIN; все попытки мимо — уведомление и запись в журнал сбоев. Итог — в самом деле (last_run,
         last_ok, last_error: студия, «Напоминания», и ночной разбор)."""
+        preset = str(item.get('preset') or '')
+        if preset.startswith('project-backup:'):
+            project_id = preset.split(':', 1)[1].strip()
+            try:
+                task = self.tasks.create_project_backup(project_id)
+                self.reminders.update(item.get('id'), {
+                    'last_run': datetime.now().isoformat(timespec='seconds'),
+                    'last_ok': True, 'last_error': ''})
+                self.emit('push', title='🗓 Резервирование запущено',
+                          text=f'Проект «{project_id}»: задача «{task.title}» создана и выполняется.', critical=False)
+            except Exception as exc:  # noqa: BLE001 — scheduler must survive one bad profile
+                self.reminders.update(item.get('id'), {
+                    'last_run': datetime.now().isoformat(timespec='seconds'),
+                    'last_ok': False, 'last_error': str(exc)[:200]})
+                self.emit('push', title='⚠ Резервирование не запущено',
+                          text=f'Проект «{project_id}»: {str(exc)[:240]}', critical=True)
+            return
         end = time.monotonic() + 180
         while time.monotonic() < end and (self.turn is not None or self.state in ("speaking", "thinking") or self.alarm):
             time.sleep(1.0)

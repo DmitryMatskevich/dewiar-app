@@ -327,3 +327,38 @@ console.log('Short pauses carry chords without a «Проигрыш» label; voi
   assert.match(s.toolbar(layoutRow),/id="song-layout-edit"[^>]*aria-pressed="false"/);
   console.log('Labels, blank lines and layout buttons of the sheet: OK');
 }
+// Fingering priority: open strings first, then closest to the nut, then the
+// fewest muted strings — and a muted string between two sounding ones (very
+// hard to damp) is pushed to the very end.
+{
+  const frets=sh=>sh.split('-').map(x=>x==='x'?-1:Number(x));
+  const opens=sh=>frets(sh).filter(f=>f===0).length;
+  const interior=sh=>{const p=frets(sh),snd=p.map((f,i)=>f>=0?i:-1).filter(i=>i>=0);let n=0;for(let i=snd[0]+1;i<snd[snd.length-1];i++)if(p[i]<0)n++;return n;};
+  // The default pick uses open strings and sits low on the neck.
+  assert.equal(s.chordFingering('Em'),'0-0-0-2-2-0');   // 4 open strings
+  assert.equal(s.chordFingering('Am'),'0-1-2-2-0-x');
+  assert.equal(s.chordFingering('C/G'),'0-1-0-2-3-3');  // full, not the thin 0-1-0-x-x-x
+  for(const name of ['C','G','A','E','Cadd9','A7']) {
+    assert.ok(opens(s.chordFingering(name))>=2,`${name}: open strings expected, got ${s.chordFingering(name)}`);
+  }
+  for(const name of ['C','G','D','A','E','Dm','Cadd9','A7','Am','Em','F']) {
+    assert.equal(interior(s.chordFingering(name)),0,`${name}: default must not mute an inner string`);
+  }
+  // D/F# prefers the full shape over the thumb-muted inner-A one.
+  assert.equal(s.chordFingering('D/F#'),'2-3-2-0-0-2');
+  // An inner muted string (hard to damp) is never first, and comes last.
+  for(const name of ['C/G','D/F#','Bm','Am','G']) {
+    const list=s.chordFingerings(name);
+    const firstInterior=list.findIndex(sh=>interior(sh)>0);
+    if(firstInterior>=0) {
+      // Inner-muted shapes form the tail: every clean shape comes first.
+      assert.ok(list.slice(firstInterior).every(sh=>interior(sh)>0),`${name}: a clean shape after an inner-muted one`);
+      assert.ok(firstInterior>list.length/2,`${name}: inner-muted shapes not pushed to the end`);
+    }
+  }
+  // Closest to the nut when two voicings are otherwise alike (both open, both clean).
+  const am=s.chordFingerings('Am').filter(sh=>interior(sh)===0);
+  const lowest=Math.min(...frets(am[0]).filter(f=>f>0));
+  assert.ok(am.slice(1).every(sh=>Math.min(...frets(sh).filter(f=>f>0).concat([99]))>=lowest-0),'Am: not ordered toward the nut');
+  console.log('Fingering priority — open strings, near the nut, inner mutes last: OK');
+}

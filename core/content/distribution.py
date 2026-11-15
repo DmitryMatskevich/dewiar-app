@@ -33,7 +33,7 @@ def _target(c,ident):
         'binding':('id','revision','route','role'),
         'connection':('id','platform','transport'),
         'identity':('id','revision','platform','name','kind','external_id','url'),
-        'destination':('id','revision','platform','name','kind','external_id','url','language','audience','rules')}.items() for record in [snapshot[key]]}
+        'destination':('id','revision','platform','name','kind','external_id','url','language','audience','rules','max_characters')}.items() for record in [snapshot[key]]}
 
 def get(store,ident):
     with store.db() as c:
@@ -119,6 +119,8 @@ def update(store,args):
         c.execute('BEGIN IMMEDIATE');variant=_variant(c,ident);campaign=_campaign(c,variant['campaign_id'])
         if campaign['archived']:raise ValueError('Задание в архиве')
         if variant['revision']!=expected:raise ValueError('revision_conflict: вариант уже изменён')
+        cap=variant.get('target',{}).get('destination',{}).get('max_characters',0)
+        if cap and len(value)>cap:raise ValueError(f'Текст длиннее лимита назначения: {len(value)} из {cap} символов')
         if variant['text']==value and variant['canonical_url']==url:return variant
         variant={**variant,'text':value,'canonical_url':url,'revision':expected+1,'updated_at':now(),'status':'draft'};_write(c,variant)
     return variant

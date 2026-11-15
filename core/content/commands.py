@@ -26,6 +26,8 @@ def dispatch(store, cmd, args, tasks=None):
     if cmd in video_store.COMMANDS:return video_store.dispatch(store,cmd,args)
     from . import social_store
     if cmd in social_store.COMMANDS:return social_store.dispatch(store,cmd,args)
+    from . import social_posts
+    if cmd in social_posts.COMMANDS:return social_posts.dispatch(store,cmd,args)
     from . import distribution
     if cmd in distribution.COMMANDS:return distribution.dispatch(store,cmd,args)
     from .sites import service

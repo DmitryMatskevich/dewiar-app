@@ -116,13 +116,19 @@ with tempfile.TemporaryDirectory(prefix='dewiar-chord-test-') as tmp, sync_playw
         assert follow.locator('.song-chord-mini-name').inner_text()=='Am'
         assert follow.locator('button').count()==0
         assert follow.evaluate("e=>getComputedStyle(e).pointerEvents")=='none'
-        fb,cb=follow.bounding_box(),current.bounding_box()
-        assert fb['y']+fb['height']<=cb['y']+1,(fb,cb)       # above the chord being played
+        paper=page.locator('#song-guitar-content .song-paper')
+        fb,pb=follow.bounding_box(),paper.bounding_box()
+        # Pinned to one place — the right side of the sheet, not above the chord.
+        assert fb['x']>pb['x']+pb['width']/2,(fb,pb)
+        assert fb['x']+fb['width']<=pb['x']+pb['width']+1,(fb,pb)
         assert fb['width']<200 and fb['height']<140,fb       # smaller than the editing window
         assert follow.locator('i.filled').count()==3 and follow.locator('i.is-muted').count()==4  # Am: 0-1-2-2-0-x
         (ROOT/'work/chord-popover-check').mkdir(exist_ok=True)
         page.screenshot(path=str(ROOT/'work/chord-popover-check/follow-card.png'))
         page.evaluate('(sid)=>SongSheet.updatePlayback(sid,1000,false)',sid)
+        # The chord changes; the card stays put (does not jump from chord to chord).
+        moved=follow.bounding_box()
+        assert abs(moved['x']-fb['x'])<=1 and abs(moved['y']-fb['y'])<=1,(fb,moved)
         assert follow.locator('.song-chord-mini-name').inner_text()=='Em'
         page.evaluate('(sid)=>{window.__paused=true;SongSheet.updatePlayback(sid,1000,false);}',sid)
         assert follow.is_hidden()

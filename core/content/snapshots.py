@@ -65,6 +65,16 @@ def media(c):
             row=json.loads(raw);path=row.get('asset_path','');sha=row.get('sha256','');size=row.get('bytes')
             if not re.fullmatch(r'renders/[a-f0-9]{64}\.(mp4|mov|webm|mkv)',path) or path.split('/')[1].split('.')[0]!=sha or type(size) is not int or not 0<size<=4*1024**3:raise ValueError('Некорректный видеорезультат в каталоге')
             files[path]={'sha256':sha,'bytes':size}
+    if 'social_posts' in tables:
+        seen=set()
+        source='social_post_revisions' if 'social_post_revisions' in tables else 'social_posts'
+        for (raw,) in c.execute(f'SELECT snapshot FROM {source}'):
+            post=json.loads(raw)
+            for item in post.get('attachments',[]):
+                sha=item.get('sha256','');size=item.get('size')
+                if not re.fullmatch(r'[a-f0-9]{64}',sha) or type(size) is not int or not 0<size<=100*1024*1024:raise ValueError('Некорректное вложение соцматериала в каталоге')
+                if sha in seen:continue
+                seen.add(sha);files['social-media/'+sha]={'sha256':sha,'bytes':size}
     return files
 
 

@@ -120,6 +120,8 @@
       form.elements[field].value = Array.isArray(value) ? value.join('\n') : value || '';
     }
     form.elements.description.value = project.description || '';
+    form.elements.schedule_enabled.checked = Boolean(project.schedule_enabled);
+    form.elements.schedule_hours.value = project.schedule_hours || 24;
     form.elements.include_notes.value = formatNotes(project.include_notes);
     form.elements.exclude_notes.value = formatNotes(project.exclude_notes);
     destinations.replaceChildren();
@@ -159,6 +161,8 @@
         title: form.elements.title.value, root: form.elements.root.value, output_dir: form.elements.output_dir.value,
         aliases: lines('aliases'), include: lines('include'), exclude: lines('exclude'),
         description: form.elements.description.value,
+        schedule_enabled: form.elements.schedule_enabled.checked,
+        schedule_hours: form.elements.schedule_hours.value,
         include_notes: parseNotes('include_notes'), exclude_notes: parseNotes('exclude_notes'),
         destinations: [...destinations.querySelectorAll('[data-backup-destination]')].map(row => ({
           provider: row.querySelector('select').value, target: row.querySelector('input').value,

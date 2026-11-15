@@ -12,7 +12,7 @@ HOSTS={'linkedin':('linkedin.com',),'facebook':('facebook.com','fb.com'),'thread
 FIELDS={
  'connections':{'platform':'linkedin','name':'','description':'','transport':'manual','browser':'default'},
  'identities':{'platform':'linkedin','name':'','description':'','kind':'personal','external_id':'','url':'','project_ids':[]},
- 'destinations':{'platform':'linkedin','name':'','description':'','kind':'profile','external_id':'','url':'','project_ids':[],'language':'ru','audience':'','rules':''},
+ 'destinations':{'platform':'linkedin','name':'','description':'','kind':'profile','external_id':'','url':'','project_ids':[],'language':'ru','audience':'','rules':'','max_characters':0},
  'bindings':{'name':'','description':'','connection_id':'','identity_id':'','destination_id':'','role':'author','route':'manual'},
  'sets':{'name':'','description':'','binding_ids':[],'project_ids':[]}}
 
@@ -55,6 +55,7 @@ def _get(c,kind,ident):
     if not row:raise ValueError('Запись соцсетей не найдена')
     value=json.loads(row['snapshot'])
     if kind=='connections':value.setdefault('browser','default')
+    if kind=='destinations':value.setdefault('max_characters',0)
     return value
 
 def get(store,kind,ident):
@@ -93,6 +94,7 @@ def _validate(c,kind,data,current=None):
     if kind=='destinations':
         if value['language'] not in ('ru','en','mixed'):raise ValueError('Неизвестный язык')
         value['audience']=text(value['audience'],'Аудитория',1000);value['rules']=text(value['rules'],'Правила',5000)
+        value['max_characters']=integer(value['max_characters'],'Лимит символов',0,100000)
     if kind=='bindings':
         related=[_get(c,k,value[f]) for k,f in [('connections','connection_id'),('identities','identity_id'),('destinations','destination_id')]]
         if len({r['platform'] for r in related})!=1:raise ValueError('Подключение, профиль и назначение должны принадлежать одной сети')

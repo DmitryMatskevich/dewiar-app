@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import zipfile
+import math
 from pathlib import Path
 from datetime import datetime
 
@@ -395,6 +396,13 @@ def validate_profile(raw):
     include_notes = _notes(raw.get('include_notes'), 'Комментарии к включению')
     exclude_notes = _notes(raw.get('exclude_notes'), 'Комментарии к исключению', anywhere=True)
     aliases = _items(raw.get('aliases', []), 'Названия для ассистента')
+    schedule_enabled = bool(raw.get('schedule_enabled', False))
+    try:
+        schedule_hours = float(raw.get('schedule_hours', 24) or 24)
+    except (TypeError, ValueError):
+        raise ValueError('Интервал автоматического бэкапа должен быть числом часов.') from None
+    if not math.isfinite(schedule_hours) or schedule_hours < 0.25 or schedule_hours > 8760:
+        raise ValueError('Интервал автоматического бэкапа должен быть от 0,25 до 8760 часов.')
     destinations = raw.get('destinations', [])
     if not isinstance(destinations, list) or len(destinations) > 20:
         raise ValueError('Укажите до 20 назначений для копий.')
@@ -410,7 +418,8 @@ def validate_profile(raw):
     return dict(title=title, description=description, root=root, output_dir=output, include=include, exclude=exclude,
                 include_notes=include_notes, exclude_notes=exclude_notes,
                 exclude_extensions_by_prefix=normalized_extension_rules,
-                aliases=aliases, destinations=rows)
+                aliases=aliases, destinations=rows, schedule_enabled=schedule_enabled,
+                schedule_hours=round(schedule_hours, 2), schedule_reminder_id=str(raw.get('schedule_reminder_id') or ''))
 
 
 def configured_projects(settings=None):
@@ -423,6 +432,9 @@ def configured_projects(settings=None):
         profile.setdefault('include_notes', dict(preset.get('include_notes', {})))
         profile.setdefault('exclude_notes', dict(preset.get('exclude_notes', {})))
         profile.setdefault('exclude_extensions_by_prefix', dict(preset.get('exclude_extensions_by_prefix', {})))
+        profile.setdefault('schedule_enabled', bool(preset.get('schedule_enabled', False)))
+        profile.setdefault('schedule_hours', float(preset.get('schedule_hours', 24) or 24))
+        profile.setdefault('schedule_reminder_id', str(preset.get('schedule_reminder_id') or ''))
     return profiles
 
 

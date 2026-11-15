@@ -5,12 +5,56 @@ command(cmd, a) — единый разбор: bridge.py вызывает его
 совпадают с вызовами в ui/ (студия, виджет); новую команду добавляйте и сюда, и туда.
 Многие команды лишь передают работу службам (reminders, money, telegram, cloud…) и шлют событие для обновления окна."""
 import sys
+from datetime import datetime, timedelta
 from songs.public import public_song_commands
 from engine_base import *  # noqa: F401,F403 — общие импорты и помощники движка
 
 
 class CommandsMixin:
     # ---------- команды из интерфейса ----------
+
+    def _sync_project_backup_schedule(self, project_id, profile):
+        """Create/update the persistent interval job for one project profile."""
+        reminder_id = str(profile.get('schedule_reminder_id') or '')
+        enabled = bool(profile.get('schedule_enabled'))
+        if not enabled:
+            if reminder_id:
+                self.reminders.remove(reminder_id)
+            if reminder_id:
+                profiles = self.s.get('project_backups', 'profiles') or {}
+                saved = dict(profiles.get(project_id) or {})
+                saved['schedule_reminder_id'] = ''
+                self.s.update({'project_backups': {'profiles': {project_id: saved}}})
+            return ''
+
+        try:
+            hours = float(profile.get('schedule_hours') or 24)
+        except (TypeError, ValueError):
+            hours = 24.0
+        minutes = max(15, int(round(hours * 60)))
+        title = profile.get('title') or project_id
+        text = f'Резервирование проекта «{title}» по расписанию'
+        repeat = {'kind': 'interval', 'minutes': minutes}
+        item = self.reminders.get(reminder_id) if reminder_id else None
+        if item and item.get('preset') != f'project-backup:{project_id}':
+            self.reminders.remove(reminder_id)
+            item = None
+        if item:
+            item = self.reminders.update(reminder_id, {
+                'text': text,
+                'at': (datetime.now() + timedelta(minutes=minutes)).replace(microsecond=0).isoformat(timespec='seconds'),
+                'repeat': repeat,
+                'paused': False,
+            })
+        else:
+            item = self.reminders.add(datetime.now() + timedelta(minutes=minutes), text, repeat, 'job',
+                                      extra={'preset': f'project-backup:{project_id}'})
+        rid = item['id']
+        profiles = self.s.get('project_backups', 'profiles') or {}
+        saved = dict(profiles.get(project_id) or {})
+        saved['schedule_reminder_id'] = rid
+        self.s.update({'project_backups': {'profiles': {project_id: saved}}})
+        return rid
 
 
     def _meeting_speakers_cmd(self, cmd, a):
@@ -1985,8 +2029,23 @@ class CommandsMixin:
             from project_backups import backup_settings
             return backup_settings(self.s)
         if cmd == 'project_backups_save':
-            from project_backups import save_profile
-            return save_profile(self.s, a.get('id') or '', a.get('profile'))
+            from project_backups import configured_projects, save_profile
+            project_id = a.get('id') or ''
+            old_profile = configured_projects(self.s).get(project_id) or {}
+            old_reminder_id = str(old_profile.get('schedule_reminder_id') or '')
+            result = save_profile(self.s, project_id, a.get('profile'))
+            selected = result.get('selected') or a.get('id') or ''
+            profile = next((row for row in result.get('projects', []) if row.get('id') == selected), None)
+            if profile:
+                if old_reminder_id and old_reminder_id != str(profile.get('schedule_reminder_id') or ''):
+                    self.reminders.remove(old_reminder_id)
+                self._sync_project_backup_schedule(selected, profile)
+                # Return the catalog again so the UI sees the generated
+                # reminder id and the final persisted schedule state.
+                from project_backups import backup_settings
+                result = backup_settings(self.s)
+                result['selected'] = selected
+            return result
         if cmd == 'project_backups_run':
             from project_backups import configured_projects, resolve_projects
             ids = resolve_projects(a.get('projects'), configured_projects(self.s))

@@ -37,6 +37,10 @@ def _voicing_fields(event):
 
 def _vocal_bounds(phrase):
     """Use timed words to exclude instrumental lead-ins and tails."""
+    cues = phrase.get('cues')
+    if cues:
+        # Every word has its place in the voice (word_timeline).
+        return int(cues[0]['start_ms']), max(int(cues[0]['start_ms']), int(cues[-1]['end_ms']))
     start = int(phrase.get('start_ms') or 0)
     end = int(phrase.get('end_ms') or start)
     words = [word for word in phrase.get('words') or []
@@ -60,6 +64,15 @@ def _anchor(event, phrase):
             index -= phrase.get('source_char_offset',0)
         if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(phrase['text']):
             return index, anchor['kind']
+    cues = phrase.get('cues')
+    if cues:
+        # The word sounding when the chord changes; in a breath between two
+        # words — the word that follows. Time order is text order.
+        t = event['start_ms']
+        for cue in cues:
+            if t < cue['end_ms']:
+                return cue['char_start'], 'word' if cue.get('measured') else 'estimated_word'
+        return cues[-1]['char_start'], 'held_word'
     if not phrase.get('alignment_stale'):
         for word in phrase.get('words') or []:
             if (word.get('start_ms') is not None and word.get('end_ms') is not None
@@ -90,9 +103,41 @@ def _anchor(event, phrase):
     return None, 'line'
 
 
-def _vocal_slices(phrase):
+def _cue_slices(phrase, cues):
+    """Lines of a phrase by the pauses between its words (every word placed)."""
+    text = str(phrase.get('text') or '')
+    cuts = [0]
+    for a, b in zip(cues, cues[1:]):
+        gap = b['start_ms'] - a['end_ms']
+        boundary = ('\n' in text[a['char_end']:b['char_start']] or text[b['char_start']:b['char_start']+1].isupper()
+                    or bool(re.search(r'[.!?;][»”\"\)]?$', text[:a['char_end']])))
+        if gap > 0 and (boundary or gap >= 1500):
+            cuts.append(b['char_start'])
+    measured = [w for w in phrase.get('words', []) if isinstance(w.get('char_start'), int)
+                and isinstance(w.get('char_end'), int)]
+    slices = []
+    for a, b in zip(cuts, cuts[1:] + [len(text)]):
+        value = text[a:b].rstrip()
+        own = [dict(c, char_start=c['char_start']-a, char_end=c['char_end']-a)
+               for c in cues if a <= c['char_start'] and c['char_end'] <= a + len(value)]
+        if not own:
+            continue
+        timed = {(c['char_start'], c['char_end']) for c in own if c.get('measured')}
+        words = [dict(w, char_start=w['char_start']-a, char_end=w['char_end']-a) for w in measured
+                 if (w['char_start']-a, w['char_end']-a) in timed]
+        part = {**phrase, 'text': value, 'words': words, 'cues': own,
+                'start_ms': own[0]['start_ms'], 'end_ms': own[-1]['end_ms']}
+        if a:
+            part['source_char_offset'] = a
+        slices.append(part)
+    return slices or [phrase]
+
+
+def _vocal_slices(phrase, cues=None):
     """Split only measured pauses between adjacent text tokens, preserving edits."""
     text = str(phrase.get('text') or '')
+    if cues and not phrase.get('alignment_stale'):
+        return _cue_slices(phrase, cues)
     if phrase.get('alignment_stale'):
         return [phrase]
     words = sorted([w for w in phrase.get('words',[]) if
@@ -172,7 +217,11 @@ def layout_chords(phrases, events, duration_ms=None, vocal=None):
     unsung = [p for p in phrases or [] if vocal and p.get('vocal_evidence') == 'none'
               and str(p.get('text') or '').strip()]
     sung = [p for p in phrases or [] if not any(p is q for q in unsung)]
-    slices = [part for p in sung for part in _vocal_slices(p) if str(part.get('text') or '')]
+    # A place in the voice for every word, measured or not (word_timeline):
+    # words without a time must not be spread over the intro and the breaks.
+    from .word_timeline import timelines
+    cues = timelines(sung, vocal, duration_ms) if vocal else {}
+    slices = [part for p in sung for part in _vocal_slices(p, cues.get(id(p))) if str(part.get('text') or '')]
     spans = [_vocal_bounds(part) for part in slices]
     if vocal:
         spans = held_spans(spans, vocal, duration_ms)

@@ -61,7 +61,13 @@ def public_song(row, summary=False):
         # Singing without text needs an independent recognizer's words there;
         # a lead instrument in the vocal stem is not singing.
         from .vocal_timing import unrecognized_windows
-        vocal = {**vocal, 'lexical': unrecognized_windows(phrases, selected.get('hypotheses', []))}
+        vocal = {**vocal, 'lexical': unrecognized_windows(phrases, selected.get('hypotheses', [])),
+                 # Where another recognizer heard a line (segments, not 25-second
+                 # chunks): helps to place words the aligner left without a time.
+                 'heard': [(h.get('start_ms'), h.get('end_ms'), h.get('text'))
+                           for model in selected.get('hypotheses', []) for h in model.get('phrases') or []
+                           if isinstance(h.get('start_ms'), (int, float)) and isinstance(h.get('end_ms'), (int, float))
+                           and 0 < h['end_ms'] - h['start_ms'] <= 12000 and str(h.get('text') or '').strip()]}
     rows = build_guitar_sheet(phrases,events,duration,vocal)
     from .source_layout import confirmed_references, word_layout
     layout, coverage = word_layout(rows, confirmed_references(row))

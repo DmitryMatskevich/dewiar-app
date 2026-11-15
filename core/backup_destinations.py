@@ -5,8 +5,10 @@ import json
 import os
 import re
 import tempfile
+import time
+import webbrowser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -20,10 +22,46 @@ CHUNK_SIZE = 8 * 1024 * 1024
 GOOGLE_FILES = "https://www.googleapis.com/drive/v3/files"
 GOOGLE_FIELDS = "id,name,parents,size,sha256Checksum,md5Checksum"
 YANDEX_RESOURCES = "https://cloud-api.yandex.net/v1/disk/resources"
+_WEB_OPENED = {}
+_WEB_OPEN_TTL = 600
 
 
 class DeliveryError(RuntimeError):
     pass
+
+
+def _web_destination_url(provider, target):
+    """Return the logged-in web folder used as a manual fallback.
+
+    The URL contains only a user-supplied folder path/ID, never a token or a
+    credential.  Opening the default browser preserves the user's existing
+    Yandex/Google session and therefore deliberately does not use Dewiar's
+    isolated browser profile.
+    """
+    if provider == "yandex":
+        path = str(target or "").strip("/")
+        return "https://disk.yandex.ru/client/disk/" + quote(path, safe="/")
+    if provider == "google":
+        return "https://drive.google.com/drive/folders/" + quote(str(target or "").strip(), safe="")
+    return ""
+
+
+def _open_web_destination(provider, target):
+    url = _web_destination_url(provider, target)
+    if not url:
+        return "веб-папка для этого назначения не настроена"
+    key = (provider, str(target))
+    now = time.monotonic()
+    if now - _WEB_OPENED.get(key, 0.0) <= _WEB_OPEN_TTL:
+        return f"веб-папка уже открыта: {url}"
+    try:
+        opened = webbrowser.open(url, new=2)
+    except Exception:  # noqa: BLE001 — opening a browser is best-effort
+        opened = False
+    if opened:
+        _WEB_OPENED[key] = now
+        return f"открыта веб-папка: {url}"
+    return f"не удалось открыть браузер автоматически; откройте веб-папку: {url}"
 
 
 def _check_cancel(cancel):
@@ -45,6 +83,19 @@ def _value(vault, name):
     if not value:
         raise DeliveryError(f"Запись сейфа «{name}» пуста.")
     return value
+
+
+def _credential_ready(provider, credential):
+    if provider == 'yandex':
+        return bool(str(credential or '').strip())
+    if provider == 'google':
+        try:
+            oauth = json.loads(credential)
+            return all(isinstance(oauth.get(key), str) and oauth[key].strip()
+                       for key in ('client_id', 'client_secret', 'refresh_token'))
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _verified(meta, archive, sha256, remote_sha="sha256", remote_md5="md5"):
@@ -230,7 +281,27 @@ def deliver_backup(spec, archive, sha256, vault, cancel, progress, *, local_only
             else:
                 if local_only:
                     raise DeliveryError('Включён режим «Ничего не уходит в интернет».')
-                credential = _value(vault, vault_name)
+                try:
+                    credential = _value(vault, vault_name)
+                except DeliveryError as exc:
+                    # A missing/empty credential is an expected setup state,
+                    # not a generic network failure.  Hand the user over to
+                    # the already authenticated web service and keep the
+                    # result explicitly unconfirmed until they upload the
+                    # archive (and its manifest) there.
+                    web = _open_web_destination(provider, target)
+                    results.append((label, False,
+                                    f"Веб-интерфейс: токен недоступен ({exc}). {web}. "
+                                    f"Загрузите вручную {archive.name} и {archive.stem}.manifest.json; "
+                                    "Диск не подтвержден автоматически."))
+                    continue
+                if not _credential_ready(provider, credential):
+                    web = _open_web_destination(provider, target)
+                    results.append((label, False,
+                                    f"Веб-интерфейс: запись подключения есть, но токен не распознан. {web}. "
+                                    f"Загрузите вручную {archive.name} и {archive.stem}.manifest.json; "
+                                    "Диск не подтвержден автоматически."))
+                    continue
                 uploader = {'yandex': _yandex, 'google': _google}[provider]
                 with httpx.Client(timeout=httpx.Timeout(60, write=120), follow_redirects=False) as client:
                     check = uploader(client, archive, sha256, target, credential, cancel, report)

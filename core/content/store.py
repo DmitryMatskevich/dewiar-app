@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 import uuid
 from .models import plain_blocks, validate_blocks, body_from_blocks, with_blocks
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 SITES = [('site-dcnt-ru', 'dcnt.ru', 'DCNT', 'astro'),
          ('site-ockc-ru', 'ockc.ru', 'ОСКС', 'astro'),
@@ -161,6 +161,10 @@ class ContentStore:
             if version < 24:
                 # Older video editors would drop the optional scene citations.
                 c.execute('PRAGMA user_version=24')
+            if version < 25:
+                from .social_posts import migrate
+                migrate(c)
+                c.execute('PRAGMA user_version=25')
 
     @contextmanager
     def db(self):

@@ -525,6 +525,10 @@
           <label class="f">Названия и голосовые варианты<textarea name="aliases" rows="3" placeholder="По одному варианту в строке"></textarea><span class="hint">Например: dcnt.ru, DCNT, сайт DCNT, дсмастер. После слов «бэкап», «резерв» и «создай копию» Dewiar выберет проект по любому из этих вариантов.</span></label>
         </div>
         <label class="f">Описание резервирования<textarea name="description" rows="3" placeholder="Что сохраняется, что восстанавливается и какие данные хранятся отдельно"></textarea><span class="hint">Опишите назначение копии и важные ограничения. Это описание попадёт в опись ZIP и останется рядом с результатом задачи.</span></label>
+        <div class="row">
+          <div class="f" style="max-width:260px"><span>Автоматическое резервирование</span><label class="tg"><input type="checkbox" name="schedule_enabled"><i></i></label><span class="hint">После включения Dewiar сам создаёт задачу этого проекта по расписанию.</span></div>
+          <label class="f" style="max-width:260px">Интервал, часов<input name="schedule_hours" type="number" min="0.25" max="8760" step="0.25"><span class="hint">Например, 24 — раз в сутки; 168 — раз в неделю. Первый запуск — через этот интервал.</span></label>
+        </div>
         <label class="f">Папка проекта<input name="root" required placeholder="~/Documents/проект"></label>
         <div class="row">
           <label class="f">Что включать<textarea name="include" rows="4" required spellcheck="false"></textarea><span class="hint">Пути от папки проекта, по одному в строке. Точка означает весь проект.</span></label>
@@ -537,7 +541,7 @@
         <label class="f">Папка для ZIP и описи<input name="output_dir" required><span class="hint">Пакетная обработка хранит в этой папке текущую и предыдущую проверенную копию; более старые пары перемещаются обратимо в служебную корзину.</span></label>
         <h4>Куда отправлять копии</h4>
         <div id="projects-destinations"></div>
-        <p class="hint">Для облачных дисков нужны подключения из сейфа. Для внешнего диска или папки синхронизации выберите «Локальная папка».</p>
+        <p class="hint">При наличии токена Dewiar загружает и проверяет ZIP через API. Если токена нет, задача откроет папку в веб-интерфейсе Яндекс.Диска или Google Диска и покажет, какие ZIP и опись нужно загрузить вручную; такой результат остаётся неподтверждённым до ручной проверки.</p>
         <div class="actions"><button type="button" class="btn" id="projects-dest-add">Добавить назначение</button></div>
         <div class="actions">
           <button type="submit" class="btn primary" id="projects-save">Сохранить</button>
@@ -2104,6 +2108,7 @@
 <script src="studio/distribution.js"></script>
 <link rel="stylesheet" href="studio/social.css">
 <script src="studio/social.js"></script>
+<script src="studio/social_posts.js"></script>
 <link rel="stylesheet" href="studio/video.css">
 <script src="studio/video.js"></script>
 <script src="studio/video_exchange.js"></script>
